@@ -23,6 +23,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.1.59",
     "@anthropic-ai/sdk": "^0.71.1",
     "@modelcontextprotocol/sdk": "^1.24.3",
+    "@shikijs/cli": "^3.19.0",
     "chalk": "5.2.0",
     "ink": "4.1.0",
     "marked": "^17.0.1",
@@ -30,6 +31,7 @@
     "meow": "11.0.0",
     "open": "^11.0.0",
     "react": "18.2.0",
+    "shiki": "^3.19.0",
     "zod": "^4.1.13"
   }
 }

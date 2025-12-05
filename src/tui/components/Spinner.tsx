@@ -2,7 +2,8 @@ import React, { memo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { formatDuration } from '../utils/markdown.js';
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+// Full braille cell spinner - more vertically centered than top-weighted dots
+const SPINNER_FRAMES = ['⣷', '⣯', '⣟', '⡿', '⢿', '⣻', '⣽', '⣾'];
 
 export interface AnimatedSpinnerProps {
   color?: string;
