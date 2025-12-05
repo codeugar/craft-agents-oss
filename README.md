@@ -1,6 +1,6 @@
 # Craft TUI Agent
 
-A Claude Code-like TUI (Terminal User Interface) agent for Craft documents using the Claude Agent SDK and Craft MCP.
+A Claude Code-like TUI (Terminal User Interface) agent for Craft documents using the Anthropic SDK and Craft MCP.
 
 ## Features
 
@@ -21,7 +21,7 @@ A Claude Code-like TUI (Terminal User Interface) agent for Craft documents using
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/craft-tui-agent.git
+git clone https://github.com/lukilabs/craft-terminal-agent.git
 cd craft-tui-agent
 
 # Install dependencies
@@ -168,7 +168,7 @@ bun dev
 ## Tech Stack
 
 - **Runtime**: [Bun](https://bun.sh/)
-- **SDK**: [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+- **AI**: [@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)
 - **TUI**: [Ink](https://github.com/vadimdemedes/ink) (React for CLIs)
 - **MCP**: Server-Sent Events transport
 
