@@ -1,0 +1,82 @@
+/**
+ * MCP client using official @modelcontextprotocol/sdk
+ * Configured for Craft's streamable HTTP transport
+ */
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+
+export interface McpClientConfig {
+  url: string;
+  headers?: Record<string, string>;
+}
+
+export class CraftMcpClient {
+  private client: Client;
+  private transport: StreamableHTTPClientTransport;
+  private connected = false;
+
+  constructor(config: McpClientConfig) {
+    this.client = new Client({
+      name: 'craft-tui-agent',
+      version: '1.0.0',
+    });
+
+    this.transport = new StreamableHTTPClientTransport(
+      new URL(config.url),
+      {
+        requestInit: {
+          headers: config.headers,
+        },
+      }
+    );
+  }
+
+  async connect(): Promise<void> {
+    if (this.connected) return;
+
+    await this.client.connect(this.transport);
+    this.connected = true;
+  }
+
+  async listTools(): Promise<Tool[]> {
+    if (!this.connected) {
+      await this.connect();
+    }
+
+    const result = await this.client.listTools();
+    return result.tools;
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    if (!this.connected) {
+      await this.connect();
+    }
+
+    const result = await this.client.callTool({ name, arguments: args });
+    return result;
+  }
+
+  async close(): Promise<void> {
+    if (this.connected) {
+      await this.client.close();
+      this.connected = false;
+    }
+  }
+}
+
+/**
+ * Convert MCP tools to Anthropic tool format
+ */
+export function mcpToolsToAnthropicTools(mcpTools: Tool[]): Array<{
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}> {
+  return mcpTools.map(tool => ({
+    name: tool.name,
+    description: tool.description || '',
+    input_schema: tool.inputSchema as Record<string, unknown>,
+  }));
+}

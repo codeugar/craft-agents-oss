@@ -1,0 +1,243 @@
+import React, { useState, useCallback, memo, useMemo } from 'react';
+import { Box, Text, useInput, useStdout } from 'ink';
+
+export interface InputProps {
+  onSubmit: (input: string) => void;
+  onPaste?: () => void;
+  disabled?: boolean;
+  history?: string[];
+  placeholder?: string;
+  attachmentCount?: number;
+}
+
+// Simple custom text input without cursor animation
+const SimpleTextInput: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}> = ({ value, onChange, onSubmit, placeholder = '', disabled = false }) => {
+  useInput(
+    (input, key) => {
+      if (disabled) return;
+
+      if (key.return) {
+        onSubmit(value);
+        return;
+      }
+
+      if (key.backspace || key.delete) {
+        onChange(value.slice(0, -1));
+        return;
+      }
+
+      // Ignore control characters
+      if (key.ctrl || key.meta || key.escape || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+        return;
+      }
+
+      // Add printable characters
+      if (input && input.length === 1 && input.charCodeAt(0) >= 32) {
+        onChange(value + input);
+      }
+    },
+    { isActive: !disabled }
+  );
+
+  const displayValue = value || '';
+  const showPlaceholder = displayValue.length === 0;
+
+  return (
+    <Text>
+      {showPlaceholder ? (
+        <>
+          {!disabled && <Text color="blue">▌</Text>}
+          <Text dimColor>{placeholder}</Text>
+        </>
+      ) : (
+        <>
+          <Text>{displayValue}</Text>
+          {!disabled && <Text color="blue">▌</Text>}
+        </>
+      )}
+    </Text>
+  );
+};
+
+// Horizontal line for top/bottom borders - no memo to allow resize updates
+const HorizontalLine: React.FC<{ color: string }> = ({ color }) => {
+  const { stdout } = useStdout();
+  const width = Math.max(20, (stdout?.columns || 80) - 4);
+  return (
+    <Text color={color}>{'─'.repeat(width)}</Text>
+  );
+};
+
+// Memoized prompt character
+const InputPrompt = memo<{ disabled: boolean }>(({ disabled }) => (
+  <Text color={disabled ? 'gray' : 'blue'} bold>
+    {disabled ? '◌' : '>'}{' '}
+  </Text>
+));
+
+export const Input: React.FC<InputProps> = ({
+  onSubmit,
+  onPaste,
+  disabled = false,
+  history = [],
+  placeholder,
+  attachmentCount = 0,
+}) => {
+  const [value, setValue] = useState('');
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
+  const handleSubmit = useCallback(
+    (input: string) => {
+      if (input.trim() && !disabled) {
+        onSubmit(input.trim());
+        setValue('');
+        setHistoryIndex(-1);
+      }
+    },
+    [onSubmit, disabled]
+  );
+
+  useInput(
+    (input, key) => {
+      if (disabled) return;
+
+      // Handle up arrow for history
+      if (key.upArrow && history.length > 0) {
+        const newIndex = Math.min(historyIndex + 1, history.length - 1);
+        setHistoryIndex(newIndex);
+        setValue(history[history.length - 1 - newIndex] || '');
+      }
+
+      // Handle down arrow for history
+      if (key.downArrow && historyIndex > -1) {
+        const newIndex = historyIndex - 1;
+        setHistoryIndex(newIndex);
+        if (newIndex < 0) {
+          setValue('');
+        } else {
+          setValue(history[history.length - 1 - newIndex] || '');
+        }
+      }
+
+      // Handle Ctrl+U to clear line
+      if (key.ctrl && input === 'u') {
+        setValue('');
+        setHistoryIndex(-1);
+      }
+
+      // Handle Ctrl+V to paste from clipboard (for images)
+      if (key.ctrl && input === 'v' && onPaste) {
+        onPaste();
+      }
+    },
+    { isActive: !disabled }
+  );
+
+  // Determine placeholder text
+  const placeholderText = disabled
+    ? 'Thinking...'
+    : placeholder || 'Message craft...';
+
+  // Memoize command hint to avoid recalculation
+  const commandHint = useMemo(() => {
+    if (!value.startsWith('/')) return null;
+    return getCommandHint(value);
+  }, [value]);
+
+  const lineColor = disabled ? 'gray' : 'blue';
+
+  return (
+    <Box flexDirection="column" width="100%">
+      {!disabled && commandHint && (
+        <Box paddingLeft={2} marginBottom={1}>
+          <Text dimColor>{commandHint}</Text>
+        </Box>
+      )}
+      {/* Top line */}
+      <HorizontalLine color={lineColor} />
+      {/* Input row */}
+      <Box paddingX={1}>
+        <InputPrompt disabled={disabled} />
+        {attachmentCount > 0 && (
+          <Text color="cyan">
+            [{attachmentCount === 1 ? 'Image' : `${attachmentCount} files`}]{' '}
+          </Text>
+        )}
+        <SimpleTextInput
+          value={value}
+          onChange={setValue}
+          onSubmit={handleSubmit}
+          placeholder={placeholderText}
+          disabled={disabled}
+        />
+      </Box>
+      {/* Bottom line */}
+      <HorizontalLine color={lineColor} />
+    </Box>
+  );
+};
+
+/**
+ * Get hint text for slash commands
+ */
+function getCommandHint(input: string): string {
+  const cmd = input.toLowerCase().trim();
+
+  if (cmd === '/') {
+    return 'Commands: /help /clear /paste /tools /config /prefs /model /cost /exit';
+  }
+
+  const commands: Record<string, string> = {
+    '/help': 'Show help and available commands',
+    '/clear': 'Clear conversation history',
+    '/paste': 'Paste image from clipboard',
+    '/image': 'Paste image from clipboard',
+    '/tools': 'List available Craft MCP tools',
+    '/config': 'Show current configuration',
+    '/prefs': 'Show user preferences',
+    '/setup': 'Reconfigure API keys and MCP settings',
+    '/compact': 'Toggle compact mode for tool output',
+    '/model': 'Show or change the Claude model',
+    '/cost': 'Show token usage and estimated cost',
+    '/web': 'Toggle web search capability',
+    '/fetch': 'Toggle web fetch capability',
+    '/code': 'Toggle code execution capability',
+    '/exit': 'Exit the application',
+    '/quit': 'Exit the application',
+    '/q': 'Exit the application',
+  };
+
+  // Find matching commands
+  const matches = Object.entries(commands)
+    .filter(([c]) => c.startsWith(cmd))
+    .map(([c, desc]) => `${c}: ${desc}`);
+
+  if (matches.length === 1 && matches[0]) {
+    return matches[0];
+  } else if (matches.length > 1 && matches.length <= 4) {
+    return matches.map(m => m.split(':')[0] || '').join(' | ');
+  }
+
+  return '';
+}
+
+/**
+ * Multiline input hint component
+ */
+export const InputHint: React.FC<{ visible?: boolean }> = memo(({ visible = true }) => {
+  if (!visible) return null;
+
+  return (
+    <Box paddingX={1} marginTop={1}>
+      <Text dimColor>
+        Enter to send | ↑↓ history | Ctrl+U clear | Ctrl+C exit
+      </Text>
+    </Box>
+  );
+});
