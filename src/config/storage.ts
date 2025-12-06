@@ -30,11 +30,7 @@ export interface StoredConfig {
   claudeOAuthToken?: string;
   // Which auth method to use
   authType?: AuthType;
-  // Legacy fields (kept for migration from single-workspace config)
-  craftMcpUrl?: string;
-  oauth?: OAuthCredentials;
-  isPublic?: boolean;
-  // Multi-workspace fields
+  // Workspace fields
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   model?: string;
@@ -49,112 +45,27 @@ export function ensureConfigDir(): void {
   }
 }
 
-// Extract a friendly name from MCP URL for migration
-function extractWorkspaceName(mcpUrl: string): string {
-  try {
-    const url = new URL(mcpUrl);
-    // Try to get meaningful name from path (e.g., /links/ABC123/mcp -> ABC123)
-    const parts = url.pathname.split('/').filter(Boolean);
-    if (parts.length >= 2 && parts[0] === 'links' && parts[1]) {
-      return `Workspace ${parts[1].substring(0, 6)}`;
-    }
-    return url.hostname.replace(/^mcp\./, '').split('.')[0] || 'Default';
-  } catch {
-    return 'Default';
-  }
-}
-
-// Migrate legacy single-workspace config to multi-workspace format
-function migrateConfig(rawConfig: Record<string, unknown>): StoredConfig | null {
-  // Check if already migrated (has workspaces array)
-  if (Array.isArray(rawConfig.workspaces)) {
-    // Already migrated - just validate it has required auth
-    const config = rawConfig as unknown as StoredConfig;
-    const hasApiKey = config.anthropicApiKey && config.anthropicApiKey.length > 0;
-    const hasOAuthToken = config.claudeOAuthToken && config.claudeOAuthToken.length > 0;
-    if (!hasApiKey && !hasOAuthToken) {
-      return null;
-    }
-    return config;
-  }
-
-  // Validate legacy required fields
-  const anthropicApiKey = rawConfig.anthropicApiKey as string | undefined;
-  const claudeOAuthToken = rawConfig.claudeOAuthToken as string | undefined;
-  const craftMcpUrl = rawConfig.craftMcpUrl as string | undefined;
-  const oauth = rawConfig.oauth as OAuthCredentials | undefined;
-  const bearerToken = rawConfig.bearerToken as string | undefined;
-  const isPublic = rawConfig.isPublic as boolean | undefined;
-  const model = rawConfig.model as string | undefined;
-
-  // Must have either API key or OAuth token for Claude auth
-  const hasClaudeAuth = (anthropicApiKey && anthropicApiKey.length > 0) || (claudeOAuthToken && claudeOAuthToken.length > 0);
-  if (!hasClaudeAuth || !craftMcpUrl) {
-    return null;
-  }
-
-  // Must have OAuth credentials, bearer token, or be marked as public
-  if (!oauth?.accessToken && !bearerToken && !isPublic) {
-    return null;
-  }
-
-  // Create workspace from legacy config
-  const workspace: Workspace = {
-    id: randomUUID(),
-    name: extractWorkspaceName(craftMcpUrl),
-    mcpUrl: craftMcpUrl,
-    oauth,
-    bearerToken,
-    isPublic,
-    createdAt: Date.now(),
-  };
-
-  const migratedConfig: StoredConfig = {
-    anthropicApiKey: anthropicApiKey || '',
-    claudeOAuthToken: claudeOAuthToken,
-    // Keep legacy fields for backwards compatibility
-    craftMcpUrl,
-    oauth,
-    isPublic,
-    // New multi-workspace fields
-    workspaces: [workspace],
-    activeWorkspaceId: workspace.id,
-    model,
-  };
-
-  // Save migrated config
-  saveConfig(migratedConfig);
-
-  return migratedConfig;
-}
-
 export function loadStoredConfig(): StoredConfig | null {
   try {
     if (!existsSync(CONFIG_FILE)) {
       return null;
     }
     const content = readFileSync(CONFIG_FILE, 'utf-8');
-    const rawConfig = JSON.parse(content) as Record<string, unknown>;
+    const config = JSON.parse(content) as StoredConfig;
 
     // Validate Claude auth exists (either API key or OAuth token)
-    const hasApiKey = rawConfig.anthropicApiKey && (rawConfig.anthropicApiKey as string).length > 0;
-    const hasOAuthToken = rawConfig.claudeOAuthToken && (rawConfig.claudeOAuthToken as string).length > 0;
+    const hasApiKey = config.anthropicApiKey && config.anthropicApiKey.length > 0;
+    const hasOAuthToken = config.claudeOAuthToken && config.claudeOAuthToken.length > 0;
     if (!hasApiKey && !hasOAuthToken) {
       return null;
     }
 
-    // Migrate if needed and validate
-    const config = migrateConfig(rawConfig);
-    if (!config) {
+    // Must have workspaces array (legacy single-workspace configs not supported)
+    if (!Array.isArray(config.workspaces) || config.workspaces.length === 0) {
       return null;
     }
 
-    // Must have at least one workspace with valid auth
-    if (!config.workspaces || config.workspaces.length === 0) {
-      return null;
-    }
-
-    // Validate active workspace exists and has valid auth
+    // Validate active workspace exists
     const activeWorkspace = config.workspaces.find(w => w.id === config.activeWorkspaceId);
     if (!activeWorkspace) {
       // Default to first workspace
