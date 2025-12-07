@@ -218,13 +218,16 @@ Rules:
       result.instructions?.length || 0,
       'chars of instructions,',
       result.mcpServers?.length || 0,
-      'MCP servers',
+      'MCP servers,',
+      result.info?.length || 0,
+      'info messages',
     );
 
     return {
       instructions: result.instructions || '',
       instructionsBlockId: result.instructionsBlockId || undefined,
       mcpServers: result.mcpServers || [],
+      info: result.info || [],
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
