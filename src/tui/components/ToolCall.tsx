@@ -109,10 +109,11 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
   const displayName = customDisplay?.name ?? formatToolName(toolName);
   const inputParams = customDisplay?.params ?? formatInputParams(input);
 
-  // Compact view (single line)
+  // Compact view (single line, but with progress sub-lines when executing)
   if (compact && !expanded) {
     return (
-      <Box paddingLeft={1}>
+      <Box flexDirection="column" paddingLeft={1}>
+        {/* Main tool header line */}
         <Box>
           {status === 'executing' ? (
             <Box>
@@ -134,6 +135,12 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
             <Text color="red"> — {truncateText(result.replace(/\n/g, ' '), 50)}</Text>
           )}
         </Box>
+        {/* Progress messages when executing (indented below header) */}
+        {status === 'executing' && result && (
+          <Box paddingLeft={2}>
+            <Text dimColor>{result}</Text>
+          </Box>
+        )}
       </Box>
     );
   }

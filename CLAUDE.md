@@ -38,6 +38,12 @@ src/
 ├── index.tsx                 # CLI entry point, setup routing
 ├── agent/
 │   └── craft-agent.ts        # Claude Agent SDK wrapper
+├── agents/
+│   ├── types.ts              # SubAgentDefinition, ApiConfig interfaces
+│   ├── manager.ts            # SubAgentManager - list, activate, deactivate
+│   ├── extractor.ts          # Agentic extraction from Craft documents
+│   ├── api-tools.ts          # Dynamic MCP server factory for REST APIs
+│   └── cache.ts              # Credential storage (OAuth, API keys)
 ├── auth/
 │   └── oauth.ts              # OAuth 2.0 with PKCE
 ├── config/
@@ -52,9 +58,11 @@ src/
 └── tui/
     ├── App.tsx               # Main app, command routing
     ├── components/
+    │   ├── ApiAuth.tsx           # API key entry for REST APIs
     │   ├── AskUserQuestion.tsx   # Interactive question UI for SDK hooks
     │   ├── Header.tsx            # Status bar (model, workspace, tokens, cost)
     │   ├── Input.tsx             # Text input with history & file handling
+    │   ├── McpAuth.tsx           # OAuth flow for MCP servers
     │   ├── Messages.tsx          # Message display with streaming
     │   ├── ModelSelector.tsx     # Model selection UI
     │   ├── Setup.tsx             # First-run configuration wizard
@@ -129,6 +137,47 @@ Stored in `~/.craft-agent/preferences.json`:
 - `CraftMcpClient`: Basic MCP client for direct tool calls (used by sub-agent manager)
 - SDK handles MCP connections via HTTP mode configuration
 - `tools.ts`: Registry of 32+ Craft tools for `/tools` command
+
+### Subagent System (`src/agents/`)
+Subagents are specialized agents defined in Craft documents. When activated, they extend the base agent with custom instructions, MCP servers, and REST APIs.
+
+**Key files:**
+- `types.ts` - `SubAgentDefinition`, `ApiConfig`, `ApiEndpoint` interfaces
+- `manager.ts` - `SubAgentManager` for listing, activating, deactivating agents
+- `extractor.ts` - Agentic extraction of agent definitions from Craft documents
+- `api-tools.ts` - Dynamic MCP server factory for REST APIs
+- `cache.ts` - Credential storage for MCP OAuth and API keys
+
+**Extraction flow (`extractor.ts`):**
+1. Uses Claude Agent SDK to agentically read Craft document via MCP tools
+2. Claude parses document structure, finding Instructions section
+3. Extracts MCP server configs (HTTP/HTTPS URLs only, not npx/stdio)
+4. Detects REST APIs from any reference: curl examples, fetch/axios calls, inline API docs, or links to API documentation
+5. Returns structured `ExtractionResult` with instructions, servers, and APIs
+
+**Dynamic API Integration (`api-tools.ts`):**
+Converts REST API configs into in-process MCP servers using `createSdkMcpServer`:
+```typescript
+// Each API endpoint becomes a tool
+createApiServer(config: ApiConfig, apiKey: string)
+// Creates tools like: exa_search, exa_contents
+```
+- Flexible `z.record(z.unknown())` schema - Claude figures out params from description
+- Supports header, bearer, and query param authentication
+- GET params go in query string, POST params in body
+
+**Large Response Summarization:**
+API responses can be huge (e.g., full web page content). To prevent context overflow:
+1. Extractor prompt emphasizes pagination/limit parameters in tool descriptions
+2. Responses >10k tokens (~40KB) are automatically summarized using Claude Haiku
+3. Summarization uses request params as context to focus on relevant information
+4. Input truncated to 20k tokens before summarization to prevent Haiku overflow
+5. Falls back to simple truncation if summarization fails
+
+**Credential storage:**
+- Stored in `~/.craft-agent/agents/{workspaceId}/{agentId}/mcp-auth.json`
+- MCP OAuth tokens: `{ accessToken, refreshToken, expiresAt }`
+- API keys: `{ accessToken }` (stored under `api_{name}` key)
 
 ### OAuth (`src/auth/oauth.ts`)
 - Dynamic client registration (no pre-registration)

@@ -5,10 +5,12 @@ A Claude Code-like TUI (Terminal User Interface) agent for Craft documents using
 ## Features
 
 - **Claude Code-like Experience**: Streaming responses, tool visualization, and real-time updates
-- **Craft MCP Integration**: Access to 32 Craft document tools (blocks, collections, search, tasks)
+- **Craft MCP Integration**: Access to 32+ Craft document tools (blocks, collections, search, tasks)
+- **Subagents**: Define specialized agents in Craft documents with custom instructions, MCP servers, and REST APIs
+- **Dynamic API Integration**: Automatically extract REST APIs from curl examples and create tools
 - **Rich Terminal UI**: Built with Ink (React for CLIs)
 - **Command History**: Navigate previous inputs with arrow keys
-- **Slash Commands**: `/help`, `/tools`, `/setup`, `/clear`, `/exit`
+- **Slash Commands**: `/help`, `/tools`, `/setup`, `/clear`, `/agent`, `/info`, `/exit`
 - **Interactive Setup**: First-run wizard to configure API keys and MCP connection
 
 ## Prerequisites
@@ -84,6 +86,8 @@ bun dev
 |---------|-------------|
 | `/help` | Show help message |
 | `/tools` | List available Craft MCP tools |
+| `/agent` | List, activate, or deactivate subagents |
+| `/info` | Show active agent info and available tools |
 | `/setup` | Re-run the configuration wizard |
 | `/config` | Show current configuration |
 | `/clear` | Clear conversation |
@@ -115,6 +119,53 @@ bun dev
 - `blocks_delete`
 - `collectionItems_delete`
 - `tasks_delete`
+
+## Subagents
+
+Subagents are specialized agents defined in Craft documents. They extend the base agent with custom instructions, MCP servers, and REST APIs.
+
+### Defining a Subagent
+
+Create a Craft document with an "Instructions" section containing the agent's system prompt. You can also include:
+
+**MCP Servers** (HTTP/HTTPS only):
+```yaml
+servers:
+  - name: myserver
+    url: https://example.com/mcp
+```
+
+**REST APIs** (detected from various sources):
+```bash
+# Curl examples
+curl -X POST https://api.exa.ai/search \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{"query": "search query", "numResults": 10}'
+
+# Or fetch/axios calls, inline API docs, or links to API documentation
+```
+
+The extractor will automatically:
+- Detect APIs from curl examples, fetch calls, axios requests, or API documentation
+- Parse endpoints, authentication methods, and example parameters
+- Create tools like `exa_search` that Claude can use
+- Prompt for API keys on first activation
+
+### Using Subagents
+
+```bash
+/agent              # List available subagents
+/agent myagent      # Activate a subagent
+/agent off          # Deactivate current subagent
+/info               # Show active agent info and tools
+```
+
+### Large Response Handling
+
+API responses are automatically summarized if they exceed ~40KB to prevent context overflow. The summarization:
+- Uses Claude Haiku for fast, cheap processing
+- Focuses on relevant information based on your search parameters
+- Preserves key data points, URLs, and actionable information
 
 ## Example Prompts
 
