@@ -4,7 +4,16 @@ import { render } from 'ink';
 import meow from 'meow';
 import { App } from './tui/App.tsx';
 import { Setup } from './tui/components/Setup.tsx';
-import { loadStoredConfig, getActiveWorkspace, type StoredConfig, type Workspace, type AuthType } from './config/storage.ts';
+import {
+  loadStoredConfig,
+  getActiveWorkspace,
+  getAnthropicApiKey,
+  getClaudeOAuthToken,
+  hasValidCredentials,
+  type StoredConfig,
+  type Workspace,
+  type AuthType,
+} from './config/storage.ts';
 import type { CraftAgentConfig } from './agent/craft-agent.ts';
 
 const cli = meow(
@@ -63,14 +72,27 @@ interface RootProps {
   initialConfig: StoredConfig | null;
   cliFlags: typeof cli.flags;
   forceSetup: boolean;
+  initialCredentials: { apiKey: string | null; oauthToken: string | null } | null;
+  initialHasValidCredentials: boolean;
 }
 
-const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup }) => {
-  const [showSetup, setShowSetup] = useState(forceSetup || !initialConfig);
+const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup, initialCredentials, initialHasValidCredentials }) => {
+  // Show setup if: forced, no config, or no valid credentials in keychain
+  const [showSetup, setShowSetup] = useState(forceSetup || !initialConfig || !initialHasValidCredentials);
   const [config, setConfig] = useState<StoredConfig | null>(initialConfig);
+  const [credentials, setCredentials] = useState(initialCredentials);
 
-  const handleSetupComplete = useCallback((newConfig: StoredConfig) => {
+  const handleSetupComplete = useCallback(async (newConfig: StoredConfig) => {
     setConfig(newConfig);
+    // Reload credentials from keychain after setup
+    try {
+      const apiKey = await getAnthropicApiKey();
+      const oauthToken = await getClaudeOAuthToken();
+      setCredentials({ apiKey, oauthToken });
+    } catch (err) {
+      // Log error but continue - credentials may have been saved successfully
+      console.error('Failed to reload credentials:', err);
+    }
     setShowSetup(false);
   }, []);
 
@@ -137,15 +159,16 @@ const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup }) => {
   };
 
   // Set authentication in environment for the SDK based on auth type
+  // Credentials are now loaded from keychain (passed in from main())
   const authType: AuthType = config.authType || 'api_key';
-  if (authType === 'oauth_token' && config.claudeOAuthToken) {
+  if (authType === 'oauth_token' && credentials?.oauthToken) {
     // Use Claude Max subscription via OAuth token
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = config.claudeOAuthToken;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = credentials.oauthToken;
     // Clear API key to ensure SDK uses OAuth token
     delete process.env.ANTHROPIC_API_KEY;
-  } else {
+  } else if (credentials?.apiKey) {
     // Use API key (pay-as-you-go)
-    process.env.ANTHROPIC_API_KEY = config.anthropicApiKey;
+    process.env.ANTHROPIC_API_KEY = credentials.apiKey;
     // Clear OAuth token if set
     delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   }
@@ -169,9 +192,18 @@ async function main() {
   process.on('SIGINT', () => { cleanup(); process.exit(0); });
   process.on('SIGTERM', () => { cleanup(); process.exit(0); });
 
-  // Check for existing config
+  // Check for existing config and credentials
   const storedConfig = loadStoredConfig();
   const forceSetup = cli.flags.setup;
+  const initialHasValidCredentials = await hasValidCredentials();
+
+  // Load actual credentials from keychain (needed for env vars later)
+  let initialCredentials: { apiKey: string | null; oauthToken: string | null } | null = null;
+  if (storedConfig) {
+    const apiKey = await getAnthropicApiKey();
+    const oauthToken = await getClaudeOAuthToken();
+    initialCredentials = { apiKey, oauthToken };
+  }
 
   // Render the root component
   const { waitUntilExit } = render(
@@ -179,6 +211,8 @@ async function main() {
       initialConfig={storedConfig}
       cliFlags={cli.flags}
       forceSetup={forceSetup}
+      initialCredentials={initialCredentials}
+      initialHasValidCredentials={initialHasValidCredentials}
     />
   );
 

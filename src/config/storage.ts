@@ -2,7 +2,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { getCredentialManager } from '../credentials/index.ts';
 
+/**
+ * OAuth credentials from a fresh authentication flow.
+ * Used for temporary state in UI components before saving to keychain.
+ *
+ * Note: `clientId` is required here because OAuth flows always return it.
+ * This differs from `StoredCredential` where `clientId` is optional since
+ * not all credential types (bearer tokens, API keys) have a clientId.
+ */
 export interface OAuthCredentials {
   accessToken: string;
   refreshToken?: string;
@@ -15,8 +24,6 @@ export interface Workspace {
   id: string;
   name: string;
   mcpUrl: string;
-  oauth?: OAuthCredentials;
-  bearerToken?: string;  // Static bearer token (alternative to OAuth)
   isPublic?: boolean;
   createdAt: number;
   sessionId?: string;  // SDK session ID for conversation continuity
@@ -24,13 +31,9 @@ export interface Workspace {
 
 export type AuthType = 'api_key' | 'oauth_token';
 
+// Config stored in JSON file (credentials stored in OS keychain, not here)
 export interface StoredConfig {
-  anthropicApiKey: string;
-  // Claude Max OAuth token (alternative to API key)
-  claudeOAuthToken?: string;
-  // Which auth method to use
   authType?: AuthType;
-  // Workspace fields
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   model?: string;
@@ -53,13 +56,6 @@ export function loadStoredConfig(): StoredConfig | null {
     const content = readFileSync(CONFIG_FILE, 'utf-8');
     const config = JSON.parse(content) as StoredConfig;
 
-    // Validate Claude auth exists (either API key or OAuth token)
-    const hasApiKey = config.anthropicApiKey && config.anthropicApiKey.length > 0;
-    const hasOAuthToken = config.claudeOAuthToken && config.claudeOAuthToken.length > 0;
-    if (!hasApiKey && !hasOAuthToken) {
-      return null;
-    }
-
     // Must have workspaces array (legacy single-workspace configs not supported)
     if (!Array.isArray(config.workspaces) || config.workspaces.length === 0) {
       return null;
@@ -78,61 +74,103 @@ export function loadStoredConfig(): StoredConfig | null {
   }
 }
 
+/**
+ * Check if config has valid credentials in keychain
+ */
+export async function hasValidCredentials(): Promise<boolean> {
+  const config = loadStoredConfig();
+  if (!config) return false;
+
+  const manager = getCredentialManager();
+  const apiKey = await manager.getApiKey();
+  const oauthToken = await manager.getClaudeOAuth();
+
+  return !!(apiKey || oauthToken);
+}
+
+/**
+ * Get the Anthropic API key from keychain
+ */
+export async function getAnthropicApiKey(): Promise<string | null> {
+  const manager = getCredentialManager();
+  return manager.getApiKey();
+}
+
+/**
+ * Get the Claude OAuth token from keychain
+ */
+export async function getClaudeOAuthToken(): Promise<string | null> {
+  const manager = getCredentialManager();
+  return manager.getClaudeOAuth();
+}
+
 // Check if workspace OAuth token needs refresh (with 5 minute buffer)
-export function isWorkspaceTokenExpired(workspace: Workspace): boolean {
-  if (!workspace.oauth?.expiresAt) {
+export async function isWorkspaceTokenExpiredAsync(workspaceId: string): Promise<boolean> {
+  const manager = getCredentialManager();
+  const oauth = await manager.getWorkspaceOAuth(workspaceId);
+  if (!oauth?.expiresAt) {
     return false;
   }
   const bufferMs = 5 * 60 * 1000; // 5 minutes
-  return Date.now() + bufferMs >= workspace.oauth.expiresAt;
+  return Date.now() + bufferMs >= oauth.expiresAt;
 }
 
-// Get access token for a specific workspace
-export function getWorkspaceAccessToken(workspace: Workspace): string | null {
-  if (workspace.isPublic) {
+
+// Get access token for a specific workspace from keychain
+export async function getWorkspaceAccessTokenAsync(workspaceId: string): Promise<string | null> {
+  const config = loadStoredConfig();
+  const workspace = config?.workspaces.find(w => w.id === workspaceId);
+
+  if (workspace?.isPublic) {
     return null;
   }
-  // Check bearer token first (static, no refresh needed)
-  if (workspace.bearerToken) {
-    return workspace.bearerToken;
-  }
-  return workspace.oauth?.accessToken || null;
+
+  const manager = getCredentialManager();
+
+  // Check keychain for bearer token
+  const bearer = await manager.getWorkspaceBearer(workspaceId);
+  if (bearer) return bearer;
+
+  // Check keychain for OAuth
+  const oauth = await manager.getWorkspaceOAuth(workspaceId);
+  return oauth?.accessToken || null;
 }
 
-// Update OAuth tokens for a specific workspace
-export function updateWorkspaceOAuthTokens(
+
+// Update OAuth tokens for a specific workspace (saves to keychain)
+export async function updateWorkspaceOAuthTokensAsync(
   workspaceId: string,
   accessToken: string,
   refreshToken?: string,
-  expiresAt?: number
-): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
-  const workspace = config.workspaces.find(w => w.id === workspaceId);
-  if (!workspace || !workspace.oauth) return;
-
-  workspace.oauth.accessToken = accessToken;
-  if (refreshToken) {
-    workspace.oauth.refreshToken = refreshToken;
-  }
-  if (expiresAt) {
-    workspace.oauth.expiresAt = expiresAt;
-  }
-
-  saveConfig(config);
+  expiresAt?: number,
+  clientId?: string,
+  tokenType?: string
+): Promise<void> {
+  const manager = getCredentialManager();
+  await manager.setWorkspaceOAuth(workspaceId, {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    clientId,
+    tokenType,
+  });
 }
+
 
 export function saveConfig(config: StoredConfig): void {
   ensureConfigDir();
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
 }
 
-export function updateApiKey(newApiKey: string): boolean {
+export async function updateApiKey(newApiKey: string): Promise<boolean> {
   const config = loadStoredConfig();
   if (!config) return false;
 
-  config.anthropicApiKey = newApiKey;
+  // Save API key to keychain
+  const manager = getCredentialManager();
+  await manager.setApiKey(newApiKey);
+
+  // Update auth type in config (but not the key itself)
   config.authType = 'api_key';
   saveConfig(config);
   return true;
@@ -202,7 +240,7 @@ export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt'>): Wo
   return newWorkspace;
 }
 
-export function removeWorkspace(workspaceId: string): boolean {
+export async function removeWorkspace(workspaceId: string): Promise<boolean> {
   const config = loadStoredConfig();
   if (!config) return false;
 
@@ -217,6 +255,11 @@ export function removeWorkspace(workspaceId: string): boolean {
   }
 
   saveConfig(config);
+
+  // Clean up keychain credentials for this workspace
+  const manager = getCredentialManager();
+  await manager.deleteWorkspaceCredentials(workspaceId);
+
   return true;
 }
 
@@ -336,3 +379,4 @@ export function clearWorkspaceConversation(workspaceId: string): void {
   // Also clear session ID
   updateWorkspaceSessionId(workspaceId, null);
 }
+

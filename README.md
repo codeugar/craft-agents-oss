@@ -61,6 +61,11 @@ The wizard will ask for:
 
 Configuration is saved to `~/.craft-agent/config.json`
 
+**Security**: All sensitive credentials (API keys, OAuth tokens) are stored securely in your operating system's native keychain:
+- **macOS**: Keychain Access
+- **Linux**: Secret Service (GNOME Keyring / KWallet)
+- **Windows**: Credential Manager
+
 ## Usage
 
 ```bash
@@ -183,8 +188,14 @@ What tasks do I have due this week?
 src/
 ├── index.tsx           # Entry point with CLI + setup flow
 ├── agent/
-│   ├── craft-agent.ts  # Claude Agent SDK wrapper
-│   └── stream-handler.ts
+│   └── craft-agent.ts  # Claude Agent SDK wrapper
+├── agents/
+│   ├── manager.ts      # Subagent management
+│   ├── extractor.ts    # Extract agent definitions from docs
+│   └── cache.ts        # Agent definition cache
+├── credentials/
+│   ├── manager.ts      # Keychain credential management
+│   └── backends/       # Platform-specific backends
 ├── mcp/
 │   └── tools.ts        # Tool registry
 ├── tui/
@@ -219,9 +230,10 @@ bun dev
 ## Tech Stack
 
 - **Runtime**: [Bun](https://bun.sh/)
-- **AI**: [@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)
+- **AI**: [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
 - **TUI**: [Ink](https://github.com/vadimdemedes/ink) (React for CLIs)
-- **MCP**: Server-Sent Events transport
+- **MCP**: HTTP transport via Agent SDK
+- **Credentials**: [keytar](https://www.npmjs.com/package/keytar) (cross-platform OS keychain access)
 
 ## License
 

@@ -34,9 +34,9 @@ export function getSystemPrompt(activeAgent?: SubAgentDefinition): string {
     debug('[getSystemPrompt] instructions:', activeAgent.instructions);
   }
 
-  const fullPrompt = `${getDateTimeContext()}
-
-${preferences}${CRAFT_ASSISTANT_SYSTEM_PROMPT}${agentContext}`;
+  // Note: Date/time context is now added to user messages instead of system prompt
+  // to enable prompt caching. The system prompt stays static and cacheable.
+  const fullPrompt = `${preferences}${CRAFT_ASSISTANT_SYSTEM_PROMPT}${agentContext}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
   debug('[getSystemPrompt] agentContext length:', agentContext.length);

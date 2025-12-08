@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { CraftOAuth, getMcpBaseUrl } from '../../auth/oauth.ts';
-import { saveServerCredentials } from '../../agents/cache.ts';
+import { saveServerCredentialsAsync } from '../../agents/cache.ts';
 import type { McpServerConfig } from '../../agents/types.ts';
 import { AnimatedSpinner } from './Spinner.tsx';
 import { debug } from '../utils/debug.ts';
@@ -163,15 +163,15 @@ export const McpAuth: React.FC<McpAuthProps> = ({
 
       if (isCancelledRef.current) return false;
 
-      // Save credentials including clientId for future token refresh
+      // Save credentials including clientId for future token refresh (to keychain)
       debug('[McpAuth] Saving credentials for', server.name, 'clientId:', clientId);
-      saveServerCredentials(workspaceId, agentId, server.name, {
+      await saveServerCredentialsAsync(workspaceId, agentId, server.name, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.expiresAt,
         clientId,
       });
-      debug('[McpAuth] Credentials saved successfully');
+      debug('[McpAuth] Credentials saved to keychain for', server.name);
 
       oauthRef.current = null;
       return true;
@@ -245,7 +245,7 @@ export const McpAuth: React.FC<McpAuthProps> = ({
   }, [servers, currentServerIndex, authenticateServer, onComplete]);
 
   // Handle bearer token submission
-  const handleBearerTokenSubmit = useCallback((token: string) => {
+  const handleBearerTokenSubmit = useCallback(async (token: string) => {
     if (!token.trim()) return;
 
     const server = servers[currentServerIndex];
@@ -253,8 +253,8 @@ export const McpAuth: React.FC<McpAuthProps> = ({
 
     debug('[McpAuth] Saving bearer token for', server.name);
 
-    // Save token as non-expiring access token
-    saveServerCredentials(workspaceId, agentId, server.name, {
+    // Save token as non-expiring access token (to keychain)
+    await saveServerCredentialsAsync(workspaceId, agentId, server.name, {
       accessToken: token.trim(),
       // No refreshToken, no expiresAt - static bearer token
     });

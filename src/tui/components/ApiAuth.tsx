@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { saveServerCredentials } from '../../agents/cache.ts';
+import { saveApiKeyCredentialAsync } from '../../agents/cache.ts';
 import type { ApiConfig } from '../../agents/types.ts';
 import { debug } from '../utils/debug.ts';
 
@@ -96,7 +96,7 @@ export const ApiAuth: React.FC<ApiAuthProps> = ({
   });
 
   // Handle API key submission
-  const handleSubmit = useCallback((key: string) => {
+  const handleSubmit = useCallback(async (key: string) => {
     if (!key.trim()) return;
 
     const api = apis[currentIndex];
@@ -104,11 +104,8 @@ export const ApiAuth: React.FC<ApiAuthProps> = ({
 
     debug('[ApiAuth] Saving API key for', api.name);
 
-    // Save the API key using the same storage as MCP OAuth tokens
-    saveServerCredentials(workspaceId, agentId, `api_${api.name}`, {
-      accessToken: key.trim(),
-      // No refreshToken, no expiresAt - static API key
-    });
+    // Save the API key to keychain
+    await saveApiKeyCredentialAsync(workspaceId, agentId, api.name, key.trim());
 
     setCompletedApis(prev => [...prev, api.name]);
 

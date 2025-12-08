@@ -2,12 +2,13 @@
  * Agent caching layer
  *
  * Caches agent definitions and registry locally for performance.
+ * Credentials are stored in OS keychain (not in files).
+ *
  * Cache structure:
  * ~/.craft-agent/agents/{workspaceId}/
  * ├── registry.json           # List of agent metadata
- * ├── {agentId}/
- * │   ├── definition.json     # Cached agent definition
- * │   └── mcp-auth.json       # MCP server credentials
+ * └── {agentId}/
+ *     └── definition.json     # Cached agent definition
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
@@ -18,7 +19,6 @@ import type {
   SubAgentDefinition,
   CachedSubAgent,
   AgentRegistry,
-  AgentMcpCredentials,
 } from './types.ts';
 import { debug } from '../tui/utils/debug.ts';
 
@@ -172,98 +172,90 @@ export function invalidateDefinition(workspaceId: string, agentId: string): void
 }
 
 // ============================================================
-// MCP Credentials Cache
+// MCP Credentials Cache (Keychain-based)
 // ============================================================
 
-/**
- * Get path to MCP credentials file
- */
-function getMcpAuthPath(workspaceId: string, agentId: string): string {
-  return join(AGENTS_DIR, workspaceId, agentId, 'mcp-auth.json');
-}
+import { getCredentialManager } from '../credentials/index.ts';
 
 /**
- * Load MCP credentials for an agent
+ * Get MCP server credentials from keychain
  */
-export function loadMcpCredentials(workspaceId: string, agentId: string): AgentMcpCredentials | null {
-  const path = getMcpAuthPath(workspaceId, agentId);
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  try {
-    const raw = readFileSync(path, 'utf-8');
-    return JSON.parse(raw) as AgentMcpCredentials;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Clear MCP credentials for an agent
- */
-export function clearMcpCredentials(workspaceId: string, agentId: string): void {
-  const path = getMcpAuthPath(workspaceId, agentId);
-  if (existsSync(path)) {
-    unlinkSync(path);
-    debug('[cache] clearMcpCredentials:', agentId);
-  }
-}
-
-/**
- * Save MCP credentials for an agent
- */
-export function saveMcpCredentials(
-  workspaceId: string,
-  agentId: string,
-  credentials: AgentMcpCredentials,
-): void {
-  ensureAgentDir(workspaceId, agentId);
-  const path = getMcpAuthPath(workspaceId, agentId);
-  writeFileSync(path, JSON.stringify(credentials, null, 2));
-}
-
-/**
- * Get specific server credentials
- */
-export function getServerCredentials(
+export async function getServerCredentialsAsync(
   workspaceId: string,
   agentId: string,
   serverName: string,
-): { accessToken: string; refreshToken?: string; expiresAt?: number; clientId?: string } | null {
-  const creds = loadMcpCredentials(workspaceId, agentId);
-  return creds?.servers[serverName] || null;
+): Promise<{ accessToken: string; refreshToken?: string; expiresAt?: number; clientId?: string } | null> {
+  const manager = getCredentialManager();
+  return manager.getMcpOAuth(workspaceId, agentId, serverName);
 }
 
 /**
- * Save credentials for a specific server
+ * Save MCP server credentials to keychain
  */
-export function saveServerCredentials(
+export async function saveServerCredentialsAsync(
   workspaceId: string,
   agentId: string,
   serverName: string,
   credentials: { accessToken: string; refreshToken?: string; expiresAt?: number; clientId?: string },
-): void {
-  const existing = loadMcpCredentials(workspaceId, agentId) || {
-    agentId,
-    servers: {},
-  };
-
-  existing.servers[serverName] = credentials;
-  saveMcpCredentials(workspaceId, agentId, existing);
+): Promise<void> {
+  const manager = getCredentialManager();
+  await manager.setMcpOAuth(workspaceId, agentId, serverName, credentials);
+  debug(`[CredentialManager] Saved MCP credentials: ${agentId}/${serverName}`);
 }
 
 /**
- * Check if server credentials are expired
+ * Get API key for an agent from keychain
  */
-export function isCredentialExpired(
+export async function getApiKeyCredentialAsync(
+  workspaceId: string,
+  agentId: string,
+  apiName: string,
+): Promise<string | null> {
+  const manager = getCredentialManager();
+  return manager.getApiKeyForAgent(workspaceId, agentId, apiName);
+}
+
+/**
+ * Save API key for an agent to keychain
+ */
+export async function saveApiKeyCredentialAsync(
+  workspaceId: string,
+  agentId: string,
+  apiName: string,
+  apiKey: string,
+): Promise<void> {
+  const manager = getCredentialManager();
+  await manager.setApiKeyForAgent(workspaceId, agentId, apiName, apiKey);
+  debug(`[CredentialManager] Saved API key: ${agentId}/${apiName}`);
+}
+
+/**
+ * Check if MCP server credentials are expired
+ */
+export async function isCredentialExpiredAsync(
   workspaceId: string,
   agentId: string,
   serverName: string,
-): boolean {
-  const cred = getServerCredentials(workspaceId, agentId, serverName);
+): Promise<boolean> {
+  const cred = await getServerCredentialsAsync(workspaceId, agentId, serverName);
   if (!cred) return true;
   if (!cred.expiresAt) return false;
   // Consider expired if within 5 minutes of expiry
   return Date.now() > cred.expiresAt - 5 * 60 * 1000;
 }
+
+/**
+ * Clear all credentials for an agent.
+ * If serverNames/apiNames provided, only those are deleted.
+ * If not provided, finds and deletes ALL credentials for this agent.
+ */
+export async function clearAgentCredentialsAsync(
+  workspaceId: string,
+  agentId: string,
+  serverNames?: string[],
+  apiNames?: string[],
+): Promise<void> {
+  const manager = getCredentialManager();
+  await manager.deleteAgentCredentials(workspaceId, agentId, serverNames, apiNames);
+}
+

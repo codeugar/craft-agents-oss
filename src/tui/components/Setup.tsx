@@ -3,6 +3,7 @@ import { Box, Text, useInput, useApp } from 'ink';
 import { saveConfig, getConfigPath, generateWorkspaceId, loadStoredConfig, getActiveWorkspace, type StoredConfig, type Workspace, type AuthType } from '../../config/storage.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../../auth/oauth.ts';
 import { getExistingClaudeToken, isClaudeCliInstalled, runClaudeSetupToken } from '../../auth/claude-token.ts';
+import { getCredentialManager } from '../../credentials/index.ts';
 
 // Simple text input without cursor animation
 const SimpleTextInput: React.FC<{
@@ -77,24 +78,30 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel }) => {
 
   // Load existing config on mount
   useEffect(() => {
-    const existingConfig = loadStoredConfig();
-    const activeWorkspace = getActiveWorkspace();
-    if (existingConfig && activeWorkspace && activeWorkspace.mcpUrl) {
-      setHasExistingMcp(true);
-      setExistingWorkspace(activeWorkspace);
-      setMcpUrl(activeWorkspace.mcpUrl);
-      setIsPublicServer(activeWorkspace.isPublic ?? false);
-      // Pre-populate OAuth result if we have it
-      if (activeWorkspace.oauth) {
-        setOauthResult({
-          accessToken: activeWorkspace.oauth.accessToken,
-          refreshToken: activeWorkspace.oauth.refreshToken,
-          expiresAt: activeWorkspace.oauth.expiresAt,
-          clientId: activeWorkspace.oauth.clientId,
-          tokenType: activeWorkspace.oauth.tokenType,
-        });
+    const loadExisting = async () => {
+      const existingConfig = loadStoredConfig();
+      const activeWorkspace = getActiveWorkspace();
+      if (existingConfig && activeWorkspace && activeWorkspace.mcpUrl) {
+        setHasExistingMcp(true);
+        setExistingWorkspace(activeWorkspace);
+        setMcpUrl(activeWorkspace.mcpUrl);
+        setIsPublicServer(activeWorkspace.isPublic ?? false);
+
+        // Load OAuth from keychain
+        const manager = getCredentialManager();
+        const oauth = await manager.getWorkspaceOAuth(activeWorkspace.id);
+        if (oauth) {
+          setOauthResult({
+            accessToken: oauth.accessToken,
+            refreshToken: oauth.refreshToken,
+            expiresAt: oauth.expiresAt,
+            clientId: oauth.clientId || '',
+            tokenType: oauth.tokenType || 'Bearer',
+          });
+        }
       }
-    }
+    };
+    loadExisting();
   }, []);
   const [oauthResult, setOauthResult] = useState<{
     accessToken: string;
@@ -317,7 +324,7 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel }) => {
     };
   }, [step, mcpUrl]);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     // For new MCP setup, we need OAuth, bearer token, or public
     if (!hasExistingMcp && !isPublicServer && !oauthResult && !mcpBearerToken) {
       setError('MCP authentication not completed');
@@ -327,60 +334,71 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel }) => {
 
     setStep('testing');
 
-    // Reuse existing workspace or create new one
-    let workspace: Workspace;
-    let workspaceId: string;
-
-    if (hasExistingMcp && existingWorkspace) {
-      // Reuse existing workspace (just updating auth)
-      workspace = existingWorkspace;
-      workspaceId = existingWorkspace.id;
-    } else {
-      // Create new workspace from MCP URL
-      workspaceId = generateWorkspaceId();
-      workspace = {
-        id: workspaceId,
-        name: 'Default',
-        mcpUrl: mcpUrl,
-        isPublic: isPublicServer,
-        ...(oauthResult && {
-          oauth: {
-            accessToken: oauthResult.accessToken,
-            refreshToken: oauthResult.refreshToken,
-            expiresAt: oauthResult.expiresAt,
-            clientId: oauthResult.clientId,
-            tokenType: oauthResult.tokenType,
-          },
-        }),
-        ...(mcpBearerToken && { bearerToken: mcpBearerToken }),
-        createdAt: Date.now(),
-      };
-    }
-
-    // Load existing config to preserve other workspaces
-    const existingConfig = loadStoredConfig();
-    const existingWorkspaces = existingConfig?.workspaces || [];
-
-    // Update or add the workspace
-    let updatedWorkspaces: Workspace[];
-    if (hasExistingMcp && existingWorkspace) {
-      // Keep all existing workspaces as-is (we're just changing Claude auth)
-      updatedWorkspaces = existingWorkspaces;
-    } else {
-      // Add new workspace
-      updatedWorkspaces = [...existingWorkspaces.filter(w => w.id !== workspaceId), workspace];
-    }
-
-    // Build config
-    const config: StoredConfig = {
-      anthropicApiKey: authType === 'api_key' ? apiKey : '', // Empty if using OAuth token
-      claudeOAuthToken: authType === 'oauth_token' ? oauthToken : undefined,
-      authType,
-      workspaces: updatedWorkspaces,
-      activeWorkspaceId: workspaceId,
-    };
-
     try {
+      // Save credentials to keychain
+      const manager = getCredentialManager();
+
+      // Save Claude credentials to keychain
+      if (authType === 'api_key' && apiKey) {
+        await manager.setApiKey(apiKey);
+      } else if (authType === 'oauth_token' && oauthToken) {
+        await manager.setClaudeOAuth(oauthToken);
+      }
+
+      // Reuse existing workspace or create new one
+      let workspace: Workspace;
+      let workspaceId: string;
+
+      if (hasExistingMcp && existingWorkspace) {
+        // Reuse existing workspace (just updating auth)
+        workspace = existingWorkspace;
+        workspaceId = existingWorkspace.id;
+      } else {
+        // Create new workspace from MCP URL
+        workspaceId = generateWorkspaceId();
+        workspace = {
+          id: workspaceId,
+          name: 'Default',
+          mcpUrl: mcpUrl,
+          isPublic: isPublicServer,
+          createdAt: Date.now(),
+        };
+      }
+
+      // Save workspace credentials to keychain (not in config)
+      if (oauthResult) {
+        await manager.setWorkspaceOAuth(workspaceId, {
+          accessToken: oauthResult.accessToken,
+          refreshToken: oauthResult.refreshToken,
+          expiresAt: oauthResult.expiresAt,
+          clientId: oauthResult.clientId,
+          tokenType: oauthResult.tokenType,
+        });
+      } else if (mcpBearerToken) {
+        await manager.setWorkspaceBearer(workspaceId, mcpBearerToken);
+      }
+
+      // Load existing config to preserve other workspaces
+      const existingConfig = loadStoredConfig();
+      const existingWorkspaces = existingConfig?.workspaces || [];
+
+      // Update or add the workspace
+      let updatedWorkspaces: Workspace[];
+      if (hasExistingMcp && existingWorkspace) {
+        // Keep all existing workspaces as-is (we're just changing Claude auth)
+        updatedWorkspaces = existingWorkspaces;
+      } else {
+        // Add new workspace
+        updatedWorkspaces = [...existingWorkspaces.filter(w => w.id !== workspaceId), workspace];
+      }
+
+      // Build config (credentials stored in keychain, not here)
+      const config: StoredConfig = {
+        authType,
+        workspaces: updatedWorkspaces,
+        activeWorkspaceId: workspaceId,
+      };
+
       saveConfig(config);
       setStep('complete');
 

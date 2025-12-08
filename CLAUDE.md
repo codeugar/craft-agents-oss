@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Important:** Keep this file up-to-date whenever functionality changes. This should always reflect the current state of the codebase, including architecture, interfaces, and key patterns.
+
 ## Project Overview
 
 Craft TUI Agent is a Claude Code-like terminal interface for managing Craft documents. It uses the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) to interact with Claude models and connects to Craft MCP servers for document operations. Supports multiple workspaces with separate conversations and OAuth authentication.
@@ -43,13 +45,21 @@ src/
 │   ├── manager.ts            # SubAgentManager - list, activate, deactivate
 │   ├── extractor.ts          # Agentic extraction from Craft documents
 │   ├── api-tools.ts          # Dynamic MCP server factory for REST APIs
-│   └── cache.ts              # Credential storage (OAuth, API keys)
+│   └── cache.ts              # Agent definition cache
 ├── auth/
 │   └── oauth.ts              # OAuth 2.0 with PKCE
 ├── config/
 │   ├── env.ts                # Environment validation (legacy)
 │   ├── storage.ts            # Config persistence, multi-workspace
 │   └── preferences.ts        # User preferences (name, timezone, etc.)
+├── credentials/
+│   ├── index.ts              # Public exports
+│   ├── types.ts              # CredentialId, StoredCredential interfaces
+│   ├── manager.ts            # CredentialManager - main API
+│   └── backends/
+│       ├── types.ts          # CredentialBackend interface
+│       ├── keytar.ts         # Primary: keytar (cross-platform native)
+│       └── env.ts            # Environment variables (server deployment)
 ├── mcp/
 │   ├── client.ts             # MCP client & proxy for persistent connections
 │   └── tools.ts              # Tool registry and help formatting
@@ -109,7 +119,7 @@ Core `CraftAgent` class that:
 Multi-workspace support with:
 ```typescript
 interface StoredConfig {
-  anthropicApiKey: string;
+  authType?: 'api_key' | 'oauth_token';
   model?: string;
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
@@ -119,13 +129,58 @@ interface Workspace {
   id: string;
   name: string;
   mcpUrl: string;
-  oauth?: OAuthCredentials;  // For private servers
   isPublic?: boolean;        // For public servers
   sessionId?: string;        // SDK session for continuity
 }
 ```
 - Workspace conversations stored in `~/.craft-agent/workspaces/{id}/conversation.json`
-- Auto-migration from legacy single-workspace format
+- **Credentials stored in OS keychain** (not in config.json)
+
+### Credential Storage (`src/credentials/`)
+All sensitive credentials are stored in OS native secure storage:
+- **macOS**: Keychain Access
+- **Linux**: Secret Service (GNOME Keyring / KWallet)
+- **Windows**: Credential Manager
+
+**Keychain naming convention:**
+```
+Service: "craft-tui-agent"
+Account: "{type}::{scope...}"
+
+Examples:
+- anthropic_api_key::global             # Anthropic API key
+- claude_oauth::global                  # Claude Max OAuth token
+- workspace_oauth::{workspaceId}        # Workspace MCP server OAuth
+- workspace_bearer::{workspaceId}       # Workspace bearer token
+- mcp_oauth::{wsId}::{agentId}::{name}  # Subagent MCP server OAuth
+- api_key::{wsId}::{agentId}::{name}    # Subagent REST API key
+
+Note: Using "::" as delimiter to avoid conflicts with "/" in URLs or paths.
+```
+
+**Backend priority:**
+1. Environment variables - For server deployment (`CRAFT_ANTHROPIC_API_KEY`, `CRAFT_CLAUDE_OAUTH_TOKEN`)
+2. `keytar` - Cross-platform native module (uses N-API)
+
+**Usage:**
+```typescript
+import { getCredentialManager } from './credentials';
+
+const manager = getCredentialManager();
+await manager.initialize();
+
+// Global credentials
+const apiKey = await manager.getApiKey();
+await manager.setApiKey('sk-ant-...');
+
+// Workspace credentials
+const oauth = await manager.getWorkspaceOAuth(workspaceId);
+await manager.setWorkspaceOAuth(workspaceId, { accessToken, refreshToken, ... });
+
+// Subagent credentials
+const mcpCreds = await manager.getMcpOAuth(wsId, agentId, serverName);
+const apiKey = await manager.getApiKeyForAgent(wsId, agentId, apiName);
+```
 
 ### User Preferences (`src/config/preferences.ts`)
 Stored in `~/.craft-agent/preferences.json`:
@@ -146,7 +201,7 @@ Subagents are specialized agents defined in Craft documents. When activated, the
 - `manager.ts` - `SubAgentManager` for listing, activating, deactivating agents
 - `extractor.ts` - Agentic extraction of agent definitions from Craft documents
 - `api-tools.ts` - Dynamic MCP server factory for REST APIs
-- `cache.ts` - Credential storage for MCP OAuth and API keys
+- `cache.ts` - Agent definition cache
 
 **Extraction flow (`extractor.ts`):**
 1. Uses Claude Agent SDK to agentically read Craft document via MCP tools
@@ -175,9 +230,9 @@ API responses can be huge (e.g., full web page content). To prevent context over
 5. Falls back to simple truncation if summarization fails
 
 **Credential storage:**
-- Stored in `~/.craft-agent/agents/{workspaceId}/{agentId}/mcp-auth.json`
-- MCP OAuth tokens: `{ accessToken, refreshToken, expiresAt }`
-- API keys: `{ accessToken }` (stored under `api_{name}` key)
+- Stored in OS keychain via `CredentialManager` (see Credential Storage section)
+- MCP OAuth: `mcp_oauth/{workspaceId}/{agentId}/{serverName}`
+- API keys: `api_key/{workspaceId}/{agentId}/{apiName}`
 
 ### OAuth (`src/auth/oauth.ts`)
 - Dynamic client registration (no pre-registration)
@@ -288,5 +343,6 @@ tail -f /tmp/craft-debug.log
 - **TUI**: Ink 4.x (React for CLIs)
 - **AI**: @anthropic-ai/claude-agent-sdk
 - **MCP**: @modelcontextprotocol/sdk (via Agent SDK)
+- **Credentials**: keytar (cross-platform OS keychain access)
 - **Markdown**: marked + marked-terminal + Shiki syntax highlighting
 - **CLI**: meow for argument parsing

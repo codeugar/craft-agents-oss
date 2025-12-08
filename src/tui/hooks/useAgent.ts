@@ -8,18 +8,20 @@ import {
   saveWorkspaceConversation,
   loadWorkspaceConversation,
   clearWorkspaceConversation,
-  isWorkspaceTokenExpired,
-  updateWorkspaceOAuthTokens,
+  getWorkspaceAccessTokenAsync,
+  isWorkspaceTokenExpiredAsync,
+  updateWorkspaceOAuthTokensAsync,
   loadStoredConfig,
   saveConfig,
   type Workspace,
   type StoredMessage,
 } from '../../config/storage.ts';
+import { getCredentialManager } from '../../credentials/index.ts';
 import { CraftMcpClient } from '../../mcp/client.ts';
 import { SubAgentManager } from '../../agents/manager.ts';
 import type { SubAgentDefinition, McpServerConfig, ApiConfig } from '../../agents/types.ts';
 import type { ExtractionProgressEvent } from '../../agents/extractor.ts';
-import { invalidateDefinition, clearMcpCredentials, loadRegistry } from '../../agents/cache.ts';
+import { invalidateDefinition, loadRegistry, clearAgentCredentialsAsync } from '../../agents/cache.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../../auth/oauth.ts';
 import { debug } from '../utils/debug.ts';
 
@@ -231,38 +233,51 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       return null;
     }
 
-    if (!workspace.oauth) {
+    // Get token from keychain (handles bearer token, OAuth, and legacy config fallback)
+    const token = await getWorkspaceAccessTokenAsync(workspace.id);
+    if (!token) {
       return null;
     }
 
     // Check if token is expired and refresh if needed
-    if (isWorkspaceTokenExpired(workspace) && workspace.oauth.refreshToken) {
-      try {
-        const oauth = new CraftOAuth(
-          { mcpBaseUrl: getMcpBaseUrl(workspace.mcpUrl) },
-          { onStatus: () => {}, onError: () => {} }
-        );
+    const isExpired = await isWorkspaceTokenExpiredAsync(workspace.id);
+    if (isExpired) {
+      // Get full OAuth credentials from keychain for refresh
+      const manager = getCredentialManager();
+      const oauthCreds = await manager.getWorkspaceOAuth(workspace.id);
 
-        const newTokens = await oauth.refreshAccessToken(
-          workspace.oauth.refreshToken,
-          workspace.oauth.clientId
-        );
+      if (oauthCreds?.refreshToken && oauthCreds?.clientId) {
+        try {
+          const oauth = new CraftOAuth(
+            { mcpBaseUrl: getMcpBaseUrl(workspace.mcpUrl) },
+            { onStatus: () => {}, onError: () => {} }
+          );
 
-        updateWorkspaceOAuthTokens(
-          workspace.id,
-          newTokens.accessToken,
-          newTokens.refreshToken,
-          newTokens.expiresAt
-        );
+          const newTokens = await oauth.refreshAccessToken(
+            oauthCreds.refreshToken,
+            oauthCreds.clientId
+          );
 
-        return newTokens.accessToken;
-      } catch {
-        return workspace.oauth.accessToken;
+          // Save refreshed tokens to keychain
+          await updateWorkspaceOAuthTokensAsync(
+            workspace.id,
+            newTokens.accessToken,
+            newTokens.refreshToken,
+            newTokens.expiresAt,
+            oauthCreds.clientId,
+            newTokens.tokenType
+          );
+
+          return newTokens.accessToken;
+        } catch {
+          // Refresh failed, return existing token (may still work)
+          return token;
+        }
       }
     }
 
-    return workspace.oauth.accessToken;
-  }, [workspace]);
+    return token;
+  }, [workspace.id, workspace.isPublic, workspace.mcpUrl]);
 
   // Initialize MCP client and agent manager for current workspace
   // Only re-run when workspace ID changes (not on every workspace state update)
@@ -290,11 +305,8 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
           }
         }
 
-        // Get token (inline to avoid dependency issues)
-        let token: string | null = null;
-        if (!workspace.isPublic && workspace.oauth) {
-          token = workspace.oauth.accessToken;
-        }
+        // Get token from keychain
+        const token = await getMcpToken();
 
         // Create MCP client
         const client = new CraftMcpClient({
@@ -350,9 +362,8 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       setActiveAgentDefinition(null);
       // Don't clear availableAgents here - it causes race condition with token refresh
     };
-    // Note: Don't include workspace.oauth?.accessToken - token refresh is handled in refreshAgents()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.id, workspace.mcpUrl, workspace.isPublic]);
+  }, [workspace.id, workspace.mcpUrl, workspace.isPublic, getMcpToken]);
 
   const getAgent = useCallback(() => {
     if (!agentRef.current) {
@@ -834,7 +845,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   const activationComplete = useCallback((
     definition: SubAgentDefinition,
     mcpServers: Awaited<ReturnType<SubAgentManager['buildMcpServerConfig']>>,
-    apiServers: ReturnType<SubAgentManager['buildApiServers']>,
+    apiServers: Awaited<ReturnType<SubAgentManager['buildApiServers']>>,
     agentName: string,
     isFirstTimeSetup: boolean,
   ) => {
@@ -948,7 +959,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       setActiveAgentDefinition(definition);
 
       // Check if any MCP servers need authentication
-      const serversNeedingAuth = agentManagerRef.current.getMcpServersNeedingAuth(definition);
+      const serversNeedingAuth = await agentManagerRef.current.getMcpServersNeedingAuth(definition);
       if (serversNeedingAuth.length > 0) {
         debug('[useAgent.activateAgent] Servers needing auth:', serversNeedingAuth.map(s => s.name));
         // Trigger auth flow - don't complete activation until auth is done
@@ -962,7 +973,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       }
 
       // Check if any APIs need authentication
-      const apisNeedingAuth = agentManagerRef.current.getApisNeedingAuth(definition);
+      const apisNeedingAuth = await agentManagerRef.current.getApisNeedingAuth(definition);
       if (apisNeedingAuth.length > 0) {
         debug('[useAgent.activateAgent] APIs needing auth:', apisNeedingAuth.map(a => a.name));
         // Trigger API auth flow
@@ -977,7 +988,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
 
       // No auth needed - complete activation immediately
       const mcpServers = await agentManagerRef.current.buildMcpServerConfig(definition);
-      const apiServers = agentManagerRef.current.buildApiServers(definition);
+      const apiServers = await agentManagerRef.current.buildApiServers(definition);
       debug('[useAgent.activateAgent] No auth needed, completing activation');
       activationComplete(definition, mcpServers, apiServers, name, needsExtraction);
       return true;
@@ -1047,10 +1058,13 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       return false;
     }
 
-    // Clear file cache and auth credentials
+    // Clear definition cache
     invalidateDefinition(workspace.id, agentMeta.id);
-    clearMcpCredentials(workspace.id, agentMeta.id);
-    debug('[useAgent.resetAgent] Caches cleared for agent:', agentMeta.id);
+    debug('[useAgent.resetAgent] Definition cache cleared for agent:', agentMeta.id);
+
+    // Clear all credentials for this agent from keychain
+    await clearAgentCredentialsAsync(workspace.id, agentMeta.id);
+    debug('[useAgent.resetAgent] Credentials cleared from keychain');
 
     // Deactivate and return to main (don't re-activate - user can re-select to restart setup)
     deactivateAgent();
@@ -1067,7 +1081,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     }
 
     // Check if APIs need auth after MCP auth completes
-    const apisNeedingAuth = agentManagerRef.current.getApisNeedingAuth(pendingMcpAuth.definition);
+    const apisNeedingAuth = await agentManagerRef.current.getApisNeedingAuth(pendingMcpAuth.definition);
     if (apisNeedingAuth.length > 0) {
       debug('[completeMcpAuth] APIs needing auth:', apisNeedingAuth.map(a => a.name));
       // Clear MCP auth and trigger API auth
@@ -1084,7 +1098,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     // MCP auth done (no API auth needed) - complete activation
     // Auth flow only happens on first-time setup, so always show info
     const mcpServers = await agentManagerRef.current.buildMcpServerConfig(pendingMcpAuth.definition);
-    const apiServers = agentManagerRef.current.buildApiServers(pendingMcpAuth.definition);
+    const apiServers = await agentManagerRef.current.buildApiServers(pendingMcpAuth.definition);
     debug('[completeMcpAuth] Completing activation, success:', success);
     activationComplete(pendingMcpAuth.definition, mcpServers, apiServers, pendingMcpAuth.agentName, true);
 
@@ -1107,7 +1121,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   }, [completeMcpAuth]);
 
   // Trigger auth flow manually (for /auth command)
-  const triggerMcpAuth = useCallback(() => {
+  const triggerMcpAuth = useCallback(async () => {
     if (!agentManagerRef.current || !activeAgentDefinition) {
       setMessages(prev => [...prev, {
         id: `auth-error-${Date.now()}`,
@@ -1118,7 +1132,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       return;
     }
 
-    const serversNeedingAuth = agentManagerRef.current.getMcpServersNeedingAuth(activeAgentDefinition);
+    const serversNeedingAuth = await agentManagerRef.current.getMcpServersNeedingAuth(activeAgentDefinition);
     if (serversNeedingAuth.length === 0) {
       setMessages(prev => [...prev, {
         id: `auth-ok-${Date.now()}`,
@@ -1150,7 +1164,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     // All auth done - complete activation
     // Auth flow only happens on first-time setup, so always show info
     const mcpServers = await agentManagerRef.current.buildMcpServerConfig(pendingApiAuth.definition);
-    const apiServers = agentManagerRef.current.buildApiServers(pendingApiAuth.definition);
+    const apiServers = await agentManagerRef.current.buildApiServers(pendingApiAuth.definition);
     debug('[completeApiAuth] Completing activation, success:', success);
     activationComplete(pendingApiAuth.definition, mcpServers, apiServers, pendingApiAuth.agentName, true);
 

@@ -115,24 +115,6 @@ export interface ApiEndpoint {
 }
 
 /**
- * Stored credentials for agent MCP servers
- */
-export interface AgentMcpCredentials {
-  /** Agent this belongs to */
-  agentId: string;
-  /** Credentials keyed by server name */
-  servers: Record<
-    string,
-    {
-      accessToken: string;
-      refreshToken?: string;
-      expiresAt?: number;
-      clientId?: string;  // Needed for token refresh
-    }
-  >;
-}
-
-/**
  * Current active agent state
  */
 export interface ActiveAgentState {

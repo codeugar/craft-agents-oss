@@ -282,7 +282,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
     setShowWorkspaceRename(true);
   }, [workspace.id, setWorkspace]);
 
-  const handleWorkspaceRemove = useCallback((workspaceId: string) => {
+  const handleWorkspaceRemove = useCallback(async (workspaceId: string) => {
     setShowWorkspaceSelector(false);
     const workspaces = getWorkspaces();
 
@@ -298,7 +298,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
     }
 
     const isActive = workspaceId === workspace.id;
-    const removed = removeWorkspace(workspaceId);
+    const removed = await removeWorkspace(workspaceId);
 
     if (removed) {
       addLocalMessage(`Workspace "${workspaceToRemove.name}" removed.`, 'system');
@@ -338,12 +338,16 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
     setShowWorkspaceRename(false);
   }, []);
 
-  const handleApiKeySubmit = useCallback((newApiKey: string) => {
+  const handleApiKeySubmit = useCallback(async (newApiKey: string) => {
     setShowApiKeyChange(false);
-    const success = updateApiKey(newApiKey);
-    if (success) {
-      addLocalMessage('API key updated. Restart the app to use the new key.', 'system');
-    } else {
+    try {
+      const success = await updateApiKey(newApiKey);
+      if (success) {
+        addLocalMessage('API key updated. Restart the app to use the new key.', 'system');
+      } else {
+        addLocalMessage('Failed to update API key.', 'error');
+      }
+    } catch {
       addLocalMessage('Failed to update API key.', 'error');
     }
   }, [addLocalMessage]);
@@ -648,7 +652,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
 
               // Check if removing active workspace
               const isActive = workspaceToRemove.id === workspace.id;
-              const removed = removeWorkspace(workspaceToRemove.id);
+              const removed = await removeWorkspace(workspaceToRemove.id);
 
               if (removed) {
                 // If we removed the active workspace, switch to another

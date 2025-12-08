@@ -25,9 +25,10 @@ import {
   loadDefinition,
   saveDefinition,
   invalidateDefinition,
-  getServerCredentials,
-  isCredentialExpired,
-  saveServerCredentials,
+  getServerCredentialsAsync,
+  isCredentialExpiredAsync,
+  saveServerCredentialsAsync,
+  getApiKeyCredentialAsync,
 } from './cache.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
 import { debug } from '../tui/utils/debug.ts';
@@ -377,14 +378,14 @@ export class SubAgentManager {
         };
         debug('[manager.buildMcpServerConfig] Using static bearer token for', name);
       } else if (config.requiresAuth) {
-        const creds = getServerCredentials(
+        const creds = await getServerCredentialsAsync(
           this.workspaceId,
           this.activeAgent.agentId,
           name
         );
 
         if (creds) {
-          const isExpired = isCredentialExpired(this.workspaceId, this.activeAgent.agentId, name);
+          const isExpired = await isCredentialExpiredAsync(this.workspaceId, this.activeAgent.agentId, name);
           debug('[manager.buildMcpServerConfig] Credentials found for', name, 'expired:', isExpired, 'hasClientId:', !!creds.clientId);
 
           if (isExpired) {
@@ -398,8 +399,8 @@ export class SubAgentManager {
                 );
                 const newTokens = await oauth.refreshAccessToken(creds.refreshToken, creds.clientId);
 
-                // Save refreshed credentials
-                saveServerCredentials(this.workspaceId, this.activeAgent.agentId, name, {
+                // Save refreshed credentials to keychain
+                await saveServerCredentialsAsync(this.workspaceId, this.activeAgent.agentId, name, {
                   accessToken: newTokens.accessToken,
                   refreshToken: newTokens.refreshToken || creds.refreshToken,
                   expiresAt: newTokens.expiresAt,
@@ -442,17 +443,22 @@ export class SubAgentManager {
   /**
    * Get MCP servers that require authentication
    */
-  getMcpServersNeedingAuth(definition: SubAgentDefinition): McpServerConfig[] {
+  async getMcpServersNeedingAuth(definition: SubAgentDefinition): Promise<McpServerConfig[]> {
     if (!definition.mcpServers || !this.activeAgent.agentId) {
       return [];
     }
 
-    return definition.mcpServers.filter((config) => {
-      if (!config.requiresAuth) return false;
+    const results: McpServerConfig[] = [];
+    for (const config of definition.mcpServers) {
+      if (!config.requiresAuth) continue;
 
       const name = config.name || this.extractNameFromUrl(config.url);
-      return isCredentialExpired(this.workspaceId, this.activeAgent.agentId!, name);
-    });
+      const isExpired = await isCredentialExpiredAsync(this.workspaceId, this.activeAgent.agentId!, name);
+      if (isExpired) {
+        results.push(config);
+      }
+    }
+    return results;
   }
 
   // ============================================================
@@ -462,32 +468,36 @@ export class SubAgentManager {
   /**
    * Get APIs that need authentication (have auth config but no stored key)
    */
-  getApisNeedingAuth(definition: SubAgentDefinition): ApiConfig[] {
+  async getApisNeedingAuth(definition: SubAgentDefinition): Promise<ApiConfig[]> {
     if (!definition.apis || !this.activeAgent.agentId) {
       return [];
     }
 
-    return definition.apis.filter((api) => {
+    const results: ApiConfig[] = [];
+    for (const api of definition.apis) {
       // No auth needed for this API
-      if (!api.auth) return false;
+      if (!api.auth) continue;
 
-      // Check if we have stored credentials
-      const creds = getServerCredentials(
+      // Check if we have stored credentials in keychain
+      const apiKey = await getApiKeyCredentialAsync(
         this.workspaceId,
         this.activeAgent.agentId!,
-        `api_${api.name}`
+        api.name
       );
-      return !creds?.accessToken;
-    });
+      if (!apiKey) {
+        results.push(api);
+      }
+    }
+    return results;
   }
 
   /**
    * Build in-process MCP servers for all APIs with credentials
    * Returns servers keyed by `api_{name}`
    */
-  buildApiServers(
+  async buildApiServers(
     definition: SubAgentDefinition
-  ): Record<string, ReturnType<typeof createApiServer>> {
+  ): Promise<Record<string, ReturnType<typeof createApiServer>>> {
     const servers: Record<string, ReturnType<typeof createApiServer>> = {};
 
     if (!definition.apis || !this.activeAgent.agentId) {
@@ -504,19 +514,19 @@ export class SubAgentManager {
         continue;
       }
 
-      // Get API key (either stored or not needed)
+      // Get API key from keychain (either stored or not needed)
       let apiKey = '';
       if (api.auth) {
-        const creds = getServerCredentials(
+        const storedKey = await getApiKeyCredentialAsync(
           this.workspaceId,
           this.activeAgent.agentId,
-          serverKey
+          api.name
         );
-        if (!creds?.accessToken) {
+        if (!storedKey) {
           debug(`[manager.buildApiServers] No credentials for ${api.name}, skipping`);
           continue;
         }
-        apiKey = creds.accessToken;
+        apiKey = storedKey;
       }
 
       // Create and cache the server
@@ -566,7 +576,7 @@ export class SubAgentManager {
           };
           debug('[manager.fetchMcpServerTools] Using static bearer token for', name);
         } else if (config.requiresAuth) {
-          const creds = getServerCredentials(
+          const creds = await getServerCredentialsAsync(
             this.workspaceId,
             this.activeAgent.agentId,
             name

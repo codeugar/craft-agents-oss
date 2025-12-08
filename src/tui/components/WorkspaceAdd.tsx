@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { addWorkspace, type Workspace, type OAuthCredentials } from '../../config/storage.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../../auth/oauth.ts';
+import { getCredentialManager } from '../../credentials/index.ts';
 
 // Simple text input component
 const SimpleTextInput: React.FC<{
@@ -187,15 +188,29 @@ export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel
     };
   }, [step, mcpUrl]);
 
-  const saveWorkspace = useCallback((oauth: OAuthCredentials | null, isPublic: boolean, token?: string) => {
+  const saveWorkspace = useCallback(async (oauth: OAuthCredentials | null, isPublic: boolean, token?: string) => {
     try {
+      // First create the workspace to get its ID
       const workspace = addWorkspace({
         name,
         mcpUrl,
-        oauth: oauth || undefined,
-        bearerToken: token || undefined,
         isPublic,
       });
+
+      // Save credentials to keychain
+      const manager = getCredentialManager();
+
+      if (oauth) {
+        await manager.setWorkspaceOAuth(workspace.id, {
+          accessToken: oauth.accessToken,
+          refreshToken: oauth.refreshToken,
+          expiresAt: oauth.expiresAt,
+          clientId: oauth.clientId,
+          tokenType: oauth.tokenType,
+        });
+      } else if (token) {
+        await manager.setWorkspaceBearer(workspace.id, token);
+      }
 
       setStep('complete');
 

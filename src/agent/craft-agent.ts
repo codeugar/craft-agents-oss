@@ -1,9 +1,10 @@
 import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessage, type SDKUserMessage, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
-import { getSystemPrompt } from '../prompts/system.ts';
+import { getSystemPrompt, getDateTimeContext } from '../prompts/system.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
-import { isWorkspaceTokenExpired, updateWorkspaceOAuthTokens, type Workspace } from '../config/storage.ts';
+import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, type Workspace } from '../config/storage.ts';
+import { getCredentialManager } from '../credentials/index.ts';
 import { updatePreferences, loadPreferences, type UserPreferences } from '../config/preferences.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
 import type { FileAttachment } from '../tui/utils/files.ts';
@@ -365,50 +366,50 @@ export class CraftAgent {
       return null;
     }
 
-    // Bearer token - static, no refresh needed
-    if (workspace.bearerToken) {
-      return workspace.bearerToken;
-    }
-
-    if (!workspace.oauth) {
+    // Get token from keychain (handles bearer token, OAuth, and legacy config fallback)
+    const token = await getWorkspaceAccessTokenAsync(workspace.id);
+    if (!token) {
       throw new Error('No authentication credentials found for workspace. Please re-add the workspace.');
     }
 
-    if (isWorkspaceTokenExpired(workspace) && workspace.oauth.refreshToken) {
-      try {
-        const oauth = new CraftOAuth(
-          { mcpBaseUrl: getMcpBaseUrl(workspace.mcpUrl) },
-          { onStatus: () => {}, onError: () => {} }
-        );
+    // Check if token is expired and needs refresh
+    const isExpired = await isWorkspaceTokenExpiredAsync(workspace.id);
+    if (isExpired) {
+      // Get full OAuth credentials from keychain for refresh
+      const manager = getCredentialManager();
+      const oauthCreds = await manager.getWorkspaceOAuth(workspace.id);
 
-        const newTokens = await oauth.refreshAccessToken(
-          workspace.oauth.refreshToken,
-          workspace.oauth.clientId
-        );
+      if (oauthCreds?.refreshToken && oauthCreds?.clientId) {
+        try {
+          const oauth = new CraftOAuth(
+            { mcpBaseUrl: getMcpBaseUrl(workspace.mcpUrl) },
+            { onStatus: () => {}, onError: () => {} }
+          );
 
-        updateWorkspaceOAuthTokens(
-          workspace.id,
-          newTokens.accessToken,
-          newTokens.refreshToken,
-          newTokens.expiresAt
-        );
+          const newTokens = await oauth.refreshAccessToken(
+            oauthCreds.refreshToken,
+            oauthCreds.clientId
+          );
 
-        // Update local workspace reference too
-        workspace.oauth.accessToken = newTokens.accessToken;
-        if (newTokens.refreshToken) {
-          workspace.oauth.refreshToken = newTokens.refreshToken;
+          // Save refreshed tokens to keychain
+          await updateWorkspaceOAuthTokensAsync(
+            workspace.id,
+            newTokens.accessToken,
+            newTokens.refreshToken,
+            newTokens.expiresAt,
+            oauthCreds.clientId,
+            newTokens.tokenType
+          );
+
+          return newTokens.accessToken;
+        } catch {
+          // Refresh failed, return existing token (may still work)
+          return token;
         }
-        if (newTokens.expiresAt) {
-          workspace.oauth.expiresAt = newTokens.expiresAt;
-        }
-
-        return newTokens.accessToken;
-      } catch {
-        return workspace.oauth.accessToken;
       }
     }
 
-    return workspace.oauth.accessToken;
+    return token;
   }
 
   async *chat(userMessage: string, attachments?: FileAttachment[]): AsyncGenerator<AgentEvent> {
@@ -697,20 +698,24 @@ export class CraftAgent {
 
   /**
    * Build a simple text prompt with embedded text file contents (for text-only messages)
+   * Prepends date/time context for prompt caching optimization (keeps system prompt static)
    */
   private buildTextPrompt(text: string, attachments?: FileAttachment[]): string {
-    if (!attachments || attachments.length === 0) {
-      return text;
-    }
-
     const parts: string[] = [];
 
-    for (const attachment of attachments) {
-      if (attachment.type === 'text' && attachment.text) {
-        parts.push(`[File: ${attachment.name}]\n\`\`\`\n${attachment.text}\n\`\`\``);
+    // Add date/time context first (moved from system prompt to enable caching)
+    parts.push(getDateTimeContext());
+
+    // Add file attachments
+    if (attachments) {
+      for (const attachment of attachments) {
+        if (attachment.type === 'text' && attachment.text) {
+          parts.push(`[File: ${attachment.name}]\n\`\`\`\n${attachment.text}\n\`\`\``);
+        }
       }
     }
 
+    // Add user's message
     if (text) {
       parts.push(text);
     }
@@ -720,11 +725,15 @@ export class CraftAgent {
 
   /**
    * Build an SDK user message with proper content blocks for binary attachments
+   * Prepends date/time context for prompt caching optimization (keeps system prompt static)
    */
   private buildSDKUserMessage(text: string, attachments?: FileAttachment[]): SDKUserMessage {
     const contentBlocks: ContentBlockParam[] = [];
 
-    // Add attachments first
+    // Add date/time context first (moved from system prompt to enable caching)
+    contentBlocks.push({ type: 'text', text: getDateTimeContext() });
+
+    // Add attachments
     if (attachments) {
       for (const attachment of attachments) {
         if (attachment.type === 'image' && attachment.base64) {
