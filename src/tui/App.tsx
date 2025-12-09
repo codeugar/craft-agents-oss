@@ -424,6 +424,9 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
 
   const handleSubmit = useCallback(
     async (input: string) => {
+      // Add ALL inputs to history for arrow key recall (persisted to file)
+      addToHistory(input);
+
       // Handle @mentions
       if (input.startsWith('@')) {
         const [mentionInput, ...rest] = input.slice(1).split(/\s+/);
@@ -454,7 +457,6 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
             // If there's text after @agent, send it as a message
             const remainingText = rest.join(' ').trim();
             if (remainingText) {
-              addToHistory(input);
               await sendMessage(remainingText);
             }
           } else {
@@ -919,8 +921,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
         addLocalMessage(error, 'error');
       }
 
-      // Regular message - add to history and send with attachments
-      addToHistory(input);
+      // Send message with attachments
       await sendMessage(text || input, allAttachments.length > 0 ? allAttachments : undefined);
     },
     [
