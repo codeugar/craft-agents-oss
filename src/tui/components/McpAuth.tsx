@@ -31,7 +31,9 @@ export const McpAuth: React.FC<McpAuthProps> = ({
   const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [completedServers, setCompletedServers] = useState<string[]>([]);
+  const [skippedServers, setSkippedServers] = useState<string[]>([]);
   const [bearerToken, setBearerToken] = useState('');
+  const [failureReason, setFailureReason] = useState<'oauth' | 'bearer' | null>(null);
   const oauthRef = useRef<CraftOAuth | null>(null);
   const isCancelledRef = useRef(false);
 
@@ -67,6 +69,16 @@ export const McpAuth: React.FC<McpAuthProps> = ({
     if (key.return && step === 'confirm') {
       debug('[McpAuth] User confirmed, starting auth for:', currentServer?.name);
       startAuthForCurrentServer();
+    }
+
+    // 's' to skip when in confirm step
+    if (input === 's' && step === 'confirm') {
+      skipCurrentServer();
+    }
+
+    // Tab to skip when in bearer-token step (can't use 's' as TextInput captures it)
+    if (key.tab && step === 'bearer-token') {
+      skipCurrentServer();
     }
   });
 
@@ -125,6 +137,7 @@ export const McpAuth: React.FC<McpAuthProps> = ({
       if (!validationResult.success) {
         debug('[McpAuth] Validation failed for', server.name, ':', validationResult.error);
         setError(`${server.name}: ${getValidationErrorMessage(validationResult)}`);
+        setFailureReason('oauth');
         oauthRef.current = null;
         return 'oauth-failed' as const;
       }
@@ -146,6 +159,7 @@ export const McpAuth: React.FC<McpAuthProps> = ({
       const message = err instanceof Error ? err.message : 'Authentication failed';
       debug('[McpAuth] OAuth failed for', server.name, ':', message, '- offering bearer token fallback');
       setError(`${server.name}: ${message}`);
+      setFailureReason('oauth');
       oauthRef.current = null;
       // Return 'oauth-failed' to indicate we should offer bearer token as fallback
       return 'oauth-failed' as const;
@@ -238,6 +252,7 @@ export const McpAuth: React.FC<McpAuthProps> = ({
     if (!validationResult.success) {
       debug('[McpAuth] Bearer token validation failed for', server.name, ':', validationResult.error);
       setError(`${server.name}: ${getValidationErrorMessage(validationResult)}`);
+      setFailureReason('bearer');
       setStep('bearer-token'); // Go back to token entry
       return;
     }
@@ -274,6 +289,36 @@ export const McpAuth: React.FC<McpAuthProps> = ({
     }
   }, [servers, currentServerIndex, workspaceId, agentId, onComplete]);
 
+  // Skip current server without authentication
+  const skipCurrentServer = useCallback(() => {
+    const server = servers[currentServerIndex];
+    if (!server) return;
+
+    debug('[McpAuth] Skipping server:', server.name);
+    setSkippedServers(prev => [...prev, server.name]);
+
+    const nextIndex = currentServerIndex + 1;
+    if (nextIndex < servers.length) {
+      setCurrentServerIndex(nextIndex);
+      setStep('confirm');
+      setBearerToken('');
+      setError(null);
+      setFailureReason(null);
+      setStatus('');
+    } else {
+      // All done
+      debug('[McpAuth] Authentication complete (some servers skipped)');
+      setStep('complete');
+      setStatus('Authentication complete (some servers skipped)');
+
+      setTimeout(() => {
+        if (!isCancelledRef.current) {
+          onComplete(true);
+        }
+      }, 1000);
+    }
+  }, [servers, currentServerIndex, onComplete]);
+
   return (
     <Box flexDirection="column" paddingX={1}>
       {/* Header */}
@@ -289,7 +334,9 @@ export const McpAuth: React.FC<McpAuthProps> = ({
         {servers.map((server, i) => (
           <Box key={server.url}>
             <Text>
-              {completedServers.includes(server.name) ? (
+              {skippedServers.includes(server.name) ? (
+                <Text dimColor>⊘ </Text>
+              ) : completedServers.includes(server.name) ? (
                 <Text color="green">✓ </Text>
               ) : i === currentServerIndex && (step === 'authenticating' || step === 'validating') ? (
                 <Text color="yellow">● </Text>
@@ -298,8 +345,9 @@ export const McpAuth: React.FC<McpAuthProps> = ({
               ) : (
                 <Text dimColor>○ </Text>
               )}
-              <Text dimColor={i > currentServerIndex && !completedServers.includes(server.name)}>
+              <Text dimColor={i > currentServerIndex && !completedServers.includes(server.name) && !skippedServers.includes(server.name)}>
                 {server.name}
+                {skippedServers.includes(server.name) && <Text dimColor> (skipped)</Text>}
               </Text>
             </Text>
           </Box>
@@ -342,7 +390,11 @@ export const McpAuth: React.FC<McpAuthProps> = ({
       {/* Bearer token step - fallback when OAuth fails */}
       {step === 'bearer-token' && currentServer && (
         <Box marginY={1} flexDirection="column">
-          <Text color="yellow">OAuth authentication failed for {currentServer.name}</Text>
+          <Text color="yellow">
+            {failureReason === 'bearer'
+              ? `Token validation failed for ${currentServer.name}`
+              : `OAuth authentication failed for ${currentServer.name}`}
+          </Text>
           {error && <Text dimColor>{error}</Text>}
           <Box marginTop={1} flexDirection="column">
             <Text>Enter a bearer token instead:</Text>
@@ -373,13 +425,13 @@ export const McpAuth: React.FC<McpAuthProps> = ({
       {/* Instructions */}
       <Box marginTop={1}>
         {step === 'confirm' && (
-          <Text dimColor>Press Enter to continue, Esc to cancel</Text>
+          <Text dimColor>Press Enter to continue, s to skip, Esc to cancel</Text>
         )}
         {step === 'authenticating' && (
           <Text dimColor>Complete authorization in your browser. Press Esc to cancel.</Text>
         )}
         {step === 'bearer-token' && (
-          <Text dimColor>Press Enter to submit, Esc to cancel</Text>
+          <Text dimColor>Press Enter to submit, Tab to skip, Esc to cancel</Text>
         )}
         {step === 'error' && (
           <Text dimColor>Press Esc to close</Text>

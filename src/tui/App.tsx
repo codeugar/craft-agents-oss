@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useMemo } from 'react';
+import { homedir } from 'os';
 import { Box, useApp, useInput, Text } from 'ink';
 import { Header } from './components/Header.tsx';
 import { Messages, type Message } from './components/Messages.tsx';
@@ -862,10 +863,25 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup }) => {
           case '/debug': {
             const dataPath = getWorkspaceDataPath(workspace.id);
             const conversationPath = `${dataPath}/conversation.json`;
-            addLocalMessage(
-              `**Debug Info**\n\nWorkspace: ${workspace.name}\nConversation: file://${conversationPath}`,
-              'assistant'
-            );
+
+            // Construct SDK transcript path: ~/.claude/projects/{projectSlug}/{sessionId}.jsonl
+            // SDK converts cwd to slug by replacing / with - (keeps leading -)
+            let transcriptPath: string | null = null;
+            if (workspace.sessionId) {
+              const projectSlug = process.cwd().replace(/\//g, '-');
+              transcriptPath = `${homedir()}/.claude/projects/${projectSlug}/${workspace.sessionId}.jsonl`;
+            }
+
+            let debugInfo = `**Debug Info**\n\n`;
+            debugInfo += `Workspace: ${workspace.name}\n`;
+            debugInfo += `Session: ${workspace.sessionId || 'none'}\n\n`;
+            debugInfo += `**Files:**\n\n`;
+            debugInfo += `file://${conversationPath}\n`;
+            if (transcriptPath) {
+              debugInfo += `file://${transcriptPath}\n`;
+            }
+
+            addLocalMessage(debugInfo, 'assistant');
             return;
           }
 
