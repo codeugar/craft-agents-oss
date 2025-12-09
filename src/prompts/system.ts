@@ -122,6 +122,8 @@ ${agent.instructions}
 ${clarificationsSection}${toolPrioritySection}### Self-Modification
 You can update your Instructions document using \`update_agent_instructions\` when you learn something that should persist across conversations. Only add NEW learnings - don't rewrite existing instructions. Use human-friendly references like "this document" instead of IDs.
 
+**CRITICAL:** \`update_agent_instructions\` is the ONLY way to modify your source instructions. NEVER use direct Craft MCP tools (blocks_update, markdown_add, markdown_replace, etc.) to edit your Instructions document - always use \`update_agent_instructions\` instead.
+
 ### Platform Limitations
 This is an interactive CLI tool. You CANNOT:
 - Run automatically or on a schedule
