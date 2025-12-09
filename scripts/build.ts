@@ -4,7 +4,7 @@ import { readFileSync, mkdirSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 
-const VERSION = process.argv[1];
+const VERSION = process.argv[2];
 if (!VERSION) {
   console.error('Version is required');
   process.exit(1);
