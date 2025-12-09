@@ -439,18 +439,25 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     setGlobalPermissionHandler((request) => {
       setPendingPermission(request);
     });
+
+    // Progress callback - updates tool message content during execution
     setUpdateAgentInstructionsProgressCallback((event: UpdateInstructionsProgressEvent) => {
+      if (event.type !== 'tool_start') return;
+
       const toolMsgId = updateInstructionsToolMsgIdRef.current;
-      if (toolMsgId && event.type === 'tool_start') {
-        debug('[useAgent] Update instructions progress:', event.message, 'toolMsgId:', toolMsgId);
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === toolMsgId
-              ? { ...m, content: event.message }
-              : m
-          )
-        );
+      if (!toolMsgId) {
+        debug('[useAgent] Progress event but no toolMsgId - ref not set yet');
+        return;
       }
+
+      debug('[useAgent] Updating tool message content:', toolMsgId, event.message);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === toolMsgId
+            ? { ...m, content: event.message }
+            : m
+        )
+      );
     });
 
     return agentRef.current;
@@ -601,6 +608,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
           case 'tool_start': {
             const now = Date.now();
             const toolMessageId = `tool-${event.toolUseId}`;
+            debug('[useAgent] tool_start event:', event.toolName, 'toolUseId:', event.toolUseId);
 
             // Mark any previously executing tools as completed
             // (New tool starting means previous tools must have finished)
@@ -628,7 +636,9 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
             setStatus('');
             setHasExecutingTool(true);
             // Track update_agent_instructions tool for progress updates
-            if (event.toolName === 'update_agent_instructions') {
+            // Check for exact match or MCP-prefixed version (mcp__preferences__update_agent_instructions)
+            if (event.toolName === 'update_agent_instructions' || event.toolName?.includes('update_agent_instructions')) {
+              debug('[useAgent] Setting updateInstructionsToolMsgIdRef:', toolMessageId, 'for tool:', event.toolName);
               updateInstructionsToolMsgIdRef.current = toolMessageId;
             }
 
