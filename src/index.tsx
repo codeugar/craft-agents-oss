@@ -8,6 +8,7 @@ import {
   loadStoredConfig,
   getActiveWorkspace,
   getWorkspaceByNameOrId,
+  getWorkspaces,
   setActiveWorkspace,
   getAnthropicApiKey,
   getClaudeOAuthToken,
@@ -322,7 +323,9 @@ async function main() {
       // -w flag: lookup by name or ID
       workspace = getWorkspaceByNameOrId(cli.flags.workspace);
       if (!workspace) {
-        console.error(`Error: Workspace '${cli.flags.workspace}' not found.`);
+        const available = getWorkspaces();
+        const names = available.map(w => w.name).join(', ') || 'none';
+        console.error(`Error: Workspace '${cli.flags.workspace}' not found. Available: ${names}`);
         process.exit(1);
       }
     } else {

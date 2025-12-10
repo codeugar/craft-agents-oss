@@ -243,11 +243,15 @@ export class HeadlessRunner {
     // Activate agent (will use cache or extract definition)
     const definition = await this.agentManager.activateAgent(agentName);
     if (!definition) {
+      // List available agents for helpful error message
+      const available = await this.agentManager.getAvailableAgents();
+      const names = available.map(a => `@${a.name}`).join(', ') || 'none';
       return {
         success: false,
         error: {
           code: 'agent_not_found',
-          message: `Agent '@${agentName}' not found. Available agents can be listed with 'craft' in interactive mode.`,
+          message: `Agent '@${agentName}' not found. Available: ${names}`,
+          details: { availableAgents: available.map(a => a.name) },
         },
       };
     }

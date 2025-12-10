@@ -161,11 +161,8 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
             content: `Agent '@${initialAgent}' not found. Available agents: ${availableAgents.map(a => `@${a}`).join(', ') || 'none'}`,
             timestamp: Date.now(),
           }]);
-          // Still send the prompt if there is one (to main agent)
-          if (initialPromptPendingRef.current) {
-            await sendMessage(initialPromptPendingRef.current);
-            initialPromptPendingRef.current = null;
-          }
+          // Cancel initial prompt - don't send to main agent since user intended specific agent
+          initialPromptPendingRef.current = null;
           return;
         }
 
