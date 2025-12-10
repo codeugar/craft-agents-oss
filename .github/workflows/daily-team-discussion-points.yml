@@ -23,7 +23,7 @@ jobs:
           craft \
             -w "${{ secrets.CRAFT_KB_MCP_URL }}" \
             -a "@daily-team-discussion-points" \
-            -p "dry-run: don't create discussion points on any day, just try to find todays daily note and return if you succeeded" \
+            -p "please do a run on today's daily note" \
             --output-format stream-json \
             -m claude-opus-4-5-20251101 \
             --debug
