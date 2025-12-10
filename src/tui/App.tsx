@@ -33,9 +33,11 @@ export interface AppProps {
   initialAgent?: string;
   /** Prompt to auto-send after agent activation (or immediately if no agent) */
   initialPrompt?: string;
+  /** Error message to display on startup (e.g., workspace not found) */
+  initialError?: string;
 }
 
-export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, initialPrompt }) => {
+export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, initialPrompt, initialError }) => {
   const { exit } = useApp();
 
   const {
@@ -92,7 +94,18 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
   } = useAgent(config);
 
   const { history, addToHistory } = useHistory();
-  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<Message[]>(() => {
+    // Initialize with error message if provided (e.g., workspace not found)
+    if (initialError) {
+      return [{
+        id: `startup-error-${Date.now()}`,
+        type: 'error',
+        content: initialError,
+        timestamp: Date.now(),
+      }];
+    }
+    return [];
+  });
   const [compactMode, setCompactMode] = useState(true);
   const [showWelcome, setShowWelcome] = useState(true);
   const [staticResetKey, setStaticResetKey] = useState(0); // Incremented on /clear to create fresh Static items

@@ -8,6 +8,7 @@ import {
   loadStoredConfig,
   getActiveWorkspace,
   getWorkspaceByNameOrId,
+  setActiveWorkspace,
   getAnthropicApiKey,
   getClaudeOAuthToken,
   hasValidCredentials,
@@ -211,16 +212,33 @@ const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup, initia
   }
 
   // Build agent config from stored config + CLI overrides
-  // If CLI URL is provided, create a temporary workspace object for it
-  const workspace: Workspace = cliFlags.url
-    ? {
-        id: 'cli-override',
-        name: 'CLI Override',
-        mcpUrl: cliFlags.url,
-        isPublic: true, // Assume public for CLI override
-        createdAt: Date.now(),
-      }
-    : activeWorkspace;
+  // Priority: --url (temporary workspace) > -w (workspace by name/ID) > active workspace
+  let workspace: Workspace;
+  let workspaceError: string | undefined;
+  if (cliFlags.url) {
+    // URL override creates a temporary workspace
+    workspace = {
+      id: 'cli-override',
+      name: 'CLI Override',
+      mcpUrl: cliFlags.url,
+      isPublic: true, // Assume public for CLI override
+      createdAt: Date.now(),
+    };
+  } else if (cliFlags.workspace) {
+    // -w flag: lookup by name or ID
+    const found = getWorkspaceByNameOrId(cliFlags.workspace);
+    if (!found) {
+      // Workspace not found - fall back to active workspace, cancel initial agent/prompt
+      workspaceError = `Workspace '${cliFlags.workspace}' not found. Using '${activeWorkspace.name}' instead.`;
+      workspace = activeWorkspace;
+    } else {
+      workspace = found;
+      // Update last active workspace for REPL mode (user is interactively working here now)
+      setActiveWorkspace(found.id);
+    }
+  } else {
+    workspace = activeWorkspace;
+  }
 
   const agentConfig: CraftAgentConfig = {
     workspace,
@@ -248,8 +266,10 @@ const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup, initia
     <App
       config={agentConfig}
       onRequestSetup={handleRequestSetup}
-      initialAgent={initialAgent}
-      initialPrompt={initialPrompt}
+      // Cancel initial agent/prompt if workspace lookup failed
+      initialAgent={workspaceError ? undefined : initialAgent}
+      initialPrompt={workspaceError ? undefined : initialPrompt}
+      initialError={workspaceError}
     />
   );
 };
