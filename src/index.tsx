@@ -38,6 +38,8 @@ const cli = meow(
   Common Options (both modes)
     --agent, -a <name>      Agent to activate (with or without @ prefix)
     --workspace, -w <name>  Select workspace by name or ID
+    --model, -m <model>     Claude model to use (default: claude-sonnet-4-5-20250929)
+    --debug                 Enable debug logging to /tmp/craft-debug.log
 
   Print Mode (non-interactive, exits after response)
     --print, -p <query>     Execute prompt and exit (non-interactive)
@@ -49,9 +51,7 @@ const cli = meow(
   Interactive Mode Options
     --setup         Run the setup wizard (reconfigure)
     --url, -u       Craft MCP server URL (overrides saved config)
-    --token, -t     Bearer token for authentication (overrides saved config)
-    --model, -m     Claude model to use (default: claude-sonnet-4-5-20250929)
-    --debug         Enable debug logging to /tmp/craft-debug.log
+    --token, -t     Bearer token for MCP authentication (overrides saved config)
     --help          Show this help message
     --version       Show version number
 
@@ -133,6 +133,7 @@ const cli = meow(
         default: false,
       },
     },
+    allowUnknownFlags: false,
   }
 );
 
