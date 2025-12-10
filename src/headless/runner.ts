@@ -1,0 +1,367 @@
+import { CraftAgent, type CraftAgentConfig } from '../agent/craft-agent.ts';
+import { CraftMcpClient } from '../mcp/client.ts';
+import { SubAgentManager } from '../agents/manager.ts';
+import type { SubAgentDefinition } from '../agents/types.ts';
+import { getWorkspaceAccessTokenAsync } from '../config/storage.ts';
+import { debug } from '../tui/utils/debug.ts';
+import type {
+  HeadlessConfig,
+  HeadlessResult,
+  HeadlessEvent,
+  ToolCallRecord,
+} from './types.ts';
+
+// Safe commands that can be auto-allowed with 'allow-safe' policy
+const SAFE_COMMANDS = new Set([
+  'ls', 'cat', 'head', 'tail', 'grep', 'find', 'pwd', 'echo', 'which',
+  'wc', 'sort', 'uniq', 'diff', 'file', 'stat', 'tree', 'less', 'more',
+]);
+
+/**
+ * HeadlessRunner executes queries in non-interactive mode.
+ *
+ * Reuses existing components:
+ * - CraftMcpClient for MCP connections
+ * - SubAgentManager for agent discovery and activation
+ * - CraftAgent for query execution
+ *
+ * Handles interactions automatically:
+ * - Permissions: based on policy (deny-all, allow-safe, allow-all)
+ * - Questions: returns empty answers
+ * - Auth: fails if credentials missing (must run interactively first)
+ */
+export class HeadlessRunner {
+  private config: HeadlessConfig;
+  private mcpClient: CraftMcpClient | null = null;
+  private agentManager: SubAgentManager | null = null;
+  private agent: CraftAgent | null = null;
+
+  // Temporary storage for agent activation
+  private activeDefinition: SubAgentDefinition | null = null;
+  private mcpServers: Record<string, { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }> = {};
+  private apiServers: Record<string, unknown> = {};
+
+  constructor(config: HeadlessConfig) {
+    this.config = config;
+  }
+
+  /**
+   * Run the query and return result.
+   * For streaming output, use runStreaming() instead.
+   */
+  async run(): Promise<HeadlessResult> {
+    for await (const event of this.runStreaming()) {
+      if (event.type === 'complete') {
+        return event.result;
+      }
+    }
+    return {
+      success: false,
+      error: { code: 'execution_error', message: 'No completion event received' },
+    };
+  }
+
+  /**
+   * Run the query with streaming events.
+   */
+  async *runStreaming(): AsyncGenerator<HeadlessEvent> {
+    try {
+      // 1. Initialize MCP client and agent manager
+      yield { type: 'status', message: 'Connecting to workspace...' };
+      const initResult = await this.initializeMcpClient();
+      if (!initResult.success) {
+        yield { type: 'complete', result: { success: false, error: initResult.error } };
+        return;
+      }
+
+      // 2. Activate agent if specified
+      if (this.config.agentName) {
+        yield { type: 'status', message: `Activating @${this.config.agentName}...` };
+        const activationResult = await this.activateAgent();
+        if (!activationResult.success) {
+          yield { type: 'complete', result: { success: false, error: activationResult.error } };
+          return;
+        }
+      }
+
+      // 3. Create CraftAgent with headless callbacks
+      this.createAgent();
+
+      // 4. Execute query
+      yield { type: 'status', message: 'Processing...' };
+
+      let response = '';
+      const toolCalls: ToolCallRecord[] = [];
+      let usage: HeadlessResult['usage'];
+
+      for await (const event of this.agent!.chat(this.config.prompt)) {
+        switch (event.type) {
+          case 'status':
+            yield { type: 'status', message: event.message };
+            break;
+
+          case 'text_delta':
+            yield { type: 'text_delta', text: event.text };
+            break;
+
+          case 'text_complete':
+            response = event.text;
+            break;
+
+          case 'tool_start':
+            yield {
+              type: 'tool_start',
+              id: event.toolUseId,
+              name: event.toolName,
+              input: event.input,
+            };
+            break;
+
+          case 'tool_result':
+            toolCalls.push({
+              id: event.toolUseId,
+              name: event.toolUseId, // We don't have tool name in result, use ID
+              input: event.input ?? {},
+              result: event.result,
+              isError: event.isError,
+            });
+            yield {
+              type: 'tool_result',
+              id: event.toolUseId,
+              name: event.toolUseId,
+              result: event.result,
+              isError: event.isError,
+            };
+            break;
+
+          case 'error':
+            yield { type: 'error', message: event.message };
+            break;
+
+          case 'complete':
+            if (event.usage) {
+              usage = {
+                inputTokens: event.usage.inputTokens,
+                outputTokens: event.usage.outputTokens,
+                cacheReadTokens: event.usage.cacheReadTokens,
+                cacheCreationTokens: event.usage.cacheCreationTokens,
+                costUsd: event.usage.costUsd ?? 0,
+              };
+            }
+            break;
+        }
+      }
+
+      // Emit completion
+      yield {
+        type: 'complete',
+        result: {
+          success: true,
+          response,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          usage,
+          sessionId: this.agent?.getSessionId() ?? undefined,
+        },
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      debug('[HeadlessRunner] Error:', message);
+      yield {
+        type: 'complete',
+        result: {
+          success: false,
+          error: { code: 'execution_error', message },
+        },
+      };
+    } finally {
+      await this.cleanup();
+    }
+  }
+
+  /**
+   * Initialize MCP client and agent manager.
+   */
+  private async initializeMcpClient(): Promise<{ success: true } | { success: false; error: HeadlessResult['error'] }> {
+    try {
+      // Build MCP URL (same logic as useAgent)
+      let mcpUrl = this.config.workspace.mcpUrl.replace(/\/+$/, '');
+      if (!mcpUrl.endsWith('/mcp')) {
+        mcpUrl = mcpUrl.replace(/\/sse$/, '/mcp');
+        if (!mcpUrl.endsWith('/mcp')) {
+          mcpUrl = mcpUrl + '/mcp';
+        }
+      }
+
+      // Get token from keychain
+      const token = await getWorkspaceAccessTokenAsync(this.config.workspace.id);
+
+      debug('[HeadlessRunner] Connecting to MCP:', mcpUrl, 'hasToken:', !!token);
+
+      this.mcpClient = new CraftMcpClient({
+        url: mcpUrl,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      await this.mcpClient.connect();
+
+      // Create agent manager
+      this.agentManager = new SubAgentManager(
+        this.config.workspace.id,
+        this.mcpClient,
+        {
+          model: this.config.model || 'claude-sonnet-4-5-20250929',
+          mcpUrl,
+          mcpToken: token || undefined,
+        }
+      );
+
+      return { success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to connect';
+      return {
+        success: false,
+        error: { code: 'execution_error', message: `MCP connection failed: ${message}` },
+      };
+    }
+  }
+
+  /**
+   * Activate the specified agent.
+   * Fails if authentication is required but not available.
+   */
+  private async activateAgent(): Promise<{ success: true } | { success: false; error: HeadlessResult['error'] }> {
+    if (!this.agentManager) {
+      return {
+        success: false,
+        error: { code: 'execution_error', message: 'Agent manager not initialized' },
+      };
+    }
+
+    const agentName = this.config.agentName!;
+    debug('[HeadlessRunner] Activating agent:', agentName);
+
+    // Activate agent (will use cache or extract definition)
+    const definition = await this.agentManager.activateAgent(agentName);
+    if (!definition) {
+      return {
+        success: false,
+        error: {
+          code: 'agent_not_found',
+          message: `Agent '@${agentName}' not found. Available agents can be listed with 'craft' in interactive mode.`,
+        },
+      };
+    }
+
+    // Check MCP auth requirements - FAIL if missing (don't prompt)
+    const serversNeedingAuth = await this.agentManager.getMcpServersNeedingAuth(definition);
+    if (serversNeedingAuth.length > 0) {
+      const serverNames = serversNeedingAuth.map(s => s.name || s.url).join(', ');
+      return {
+        success: false,
+        error: {
+          code: 'auth_required',
+          message: `MCP server authentication required: ${serverNames}. Run 'craft' interactively and activate @${agentName} to authenticate.`,
+          details: { servers: serversNeedingAuth.map(s => s.name || s.url) },
+        },
+      };
+    }
+
+    // Check API auth requirements - FAIL if missing
+    const apisNeedingAuth = await this.agentManager.getApisNeedingAuth(definition);
+    if (apisNeedingAuth.length > 0) {
+      const apiNames = apisNeedingAuth.map(a => a.name).join(', ');
+      return {
+        success: false,
+        error: {
+          code: 'auth_required',
+          message: `API authentication required: ${apiNames}. Run 'craft' interactively and activate @${agentName} to authenticate.`,
+          details: { apis: apisNeedingAuth.map(a => a.name) },
+        },
+      };
+    }
+
+    // Build MCP and API server configs
+    this.mcpServers = await this.agentManager.buildMcpServerConfig(definition);
+    this.apiServers = await this.agentManager.buildApiServers(definition);
+    this.activeDefinition = definition;
+
+    debug('[HeadlessRunner] Agent activated:', agentName, 'mcpServers:', Object.keys(this.mcpServers).length);
+
+    return { success: true };
+  }
+
+  /**
+   * Create CraftAgent with headless callbacks for permissions and questions.
+   */
+  private createAgent(): void {
+    const agentConfig: CraftAgentConfig = {
+      workspace: this.config.workspace,
+      model: this.config.model,
+    };
+
+    this.agent = new CraftAgent(agentConfig);
+
+    // Set active agent if we activated one
+    if (this.activeDefinition) {
+      this.agent.setActiveAgentDefinition(
+        this.activeDefinition,
+        this.mcpServers,
+        this.apiServers as Record<string, ReturnType<typeof import('@anthropic-ai/claude-agent-sdk').createSdkMcpServer>>
+      );
+    }
+
+    // Wire up permission handler based on policy
+    this.agent.onPermissionRequest = (request) => {
+      const policy = this.config.permissionPolicy || 'deny-all';
+      debug('[HeadlessRunner] Permission request:', request.command, 'policy:', policy);
+
+      if (policy === 'allow-all') {
+        this.agent!.respondToPermission(request.requestId, true, false);
+        return;
+      }
+
+      if (policy === 'allow-safe') {
+        // Extract base command (first word)
+        const baseCommand = request.command.trim().split(/\s+/)[0] || '';
+        const allowed = SAFE_COMMANDS.has(baseCommand);
+        debug('[HeadlessRunner] Safe check:', baseCommand, 'allowed:', allowed);
+        this.agent!.respondToPermission(request.requestId, allowed, false);
+        return;
+      }
+
+      // deny-all (default)
+      this.agent!.respondToPermission(request.requestId, false, false);
+    };
+
+    // Wire up question handler - return empty answers in headless mode
+    this.agent.onAskUserQuestion = (request) => {
+      debug('[HeadlessRunner] Question request, returning empty answers');
+      this.agent!.respondToQuestion(request.requestId, {});
+    };
+
+    // Set session ID
+    if (this.config.sessionId) {
+      // Explicit session from CLI
+      this.agent.setSessionId(this.config.sessionId);
+    } else if (!this.config.noSession && this.config.workspace.sessionId) {
+      // Use workspace session for continuity
+      this.agent.setSessionId(this.config.workspace.sessionId);
+    }
+    // If noSession is true, don't set any session (fresh each time)
+  }
+
+  /**
+   * Clean up resources.
+   */
+  private async cleanup(): Promise<void> {
+    if (this.mcpClient) {
+      await this.mcpClient.close().catch(() => {});
+      this.mcpClient = null;
+    }
+    this.agentManager = null;
+    this.agent = null;
+    this.activeDefinition = null;
+    this.mcpServers = {};
+    this.apiServers = {};
+  }
+}

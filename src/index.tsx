@@ -23,13 +23,22 @@ const cli = meow(
   Craft Document Assistant - A Claude Code-like TUI for Craft documents
 
   Usage
-    $ craft-agent [command] [options]
+    $ craft [options]                     Interactive mode
+    $ craft -p "query"                    Execute query and exit
+    $ craft -p "query" -a agent           Activate agent first
 
   Commands
     install [version]  Install a specific version (defaults to "latest")
 
+  Print Mode (non-interactive)
+    --print, -p <query>     Execute prompt and exit
+    --agent, -a <name>      Agent to activate (with or without @ prefix)
+    --output-format <fmt>   Output format: text, json, stream-json (default: text)
+    --permission-policy     Permission handling: deny-all, allow-safe, allow-all (default: deny-all)
+    --session-id <uuid>     Use specific session ID for conversation continuity
+    --no-session            Don't persist or resume session
 
-  Options
+  Interactive Mode Options
     --setup         Run the setup wizard (reconfigure)
     --url, -u       Craft MCP server URL (overrides saved config)
     --token, -t     Bearer token for authentication (overrides saved config)
@@ -47,14 +56,41 @@ const cli = meow(
     Run with --setup to reconfigure at any time.
 
   Examples
-    $ craft-agent
-    $ craft-agent --setup
-    $ craft-agent --url http://localhost:3000/v1/links/abc123/mcp
-    $ craft-agent install 0.0.1
+    $ craft                                    # Interactive mode
+    $ craft -p "list my documents"             # Quick query
+    $ craft -p "summarize my notes" -a writer  # Use agent
+    $ craft -p "query" --output-format json    # JSON output for scripts
+    $ craft --setup                            # Reconfigure
+    $ craft install 0.0.1                      # Install specific version
 `,
   {
     importMeta: import.meta,
     flags: {
+      // Print mode flags
+      print: {
+        type: 'string',
+        shortFlag: 'p',
+      },
+      agent: {
+        type: 'string',
+        shortFlag: 'a',
+      },
+      outputFormat: {
+        type: 'string',
+        default: 'text',
+      },
+      permissionPolicy: {
+        type: 'string',
+        default: 'deny-all',
+      },
+      sessionId: {
+        type: 'string',
+      },
+      noSession: {
+        type: 'boolean',
+        default: false,
+      },
+      // Interactive mode flags
       setup: {
         type: 'boolean',
         default: false,
@@ -200,6 +236,94 @@ async function main() {
   if (cli.flags.debug) {
     enableDebug();
   }
+
+  // ========================================
+  // HEADLESS MODE (-p flag)
+  // ========================================
+  if (cli.flags.print !== undefined) {
+    const { HeadlessRunner, writeStreamingOutput } = await import('./headless/index.ts');
+
+    // Validate config exists
+    const storedConfig = loadStoredConfig();
+    if (!storedConfig) {
+      console.error('Error: No configuration found. Run `craft --setup` first.');
+      process.exit(1);
+    }
+
+    // Validate credentials
+    const hasCredentials = await hasValidCredentials();
+    if (!hasCredentials) {
+      console.error('Error: No valid credentials. Run `craft --setup` first.');
+      process.exit(1);
+    }
+
+    // Get workspace
+    const workspace = cli.flags.url
+      ? {
+          id: 'cli-override',
+          name: 'CLI Override',
+          mcpUrl: cli.flags.url,
+          isPublic: true,
+          createdAt: Date.now(),
+        }
+      : getActiveWorkspace();
+
+    if (!workspace) {
+      console.error('Error: No workspace configured. Run `craft --setup` first.');
+      process.exit(1);
+    }
+
+    // Set up auth env vars
+    const apiKey = await getAnthropicApiKey();
+    const oauthToken = await getClaudeOAuthToken();
+    const authType: AuthType = storedConfig.authType || 'api_key';
+
+    if (authType === 'oauth_token' && oauthToken) {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+      delete process.env.ANTHROPIC_API_KEY;
+    } else if (apiKey) {
+      process.env.ANTHROPIC_API_KEY = apiKey;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+
+    // Normalize agent name (strip @ prefix if present)
+    // Note: meow exposes short flags under their short name when used
+    const agentFlag = cli.flags.agent ?? (cli.flags as Record<string, unknown>).a as string | undefined;
+    const agentName = agentFlag?.replace(/^@/, '');
+
+    // Validate output format
+    const outputFormat = cli.flags.outputFormat as 'text' | 'json' | 'stream-json';
+    if (!['text', 'json', 'stream-json'].includes(outputFormat)) {
+      console.error(`Error: Invalid output format '${outputFormat}'. Use: text, json, or stream-json`);
+      process.exit(1);
+    }
+
+    // Validate permission policy
+    const permissionPolicy = cli.flags.permissionPolicy as 'deny-all' | 'allow-safe' | 'allow-all';
+    if (!['deny-all', 'allow-safe', 'allow-all'].includes(permissionPolicy)) {
+      console.error(`Error: Invalid permission policy '${permissionPolicy}'. Use: deny-all, allow-safe, or allow-all`);
+      process.exit(1);
+    }
+
+    // Create and run headless runner
+    const runner = new HeadlessRunner({
+      prompt: cli.flags.print,
+      workspace,
+      agentName,
+      model: cli.flags.model || storedConfig.model,
+      outputFormat,
+      permissionPolicy,
+      sessionId: cli.flags.sessionId,
+      noSession: cli.flags.noSession,
+    });
+
+    const result = await writeStreamingOutput(runner.runStreaming(), outputFormat);
+    process.exit(result.success ? 0 : 1);
+  }
+
+  // ========================================
+  // INTERACTIVE MODE (TUI)
+  // ========================================
 
   // Clear screen and move cursor to top-left
   process.stdout.write('\x1b[2J\x1b[H');
