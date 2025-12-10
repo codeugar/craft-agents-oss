@@ -7,6 +7,7 @@
  */
 
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { getDefaultOptions } from '../agent/options.ts';
 import type { McpServerConfig, ApiConfig, Concern } from './types.ts';
 import { debug } from '../tui/utils/debug.ts';
 
@@ -312,6 +313,7 @@ Rules:
 - instructions: Empty string "" if document is empty or not found`;
 
     const options: Options = {
+      ...getDefaultOptions(),
       model: model || 'claude-sonnet-4-20250514',
       systemPrompt,
       mcpServers,

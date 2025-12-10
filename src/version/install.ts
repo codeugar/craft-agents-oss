@@ -1,13 +1,18 @@
-import { exists, mkdir, chmod, writeFile, symlink, unlink } from "fs/promises";
+import { exists, mkdir, chmod, symlink, unlink, lstat } from "fs/promises";
+import { PassThrough, pipeline } from "stream";
+import { promisify } from "util";
 import { getLatestVersion, getManifest } from "./manifest";
 import { createHash } from "crypto";
 import { homedir } from "os";
 import { join } from "path";
+import * as tar from "tar";
 
-export async function downloadBinary(params: { url: string, sha256: string }): Promise<ArrayBuffer | null> {
+const pipelineAsync = promisify(pipeline);
+
+export async function downloadArchive(params: { url: string, sha256: string }): Promise<ArrayBuffer | null> {
   const { url, sha256 } = params;
   const response = await fetch(url);
-  console.log(`Fetching binary from: ${url}`);
+  console.log(`Fetching archive from: ${url}`);
   const data = await response.arrayBuffer();
   const buffer = Buffer.from(data);
   const hash = createHash('sha256').update(buffer).digest('hex');
@@ -25,22 +30,38 @@ export async function ensureDirectory(path: string): Promise<void> {
   }
 }
 
-export async function installBinary(params: { binaryData: ArrayBuffer, version: string }): Promise<void> {
-  const { binaryData, version } = params;
-  const actualDirectory = join(homedir(), '.local', 'share', 'craft', 'versions');
-  const actualPath = join(actualDirectory, version);
+async function extractArchive(params: { archiveData: ArrayBuffer, destination: string }): Promise<void> {
+  const { archiveData, destination } = params;
+  const buffer = Buffer.from(archiveData);
+  const stream = new PassThrough();
+  stream.end(buffer);
+  
+  await pipelineAsync(
+    stream,
+    tar.x({ C: destination, gzip: true })
+  );
+}
+
+export async function installArchive(params: { archiveData: ArrayBuffer, version: string }): Promise<void> {
+  const { archiveData, version } = params;
+  const versionDirectory = join(homedir(), '.local', 'share', 'craft', 'versions', version);
+  const binaryPath = join(versionDirectory, 'craft');
   const symlinkDirectory = join(homedir(), '.local', 'bin');
   const symlinkPath = join(symlinkDirectory, 'craft');
 
-  await ensureDirectory(actualDirectory);
+  await ensureDirectory(versionDirectory);
   await ensureDirectory(symlinkDirectory);
 
-  await writeFile(actualPath, Buffer.from(binaryData));
-  await chmod(actualPath, '755');
-  if (await exists(symlinkPath)) {
+  await extractArchive({ archiveData, destination: versionDirectory });
+  await chmod(binaryPath, '755');
+  // Use lstat to check if symlink exists (even if broken/pointing to nothing)
+  try {
+    await lstat(symlinkPath);
     await unlink(symlinkPath);
+  } catch {
+    // Symlink doesn't exist, that's fine
   }
-  await symlink(actualPath, symlinkPath);
+  await symlink(binaryPath, symlinkPath);
 }
 
 export async function install(version: string | null): Promise<VersionInstallResult> {
@@ -69,13 +90,14 @@ export async function install(version: string | null): Promise<VersionInstallRes
   const binarySha256 = binary.sha256;
   console.log(`Binary URL: ${binaryUrl}`);
   console.log(`Binary SHA256: ${binarySha256}`);
+  console.log(`Binary size: ${binary.size}`);
 
-  const binaryData = await downloadBinary({ url: binaryUrl, sha256: binarySha256 });
-  if (binaryData == null) {
+  const archiveData = await downloadArchive({ url: binaryUrl, sha256: binarySha256 });
+  if (archiveData == null) {
     console.error('Failed to download binary');
     return { success: false, error: 'Failed to download binary' };
   }
-  await installBinary({ binaryData, version });
+  await installArchive({ archiveData, version });
 
   return { success: true };
 }

@@ -25,6 +25,7 @@ import { processInputWithFiles, readClipboard, type FileAttachment } from './uti
 import { resolveCommand, resolveAgentMention } from './utils/filtering.ts';
 import { debug, isDebugEnabled } from './utils/debug.ts';
 import type { CraftAgentConfig } from '../agent/craft-agent.ts';
+import { getCurrentVersion } from '../version/version.ts';
 
 export interface AppProps {
   config: CraftAgentConfig;
@@ -1015,6 +1016,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
             let debugInfo = `**Debug Info**\n\n`;
             debugInfo += `Workspace: ${workspace.name}\n`;
             debugInfo += `Session: ${workspace.sessionId || 'none'}\n\n`;
+            debugInfo += `Version: ${getCurrentVersion()}\n\n`;
             debugInfo += `**Files:**\n\n`;
             debugInfo += `file://${conversationPath}\n`;
             if (transcriptPath) {

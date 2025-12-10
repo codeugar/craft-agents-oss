@@ -6,6 +6,7 @@
  */
 
 import { query, type McpServerStatus } from '@anthropic-ai/claude-agent-sdk';
+import { getDefaultOptions } from '../agent/options.ts';
 import { CraftMcpClient } from './client.js';
 import { debug } from '@/tui/utils/debug.js';
 
@@ -171,6 +172,7 @@ export async function validateMcpConnection(
     const q = query({
       prompt: '',
       options: {
+        ...getDefaultOptions(),
         mcpServers,
         model: config.model || 'claude-sonnet-4-20250514',
         abortController,

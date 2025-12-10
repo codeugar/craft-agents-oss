@@ -1,17 +1,18 @@
 
 import { $ } from 'bun';
+import { create } from 'tar';
 import { readFileSync, mkdirSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 
-const VERSION = process.argv[2];
-if (!VERSION) {
+const CRAFT_AGENT_CLI_VERSION = process.argv[2];
+if (!CRAFT_AGENT_CLI_VERSION) {
   console.error('Version is required');
   process.exit(1);
 }
 
-const BUILD_TIME = new Date().toISOString();
-const BUILD_TIMESTAMP = Date.now();
+const CRAFT_AGENT_CLI_BUILD_DATE = new Date().toISOString();
+const CRAFT_AGENT_CLI_BUILD_TIMESTAMP = Date.now();
 
 // Build targets
 const TARGETS = [
@@ -31,9 +32,9 @@ if (existsSync(buildDir)) {
 mkdirSync(buildDir, { recursive: true });
 
 // Build each target
-console.log(`Building version ${VERSION}...`);
-console.log(`Build time: ${BUILD_TIME}`);
-console.log(`Build timestamp: ${BUILD_TIMESTAMP}`);
+console.log(`Building version ${CRAFT_AGENT_CLI_VERSION}...`);
+console.log(`Build time: ${CRAFT_AGENT_CLI_BUILD_DATE}`);
+console.log(`Build timestamp: ${CRAFT_AGENT_CLI_BUILD_TIMESTAMP}`);
 console.log(`Build directory: ${buildDir}`);
 console.log('');
 
@@ -43,28 +44,39 @@ const manifest: {
   build_timestamp: number;
   binaries: Record<string, { url: string; sha256: string; size: number }>;
 } = {
-  version: VERSION,
-  build_time: BUILD_TIME,
-  build_timestamp: BUILD_TIMESTAMP,
+  version: CRAFT_AGENT_CLI_VERSION,
+  build_time: CRAFT_AGENT_CLI_BUILD_DATE,
+  build_timestamp: CRAFT_AGENT_CLI_BUILD_TIMESTAMP,
   binaries: {},
 };
 
+mkdirSync(join(buildDir, "upload"), { recursive: true });
+
 for (const target of TARGETS) {
-  const outfile = join(buildDir, `craft-${target.name}${target.ext}`);
+  const folder = join(buildDir, `${target.name}`);
+  mkdirSync(folder, { recursive: true });
+  const outfile = join(folder, "craft");
 
   console.log(`Building ${target.name}...`);
 
   try {
-    await $`bun build --compile --minify \
+    console.log(await $`bun build --compile --minify \
       --target=${target.bunTarget} \
-      --define VERSION="${VERSION}" \
-      --define BUILD_TIME="${BUILD_TIME}" \
-      --define BUILD_TIMESTAMP="${BUILD_TIMESTAMP}" \
-      src/index.tsx \
-      --outfile ${outfile}`.quiet();
+      --define CRAFT_AGENT_CLI_VERSION='"${CRAFT_AGENT_CLI_VERSION}"' \
+      --define CRAFT_AGENT_CLI_BUILD_DATE='"${CRAFT_AGENT_CLI_BUILD_DATE}"' \
+      --define CRAFT_AGENT_CLI_BUILD_TIMESTAMP='"${CRAFT_AGENT_CLI_BUILD_TIMESTAMP}"' \
+      --outfile ${outfile} \
+      src/index.tsx
+      `.text());
+    console.log(await $`cp -r node_modules/@anthropic-ai/claude-agent-sdk ${folder}`.text());
 
-    // Calculate SHA256
-    const content = readFileSync(outfile);
+    await create({
+        gzip: true,
+        file: join(buildDir, "upload", `${target.name}.tar.gz`),
+        C: folder,
+    }, ['craft', 'claude-agent-sdk']);
+
+    const content = readFileSync(join(buildDir, "upload", `${target.name}.tar.gz`));
     const hash = createHash('sha256').update(content).digest('hex');
     const size = content.length;
 
@@ -72,7 +84,7 @@ for (const target of TARGETS) {
     console.log(`    SHA256: ${hash}`);
 
     manifest.binaries[target.name] = {
-      url: `https://version.chaps.app/${VERSION}/craft-${target.name}${target.ext}`,
+      url: `https://agents.craft.do/${CRAFT_AGENT_CLI_VERSION}/${target.name}.tar.gz`,
       sha256: hash,
       size,
     };
@@ -84,6 +96,6 @@ for (const target of TARGETS) {
 }
 
 // Write manifest
-const manifestPath = join(buildDir, 'manifest.json');
+const manifestPath = join(buildDir, "upload", 'manifest.json');
 Bun.write(manifestPath, JSON.stringify(manifest, null, 2));
 console.log(`Manifest written to ${manifestPath}`);

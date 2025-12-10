@@ -1,4 +1,5 @@
 import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessage, type SDKUserMessage, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { getDefaultOptions } from './options.ts';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
 import { getSystemPrompt, getDateTimeContext } from '../prompts/system.ts';
@@ -704,6 +705,7 @@ export class CraftAgent {
       
       // Configure SDK options
       const options: Options = {
+        ...getDefaultOptions(),
         model: this.config.model || 'claude-sonnet-4-5-20250929',
         // Option A: Append to Claude Code's system prompt (recommended by docs)
         systemPrompt: {

@@ -1,4 +1,4 @@
-const VERSIONS_URL = 'https://version.chaps.app';
+const VERSIONS_URL = 'https://agents.craft.do';
 
 export async function getLatestVersion(): Promise<string | null> {
     try {

@@ -7,6 +7,7 @@
  */
 
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
+import { getDefaultOptions } from '../agent/options.ts';
 import { getWorkspaceAccessTokenAsync } from '../config/storage.ts';
 import { debug } from '../tui/utils/debug.ts';
 
@@ -164,6 +165,7 @@ Or if something went wrong:
 }`;
 
     const options: Options = {
+      ...getDefaultOptions(),
       model: context.model || 'claude-sonnet-4-20250514',
       systemPrompt,
       mcpServers,

@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      uploadScript:
+        description: 'Also upload install.sh to bucket root'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-and-upload:
@@ -37,8 +42,11 @@ jobs:
           S3_VERSIONS_BUCKET_ACCESS_KEY_ID: ${{ secrets.S3_VERSIONS_BUCKET_ACCESS_KEY_ID }}
           S3_VERSIONS_BUCKET_SECRET_ACCESS_KEY: ${{ secrets.S3_VERSIONS_BUCKET_SECRET_ACCESS_KEY }}
         run: |
+          FLAGS=""
           if [ "${{ inputs.isLatest }}" = "true" ]; then
-            bun run scripts/upload.ts --latest
-          else
-            bun run scripts/upload.ts
+            FLAGS="$FLAGS --latest"
           fi
+          if [ "${{ inputs.uploadScript }}" = "true" ]; then
+            FLAGS="$FLAGS --script"
+          fi
+          bun run scripts/upload.ts $FLAGS

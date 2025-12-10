@@ -2,17 +2,19 @@ import { S3Client, DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand 
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 
-const BUCKET = 'craft-tui-versions';
+const BUCKET = 'agents-craft-do';
 if (!process.env.S3_VERSIONS_BUCKET_ENDPOINT || !process.env.S3_VERSIONS_BUCKET_ACCESS_KEY_ID || !process.env.S3_VERSIONS_BUCKET_SECRET_ACCESS_KEY) {
   console.error('Missing R2 credentials');
   process.exit(1);
 }
 
 const isLatest = process.argv.includes('--latest');
+const uploadScript = process.argv.includes('--script');
 const scriptDir = import.meta.dir;
 const repoRoot = dirname(scriptDir);
 const buildDir = join(repoRoot, '.build');
-const manifestPath = join(buildDir, 'manifest.json');
+const manifestPath = join(buildDir, "upload", 'manifest.json');
+const installScriptPath = join(repoRoot, 'scripts', 'install.sh');
 console.log(`Manifest path: ${buildDir}`);
 
 // Read manifest to get version
@@ -29,6 +31,9 @@ const version = manifest.version;
 console.log(`Uploading version ${version}...`);
 if (isLatest) {
   console.log('Will also update /latest folder');
+}
+if (uploadScript) {
+  console.log('Will also upload install.sh');
 }
 console.log('');
 
@@ -69,10 +74,10 @@ async function deleteFolder(prefix: string) {
 async function uploadFolder(prefix: string) {
   console.log(`Uploading to ${prefix}...`);
   
-  const files = readdirSync(buildDir);
+  const files = readdirSync(join(buildDir, "upload"));
   
   for (const file of files) {
-    const filePath = join(buildDir, file);
+    const filePath = join(buildDir, "upload", file);
     const content = readFileSync(filePath);
     const key = `${prefix}${file}`;
     
@@ -87,6 +92,7 @@ async function uploadFolder(prefix: string) {
       Key: key,
       Body: content,
       ContentType: contentType,
+      CacheControl: 'no-cache, no-store, must-revalidate',
     }));
 
     console.log(`  ✓ ${key} (${(content.length / 1024 / 1024).toFixed(2)} MB)`);
@@ -109,6 +115,20 @@ try {
       Body: JSON.stringify({ version }),
       ContentType: 'application/json',
     }));
+  }
+
+  // If --script, upload install.sh to bucket root
+  if (uploadScript) {
+    console.log('Uploading install.sh...');
+    const content = readFileSync(installScriptPath);
+    await s3.send(new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: 'install.sh',
+      Body: content,
+      ContentType: 'text/x-shellscript',
+      CacheControl: 'no-cache, no-store, must-revalidate',
+    }));
+    console.log(`  ✓ install.sh (${(content.length / 1024).toFixed(2)} KB)`);
   }
 
   console.log('Upload complete!');
