@@ -61,10 +61,7 @@ The wizard will ask for:
 
 Configuration is saved to `~/.craft-agent/config.json`
 
-**Security**: All sensitive credentials (API keys, OAuth tokens) are stored securely in your operating system's native keychain:
-- **macOS**: Keychain Access
-- **Linux**: Secret Service (GNOME Keyring / KWallet)
-- **Windows**: Credential Manager
+**Security**: All sensitive credentials (API keys, OAuth tokens) are stored in an AES-256-GCM encrypted file at `~/.craft-agent/credentials.enc`. The encryption key is derived from your machine identity using PBKDF2, providing the same security model as OS keychains without requiring system keychain prompts.
 
 ## Usage
 
@@ -288,7 +285,7 @@ Session transcripts are stored by the Claude Agent SDK at:
 - **AI**: [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
 - **TUI**: [Ink](https://github.com/vadimdemedes/ink) (React for CLIs)
 - **MCP**: HTTP transport via Agent SDK
-- **Credentials**: [keytar](https://www.npmjs.com/package/keytar) (cross-platform OS keychain access)
+- **Credentials**: AES-256-GCM encrypted file storage
 
 ## License
 

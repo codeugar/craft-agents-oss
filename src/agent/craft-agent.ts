@@ -593,7 +593,7 @@ export class CraftAgent {
       return null;
     }
 
-    // Get token from keychain (handles bearer token, OAuth, and legacy config fallback)
+    // Get token from credential store (handles bearer token, OAuth, and legacy config fallback)
     const token = await getWorkspaceAccessTokenAsync(workspace.id);
     if (!token) {
       throw new Error('No authentication credentials found for workspace. Please re-add the workspace.');
@@ -602,7 +602,7 @@ export class CraftAgent {
     // Check if token is expired and needs refresh
     const isExpired = await isWorkspaceTokenExpiredAsync(workspace.id);
     if (isExpired) {
-      // Get full OAuth credentials from keychain for refresh
+      // Get full OAuth credentials from credential store for refresh
       const manager = getCredentialManager();
       const oauthCreds = await manager.getWorkspaceOAuth(workspace.id);
 
@@ -618,7 +618,7 @@ export class CraftAgent {
             oauthCreds.clientId
           );
 
-          // Save refreshed tokens to keychain
+          // Save refreshed tokens to credential store
           await updateWorkspaceOAuthTokensAsync(
             workspace.id,
             newTokens.accessToken,

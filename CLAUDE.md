@@ -59,7 +59,7 @@ src/
 │   ├── manager.ts            # CredentialManager - main API
 │   └── backends/
 │       ├── types.ts          # CredentialBackend interface
-│       ├── keytar.ts         # Primary: keytar (cross-platform native)
+│       ├── secure-storage.ts # Primary: AES-256-GCM encrypted file storage
 │       └── env.ts            # Environment variables (server deployment)
 ├── mcp/
 │   ├── client.ts             # MCP client for persistent connections
@@ -142,18 +142,18 @@ interface Workspace {
 }
 ```
 - Workspace conversations stored in `~/.craft-agent/workspaces/{id}/conversation.json`
-- **Credentials stored in OS keychain** (not in config.json)
+- **Credentials stored in encrypted file** at `~/.craft-agent/credentials.enc`
 
 ### Credential Storage (`src/credentials/`)
-All sensitive credentials are stored in OS native secure storage:
-- **macOS**: Keychain Access
-- **Linux**: Secret Service (GNOME Keyring / KWallet)
-- **Windows**: Credential Manager
+All sensitive credentials are stored in an AES-256-GCM encrypted file:
+- **Location**: `~/.craft-agent/credentials.enc`
+- **Encryption**: AES-256-GCM with machine-derived key (PBKDF2)
+- **Cross-platform**: Works on macOS, Linux, Windows, and server environments
+- **No OS prompts**: Unlike keychain, no security dialogs are shown to users
 
-**Keychain naming convention:**
+**Credential naming convention:**
 ```
-Service: "craft-tui-agent"
-Account: "{type}::{scope...}"
+Key format: "{type}::{scope...}"
 
 Examples:
 - anthropic_api_key::global             # Anthropic API key
@@ -169,7 +169,7 @@ Note: Using "::" as delimiter to avoid conflicts with "/" in URLs or paths.
 
 **Backend priority:**
 1. Environment variables - For server deployment (`CRAFT_ANTHROPIC_API_KEY`, `CRAFT_CLAUDE_OAUTH_TOKEN`)
-2. `keytar` - Cross-platform native module (uses N-API)
+2. Encrypted file - AES-256-GCM with machine-derived key
 
 **Usage:**
 ```typescript
@@ -275,9 +275,9 @@ API responses can be huge (e.g., full web page content). To prevent context over
 5. Falls back to simple truncation if summarization fails
 
 **Credential storage:**
-- Stored in OS keychain via `CredentialManager` (see Credential Storage section)
-- MCP OAuth: `mcp_oauth/{workspaceId}/{agentId}/{serverName}`
-- API keys: `api_key/{workspaceId}/{agentId}/{apiName}`
+- Stored in encrypted file via `CredentialManager` (see Credential Storage section)
+- MCP OAuth: `mcp_oauth::{workspaceId}::{agentId}::{serverName}`
+- API keys: `api_key::{workspaceId}::{agentId}::{apiName}`
 
 ### OAuth (`src/auth/oauth.ts`)
 - Dynamic client registration (no pre-registration)
@@ -475,6 +475,6 @@ tail -f /tmp/craft-debug.log
 - **TUI**: Ink 4.x (React for CLIs)
 - **AI**: @anthropic-ai/claude-agent-sdk
 - **MCP**: @modelcontextprotocol/sdk (via Agent SDK)
-- **Credentials**: keytar (cross-platform OS keychain access)
+- **Credentials**: AES-256-GCM encrypted file storage (no OS keychain)
 - **Markdown**: marked + marked-terminal + Shiki syntax highlighting
 - **CLI**: meow for argument parsing
