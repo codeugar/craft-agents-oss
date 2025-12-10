@@ -7,11 +7,11 @@
  * @example
  * ```typescript
  * import { useInput } from 'ink';
- * import { isShiftEnter, isLineStart, isLineEnd } from '../keyboard';
+ * import { isShiftOrAltEnter, isLineStart, isLineEnd } from '../keyboard';
  *
  * useInput((input, key) => {
- *   if (isShiftEnter(input, key)) {
- *     // Handle Shift+Enter
+ *   if (isShiftOrAltEnter(input, key)) {
+ *     // Handle Shift+Enter or Alt+Enter (insert newline)
  *   }
  *   if (isLineStart(input, key)) {
  *     // Handle Cmd+Left
@@ -21,7 +21,7 @@
  */
 
 export {
-  isShiftEnter,
+  isShiftOrAltEnter,
   isLineStart,
   isLineEnd,
   isShiftVariant,

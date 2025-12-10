@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Text, useInput } from 'ink';
-import { isShiftEnter, isLineStart, isLineEnd, isShiftVariant, isWordLeft, isWordRight, isClearLine, isCancel } from '../keyboard/index.ts';
+import { isShiftOrAltEnter, isLineStart, isLineEnd, isShiftVariant, isWordLeft, isWordRight, isClearLine, isCancel } from '../keyboard/index.ts';
 
 export interface TextInputProps {
   // Required
@@ -227,8 +227,8 @@ export const TextInput: React.FC<TextInputProps> = ({
         }
       }
 
-      // Handle Shift+Enter for newline (multiline mode)
-      if (isShiftEnter(input, key)) {
+      // Handle Shift+Enter or Alt+Enter for newline (multiline mode)
+      if (isShiftOrAltEnter(input, key)) {
         if (multiline) {
           const before = value.substring(0, cursor);
           const after = value.substring(cursor);

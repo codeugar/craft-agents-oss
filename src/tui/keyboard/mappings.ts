@@ -12,6 +12,7 @@
  * | Key Combo      | Ghostty Sends      | Ink Delivers              |
  * |----------------|--------------------|--------------------------:|
  * | Shift+Enter    | \x1b[27;2;13~      | input='[27;2;13~'         |
+ * | Alt+Enter      | \x1b\r             | input='\r' + key.meta=true|
  * | Cmd+Left       | \x01 (Ctrl+A)      | input='\x01'              |
  * | Cmd+Right      | \x05 (Ctrl+E)      | input='\x05'              |
  * | Option+Left    | \x1bb              | input='b' + key.meta=true |
@@ -36,18 +37,22 @@ interface InkKey {
 }
 
 /**
- * Shift+Enter detection
- * Ghostty sends \x1b[27;2;13~ (fixterms). Different Ink versions handle this differently:
+ * Shift+Enter or Alt+Enter detection (for inserting newlines)
+ *
+ * Shift+Enter: Ghostty sends \x1b[27;2;13~ (fixterms). Different Ink versions handle this differently:
  * - Ink 5: input='\r' (char code 13) with all key flags false
  * - Ink 4: input='\r' with key.meta=true
  *
- * We detect Shift+Enter as: char code 13 WITHOUT key.return being set
- * (Regular Enter sets key.return=true, Shift+Enter doesn't in Ink 5)
+ * Alt+Enter: Terminal.app and others send \x1b\r (ESC + carriage return)
+ * - Ink delivers: input='\r' with key.meta=true
+ *
+ * Note: Alt+Enter provides a fallback for terminals like macOS Terminal.app
+ * where Shift+Enter sends the same sequence as regular Enter.
  */
-export function isShiftEnter(input: string, key: InkKey): boolean {
+export function isShiftOrAltEnter(input: string, key: InkKey): boolean {
   return (
     (input === '\r' && key.return !== true) ||  // Ink 5: char 13 without return flag
-    (input === '\r' && key.meta === true) ||    // Ink 4: Ghostty/modern terminals
+    (input === '\r' && key.meta === true) ||    // Ink 4: Ghostty/modern terminals + Alt+Enter
     input === '[27;2;13~'                       // Raw fixterms if Ink doesn't parse
   );
 }

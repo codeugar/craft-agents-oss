@@ -330,6 +330,7 @@ Centralized detection helpers for keyboard shortcuts. Works WITH Ink's `useInput
 | Key Combo | Ghostty Sends | Ink Delivers |
 |-----------|---------------|--------------|
 | Shift+Enter | `\x1b[27;2;13~` | `input='[27;2;13~'` |
+| Alt+Enter | `\x1b\r` | `input='\r'` + `key.meta=true` |
 | Cmd+Left | `\x01` (Ctrl+A) | `input='\x01'` |
 | Cmd+Right | `\x05` (Ctrl+E) | `input='\x05'` |
 | Option+Left | `\x1bb` | `input='b'` + `key.meta=true` |
@@ -341,10 +342,10 @@ Centralized detection helpers for keyboard shortcuts. Works WITH Ink's `useInput
 **Usage:**
 ```typescript
 import { useInput } from 'ink';
-import { isShiftEnter, isLineStart, isLineEnd } from '../keyboard';
+import { isShiftOrAltEnter, isLineStart, isLineEnd } from '../keyboard';
 
 useInput((input, key) => {
-  if (isShiftEnter(input, key)) { /* newline */ }
+  if (isShiftOrAltEnter(input, key)) { /* newline */ }
   if (isLineStart(input, key)) { /* jump to start */ }
   if (key.return) { /* submit */ }
 });
