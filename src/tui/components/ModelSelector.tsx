@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-
-export interface Model {
-  id: string;
-  name: string;
-  desc: string;
-}
+import type { ModelDefinition } from '../../config/models.ts';
 
 export interface ModelSelectorProps {
-  models: Model[];
+  models: ModelDefinition[];
   currentModelId: string;
   onSelect: (modelId: string) => void;
   onCancel: () => void;
@@ -70,7 +65,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             >
               {' '}
               {isCurrentModel ? '●' : '○'} {index + 1}. {model.name}
-              <Text dimColor={!isHighlighted}> - {model.desc}</Text>
+              <Text dimColor={!isHighlighted}> - {model.description}</Text>
               {' '}
             </Text>
           </Box>

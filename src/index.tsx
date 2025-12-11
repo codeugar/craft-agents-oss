@@ -25,6 +25,7 @@ import { getAuthState, getSetupNeeds, type AuthState, type SetupNeeds } from './
 import type { CraftAgentConfig } from './agent/craft-agent.ts';
 import { enableDebug } from './tui/utils/debug.ts';
 import { install } from './version/install.ts';
+import { DEFAULT_MODEL } from './config/models.ts';
 
 /**
  * Generate a deterministic workspace ID from a URL.
@@ -72,7 +73,7 @@ const cli = meow(
   Common Options (both modes)
     --agent, -a <name>      Agent to activate (with or without @ prefix)
     --workspace, -w <name>  Select workspace by name, ID, or MCP server URL (http/https)
-    --model, -m <model>     Claude model to use (default: claude-sonnet-4-5-20250929)
+    --model, -m <model>     Claude model to use (default: ${DEFAULT_MODEL})
     --debug                 Enable debug logging to /tmp/craft-debug.log
 
   Print Mode (non-interactive, exits after response)

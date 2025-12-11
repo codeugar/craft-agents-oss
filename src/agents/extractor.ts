@@ -10,6 +10,7 @@ import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import type { McpServerConfig, ApiConfig, Concern } from './types.ts';
 import { debug } from '../tui/utils/debug.ts';
+import { EXTRACTION_MODEL } from '../config/models.ts';
 
 export interface ExtractionResult {
   instructions: string;
@@ -72,15 +73,19 @@ export async function extractAgentDefinition(
     };
 
     // System prompt for the extractor agent
-    const systemPrompt = `You are an agent definition extractor. You ONLY output JSON, never explanations.
+    const systemPrompt = `You are an agent definition extractor.
+
+CRITICAL OUTPUT RULES - YOU MUST FOLLOW THESE:
+- Your final response must be ONLY a JSON object
+- NO text before the JSON (no "Here is", "Perfect!", etc.)
+- NO text after the JSON
+- NO explanations or commentary
+- Start directly with { and end with }
 
 Your task:
 1. Use mcp__craft__blocks_get to read Craft documents
 2. Extract agent instructions from the content
-3. Return ONLY a JSON object - no text before or after
-
-CRITICAL: Your final message must be ONLY valid JSON. No "Perfect!", no explanations, no markdown.
-Just the raw JSON object starting with { and ending with }.`;
+3. Return ONLY the JSON object - nothing else`;
 
     const prompt = `Extract agent definition from Craft document ID "${documentId}" (agent: "${agentName}").
 
@@ -314,7 +319,7 @@ Rules:
 
     const options: Options = {
       ...getDefaultOptions(),
-      model: model || 'claude-sonnet-4-20250514',
+      model: EXTRACTION_MODEL,
       systemPrompt,
       mcpServers,
       maxTurns: 10, // Allow multiple tool calls if needed
@@ -488,20 +493,26 @@ Rules:
           debug('[extractor] Falling back to parsing result text');
           try {
             let jsonText = message.result.trim();
-            // Handle markdown code blocks
-            if (jsonText.startsWith('```')) {
-              const openMatch = jsonText.match(/^```(?:json)?\s*\n?/);
-              if (openMatch) {
-                const contentStart = openMatch[0].length;
-                const lastFenceIndex = jsonText.lastIndexOf('\n```');
-                const endFenceIndex = jsonText.endsWith('```') ? jsonText.length - 3 : lastFenceIndex + 1;
-                if (endFenceIndex > contentStart) {
-                  jsonText = jsonText.slice(contentStart, endFenceIndex).trim();
+
+            // Strategy 1: Try direct parse (if Claude followed instructions perfectly)
+            if (jsonText.startsWith('{')) {
+              result = JSON.parse(jsonText) as ExtractionResult;
+              debug('[extractor] Parsed direct JSON');
+            } else {
+              // Strategy 2: Extract JSON from markdown code block anywhere in response
+              const codeBlockMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+              if (codeBlockMatch && codeBlockMatch[1]) {
+                result = JSON.parse(codeBlockMatch[1].trim()) as ExtractionResult;
+                debug('[extractor] Parsed JSON from code block');
+              } else {
+                // Strategy 3: Find JSON object anywhere in text (greedy match for outermost braces)
+                const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  result = JSON.parse(jsonMatch[0]) as ExtractionResult;
+                  debug('[extractor] Parsed JSON from text');
                 }
               }
             }
-            result = JSON.parse(jsonText) as ExtractionResult;
-            debug('[extractor] Parsed result text successfully');
           } catch (parseError) {
             debug('[extractor] Failed to parse result text:', parseError);
           }

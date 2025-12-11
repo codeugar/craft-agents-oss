@@ -28,6 +28,7 @@ import {
   type Workspace,
   type StoredMessage,
 } from '../../config/storage.ts';
+import { DEFAULT_MODEL } from '../../config/models.ts';
 import { getCredentialManager } from '../../credentials/index.ts';
 import { CraftMcpClient } from '../../mcp/client.ts';
 import { SubAgentManager } from '../../agents/manager.ts';
@@ -191,7 +192,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
   });
-  const [model, setModelState] = useState(config.model || 'claude-sonnet-4-5-20250929');
+  const [model, setModelState] = useState(config.model || DEFAULT_MODEL);
   const [workspace, setWorkspaceState] = useState<Workspace>(config.workspace);
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<AskUserQuestionRequest | null>(null);

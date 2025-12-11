@@ -429,6 +429,24 @@ useInput((input, key) => {
 
 **Note:** Ctrl+A is "line start" (readline convention), not "select all".
 
+**Ctrl+Key Raw Character Pattern:**
+When handling Ctrl+key shortcuts in raw terminal mode, always check for BOTH forms:
+1. The high-level interpretation: `key.ctrl && input === 'letter'`
+2. The raw character: `input === '\xNN'` (where NN is the ASCII code)
+
+```typescript
+// Example: Ctrl+C detection
+const isCtrlC = input === '\x03' || (key.ctrl && input === 'c');
+
+// Common raw character codes:
+// Ctrl+C → '\x03' (ETX, ASCII 3)  - C is 3rd letter
+// Ctrl+G → '\x07' (BEL, ASCII 7)  - G is 7th letter
+// Ctrl+R → '\x12' (DC2, ASCII 18) - R is 18th letter
+// Ctrl+U → '\x15' (NAK, ASCII 21) - U is 21st letter
+```
+
+Different terminals/Ink versions may deliver only the raw character without setting `key.ctrl`. See `mappings.ts` for the canonical implementations.
+
 ### Terminal Resize Handling
 
 **The Problem:** When terminal is resized, Ink's character-by-character text rendering (like in TextInput) can wrap differently at different widths. Ink's internal log-update mechanism caches `previousLineCount` and only erases that many lines on re-render. When wrapping changes, stale line count causes partial erasure → visual artifacts (duplicated text scattered across screen).

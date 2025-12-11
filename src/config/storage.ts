@@ -3,6 +3,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { getCredentialManager } from '../credentials/index.ts';
+import { isOpusModel } from './models.ts';
 
 /**
  * OAuth credentials from a fresh authentication flow.
@@ -113,7 +114,7 @@ export function shouldUseExtendedCacheTtl(model: string): boolean {
   if (config === true) return true;
   if (config === false) return false;
   // Auto mode: only for Opus models
-  return model.includes('opus');
+  return isOpusModel(model);
 }
 
 /**
