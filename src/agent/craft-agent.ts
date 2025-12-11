@@ -6,6 +6,7 @@ import { getSystemPrompt, getDateTimeContext } from '../prompts/system.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
 import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, shouldUseExtendedCacheTtl, type Workspace } from '../config/storage.ts';
+import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { updatePreferences, loadPreferences, type UserPreferences } from '../config/preferences.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
@@ -689,7 +690,7 @@ export class CraftAgent {
       }
       
       // Configure SDK options
-      const model = this.config.model || 'claude-sonnet-4-5-20250929';
+      const model = this.config.model || DEFAULT_MODEL;
       const useExtendedCache = shouldUseExtendedCacheTtl(model);
       const options: Options = {
         ...getDefaultOptions(),
@@ -1313,7 +1314,7 @@ export class CraftAgent {
   }
 
   getModel(): string {
-    return this.config.model || 'claude-sonnet-4-5-20250929';
+    return this.config.model || DEFAULT_MODEL;
   }
 
   setModel(model: string): void {

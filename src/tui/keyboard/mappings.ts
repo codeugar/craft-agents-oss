@@ -110,9 +110,10 @@ export function isClearLine(input: string, key: InkKey): boolean {
 
 /**
  * Cancel - Escape or Ctrl+C
+ * Raw Ctrl+C sends '\x03' (ETX, ASCII 3) in raw mode
  */
 export function isCancel(input: string, key: InkKey): boolean {
-  return key.escape === true || (key.ctrl === true && input === 'c');
+  return key.escape === true || input === '\x03' || (key.ctrl === true && input === 'c');
 }
 
 /**

@@ -4,6 +4,7 @@ import { SubAgentManager } from '../agents/manager.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { getWorkspaceAccessTokenAsync } from '../config/storage.ts';
 import { debug } from '../tui/utils/debug.ts';
+import { DEFAULT_MODEL } from '../config/models.ts';
 import type {
   HeadlessConfig,
   HeadlessResult,
@@ -209,7 +210,7 @@ export class HeadlessRunner {
         this.config.workspace.id,
         this.mcpClient,
         {
-          model: this.config.model || 'claude-sonnet-4-5-20250929',
+          model: this.config.model || DEFAULT_MODEL,
           mcpUrl,
           mcpToken: token || undefined,
         }

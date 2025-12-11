@@ -10,6 +10,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { ApiConfig, ApiEndpoint } from './types.ts';
 import { debug } from '../tui/utils/debug.ts';
+import { SUMMARIZATION_MODEL } from '../config/models.ts';
 
 // Token limit for summarization trigger (roughly ~40KB of text)
 const TOKEN_LIMIT = 10000;
@@ -57,7 +58,7 @@ async function summarizeLargeResponse(
 
   try {
     const result = await client.messages.create({
-      model: 'claude-haiku-4-20250514',
+      model: SUMMARIZATION_MODEL,
       max_tokens: 4096,
       messages: [{
         role: 'user',

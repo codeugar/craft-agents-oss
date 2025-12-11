@@ -4,7 +4,8 @@ import { Box, useApp, useInput, Text } from 'ink';
 import { Header } from './components/Header.tsx';
 import { Messages, type Message } from './components/Messages.tsx';
 import { Input, InputHint } from './components/Input.tsx';
-import { ModelSelector, type Model } from './components/ModelSelector.tsx';
+import { ModelSelector } from './components/ModelSelector.tsx';
+import { MODELS } from '../config/models.ts';
 import { AgentMenu, type AgentAction } from './components/AgentMenu.tsx';
 import { WorkspaceSelector } from './components/WorkspaceSelector.tsx';
 import { WorkspaceAdd } from './components/WorkspaceAdd.tsx';
@@ -233,12 +234,6 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
   }, []);
   const { columns: terminalColumns } = useResize(handleTerminalResize);
 
-  // Models list
-  const models: Model[] = [
-    { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5', desc: 'Most capable' },
-    { id: 'claude-sonnet-4-5-20250929', name: 'Sonnet 4.5', desc: 'Balanced' },
-    { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', desc: 'Fast & efficient' },
-  ];
 
   const addLocalMessage = useCallback((content: string, type: Message['type'] = 'system') => {
     setLocalMessages((prev) => [
@@ -769,8 +764,8 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
             if (modelArg) {
               // Parse number selection
               const num = parseInt(modelArg, 10);
-              if (num >= 1 && num <= models.length) {
-                const selected = models[num - 1];
+              if (num >= 1 && num <= MODELS.length) {
+                const selected = MODELS[num - 1];
                 if (selected) {
                   setModel(selected.id);
                 }
@@ -778,7 +773,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
               }
 
               // Find matching model (partial match)
-              const matchedModel = models.find(m =>
+              const matchedModel = MODELS.find(m =>
                 m.id.toLowerCase().includes(modelArg.toLowerCase()) ||
                 m.name.toLowerCase().includes(modelArg.toLowerCase())
               );
@@ -1178,7 +1173,8 @@ Filename: ${workspace.sessionId}.jsonl`;
       }
     }
 
-    if (key.ctrl && input === 'c') {
+    // Ctrl+C: raw '\x03' (ETX) in raw mode, or key.ctrl + 'c'
+    if (input === '\x03' || (key.ctrl && input === 'c')) {
       if (pendingPermission) {
         respondToPermission(false, false); // Deny on Ctrl+C
       } else if (isProcessing) {
@@ -1226,7 +1222,7 @@ Filename: ${workspace.sessionId}.jsonl`;
       {/* Model selector overlay */}
       {showModelSelector && (
         <ModelSelector
-          models={models}
+          models={MODELS}
           currentModelId={model}
           onSelect={handleModelSelect}
           onCancel={handleModelCancel}

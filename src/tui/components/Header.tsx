@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { formatTokens } from '../utils/markdown.ts';
 import type { AuthType, TokenDisplayMode } from '../../config/storage.ts';
 import { AnimatedSpinner } from './Spinner.tsx';
+import { DEFAULT_MODEL, getModelDisplayName } from '../../config/models.ts';
 
 export interface HeaderProps {
   connected: boolean;
@@ -22,7 +23,7 @@ export interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = memo(({
   connected,
-  model = 'claude-sonnet-4-5-20250929',
+  model = DEFAULT_MODEL,
   mcpUrl,
   workspaceName,
   contextTokens = 0,
@@ -36,14 +37,7 @@ export const Header: React.FC<HeaderProps> = memo(({
   showCost = true,
 }) => {
   // Map model IDs to friendly names
-  const modelDisplay = useMemo(() => {
-    const modelNames: Record<string, string> = {
-      'claude-opus-4-5-20251101': 'Opus 4.5',
-      'claude-sonnet-4-5-20250929': 'Sonnet 4.5',
-      'claude-haiku-4-5-20251001': 'Haiku 4.5',
-    };
-    return modelNames[model] || model.replace('claude-', '').replace(/-\d{8}$/, '');
-  }, [model]);
+  const modelDisplay = useMemo(() => getModelDisplayName(model), [model]);
 
   // Extract MCP server name from URL
   const mcpDisplay = useMemo(() => mcpUrl

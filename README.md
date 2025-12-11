@@ -226,6 +226,14 @@ bun dev
 craft --debug
 ```
 
+### Keyboard Handling
+
+When handling Ctrl+key shortcuts in Ink's raw terminal mode, always check for both forms:
+- High-level: `key.ctrl && input === 'c'`
+- Raw character: `input === '\x03'` (Ctrl+C = ASCII 3)
+
+Different terminals may deliver only the raw character without setting `key.ctrl`. See `src/tui/keyboard/mappings.ts` for canonical implementations.
+
 ## Extended Prompt Cache
 
 The app can extend Anthropic's prompt cache TTL from 5 minutes to 1 hour, beneficial for longer conversations where you may not respond within 5 minutes.
