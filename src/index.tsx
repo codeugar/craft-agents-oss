@@ -144,10 +144,6 @@ const cli = meow(
         shortFlag: 'w',
       },
       // Interactive mode flags
-      setup: {
-        type: 'boolean',
-        default: false,
-      },
       token: {
         type: 'string',
         shortFlag: 't',
@@ -169,7 +165,6 @@ const cli = meow(
 interface RootProps {
   initialConfig: StoredConfig | null;
   cliFlags: typeof cli.flags;
-  forceSetup: boolean;
   /** Unified auth state from getAuthState() */
   authState: AuthState;
   /** Derived setup needs from getSetupNeeds() */
@@ -180,9 +175,9 @@ interface RootProps {
   initialPrompt?: string;
 }
 
-const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup, authState, setupNeeds, initialAgent, initialPrompt }) => {
-  // Show setup if: forced or not fully configured
-  const [showSetup, setShowSetup] = useState(forceSetup || !setupNeeds.isFullyConfigured);
+const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, authState, setupNeeds, initialAgent, initialPrompt }) => {
+  // Show setup if: not fully configured
+  const [showSetup, setShowSetup] = useState(!setupNeeds.isFullyConfigured);
   const [config, setConfig] = useState<StoredConfig | null>(initialConfig);
   // Track current auth state (may be updated after setup)
   const [currentAuthState, setCurrentAuthState] = useState<AuthState>(authState);
@@ -441,7 +436,6 @@ async function main() {
 
   // Get unified auth state
   const storedConfig = loadStoredConfig();
-  const forceSetup = cli.flags.setup;
   const authState = await getAuthState();
   const setupNeeds = getSetupNeeds(authState);
 
@@ -456,7 +450,6 @@ async function main() {
     <Root
       initialConfig={storedConfig}
       cliFlags={cli.flags}
-      forceSetup={forceSetup}
       authState={authState}
       setupNeeds={setupNeeds}
       initialAgent={initialAgent}

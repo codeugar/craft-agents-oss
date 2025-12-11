@@ -1393,7 +1393,6 @@ const cli = meow(`
 `, {
   importMeta: import.meta,
   flags: {
-    setup: { type: 'boolean' },
     url: { type: 'string', shortFlag: 'u' },
     token: { type: 'string', shortFlag: 't' },
     model: { type: 'string', shortFlag: 'm' },
