@@ -5,6 +5,7 @@ import open from 'open';
 import { createCallbackServer } from '../../../auth/callback-server';
 import { CraftApi } from '../../../clients/craftApi';
 import { AnimatedSpinner } from '../Spinner';
+import { debug } from '@/tui/utils/debug';
 
 export interface CraftProfile {
   userId: string;
@@ -114,6 +115,7 @@ export const CraftCallbackStep: React.FC<CraftCallbackStepProps> = ({ onComplete
         }
         
         const craftApi = new CraftApi('https://api.craft.do');
+        debug('[CraftCallbackStep] exchanging code for token:', { code: callbackCode.substring(0, 10) + '...', redirectUri: callbackUrl, codeVerifier: codeVerifier.substring(0, 10) + '...' });
         const token = await craftApi.exchangeCodeForToken({ code: callbackCode, redirectUri: callbackUrl, codeVerifier });
 
         // Fetch profile to get spaces and teams for categorization
@@ -129,7 +131,7 @@ export const CraftCallbackStep: React.FC<CraftCallbackStepProps> = ({ onComplete
     return () => {
       cancelled = true;
     };
-  }, [onComplete]);
+  }, []);
 
   return (
     <Box flexDirection="column">
