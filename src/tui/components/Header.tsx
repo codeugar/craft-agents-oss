@@ -33,7 +33,7 @@ export const Header: React.FC<HeaderProps> = memo(({
   authType = 'api_key',
   activeAgentName,
   agentsLoading = false,
-  tokenDisplay = 'total',
+  tokenDisplay = 'hidden',
   showCost = true,
 }) => {
   // Map model IDs to friendly names

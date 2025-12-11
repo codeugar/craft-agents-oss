@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import open from 'open';
-import { getAiCreditTopUpUrl } from '../../auth/balance.ts';
+import { getAiCreditTopUpUrl, getAiCreditsBalance } from '../../auth/balance.ts';
 import type { AuthType } from '../../config/storage.ts';
+import { AnimatedSpinner } from './Spinner.tsx';
 
 const AUTH_TYPE_LABELS: Record<AuthType, string> = {
   'craft_credits': 'Craft Credits',
@@ -17,21 +18,26 @@ export interface BalanceProps {
 
 type BalanceState =
   | { type: 'loading' }
-  | { type: 'ready'; url: string }
+  | { type: 'ready'; url: string; credits: number | null }
   | { type: 'error'; message: string };
 
 export const Balance: React.FC<BalanceProps> = ({ authType, onClose }) => {
   const isCraftCredits = authType === 'craft_credits';
   const [state, setState] = useState<BalanceState>(
-    isCraftCredits ? { type: 'loading' } : { type: 'ready', url: '' }
+    isCraftCredits ? { type: 'loading' } : { type: 'ready', url: '', credits: null }
   );
 
   useEffect(() => {
     if (!isCraftCredits) return;
 
-    const fetchUrl = async () => {
+    const fetchData = async () => {
       try {
-        const url = await getAiCreditTopUpUrl();
+        // Load both in parallel
+        const [url, balance] = await Promise.all([
+          getAiCreditTopUpUrl(),
+          getAiCreditsBalance(),
+        ]);
+
         if (!url) {
           setState({
             type: 'error',
@@ -39,15 +45,19 @@ export const Balance: React.FC<BalanceProps> = ({ authType, onClose }) => {
           });
           return;
         }
-        setState({ type: 'ready', url });
+        setState({
+          type: 'ready',
+          url,
+          credits: balance?.credits ?? null,
+        });
       } catch (err) {
         setState({
           type: 'error',
-          message: err instanceof Error ? err.message : 'Failed to get balance URL',
+          message: err instanceof Error ? err.message : 'Failed to load credit info',
         });
       }
     };
-    fetchUrl();
+    fetchData();
   }, [isCraftCredits]);
 
   const openUrl = async (url: string) => {
@@ -86,14 +96,22 @@ export const Balance: React.FC<BalanceProps> = ({ authType, onClose }) => {
         <>
           {state.type === 'loading' && (
             <Box marginTop={1}>
-              <Text dimColor>Loading top-up link...</Text>
+              <AnimatedSpinner />
+              <Text dimColor> Loading info...</Text>
             </Box>
           )}
 
           {state.type === 'ready' && state.url && (
             <Box marginTop={1} flexDirection="column">
+              {state.credits !== null && (
+                <Box marginBottom={1}>
+                  <Text>Balance: </Text>
+                  <Text color="green" bold>{state.credits.toFixed(2)}</Text>
+                  <Text> credits</Text>
+                </Box>
+              )}
               <Text dimColor>
-                Press <Text bold color="white">o</Text> or <Text bold color="white">Enter</Text> to view credits & top up in browser
+                <Text bold color="cyan">Press o or Enter</Text> to view credits & top up in browser
               </Text>
             </Box>
           )}

@@ -13,3 +13,13 @@ export async function getAiCreditTopUpUrl(): Promise<string | null> {
 
   return `https://docs.craft.do/assistant-topup?token=${encodeURIComponent(token)}`;
 }
+
+export async function getAiCreditsBalance(): Promise<{ credits: number } | null> {
+  const authToken = await getCraftToken();
+  const teamId = await getTeamId();
+  if (!teamId) {
+    return null;
+  }
+  const craftApi = new CraftApi("https://api.craft.do");
+  return craftApi.getAiCreditsBalance({ authToken, teamId });
+}

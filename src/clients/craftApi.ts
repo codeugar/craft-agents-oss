@@ -128,6 +128,18 @@ export class CraftApi {
             },
         });
     }
+
+    async getAiCreditsBalance(params: { authToken: string, teamId: string }) {
+        const { authToken, teamId } = params;
+        return this.fetch({
+            method: 'GET',
+            path: `/ai-usage/balance/${teamId}`,
+            authToken,
+            responseParser: async (response) => {
+                return aiCreditsBalanceResponseSchema.parse(JSON.parse(response));
+            },
+        });
+    }
 }
 
 const workflowLinkSchema = z.object({
@@ -164,4 +176,14 @@ const profileResponseSchema = z.object({
 const aiCreditCheckoutTokenResponseSchema = z.object({
     token: z.string(),
     expirationTime: z.number(),
+});
+
+const aiCreditsBalanceResponseSchema = z.object({
+    teamId: z.string(),
+    credits: z.number(),
+    details: z.array(z.object({
+        source: z.string(),
+        credits: z.number(),
+        expiresAt: z.number().nullable(),
+    })),
 });

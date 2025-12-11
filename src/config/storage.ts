@@ -320,7 +320,7 @@ export function setAuthType(authType: AuthType): void {
 
 export function getTokenDisplay(): TokenDisplayMode {
   const config = loadStoredConfig();
-  return config?.tokenDisplay || 'total';
+  return config?.tokenDisplay || 'hidden';
 }
 
 export function setTokenDisplay(mode: TokenDisplayMode): void {
