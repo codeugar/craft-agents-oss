@@ -69,9 +69,6 @@ Configuration is saved to `~/.craft-agent/config.json`
 # Run the agent (shows setup wizard on first run)
 craft
 
-# Re-run setup wizard to change configuration
-craft --setup
-
 # Override config with CLI options
 craft --url http://localhost:3000/v1/links/abc123/mcp
 

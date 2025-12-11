@@ -1380,7 +1380,6 @@ const cli = meow(`
     doctor    Show diagnostics
 
   Options
-    --setup   Force setup wizard
     --url, -u Override MCP server URL
     --token, -t Override bearer token
     --model, -m Override model selection
@@ -1389,13 +1388,11 @@ const cli = meow(`
 
   Examples
     $ craft
-    $ craft --setup
     $ craft update
     $ craft doctor
 `, {
   importMeta: import.meta,
   flags: {
-    setup: { type: 'boolean' },
     url: { type: 'string', shortFlag: 'u' },
     token: { type: 'string', shortFlag: 't' },
     model: { type: 'string', shortFlag: 'm' },

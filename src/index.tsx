@@ -84,7 +84,6 @@ const cli = meow(
     --session-resume        Resume workspace's saved session (default: fresh session)
 
   Interactive Mode Options
-    --setup         Run the setup wizard (reconfigure)
     --token, -t     Bearer token for MCP authentication (overrides saved config)
     --help          Show this help message
     --version       Show version number
@@ -95,7 +94,6 @@ const cli = meow(
 
   Configuration
     Settings are stored in ~/.craft-agent/config.json
-    Run with --setup to reconfigure at any time.
 
   Session Behavior
     - Interactive (REPL): Always resumes workspace session
@@ -112,7 +110,6 @@ const cli = meow(
     $ craft -p "summarize" -a writer           # Print mode with agent
     $ craft -p "query" --session-resume        # Print mode, resume session
     $ craft -p "query" --output-format json    # JSON output for scripts
-    $ craft --setup                            # Reconfigure
     $ craft install 0.0.1                      # Install specific version
 `,
   {
@@ -147,10 +144,6 @@ const cli = meow(
         shortFlag: 'w',
       },
       // Interactive mode flags
-      setup: {
-        type: 'boolean',
-        default: false,
-      },
       token: {
         type: 'string',
         shortFlag: 't',
@@ -172,7 +165,6 @@ const cli = meow(
 interface RootProps {
   initialConfig: StoredConfig | null;
   cliFlags: typeof cli.flags;
-  forceSetup: boolean;
   /** Unified auth state from getAuthState() */
   authState: AuthState;
   /** Derived setup needs from getSetupNeeds() */
@@ -183,9 +175,9 @@ interface RootProps {
   initialPrompt?: string;
 }
 
-const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, forceSetup, authState, setupNeeds, initialAgent, initialPrompt }) => {
-  // Show setup if: forced or not fully configured
-  const [showSetup, setShowSetup] = useState(forceSetup || !setupNeeds.isFullyConfigured);
+const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, authState, setupNeeds, initialAgent, initialPrompt }) => {
+  // Show setup if: not fully configured
+  const [showSetup, setShowSetup] = useState(!setupNeeds.isFullyConfigured);
   const [config, setConfig] = useState<StoredConfig | null>(initialConfig);
   // Track current auth state (may be updated after setup)
   const [currentAuthState, setCurrentAuthState] = useState<AuthState>(authState);
@@ -355,14 +347,14 @@ async function main() {
       // No -w flag: need config for active workspace
       const storedConfig = loadStoredConfig();
       if (!storedConfig) {
-        console.error('Error: No configuration found. Run `craft --setup` first, or use -w <url> for zero-config mode.');
+        console.error('Error: No configuration found. Run `craft` first in interactive mode, or use -w <url> for zero-config mode.');
         process.exit(1);
       }
       workspace = getActiveWorkspace();
     }
 
     if (!workspace) {
-      console.error('Error: No workspace configured. Run `craft --setup` first, or use -w <url> for zero-config mode.');
+      console.error('Error: No workspace configured. Run `craft` first in interactive mode, or use -w <url> for zero-config mode.');
       process.exit(1);
     }
 
@@ -371,7 +363,7 @@ async function main() {
     const oauthToken = await getClaudeOAuthToken();
 
     if (!apiKey && !oauthToken) {
-      console.error('Error: No Anthropic credentials found. Set ANTHROPIC_API_KEY or CRAFT_ANTHROPIC_API_KEY env var, or run `craft --setup`.');
+      console.error('Error: No Anthropic credentials found. Set ANTHROPIC_API_KEY or CRAFT_ANTHROPIC_API_KEY env var, or run `craft` in interactive mode to configure credentials for AI usage.');
       process.exit(1);
     }
 
@@ -444,7 +436,6 @@ async function main() {
 
   // Get unified auth state
   const storedConfig = loadStoredConfig();
-  const forceSetup = cli.flags.setup;
   const authState = await getAuthState();
   const setupNeeds = getSetupNeeds(authState);
 
@@ -459,7 +450,6 @@ async function main() {
     <Root
       initialConfig={storedConfig}
       cliFlags={cli.flags}
-      forceSetup={forceSetup}
       authState={authState}
       setupNeeds={setupNeeds}
       initialAgent={initialAgent}

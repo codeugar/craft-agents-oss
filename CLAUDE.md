@@ -28,7 +28,6 @@ bun link
 ```
 
 **CLI Flags:**
-- `--setup` - Force setup wizard
 - `--url, -u` - Override MCP server URL
 - `--token, -t` - Override bearer token (testing)
 - `--model, -m` - Override model selection
