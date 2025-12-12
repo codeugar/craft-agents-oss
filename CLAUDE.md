@@ -38,11 +38,12 @@ bun link
 Releases are built and deployed via [GitHub Actions](https://github.com/lukilabs/craft-terminal-agent/actions/workflows/build-and-upload.yml).
 
 **To create a release:**
-1. Go to Actions → "Build and Upload" workflow
-2. Click "Run workflow"
-3. Enter version (e.g., `1.0.1`)
-4. Check "Also upload to /latest folder" to make it the default
-5. Check "Also upload install.sh to bucket root" if install script was updated
+1. Check current latest version at https://agents.craft.do/latest
+2. Go to Actions → "Build and Upload" workflow
+3. Click "Run workflow"
+4. Enter version (e.g., `1.0.1`)
+5. Check "Also upload to /latest folder" to make it the default
+6. Check "Also upload install.sh to bucket root" if install script was updated
 
 **What it does:**
 - Builds native binaries for darwin-arm64, darwin-x64, linux-x64, linux-arm64

@@ -166,10 +166,8 @@ export class SubAgentManager {
   ): Promise<SubAgentMetadata[]> {
     const agents: SubAgentMetadata[] = [];
 
-    // 1. Get documents in this folder
-    const docsResult = await this.callMcpTool('documents_list', {
-      location: { folderId: folder.id },
-    });
+    // 1. Get documents in this folder (folderIds array format per MCP schema)
+    const docsResult = await this.callMcpTool('documents_list', { folderIds: [folder.id] });
     const documents = this.parseDocuments(docsResult);
 
     // Create metadata for each document with folder path
@@ -784,7 +782,7 @@ export class SubAgentManager {
         };
       });
     } catch (err) {
-      debug('[parseDocuments] JSON parse error:', err);
+      debug('[parseDocuments] JSON parse error:', err instanceof Error ? err.message : String(err));
       return [];
     }
   }

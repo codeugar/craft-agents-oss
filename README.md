@@ -223,6 +223,22 @@ bun dev
 craft --debug
 ```
 
+### Debugging
+
+Debug logging is disabled by default. Enable it with the `--debug` flag:
+
+```bash
+# Terminal 1: Run the app with debug logging
+craft --debug
+
+# Terminal 2: Watch logs in real-time
+tail -f /tmp/craft-debug.log
+```
+
+This two-terminal setup lets you interact with the app while seeing debug output stream in real-time.
+
+
+
 ## Releasing
 
 Releases are built and deployed via GitHub Actions.
