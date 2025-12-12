@@ -37,6 +37,8 @@ VALIDATION RULES:
 3. Path should start with /links/
 4. No credentials (user:pass@) in the URL
 5. Must be a syntactically valid URL
+6. The input should only be the URL string, nothing else NO sentences OR extra text
+7. Make sure the URL only contains allowed characters (letters, numbers, hyphens, underscores) in the link ID part
 
 RESPONSE FORMAT:
 Respond with ONLY a JSON object, no other text:
