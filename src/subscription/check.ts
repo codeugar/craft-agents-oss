@@ -5,11 +5,7 @@ const FREE_TIER = ['Free', 'free', 'V2_Free', 'v2_free'];
 const LIVE_PRICE_ID = 'price_1SdYrjCYYgB1lx2us8igvoy1';
 
 function getSuccessUrl(params: { teamId: string, spaceId: string, go: string }) {
-  const { teamId, spaceId, go } = params;
-  let result = `https://docs.craft.do/s/${encodeURIComponent(spaceId)}/all?_appVersion=aitopup&teamId=${encodeURIComponent(teamId)}`;
-  if (go) {
-    result += `&go=${encodeURIComponent(go)}`;
-  }
+  let result = `https://docs.craft.do`;
   return result;
 }
 
@@ -41,6 +37,14 @@ export async function checkSubscription(profile: ProfileResponse): Promise<strin
   const { priceId, successUrl, cancelUrl, environment, country, locale } = getSubscriptionPriceId({ teamId, spaceId: space.id });
   const craftApi = new CraftApi();
   const authToken = await getCraftToken();
-  const result = await craftApi.createStripeCheckout({ authToken, priceId, teamId, successUrl, cancelUrl, environment, country, locale });
-  return result.checkoutUrl;
+  try {
+    const result = await craftApi.createStripeCheckout({ authToken, priceId, teamId, successUrl, cancelUrl, environment, country, locale });
+    return result.checkoutUrl;
+  } catch (error) {
+    // If team already has an active subscription, proceed without checkout
+    if (error instanceof Error && error.message.includes('TEAM_ALREADY_SUBSCRIBED')) {
+      return null;
+    }
+    throw error;
+  }
 }
