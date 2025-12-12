@@ -69,12 +69,16 @@ for (const target of TARGETS) {
       src/index.tsx
       `.text());
     console.log(await $`cp -r node_modules/@anthropic-ai/claude-agent-sdk ${folder}`.text());
+    
+    // Copy cache-ttl-interceptor.ts for preload by Bun subprocess
+    // Note: Bundling breaks the fetch interception logic, must use original TS
+    console.log(await $`cp src/cache-ttl-interceptor.ts ${folder}`.text());
 
     await create({
         gzip: true,
         file: join(buildDir, "upload", `${target.name}.tar.gz`),
         C: folder,
-    }, ['craft', 'claude-agent-sdk']);
+    }, ['craft', 'claude-agent-sdk', 'cache-ttl-interceptor.ts']);
 
     const content = readFileSync(join(buildDir, "upload", `${target.name}.tar.gz`));
     const hash = createHash('sha256').update(content).digest('hex');

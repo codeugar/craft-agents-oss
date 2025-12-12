@@ -14,7 +14,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const DEBUG = process.argv.includes('--debug');
+const DEBUG = process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1';
 const LOG_FILE = '/tmp/craft-debug.log';
 const CONFIG_FILE = join(homedir(), '.craft-agent', 'config.json');
 
@@ -103,6 +103,7 @@ async function interceptedFetch(
     init?.body
   ) {
     try {
+      debugLog(`[cache-ttl-interceptor] fetch: ${url}`);
       const body = typeof init.body === 'string' ? init.body : undefined;
       if (body) {
         const parsed = JSON.parse(body);

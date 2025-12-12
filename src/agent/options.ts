@@ -13,9 +13,12 @@ export function getDefaultOptions(): Partial<Options> {
             // This makes the compiled Bun executable act as the full Bun CLI,
             // eliminating the need for external Node or Bun installation
             executable: process.execPath as 'bun',
+            // Inject cache-ttl-interceptor into SDK subprocess to patch fetch for extended TTL
+            executableArgs: ['--preload', join(baseDir, 'cache-ttl-interceptor.ts')],
             env: {
                 ...process.env,
                 BUN_BE_BUN: '1',
+                CRAFT_DEBUG: process.argv.includes('--debug') ? '1' : '0',
             }
         }
     }
