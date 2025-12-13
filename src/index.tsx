@@ -21,6 +21,7 @@ import { getAuthState, getSetupNeeds, type AuthState, type SetupNeeds } from './
 import type { CraftAgentConfig } from './agent/craft-agent.ts';
 import { debug, enableDebug } from './tui/utils/debug.ts';
 import { install } from './version/install.ts';
+import { getCurrentVersion } from './version/version.ts';
 import { DEFAULT_MODEL } from './config/models.ts';
 import { setAnthropicOptionsEnv } from './agent/options.ts';
 import { getCraftToken } from './auth/craft-token.ts';
@@ -112,6 +113,7 @@ const cli = meow(
 `,
   {
     importMeta: import.meta,
+    version: getCurrentVersion(),
     flags: {
       // Print mode flags
       print: {
