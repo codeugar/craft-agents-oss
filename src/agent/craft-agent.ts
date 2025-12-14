@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { getSystemPrompt, getDateTimeContext } from '../prompts/system.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { parseError, type AgentError } from './errors.ts';
-import { getLastApiError, clearLastApiError } from '../cache-ttl-interceptor.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
 import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, shouldUseExtendedCacheTtl, type Workspace } from '../config/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
@@ -917,24 +916,14 @@ export class CraftAgent {
         // Get error message regardless of error type
         let rawErrorMsg = sdkError instanceof Error ? sdkError.message : String(sdkError);
 
-        // Check if we captured the actual API error at the fetch level
-        this.onDebug?.(`Checking for captured API error...`);
-        const apiError = getLastApiError();
-        this.onDebug?.(`getLastApiError returned: ${apiError ? JSON.stringify(apiError) : 'null'}`);
-        if (apiError) {
-          this.onDebug?.(`Found captured API error: ${apiError.status} ${apiError.message}`);
-          // Use the actual API error message instead of the wrapped SDK message
-          rawErrorMsg = `${apiError.status} ${apiError.message}`;
-          clearLastApiError();
-        } else {
-          this.onDebug?.(`No captured error found, checking SDK error message format`);
-          // Fallback: try to parse status code from SDK's "API Error: NNN {...}" format
-          const sdkApiErrorMatch = rawErrorMsg.match(/API Error:\s*(\d{3})/i);
-          if (sdkApiErrorMatch) {
-            const statusCode = sdkApiErrorMatch[1];
-            this.onDebug?.(`Parsed status code ${statusCode} from SDK error message`);
-            rawErrorMsg = `${statusCode} ${rawErrorMsg}`;
-          }
+        // Try to parse status code from SDK's "API Error: NNN {...}" format
+        // Note: SDK text errors like "API Error: 402..." are handled in useAgent.ts
+        // via text_complete event. This is a fallback for thrown errors.
+        const sdkApiErrorMatch = rawErrorMsg.match(/API Error:\s*(\d{3})/i);
+        if (sdkApiErrorMatch) {
+          const statusCode = sdkApiErrorMatch[1];
+          this.onDebug?.(`Parsed status code ${statusCode} from SDK error message`);
+          rawErrorMsg = `${statusCode} ${rawErrorMsg}`;
         }
 
         const errorMsg = rawErrorMsg.toLowerCase();

@@ -130,7 +130,7 @@ export function parseError(error: unknown): AgentError {
   // Check for specific HTTP status codes or patterns
   if (lowerMessage.includes('402') || lowerMessage.includes('payment required') || lowerMessage.includes('insufficient credits')) {
     code = 'insufficient_credits';
-  } else if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid.*key') || lowerMessage.includes('authentication failed')) {
+  } else if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid api key') || lowerMessage.includes('invalid x-api-key') || lowerMessage.includes('authentication failed')) {
     // Distinguish between API key and OAuth errors
     if (lowerMessage.includes('oauth') || lowerMessage.includes('token') || lowerMessage.includes('session')) {
       code = 'expired_oauth_token';

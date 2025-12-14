@@ -10,7 +10,6 @@ import { getDefaultOptions } from '../agent/options.ts';
 import { SUMMARIZATION_MODEL } from '../config/models.ts';
 import { debug } from '../tui/utils/debug.ts';
 import { parseError, type AgentError } from '../agent/errors.ts';
-import { getLastApiError, clearLastApiError } from '../cache-ttl-interceptor.ts';
 
 export interface UrlValidationResult {
   valid: boolean;
@@ -103,18 +102,8 @@ export async function validateMcpUrl(
   } catch (err) {
     debug('[url-validator] Error:', err);
 
-    // Check for captured API error (from file-based storage)
-    const apiError = getLastApiError();
-    let errorToParse = err;
-    if (apiError) {
-      debug('[url-validator] Found captured API error:', apiError.status, apiError.message);
-      // Create an error with the actual API error message for parsing
-      errorToParse = new Error(`${apiError.status} ${apiError.message}`);
-      clearLastApiError();
-    }
-
     // Parse the error to get typed error for ErrorBanner display
-    const typedError = parseError(errorToParse);
+    const typedError = parseError(err);
 
     // Return typed error for ErrorBanner display (for API/billing errors)
     // For unknown errors, fall back to simple error message

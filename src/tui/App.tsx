@@ -246,6 +246,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
   }, []);
 
 
+
   const addLocalMessage = useCallback((content: string, type: Message['type'] = 'system') => {
     setLocalMessages((prev) => [
       ...prev,
