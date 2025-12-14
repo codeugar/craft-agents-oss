@@ -18,6 +18,8 @@ import { ApiAuth } from './components/ApiAuth.tsx';
 import { AgentReview } from './components/AgentReview.tsx';
 import { HelpPanel } from './components/HelpPanel.tsx';
 import { Balance } from './components/Balance.tsx';
+import { ErrorBanner } from './components/ErrorBanner.tsx';
+import type { RecoveryAction } from '../agent/errors.ts';
 import { Settings, type SettingsAction } from './components/Settings.tsx';
 import { useAgent } from './hooks/useAgent.ts';
 import { useHistory } from './hooks/useHistory.ts';
@@ -63,6 +65,8 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
     processingStartTime,
     connected,
     tokenUsage,
+    typedError,
+    dismissTypedError,
     pendingPermission,
     pendingQuestion,
     hasExecutingTool,
@@ -240,6 +244,7 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
   useEffect(() => {
     checkAndUpdate();
   }, []);
+
 
 
   const addLocalMessage = useCallback((content: string, type: Message['type'] = 'system') => {
@@ -567,6 +572,22 @@ export const App: React.FC<AppProps> = ({ config, onRequestSetup, initialAgent, 
   const handleSettingsCancel = useCallback(() => {
     setShowSettings(false);
   }, []);
+
+  // Handle recovery actions from ErrorBanner
+  const handleErrorAction = useCallback((action: RecoveryAction) => {
+    dismissTypedError();
+    if (action.action === 'credits') {
+      setShowBalance(true);
+    } else if (action.action === 'settings') {
+      setShowSettings(true);
+    } else if (action.action === 'reauth') {
+      // For Claude Max re-auth, show the auth modal
+      setShowClaudeMaxAuth(true);
+    } else if (action.action === 'retry') {
+      // For retry, we just dismiss the error - user can try again
+      // The error is already dismissed above
+    }
+  }, [dismissTypedError]);
 
   const handlePaste = useCallback(() => {
     try {
@@ -1273,6 +1294,7 @@ Filename: ${workspace.sessionId}.jsonl`;
         <WorkspaceAdd
           onComplete={handleWorkspaceAddComplete}
           onCancel={handleWorkspaceAddCancel}
+          onErrorAction={handleErrorAction}
         />
       )}
 
@@ -1372,6 +1394,15 @@ Filename: ${workspace.sessionId}.jsonl`;
 
       {/* Input + Status bar + Header together at bottom */}
       <Box flexDirection="column" width="100%" paddingX={1}>
+        {/* Typed error banner (billing, auth, rate limit errors) */}
+        {typedError && (
+          <ErrorBanner
+            error={typedError}
+            onAction={handleErrorAction}
+            onDismiss={dismissTypedError}
+          />
+        )}
+
         {/* Permission prompt */}
         {pendingPermission && (
           <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginBottom={1}>

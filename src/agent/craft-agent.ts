@@ -4,6 +4,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
 import { getSystemPrompt, getDateTimeContext } from '../prompts/system.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
+import { parseError, type AgentError } from './errors.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
 import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, shouldUseExtendedCacheTtl, type Workspace } from '../config/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
@@ -31,6 +32,7 @@ export type AgentEvent =
   | { type: 'permission_request'; requestId: string; toolName: string; command: string; description: string }
   | { type: 'ask_user'; requestId: string; questions: Question[] }
   | { type: 'error'; message: string }
+  | { type: 'typed_error'; error: AgentError }
   | { type: 'complete'; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; costUsd?: number } };
 
 // Permission request tracking
@@ -987,72 +989,127 @@ export class CraftAgent {
           return;
         }
 
-        // Classify and handle other errors
-        if (sdkError instanceof Error) {
-          const errorMsg = sdkError.message.toLowerCase();
+        // Get error message regardless of error type
+        // Note: SDK text errors like "API Error: 402..." are primarily handled in useAgent.ts
+        // via text_complete event. This is a fallback for errors that don't emit text first.
+        // parseError() will detect status codes (402, 401, etc.) in the raw message.
+        const rawErrorMsg = sdkError instanceof Error ? sdkError.message : String(sdkError);
+        const errorMsg = rawErrorMsg.toLowerCase();
 
-          // Debug logging - always log the actual error and context
-          this.onDebug?.(`Error in chat: ${sdkError.message}`);
-          this.onDebug?.(`Context: wasResuming=${wasResuming}, isRetry=${_isRetry}`);
+        // Debug logging - always log the actual error and context
+        this.onDebug?.(`Error in chat: ${rawErrorMsg}`);
+        this.onDebug?.(`Context: wasResuming=${wasResuming}, isRetry=${_isRetry}`);
 
-          // Check for auth errors - these won't be fixed by clearing session
-          const isAuthError =
-            errorMsg.includes('unauthorized') ||
-            errorMsg.includes('401') ||
-            errorMsg.includes('authentication failed') ||
-            errorMsg.includes('invalid api key') ||
-            errorMsg.includes('invalid x-api-key');
+        // Check for auth errors - these won't be fixed by clearing session
+        const isAuthError =
+          errorMsg.includes('unauthorized') ||
+          errorMsg.includes('401') ||
+          errorMsg.includes('authentication failed') ||
+          errorMsg.includes('invalid api key') ||
+          errorMsg.includes('invalid x-api-key');
 
-          if (isAuthError) {
-            // Auth errors should surface immediately, not retry
-            yield { type: 'error', message: sdkError.message };
-            yield { type: 'complete' };
-            return;
-          }
-
-          // Rate limit errors - don't retry immediately, surface to user
-          const isRateLimitError =
-            errorMsg.includes('429') ||
-            errorMsg.includes('rate limit') ||
-            errorMsg.includes('too many requests');
-
-          if (isRateLimitError) {
-            yield { type: 'error', message: sdkError.message };
-            yield { type: 'complete' };
-            return;
-          }
-
-          // Session-related retry: only if we were resuming and haven't retried yet
-          if (wasResuming && !_isRetry) {
-            this.sessionId = null;
-
-            // Provide context-aware message (conservative: only match explicit session/resume terms)
-            const isSessionError =
-              errorMsg.includes('session') ||
-              errorMsg.includes('resume');
-
-            const statusMessage = isSessionError
-              ? 'Conversation sync failed, starting fresh...'
-              : 'Request failed, retrying without history...';
-
-            yield { type: 'status', message: statusMessage };
-            // Recursively call with isRetry=true (yield* delegates all events)
-            yield* this.chat(userMessage, attachments, true);
-            return;
-          }
-
-          // Retry also failed, or wasn't resuming - show actual error
-          yield { type: 'error', message: sdkError.message };
+        if (isAuthError) {
+          // Auth errors should surface immediately, not retry
+          // Parse to typed error using the captured/processed error message
+          const typedError = parseError(new Error(rawErrorMsg));
+          yield { type: 'typed_error', error: typedError };
           yield { type: 'complete' };
           return;
         }
 
-        throw sdkError;
+        // Rate limit errors - don't retry immediately, surface to user
+        const isRateLimitError =
+          errorMsg.includes('429') ||
+          errorMsg.includes('rate limit') ||
+          errorMsg.includes('too many requests');
+
+        if (isRateLimitError) {
+          // Parse to typed error using the captured/processed error message
+          const typedError = parseError(new Error(rawErrorMsg));
+          yield { type: 'typed_error', error: typedError };
+          yield { type: 'complete' };
+          return;
+        }
+
+        // Check for billing/payment errors (402) - don't retry these
+        const isBillingError =
+          errorMsg.includes('402') ||
+          errorMsg.includes('payment required') ||
+          errorMsg.includes('insufficient credits') ||
+          errorMsg.includes('billing');
+
+        if (isBillingError) {
+          // Parse to typed error using the captured/processed error message, not the original SDK error
+          // This ensures parseError sees "402 Payment required" instead of "process exited with code 1"
+          const typedError = parseError(new Error(rawErrorMsg));
+          yield { type: 'typed_error', error: typedError };
+          yield { type: 'complete' };
+          return;
+        }
+
+        // Check for SDK process errors - these often wrap underlying billing/auth issues
+        // The SDK's internal Claude Code process exits with code 1 for various API errors
+        const isProcessError = errorMsg.includes('process exited with code');
+        if (isProcessError) {
+          // Show a helpful error that suggests common causes
+          yield {
+            type: 'typed_error',
+            error: {
+              code: 'service_error' as const,
+              title: 'Request Failed',
+              message: 'The AI service request failed. This is often caused by billing issues (insufficient credits), expired or incorrect API tokens, or temporary service problems.',
+              actions: [
+                { key: 'c', label: 'Check credits', command: '/credits', action: 'credits' as const },
+                { key: 's', label: 'Re-authenticate via settings', command: '/settings', action: 'settings' as const },
+                { key: 'r', label: 'Retry', action: 'retry' as const },
+              ],
+              canRetry: true,
+              retryDelayMs: 1000,
+              originalError: rawErrorMsg,
+            },
+          };
+          yield { type: 'complete' };
+          return;
+        }
+
+        // Session-related retry: only if we were resuming and haven't retried yet
+        if (wasResuming && !_isRetry) {
+          this.sessionId = null;
+
+          // Provide context-aware message (conservative: only match explicit session/resume terms)
+          const isSessionError =
+            errorMsg.includes('session') ||
+            errorMsg.includes('resume');
+
+          const statusMessage = isSessionError
+            ? 'Conversation sync failed, starting fresh...'
+            : 'Request failed, retrying without history...';
+
+          yield { type: 'status', message: statusMessage };
+          // Recursively call with isRetry=true (yield* delegates all events)
+          yield* this.chat(userMessage, attachments, true);
+          return;
+        }
+
+        // Retry also failed, or wasn't resuming - show generic error
+        // (Auth, billing, and rate limit errors are handled above)
+        const rawMessage = sdkError instanceof Error ? sdkError.message : String(sdkError);
+        yield { type: 'error', message: rawMessage };
+        yield { type: 'complete' };
+        return;
       }
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      yield { type: 'error', message: errorMessage };
+      // Check if this is a recognizable error type
+      const typedError = parseError(error);
+      if (typedError.code !== 'unknown_error') {
+        // Known error type - show user-friendly message with recovery actions
+        yield { type: 'typed_error', error: typedError };
+      } else {
+        // Unknown error - show raw message
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        yield { type: 'error', message: errorMessage };
+      }
       // emit complete even on error so TUI knows we're done
       yield { type: 'complete' };
     } finally {

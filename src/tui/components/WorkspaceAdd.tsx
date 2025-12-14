@@ -7,15 +7,19 @@ import { validateMcpConnection, getValidationErrorMessage } from '../../mcp/vali
 import { validateMcpUrl } from '../../validation/url-validator.ts';
 import { TextInput } from './TextInput.tsx';
 import { AnimatedSpinner } from './Spinner.tsx';
+import { ErrorBanner } from './ErrorBanner.tsx';
+import type { AgentError, RecoveryAction } from '../../agent/errors.ts';
 
 type AddStep = 'name' | 'url' | 'validating-url' | 'checking-auth' | 'no-oauth-options' | 'oauth-auth' | 'bearer-token' | 'validating' | 'complete' | 'error';
 
 export interface WorkspaceAddProps {
   onComplete: (workspace: Workspace) => void;
   onCancel: () => void;
+  /** Handler for error banner actions (credits, settings, etc.) */
+  onErrorAction?: (action: RecoveryAction) => void;
 }
 
-export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel }) => {
+export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel, onErrorAction }) => {
   const [step, setStep] = useState<AddStep>('name');
   const [name, setName] = useState('');
   const [mcpUrl, setMcpUrl] = useState('');
@@ -24,6 +28,7 @@ export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel
   const [isPublicServer, setIsPublicServer] = useState(false);
   const [bearerToken, setBearerToken] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [typedError, setTypedError] = useState<AgentError | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [pendingAuth, setPendingAuth] = useState<{ oauth: OAuthCredentials | null; isPublic: boolean; token?: string } | null>(null);
   const [oauthClient, setOauthClient] = useState<CraftOAuth | null>(null);
@@ -87,8 +92,15 @@ export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel
 
       if (result.valid) {
         setStep('checking-auth');
+      } else if (result.typedError) {
+        // API/billing error - show ErrorBanner
+        setTypedError(result.typedError);
+        setError(null);
+        setStep('url');
       } else {
+        // Simple validation error
         setError(result.error || 'Please enter a valid Craft MCP URL (mcp.craft.do)');
+        setTypedError(null);
         setStep('url');
       }
     };
@@ -204,6 +216,14 @@ export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel
       });
 
       if (!validationResult.success) {
+        // Check for API/billing errors - show ErrorBanner
+        if (validationResult.typedError) {
+          setTypedError(validationResult.typedError);
+          setValidationError(null);
+          setStep('url');
+          return;
+        }
+        // Simple validation error - show inline
         setValidationError(getValidationErrorMessage(validationResult));
         return; // Stay on validating step with error
       }
@@ -291,13 +311,25 @@ export const WorkspaceAdd: React.FC<WorkspaceAddProps> = ({ onComplete, onCancel
       )}
 
       {step === 'url' && (
-        <UrlStep
-          value={mcpUrl}
-          onChange={setMcpUrl}
-          onSubmit={handleMcpUrl}
-          onCancel={onCancel}
-          error={error}
-        />
+        <>
+          {typedError && (
+            <ErrorBanner
+              error={typedError}
+              onAction={(action) => {
+                setTypedError(null);
+                onErrorAction?.(action);
+              }}
+              onDismiss={() => setTypedError(null)}
+            />
+          )}
+          <UrlStep
+            value={mcpUrl}
+            onChange={setMcpUrl}
+            onSubmit={handleMcpUrl}
+            onCancel={onCancel}
+            error={error}
+          />
+        </>
       )}
 
       {step === 'validating-url' && (

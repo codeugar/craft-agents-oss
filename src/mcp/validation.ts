@@ -10,6 +10,8 @@ import { getDefaultOptions } from '../agent/options.ts';
 import { CraftMcpClient } from './client.js';
 import { debug } from '@/tui/utils/debug.js';
 import { DEFAULT_MODEL } from '../config/models.ts';
+import { parseError, type AgentError } from '../agent/errors.ts';
+import { getLastApiError } from '../cache-ttl-interceptor.ts';
 
 export interface InvalidProperty {
   toolName: string;
@@ -21,6 +23,8 @@ export interface McpValidationResult {
   success: boolean;
   error?: string;
   errorType?: 'failed' | 'needs-auth' | 'pending' | 'invalid-schema' | 'unknown';
+  /** Typed error for API/billing failures - display as ErrorBanner */
+  typedError?: AgentError;
   serverInfo?: {
     name: string;
     version: string;
@@ -277,6 +281,35 @@ export async function validateMcpConnection(
       // Abort on error
       abortController.abort();
 
+      // Check for captured API error from interceptor (most reliable source)
+      const apiError = getLastApiError();
+      if (apiError) {
+        debug('[mcp-validation] Found captured API error:', apiError.status, apiError.message);
+        const typedError = parseError(new Error(`${apiError.status} ${apiError.message}`));
+        if (typedError.code !== 'unknown_error') {
+          return {
+            success: false,
+            error: typedError.message,
+            errorType: 'unknown',
+            typedError,
+          };
+        }
+      }
+
+      // Fall back to parsing the thrown error
+      const typedError = parseError(err);
+
+      // For billing/auth errors, return the typed error for ErrorBanner display
+      if (typedError.code !== 'unknown_error') {
+        return {
+          success: false,
+          error: typedError.message,
+          errorType: 'unknown',
+          typedError,
+        };
+      }
+
+      // For unknown errors, return just the error message
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Validation failed',

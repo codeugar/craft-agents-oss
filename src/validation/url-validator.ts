@@ -9,10 +9,15 @@ import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import { SUMMARIZATION_MODEL } from '../config/models.ts';
 import { debug } from '../tui/utils/debug.ts';
+import { parseError, parseSDKErrorText, type AgentError } from '../agent/errors.ts';
+import { getLastApiError } from '../cache-ttl-interceptor.ts';
 
 export interface UrlValidationResult {
   valid: boolean;
+  /** Simple error message for validation failures */
   error?: string;
+  /** Typed error for API/billing failures - display as ErrorBanner */
+  typedError?: AgentError;
 }
 
 const SYSTEM_PROMPT = `You are a URL validator for Craft MCP servers. Your ONLY job is to validate if a URL is a valid Craft MCP URL.
@@ -83,6 +88,13 @@ export async function validateMcpUrl(
 
     debug('[url-validator] Response:', responseText);
 
+    // Check for SDK error text (emitted as text before throwing)
+    const sdkError = parseSDKErrorText(responseText);
+    if (sdkError) {
+      debug('[url-validator] Detected SDK error in response');
+      return { valid: false, typedError: sdkError };
+    }
+
     // Parse JSON response
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -97,6 +109,28 @@ export async function validateMcpUrl(
     };
   } catch (err) {
     debug('[url-validator] Error:', err);
-    return { valid: false, error: 'URL validation failed' };
+
+    // Check for captured API error from interceptor (most reliable source)
+    const apiError = getLastApiError();
+    if (apiError) {
+      debug('[url-validator] Found captured API error:', apiError.status, apiError.message);
+      // Create error with status code for accurate detection
+      const typedError = parseError(new Error(`${apiError.status} ${apiError.message}`));
+      if (typedError.code !== 'unknown_error') {
+        return { valid: false, typedError };
+      }
+    }
+
+    // Fall back to parsing the thrown error
+    const typedError = parseError(err);
+
+    // Return typed error for ErrorBanner display (for API/billing errors)
+    // For unknown errors, fall back to simple error message
+    if (typedError.code !== 'unknown_error') {
+      return { valid: false, typedError };
+    }
+
+    // For unknown errors, return a simple message
+    return { valid: false, error: `URL validation failed: ${typedError.originalError || 'Unknown error'}` };
   }
 }

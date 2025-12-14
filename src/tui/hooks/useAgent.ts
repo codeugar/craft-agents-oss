@@ -10,6 +10,7 @@ import {
   setGlobalPermissionHandler,
   resolveGlobalPermission,
 } from '../../agent/craft-agent.ts';
+import { parseSDKErrorText, isSDKErrorText, type AgentError } from '../../agent/errors.ts';
 import type { UpdateInstructionsContext, UpdateInstructionsProgressEvent } from '../../agents/instruction-updater.ts';
 import type { Message } from '../components/Messages.tsx';
 import type { FileAttachment } from '../utils/files.ts';
@@ -86,6 +87,15 @@ function messageToStoredMessage(msg: Message): StoredMessage {
   };
 }
 
+/**
+ * Detect if a message looks like an SDK error emitted as text output.
+ * These shouldn't be persisted as they're session-specific error feedback.
+ */
+function isSDKErrorMessage(msg: Message): boolean {
+  if (msg.type !== 'assistant') return false;
+  return isSDKErrorText(msg.content);
+}
+
 // Helper to convert StoredMessage back to Message
 function storedMessageToMessage(stored: StoredMessage): Message {
   return {
@@ -135,6 +145,8 @@ export interface UseAgentResult {
   processingStartTime: number | null;
   connected: boolean;
   error: string | null;
+  typedError: AgentError | null;
+  dismissTypedError: () => void;
   tokenUsage: TokenUsage;
   pendingPermission: PermissionRequest | null;
   pendingQuestion: AskUserQuestionRequest | null;
@@ -198,6 +210,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<AskUserQuestionRequest | null>(null);
   const [hasExecutingTool, setHasExecutingTool] = useState(false);
+  const [typedError, setTypedError] = useState<AgentError | null>(null);
 
   // Sub-agent state
   const [availableAgents, setAvailableAgents] = useState<string[]>([]);
@@ -220,6 +233,9 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   const activeAgentContextRef = useRef<UpdateInstructionsContext | null>(null);
   // Track the message ID for update_agent_instructions tool (for progress updates)
   const updateInstructionsToolMsgIdRef = useRef<string | null>(null);
+  // Track SDK text error for this request (to handle React batching)
+  // When SDK emits error as text AND throws, we want to keep the text error (more specific)
+  const sdkTextErrorRef = useRef<AgentError | null>(null);
 
   // Load saved conversation on initial mount (only if edited within last 5 minutes)
   const initialLoadDoneRef = useRef(false);
@@ -255,7 +271,15 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     if (!initialLoadDoneRef.current) return;
     // Only save if we have messages and we're not currently processing
     if (messages.length > 0 && !isProcessing) {
-      const storedMessages = messages.map(messageToStoredMessage);
+      // Filter out transient messages that shouldn't persist across sessions:
+      // - error: Session-specific feedback, not meaningful after restart
+      // - status: Temporary processing status messages
+      // - system: Internal system notifications (e.g., "Interrupted")
+      // - SDK error messages emitted as assistant text (e.g., "Invalid API key · Fix external API key")
+      const persistableMessages = messages.filter(
+        m => m.type !== 'error' && m.type !== 'status' && m.type !== 'system' && !isSDKErrorMessage(m)
+      );
+      const storedMessages = persistableMessages.map(messageToStoredMessage);
       saveWorkspaceConversation(workspace.id, storedMessages, tokenUsage);
 
       // Also save session ID if available and update React state
@@ -491,12 +515,19 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     }
   }, [pendingQuestion]);
 
+  const dismissTypedError = useCallback(() => {
+    setTypedError(null);
+  }, []);
+
   const sendMessage = useCallback(async (
     input: string,
     attachments?: FileAttachment[],
     options?: { hideUserMessage?: boolean }
   ) => {
     if (isProcessing) return;
+
+    // Clear SDK text error ref for this new request
+    sdkTextErrorRef.current = null;
 
     const agent = getAgent();
 
@@ -523,6 +554,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     setStreamingText('');
     setStatus('');
     setError(null);
+    setTypedError(null);  // Clear any typed errors from previous request
     toolStartTimeRef.current.clear();
     streamingBufferRef.current = '';
     lastStreamingUpdateRef.current = 0;
@@ -600,6 +632,20 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
           case 'text_complete':
             assistantText = event.text;
             setStreamingText('');
+
+            // Check if this is an SDK error emitted as text
+            // If so, parse it and trigger typed error directly
+            const sdkError = parseSDKErrorText(assistantText);
+            if (sdkError) {
+              // Store in ref so typed_error handler knows we already have a specific error
+              // (React batching means state might not be updated yet when typed_error arrives)
+              sdkTextErrorRef.current = sdkError;
+              setTypedError(sdkError);
+              assistantText = '';
+              break;
+            }
+
+            // Normal assistant message
             if (assistantText.trim()) {
               setMessages((prev) => [
                 ...prev,
@@ -727,6 +773,17 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
                 timestamp: Date.now(),
               },
             ]);
+            break;
+
+          case 'typed_error':
+            // Set typed error for ErrorBanner display
+            // Don't add to messages - the banner already shows the error with recovery actions
+            // If we already detected SDK error in text_complete, it's already set - skip
+            // Otherwise use the error from craft-agent.ts
+            if (!sdkTextErrorRef.current) {
+              setTypedError(event.error);
+            }
+            // If ref is set, error was already set in text_complete handler
             break;
 
           case 'complete':
@@ -877,8 +934,11 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     const currentSessionId = agentRef.current?.getSessionId() ?? null;
 
     if (currentMessages.length > 0) {
-      // Save messages and token usage to storage
-      const storedMessages = currentMessages.map(messageToStoredMessage);
+      // Filter out transient messages before saving (same as auto-save)
+      const persistableMessages = currentMessages.filter(
+        m => m.type !== 'error' && m.type !== 'status' && m.type !== 'system' && !isSDKErrorMessage(m)
+      );
+      const storedMessages = persistableMessages.map(messageToStoredMessage);
       saveWorkspaceConversation(workspace.id, storedMessages, tokenUsage);
 
       // Save session ID for conversation continuity
@@ -1616,6 +1676,8 @@ The goal is to have clean, actionable instructions without unanswered questions.
     processingStartTime,
     connected,
     error,
+    typedError,
+    dismissTypedError,
     tokenUsage,
     pendingPermission,
     pendingQuestion,
