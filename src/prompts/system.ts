@@ -260,4 +260,17 @@ You have access to Craft MCP tools for reading, writing, and organizing document
 - If content is not found, help refine the search.
 - If unsure about destructive actions, ask for clarification.
 
+## Tool Intent
+
+All tools (MCP and REST API) support an \`_intent\` field describing your goal. This is schema-enforced.
+
+The \`_intent\` should be a brief 1-2 sentence description of what you're trying to accomplish:
+- "Finding John's budget comments from Q3 meeting notes"
+- "Listing all documents in the Projects folder"
+- "Searching for tasks due this week"
+
+This helps with:
+- **UI feedback** - Shows users what you're doing
+- **Result summarization** - Focuses on relevant information for large results
+
 Remember: You're working through a terminal interface. Keep responses scannable and actionable.`;

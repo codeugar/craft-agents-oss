@@ -6,11 +6,10 @@
  */
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { ApiConfig } from './types.ts';
 import { debug } from '../tui/utils/debug.ts';
-import { SUMMARIZATION_MODEL } from '../config/models.ts';
+import { estimateTokens, summarizeLargeResult, TOKEN_LIMIT } from '../utils/summarize.ts';
 
 /**
  * Credential for HTTP Basic Authentication
@@ -32,87 +31,6 @@ function isBasicAuthCredential(cred: ApiCredential): cred is BasicAuthCredential
   return typeof cred === 'object' && cred !== null && 'username' in cred && 'password' in cred;
 }
 
-// Token limit for summarization trigger (roughly ~40KB of text)
-const TOKEN_LIMIT = 10000;
-
-// Max tokens to send to Haiku for summarization (~80KB, well under 200k context)
-const MAX_SUMMARIZATION_INPUT = 20000;
-
-// Lazy-initialized Anthropic client for summarization
-let anthropicClient: Anthropic | null = null;
-
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    anthropicClient = new Anthropic();
-  }
-  return anthropicClient;
-}
-
-/**
- * Estimate token count from text length (rough approximation: 4 chars per token)
- */
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-
-/**
- * Summarize a large API response to fit within context limits.
- * Uses Claude Haiku for fast, cheap summarization.
- */
-async function summarizeLargeResponse(
-  response: string,
-  apiName: string,
-  path: string,
-  requestParams: Record<string, unknown> | undefined
-): Promise<string> {
-  const client = getAnthropicClient();
-
-  // Build context from request params
-  const paramsContext = requestParams
-    ? `Request parameters: ${JSON.stringify(requestParams)}`
-    : 'No specific parameters provided.';
-
-  // Truncate response to fit within Haiku's context safely
-  const maxChars = MAX_SUMMARIZATION_INPUT * 4; // ~80KB
-  const truncatedResponse = response.length > maxChars
-    ? response.substring(0, maxChars) + '\n\n[... truncated for summarization ...]'
-    : response;
-  const wasTruncated = response.length > maxChars;
-
-  try {
-    const result = await client.messages.create({
-      model: SUMMARIZATION_MODEL,
-      max_tokens: 4096,
-      messages: [{
-        role: 'user',
-        content: `You are summarizing an API response that was too large to fit in context.
-
-API: ${apiName}
-Endpoint: ${path}
-${paramsContext}
-${wasTruncated ? '\nNote: The response was truncated before summarization due to extreme size.' : ''}
-
-Your task:
-1. Extract the MOST RELEVANT information based on the request
-2. Preserve key data points, IDs, URLs, and actionable information
-3. Summarize long text content but keep essential details
-4. Format the output cleanly for the AI assistant to use
-
-API Response to summarize:
-${truncatedResponse}
-
-Provide a concise but comprehensive summary that captures the essential information.`
-      }]
-    });
-
-    const textBlock = result.content.find(b => b.type === 'text');
-    return textBlock?.text || 'Failed to summarize response';
-  } catch (error) {
-    debug(`[api-tools] Summarization failed: ${error}`);
-    // Fall back to truncation if summarization fails
-    return response.substring(0, 40000) + '\n\n[Response truncated due to size]';
-  }
-}
 
 /**
  * Build headers for an API request, injecting authentication
@@ -246,9 +164,10 @@ export function createApiTool(
       path: z.string().describe('API endpoint path, e.g., "/search" or "/v1/completions"'),
       method: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']).describe('HTTP method - check documentation for correct method per endpoint'),
       params: z.record(z.string(), z.unknown()).optional().describe('Request body (POST/PUT/PATCH) or query parameters (GET)'),
+      _intent: z.string().optional().describe('REQUIRED: Describe what you are trying to accomplish with this API call (1-2 sentences)'),
     },
     async (args) => {
-      const { path, method, params } = args;
+      const { path, method, params, _intent } = args;
 
       try {
         const url = buildUrl(config.baseUrl, path, method, params, config.auth, credential);
@@ -287,11 +206,20 @@ export function createApiTool(
         const estimatedTokens = estimateTokens(text);
         if (estimatedTokens > TOKEN_LIMIT) {
           debug(`[api-tools] Response too large (~${estimatedTokens} tokens), summarizing...`);
-          const summary = await summarizeLargeResponse(text, config.name, path, params);
+          if (_intent) {
+            debug(`[api-tools] Using intent for summarization: ${_intent}`);
+          }
+          const summary = await summarizeLargeResult(text, {
+            toolName: `api_${config.name}`,
+            path,
+            input: params,
+            modelIntent: _intent,
+          });
           return {
             content: [{
               type: 'text' as const,
-              text: `[Response summarized - original was ~${estimatedTokens} tokens]\n\n${summary}`,
+              text: `[Large response (~${estimatedTokens} tokens) was summarized to fit context. ` +
+                `If key details are missing, consider using more specific query parameters.]\n\n${summary}`,
             }],
           };
         }

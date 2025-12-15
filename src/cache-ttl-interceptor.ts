@@ -159,6 +159,51 @@ function isAnthropicMessagesUrl(url: string): boolean {
 }
 
 /**
+ * Add _intent field to all MCP tool schemas in Anthropic API request.
+ * Only modifies tools that start with "mcp__" (MCP tools from SDK).
+ * Returns the modified request body object.
+ */
+function addIntentToMcpTools(body: Record<string, unknown>): Record<string, unknown> {
+  const tools = body.tools as Array<{
+    name?: string;
+    input_schema?: {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+  }> | undefined;
+
+  if (!tools || !Array.isArray(tools)) {
+    return body;
+  }
+
+  let modifiedCount = 0;
+  for (const tool of tools) {
+    // Only modify MCP tools (prefixed with mcp__)
+    if (tool.name?.startsWith('mcp__') && tool.input_schema?.properties) {
+      // Don't add if already present
+      if (!('_intent' in tool.input_schema.properties)) {
+        tool.input_schema.properties._intent = {
+          type: 'string',
+          description: 'REQUIRED: Describe what you are trying to accomplish with this tool call (1-2 sentences)',
+        };
+        // Actually enforce it by adding to required array (not just in description)
+        tool.input_schema.required = [
+          ...(tool.input_schema.required || []),
+          '_intent',
+        ];
+        modifiedCount++;
+      }
+    }
+  }
+
+  if (modifiedCount > 0) {
+    debugLog(`[Intent Schema] Added _intent to ${modifiedCount} MCP tools`);
+  }
+
+  return body;
+}
+
+/**
  * Check if URL should have API errors captured (includes Craft Gateway)
  */
 function shouldCaptureApiErrors(url: string): boolean {
@@ -346,8 +391,11 @@ async function interceptedFetch(
       }
       const body = typeof init.body === 'string' ? init.body : undefined;
       if (body) {
-        const parsed = JSON.parse(body);
+        let parsed = JSON.parse(body);
         const model = parsed.model as string | undefined;
+
+        // Add _intent to MCP tool schemas (always, regardless of cache config)
+        parsed = addIntentToMcpTools(parsed);
 
         // Determine if we should apply 1h TTL:
         // - If explicitly enabled in config: always apply

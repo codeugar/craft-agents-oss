@@ -181,12 +181,34 @@ The extractor will automatically:
 /info               # Show active agent info and tools
 ```
 
-### Large Response Handling
+### Large Response Handling & Intent-Aware Summarization
 
-API responses are automatically summarized if they exceed ~40KB to prevent context overflow. The summarization:
-- Uses Claude Haiku for fast, cheap processing
-- Focuses on relevant information based on your search parameters
-- Preserves key data points, URLs, and actionable information
+Tool responses (from MCP tools, REST APIs, etc.) that exceed ~60KB are automatically summarized using Claude Haiku to prevent context overflow.
+
+**The Problem:** A generic summarizer doesn't know what information is relevant. If you ask "What did John say about the budget?" and the tool returns a 100-page document, how does the summarizer know to focus on John's budget comments?
+
+**The Solution:** The `_intent` field is enforced via schema modification. The fetch interceptor injects `_intent` into every MCP tool's schema in the Anthropic API request, so the model MUST include it.
+
+```javascript
+mcp__craft__document_search({
+  query: "Q3 budget",
+  _intent: "Finding John's budget comments in Q3 meeting notes"
+})
+```
+
+This intent is:
+1. **Enforced** - Schema modification ensures the model includes it
+2. **Displayed in the UI** - You see exactly what the model is doing
+3. **Passed to the summarizer** - Haiku knows to focus on John + budget
+4. **Clean** - Stripped before forwarding to MCP server
+
+**Example UI Output:**
+```
+⠋ Craft Read Document Finding John's budget comments in Q3 meeting...
+✓ Craft Read Document Finding John's budget comments... (2.3s)
+```
+
+This system ensures large documents are summarized with the right focus, and users always know what the agent is doing.
 
 ## Example Prompts
 

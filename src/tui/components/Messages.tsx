@@ -12,6 +12,7 @@ export interface Message {
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  toolIntent?: string;  // Explicit intent from **Doing:** marker or Bash description
   toolStatus?: 'pending' | 'executing' | 'completed' | 'error';
   toolDuration?: number;
   isError?: boolean;
@@ -174,6 +175,7 @@ const MessageItem: React.FC<MessageItemProps> = memo(({ message, compact = true 
           toolName={message.toolName || 'unknown'}
           status={message.toolStatus || 'completed'}
           input={message.toolInput}
+          intent={message.toolIntent}
           result={message.content}
           isError={message.isError}
           duration={message.toolDuration}

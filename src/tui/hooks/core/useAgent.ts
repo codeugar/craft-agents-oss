@@ -759,13 +759,18 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
               // Check if a tool message with this ID already exists
               const existingIndex = prev.findIndex((m) => m.id === toolMessageId);
               if (existingIndex >= 0) {
-                // Update existing message with better input data if available
+                // Update existing message with better input data or intent if available
                 const existing = prev[existingIndex]!;
                 const hasNewInput = event.input && Object.keys(event.input).length > 0;
                 const existingHasInput = existing.toolInput && Object.keys(existing.toolInput).length > 0;
-                if (hasNewInput && !existingHasInput) {
+                const hasNewIntent = event.intent && !existing.toolIntent;
+                if ((hasNewInput && !existingHasInput) || hasNewIntent) {
                   const updated = [...prev];
-                  updated[existingIndex] = { ...existing, toolInput: event.input };
+                  updated[existingIndex] = {
+                    ...existing,
+                    toolInput: (hasNewInput && !existingHasInput) ? event.input : existing.toolInput,
+                    toolIntent: event.intent || existing.toolIntent,
+                  };
                   return updated;
                 }
                 return prev;
@@ -777,6 +782,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
                   type: 'tool',
                   toolName: event.toolName,
                   toolInput: event.input,
+                  toolIntent: event.intent,
                   toolStatus: 'executing',
                   content: '',
                   timestamp: now,

@@ -8,6 +8,7 @@ export interface ToolCallProps {
   toolName: string;
   status: 'pending' | 'executing' | 'completed' | 'error';
   input?: Record<string, unknown>;
+  intent?: string;  // Explicit intent from **Doing:** marker or Bash description
   result?: string;
   isError?: boolean;
   duration?: number;
@@ -81,6 +82,7 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
   toolName,
   status,
   input,
+  intent,
   result,
   isError = false,
   duration,
@@ -111,10 +113,14 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
 
   const { icon, color } = getStatusDisplay();
 
-  // Format for display - check for custom display first
+  // Format for display - prefer intent, then custom display, then formatted params
   const customDisplay = getCustomToolDisplay(toolName, input);
+  // Use intent as the display description if available (most user-friendly)
+  const displayDescription = intent
+    ? truncateText(intent, 70)
+    : customDisplay?.params ?? formatInputParams(input);
+  // Use custom name if available, otherwise format tool name
   const displayName = customDisplay?.name ?? formatToolName(toolName);
-  const inputParams = customDisplay?.params ?? formatInputParams(input);
 
   // Compact view (single line, but with progress sub-lines when executing)
   if (compact && !expanded) {
@@ -131,7 +137,7 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
             <Text color={color}>{icon} </Text>
           )}
           <Text dimColor>{displayName}</Text>
-          {inputParams && <Text color="gray"> {inputParams}</Text>}
+          {displayDescription && <Text color="gray"> {displayDescription}</Text>}
           {status === 'executing' && liveElapsed !== null && liveElapsed >= 1000 && (
             <Text dimColor> ({formatDuration(liveElapsed)})</Text>
           )}
@@ -172,6 +178,14 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
         )}
       </Box>
 
+      {/* Intent - what the model is trying to accomplish */}
+      {intent && (
+        <Box paddingLeft={2} marginTop={1}>
+          <Text dimColor>Goal: </Text>
+          <Text color="gray">{intent}</Text>
+        </Box>
+      )}
+
       {/* Input */}
       {input && Object.keys(input).length > 0 && (
         <Box flexDirection="column" paddingLeft={2} marginTop={1}>
@@ -205,41 +219,6 @@ export const ToolCall: React.FC<ToolCallProps> = memo(({
           </Box>
         </Box>
       )}
-    </Box>
-  );
-});
-
-/**
- * A group of tool calls with expand/collapse functionality
- */
-export interface ToolCallGroupProps {
-  tools: Array<{
-    id: string;
-    toolName: string;
-    status: 'pending' | 'executing' | 'completed' | 'error';
-    input?: Record<string, unknown>;
-    result?: string;
-    isError?: boolean;
-    duration?: number;
-  }>;
-  compact?: boolean;
-}
-
-export const ToolCallGroup: React.FC<ToolCallGroupProps> = memo(({ tools, compact = true }) => {
-  return (
-    <Box flexDirection="column">
-      {tools.map((tool) => (
-        <ToolCall
-          key={tool.id}
-          toolName={tool.toolName}
-          status={tool.status}
-          input={tool.input}
-          result={tool.result}
-          isError={tool.isError}
-          duration={tool.duration}
-          compact={compact}
-        />
-      ))}
     </Box>
   );
 });
