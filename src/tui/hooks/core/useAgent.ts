@@ -324,12 +324,16 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
 
         // Also update SDK session ID if it changed (for resuming conversations)
         const sdkSessionId = agentRef.current?.getSessionId();
+        debug('[useAgent] SDK session check:', sdkSessionId, 'current:', session.sdkSessionId, 'hasCallback:', !!config.onSdkSessionIdUpdate);
         if (sdkSessionId && sdkSessionId !== session.sdkSessionId) {
+          debug('[useAgent] Updating SDK session ID:', sdkSessionId);
           updateSessionSdkId(session.id, sdkSessionId);
+          // Propagate to React state so UI stays in sync
+          config.onSdkSessionIdUpdate?.(sdkSessionId);
         }
       }, SAVE_DEBOUNCE_MS);
     }
-  }, [messages, isProcessing, session, tokenUsage]);
+  }, [messages, isProcessing, session, tokenUsage, config]);
 
   // Cleanup: flush pending save on unmount to prevent data loss
   useEffect(() => {

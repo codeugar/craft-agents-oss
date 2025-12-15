@@ -41,7 +41,7 @@ export interface GlobalContextValue {
   // Current session (primary isolation boundary)
   // Changing session triggers SessionContainer remount via key={session.id}
   session: Session;
-  setSession: (session: Session) => void;
+  setSession: (session: Session | ((prev: Session) => Session)) => void;
 
   // Start a new session in the current workspace (e.g., /clear command)
   startNewSession: () => Session;
@@ -78,11 +78,13 @@ export function GlobalProvider({
     onModelChange?.(newModel);
   }, [onModelChange]);
 
-  const setSession = useCallback((newSession: Session) => {
-    // Persist active session to storage
-    setActiveSession(newSession.id);
-    // Update state (triggers SessionContainer remount via key)
-    setSessionState(newSession);
+  const setSession = useCallback((sessionOrUpdater: Session | ((prev: Session) => Session)) => {
+    setSessionState(prev => {
+      const newSession = typeof sessionOrUpdater === 'function' ? sessionOrUpdater(prev) : sessionOrUpdater;
+      // Persist active session to storage
+      setActiveSession(newSession.id);
+      return newSession;
+    });
   }, []);
 
   const setWorkspace = useCallback((newWorkspace: Workspace) => {

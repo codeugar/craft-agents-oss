@@ -20,6 +20,7 @@ export interface CraftAgentConfig {
   session?: Session;           // Current session (primary isolation boundary)
   mcpToken?: string;           // Override token (for testing)
   model?: string;
+  onSdkSessionIdUpdate?: (sdkSessionId: string) => void;  // Callback when SDK session ID is captured
 }
 
 // Message types for streaming - kept for TUI compatibility

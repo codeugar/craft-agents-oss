@@ -79,7 +79,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   initialError,
 }) => {
   const { exit } = useApp();
-  const { model, setModel, workspace, setWorkspace, startNewSession, addUsage } = useGlobalContext();
+  const { model, setModel, workspace, setWorkspace, setSession, startNewSession, addUsage } = useGlobalContext();
 
   // Centralized exit function
   const exitApp = useCallback(() => {
@@ -87,11 +87,21 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     process.exit(0);
   }, [exit]);
 
+  // Callback to update session when SDK session ID is captured
+  const handleSdkSessionIdUpdate = useCallback((sdkSessionId: string) => {
+    debug('[SessionContainer] handleSdkSessionIdUpdate called:', sdkSessionId);
+    setSession(prev => {
+      debug('[SessionContainer] setSession updating from:', prev.sdkSessionId, 'to:', sdkSessionId);
+      return { ...prev, sdkSessionId };
+    });
+  }, [setSession]);
+
   // Create config with session for the agent hook
   const agentConfig: CraftAgentConfig = useMemo(() => ({
     ...config,
     session,  // Include session for session-based conversation storage
-  }), [config, session]);
+    onSdkSessionIdUpdate: handleSdkSessionIdUpdate,
+  }), [config, session, handleSdkSessionIdUpdate]);
 
   // Use the agent hook - this creates a FRESH agent instance per session
   // because SessionContainer remounts when session.id changes (key={session.id})
