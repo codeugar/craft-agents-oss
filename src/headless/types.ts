@@ -18,10 +18,10 @@ export interface HeadlessConfig {
 
   // Session control
   // Default: fresh session each run (predictable for automation)
-  // --session-resume: use workspace's saved session
-  // --session-id <uuid>: use explicit session (for external workflow management)
-  sessionId?: string;           // Explicit session ID (--session-id)
-  sessionResume?: boolean;      // Resume workspace's saved session (--session-resume)
+  // --session-resume: resume the last session
+  // --session <id>: use explicit session (for external workflow management)
+  sessionId?: string;           // Explicit session ID (--session)
+  sessionResume?: boolean;      // Resume the last session (--session-resume)
 }
 
 /**

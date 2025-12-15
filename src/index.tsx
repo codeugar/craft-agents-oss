@@ -81,21 +81,20 @@ const cli = meow(
     --workspace, -w <name>  Select workspace by name, ID, or MCP server URL (http/https)
     --model, -m <model>     Claude model to use (default: ${DEFAULT_MODEL})
     --debug                 Enable debug logging to /tmp/craft-debug.log
+    --session <id>          resume (or create) a specific session by ID
+    --new                   Start a new session (default in headless mode, opt in for interactive mode)
+    --session-resume        Resume the last session (default in interactive mode, opt in for headless mode)
+    
+  Interactive Mode Options
+    --list-sessions      List available sessions and exit
+    --token, -t          Bearer token for MCP authentication (overrides saved config)
+    --help               Show this help message
+    --version            Show version number
 
   Print Mode (non-interactive, exits after response)
     --print, -p <query>     Execute prompt and exit (non-interactive)
     --output-format <fmt>   Output format: text, json, stream-json (default: text)
     --permission-policy     Permission handling: deny-all, allow-safe, allow-all (default: deny-all)
-    --session-id <uuid>     Use explicit session ID (for workflow management)
-    --session-resume        Resume workspace's saved session (default: fresh session)
-
-  Interactive Mode Options
-    --new                Start a new session (instead of resuming)
-    --session <id>       Resume a specific session by ID
-    --list-sessions      List available sessions and exit
-    --token, -t          Bearer token for MCP authentication (overrides saved config)
-    --help               Show this help message
-    --version            Show version number
 
   First Run
     On first run, you'll be guided through an interactive setup to configure
@@ -109,8 +108,8 @@ const cli = meow(
     - Interactive (REPL): Resumes latest session by default
       Use --new to start fresh, --session <id> to resume specific session
     - Print mode: Fresh session by default (predictable for scripts)
-      Use --session-resume to continue workspace session
-      Use --session-id <uuid> for explicit session management
+      Use --session-resume to continue the last session
+      Use --session <id> for explicit session management
 
   Examples
     $ craft                                    # Resume latest session
@@ -146,9 +145,6 @@ const cli = meow(
       permissionPolicy: {
         type: 'string',
         default: 'deny-all',
-      },
-      sessionId: {
-        type: 'string',
       },
       sessionResume: {
         type: 'boolean',
@@ -489,7 +485,7 @@ async function main() {
       model,
       outputFormat,
       permissionPolicy,
-      sessionId: cli.flags.sessionId,
+      sessionId: cli.flags.session,
       sessionResume: cli.flags.sessionResume,
     });
 
