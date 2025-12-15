@@ -13,9 +13,16 @@ import {
   setActiveWorkspace,
   getAnthropicApiKey,
   getClaudeOAuthToken,
+  listSessions,
+  loadSession,
+  createSession,
+  getOrCreateLatestSession,
+  setActiveSession,
+  cleanupLegacyConversations,
   type StoredConfig,
   type Workspace,
   type AuthType,
+  type Session,
 } from './config/storage.ts';
 import { getAuthState, getSetupNeeds, type AuthState, type SetupNeeds } from './auth/state.ts';
 import type { CraftAgentConfig } from './agent/craft-agent.ts';
@@ -74,18 +81,20 @@ const cli = meow(
     --workspace, -w <name>  Select workspace by name, ID, or MCP server URL (http/https)
     --model, -m <model>     Claude model to use (default: ${DEFAULT_MODEL})
     --debug                 Enable debug logging to /tmp/craft-debug.log
+    --session <id>          resume (or create) a specific session by ID (only within given workspace, if provided)
+    
+  Interactive Mode Options
+    --new                Start a new session (instead of resuming)
+    --list-sessions      List available sessions and exit (sessions of the specified workspace, or if not specified, of the last used workspace)
+    --token, -t          Bearer token for MCP authentication (overrides saved config)
+    --help               Show this help message
+    --version            Show version number
 
   Print Mode (non-interactive, exits after response)
     --print, -p <query>     Execute prompt and exit (non-interactive)
     --output-format <fmt>   Output format: text, json, stream-json (default: text)
     --permission-policy     Permission handling: deny-all, allow-safe, allow-all (default: deny-all)
-    --session-id <uuid>     Use explicit session ID (for workflow management)
-    --session-resume        Resume workspace's saved session (default: fresh session)
-
-  Interactive Mode Options
-    --token, -t     Bearer token for MCP authentication (overrides saved config)
-    --help          Show this help message
-    --version       Show version number
+    --session-resume        Resume the last session (in the given workspace, if provided) (default: fresh session)
 
   First Run
     On first run, you'll be guided through an interactive setup to configure
@@ -93,15 +102,20 @@ const cli = meow(
 
   Configuration
     Settings are stored in ~/.craft-agent/config.json
+    Sessions are stored in ~/.craft-agent/sessions/
 
   Session Behavior
-    - Interactive (REPL): Always resumes workspace session
+    - Interactive (REPL): Resumes latest session by default
+      Use --new to start fresh, --session <id> to resume specific session
     - Print mode: Fresh session by default (predictable for scripts)
-      Use --session-resume to continue workspace session
-      Use --session-id <uuid> for explicit session management
+      Use --session-resume to continue the last session
+      Use --session <id> for explicit session management
 
   Examples
-    $ craft                                    # Interactive mode
+    $ craft                                    # Resume latest session
+    $ craft --new                              # Start fresh session
+    $ craft --session abc123                   # Resume specific session
+    $ craft --list-sessions                    # List all sessions
     $ craft "What documents do I have?"        # Interactive with initial prompt
     $ craft -a writer "Help me draft an email" # Activate agent + prompt
     $ craft -w work -p "list my documents"     # Print mode with specific workspace
@@ -132,9 +146,6 @@ const cli = meow(
         type: 'string',
         default: 'deny-all',
       },
-      sessionId: {
-        type: 'string',
-      },
       sessionResume: {
         type: 'boolean',
         default: false,
@@ -153,6 +164,18 @@ const cli = meow(
         shortFlag: 'm',
       },
       debug: {
+        type: 'boolean',
+        default: false,
+      },
+      // Session flags (interactive mode)
+      new: {
+        type: 'boolean',
+        default: false,
+      },
+      session: {
+        type: 'string',
+      },
+      listSessions: {
         type: 'boolean',
         default: false,
       },
@@ -317,6 +340,9 @@ const Root: React.FC<RootProps> = ({ initialConfig, cliFlags, authState, setupNe
       initialAgent={workspaceError ? undefined : initialAgent}
       initialPrompt={workspaceError ? undefined : initialPrompt}
       initialError={workspaceError}
+      // Session flags from CLI
+      newSession={cliFlags.new}
+      sessionId={cliFlags.session}
     />
   );
 };
@@ -332,6 +358,35 @@ async function main() {
     } else {
       console.error(`Installation failed: ${result.error}`);
       process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  // Handle --list-sessions command
+  if (cli.flags.listSessions) {
+    const workspaceId = cli.flags.workspace
+      ? getWorkspaceByNameOrId(cli.flags.workspace)?.id
+      : getActiveWorkspace()?.id;
+
+    const sessions = listSessions(workspaceId);
+
+    if (sessions.length === 0) {
+      console.log('No sessions found.');
+    } else {
+      console.log('Sessions:\n');
+      for (const session of sessions) {
+        const date = new Date(session.lastUsedAt).toLocaleString();
+        const messageCount = session.messageCount;
+        const preview = session.preview || '(empty)';
+        const workspaceName = getWorkspaces().find(w => w.id === session.workspaceId)?.name || session.workspaceId;
+
+        console.log(`  ${session.id}`);
+        console.log(`    Workspace: ${workspaceName}`);
+        console.log(`    Last used: ${date}`);
+        console.log(`    Messages: ${messageCount}`);
+        console.log(`    Preview: ${preview.substring(0, 60)}${preview.length > 60 ? '...' : ''}`);
+        console.log('');
+      }
     }
     process.exit(0);
   }
@@ -430,7 +485,7 @@ async function main() {
       model,
       outputFormat,
       permissionPolicy,
-      sessionId: cli.flags.sessionId,
+      sessionId: cli.flags.session,
       sessionResume: cli.flags.sessionResume,
     });
 
@@ -441,6 +496,9 @@ async function main() {
   // ========================================
   // INTERACTIVE MODE (TUI)
   // ========================================
+
+  // Clean up legacy workspace-based conversations (now using session-based storage)
+  cleanupLegacyConversations();
 
   // Clear screen and move cursor to top-left
   process.stdout.write('\x1b[2J\x1b[H');
