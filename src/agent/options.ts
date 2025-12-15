@@ -6,12 +6,33 @@ import { debug } from "../tui/utils/debug";
 declare const CRAFT_AGENT_CLI_VERSION: string | undefined;
 
 let optionsEnv: Record<string, string> = {};
+let customPathToClaudeCodeExecutable: string | null = null;
 
 export function setAnthropicOptionsEnv(env: Record<string, string>) {
     optionsEnv = env;
 }
 
+/**
+ * Override the path to the Claude Code executable (cli.js from the SDK).
+ * This is needed when the SDK is bundled (e.g., in Electron) and can't auto-detect the path.
+ */
+export function setPathToClaudeCodeExecutable(path: string) {
+    customPathToClaudeCodeExecutable = path;
+}
+
 export function getDefaultOptions(): Partial<Options> {
+    // If custom path is set (e.g., for Electron), use it with minimal options
+    if (customPathToClaudeCodeExecutable) {
+        return {
+            pathToClaudeCodeExecutable: customPathToClaudeCodeExecutable,
+            env: {
+                ...process.env,
+                ... optionsEnv,
+                CRAFT_DEBUG: process.argv.includes('--debug') ? '1' : '0',
+            }
+        };
+    }
+
     if (typeof CRAFT_AGENT_CLI_VERSION !== 'undefined' && CRAFT_AGENT_CLI_VERSION != null) {
         const baseDir = join(homedir(), '.local', 'share', 'craft', 'versions', CRAFT_AGENT_CLI_VERSION);
         return {

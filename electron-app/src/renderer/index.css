@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --craft-purple: #9570BE;
+  --craft-purple-light: #B08DD4;
+  --craft-purple-dark: #7A5AA5;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: #1a1a1a;
+  color: #e5e5e5;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+/* Custom colors - Tailwind v4 way */
+@theme {
+  --color-craft-purple: #9570BE;
+  --color-craft-purple-light: #B08DD4;
+  --color-craft-purple-dark: #7A5AA5;
+}
