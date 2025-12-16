@@ -69,7 +69,7 @@ export function ChatDisplay({
       {session ? (
         <div className="flex flex-1 flex-col min-h-0 min-w-0">
           {/* === SESSION HEADER: Title only === */}
-          <div className="flex h-[42px] shrink-0 items-center px-4 relative z-50">
+          <div className="flex h-[50px] shrink-0 items-center px-4 relative z-50">
             <div className="font-semibold font-sans text-sm">{session.workspaceName || 'Chat'}</div>
           </div>
           <Separator />
@@ -79,12 +79,12 @@ export function ChatDisplay({
             <div className="p-4 space-y-4 min-w-0">
               {session.messages.length === 0 ? (
                 /* Empty State: Welcome message for new sessions */
-                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                  <div className="size-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
-                    <MessageSquare className="size-7 text-primary" />
+                <div className="flex flex-col items-center justify-center h-64 text-muted-foreground px-8">
+                  <div className="size-14 rounded-xl bg-muted flex items-center justify-center mb-3">
+                    <MessageSquare className="size-7 text-muted-foreground/50" />
                   </div>
-                  <p className="font-medium text-foreground">Welcome to {session.workspaceName}</p>
-                  <p className="text-sm mt-1">Start a conversation by typing a message below.</p>
+                  <p className="text-sm font-medium text-foreground">Welcome to {session.workspaceName}</p>
+                  <p className="text-xs mt-1 text-center">Start a conversation by typing a message below.</p>
                 </div>
               ) : (
                 /* Message List */
@@ -137,21 +137,7 @@ export function ChatDisplay({
             </form>
           </div>
         </div>
-      ) : (
-        /* === EMPTY STATE: No session selected === */
-        <div className="flex flex-1 flex-col min-h-0">
-          {/* Empty header to match session header height */}
-          <div className="h-[42px] shrink-0" />
-          <Separator />
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-            <div className="size-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
-              <MessageSquare className="size-8 text-muted-foreground/50" />
-            </div>
-            <h2 className="text-lg font-medium text-foreground">No session selected</h2>
-            <p className="text-sm mt-1">Select a session from the list or create a new one</p>
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -299,9 +285,9 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
             <span className="text-xs font-semibold uppercase tracking-wide">{message.toolName}</span>
           </div>
           {/* Tool Result: Shows preview (max 500 chars) or "Running..." spinner */}
-          <div className="px-3 py-2">
+          <div className="px-3 py-2 min-w-0">
             {message.toolResult ? (
-              <pre className="text-xs text-muted-foreground overflow-x-auto max-h-48 overflow-y-auto font-mono bg-muted/30 p-2 rounded">
+              <pre className="text-xs text-muted-foreground max-h-48 overflow-y-auto font-mono bg-muted/30 p-2 rounded whitespace-pre-wrap break-words">
                 {message.toolResult.slice(0, 500)}
                 {message.toolResult.length > 500 && '...'}
               </pre>

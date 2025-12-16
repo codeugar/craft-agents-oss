@@ -194,6 +194,71 @@ Add to `index.css`:
 - **`nativeTheme.on('updated')`** - Listen for macOS appearance changes
 - Renderer receives updates via `theme:systemChanged` IPC channel
 
+## Animations
+
+**Use Motion (formerly Framer Motion)** for all animations. The library provides smooth 60-120fps animations with spring physics.
+
+```bash
+# Already installed in apps/electron/package.json
+import { motion } from "motion/react"
+```
+
+### Spring Physics Presets
+
+```typescript
+// Snappy with minimal bounce (default for UI)
+const snappySpring = {
+  type: "spring",
+  stiffness: 400,
+  damping: 30,
+  mass: 0.8,
+}
+
+// More pronounced bounce (playful)
+const bouncySpring = {
+  type: "spring",
+  stiffness: 300,
+  damping: 20,
+  mass: 1,
+}
+
+// Exponential feel (no bounce, smooth settle)
+const exponentialSpring = {
+  type: "spring",
+  stiffness: 600,
+  damping: 40,  // Critical damping = no oscillation
+}
+```
+
+### Performance Best Practices
+
+1. **Animate GPU-accelerated properties only**: `transform`, `opacity`
+2. **Avoid animating**: `width`, `height`, `top`, `left` (trigger layout recalculation)
+3. **Use `overflow-hidden`** on parent to clip content during width/transform animations
+4. **Use `initial={false}`** to skip animation on mount
+
+### Example: Animated Sidebar
+
+```tsx
+<motion.div
+  initial={false}
+  animate={{ width: isVisible ? 260 : 0 }}
+  transition={{
+    type: "spring",
+    stiffness: 400,
+    damping: 30,
+    mass: 0.8,
+  }}
+  className="h-full overflow-hidden shrink-0"
+>
+  <div className="w-[260px] h-full">
+    {/* Fixed-width content */}
+  </div>
+</motion.div>
+```
+
+**Note:** The sidebar uses `width` animation (not `transform`) for proper layout flow, but the content inside is fixed-width so it doesn't reflow during animation.
+
 ## Debugging
 
 - Console logs print to the terminal running `electron:start`

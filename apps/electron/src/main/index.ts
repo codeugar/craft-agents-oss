@@ -41,9 +41,8 @@ function createWindow(): void {
     minHeight: 600,
     title: '',
     icon: iconExists ? iconPath : undefined,
-    transparent: true,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 16, y: 14 },  // y=14 centers in 42px header (42/2 - 7)
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
     vibrancy: 'under-window',
     visualEffectState: 'active',
     webPreferences: {

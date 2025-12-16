@@ -33,7 +33,7 @@ export function LeftSidebar({ links, isCollapsed }: LeftSidebarProps) {
             key={index}
             onClick={link.onClick}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md py-[7px] px-2 text-sm",
+              "flex w-full items-center gap-2 rounded-md py-[7px] px-2 text-sm select-none",
               link.variant === "default"
                 ? "bg-primary text-primary-foreground dark:bg-muted dark:text-foreground"
                 : "hover:bg-accent"

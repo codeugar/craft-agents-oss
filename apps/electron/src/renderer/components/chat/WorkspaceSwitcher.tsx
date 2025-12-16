@@ -87,32 +87,34 @@ export function WorkspaceSwitcher({
 
   return (
     <Select value={activeWorkspaceId || undefined} onValueChange={onSelect}>
-      {/* Trigger Button: Shows current workspace */}
+      {/* Trigger Button: Shows current workspace
+          Hover effect: subtle background tint */}
       <SelectTrigger
         className={cn(
-          "flex items-center gap-2 [&>span]:line-clamp-1 [&>span]:flex [&>span]:w-full [&>span]:items-center [&>span]:gap-1 [&>span]:truncate [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",
+          "flex items-center gap-1 w-full min-w-0 justify-start border-0 shadow-none focus:ring-0 focus-visible:ring-0 [&>span]:min-w-0 [&>span]:flex [&>span]:items-center [&>span]:gap-1 [&>svg]:hidden",
+          "text-foreground hover:bg-foreground/[0.03] transition-colors duration-150",
           isCollapsed &&
-            "flex h-9 w-9 shrink-0 items-center justify-center p-0 [&>span]:w-auto [&>svg]:hidden"
+            "flex h-9 w-9 shrink-0 items-center justify-center p-0 [&>span]:w-auto"
         )}
         aria-label="Select workspace"
       >
         <SelectValue placeholder="Select workspace">
           {/* Workspace Avatar: First letter of name */}
-          <Avatar className="h-5 w-5">
-            <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+          <Avatar className="h-4 w-4 shrink-0">
+            <AvatarFallback className="text-[10px] bg-primary text-primary-foreground">
               {selectedWorkspace?.name?.charAt(0) || 'W'}
             </AvatarFallback>
           </Avatar>
           {/* Workspace Name: Hidden when collapsed, gradient fade on overflow */}
           {!isCollapsed && (
-            <FadingText className="ml-2 font-sans" fadeWidth={36}>
+            <FadingText className="ml-1 font-sans min-w-0" fadeWidth={36}>
               {selectedWorkspace?.name || 'Select workspace'}
             </FadingText>
           )}
         </SelectValue>
       </SelectTrigger>
       {/* Dropdown Content: List of all workspaces */}
-      <SelectContent>
+      <SelectContent className="animate-none data-[state=open]:animate-none data-[state=closed]:animate-none">
         {workspaces.map((workspace) => (
           <SelectItem key={workspace.id} value={workspace.id}>
             <div className="flex items-center gap-3 font-sans">

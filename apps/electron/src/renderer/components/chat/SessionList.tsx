@@ -55,7 +55,7 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                 {index > 0 && <Separator />}
                 <button
                   className={cn(
-                    "group flex w-full flex-col items-start gap-2 px-4 py-3 text-left text-sm transition-all hover:bg-accent relative",
+                    "group flex w-full flex-col items-start gap-2 pl-5 pr-4 py-3 text-left text-sm transition-all hover:bg-foreground/5 relative",
                     session.selected === item.id && "bg-muted"  // Selected state
                   )}
                 onClick={() =>
