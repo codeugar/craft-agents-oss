@@ -1,6 +1,37 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { Text, useInput } from 'ink';
 import { isShiftOrAltEnter, isLineStart, isLineEnd, isShiftVariant, isWordLeft, isWordRight, isClearLine, isCancel, isDeleteWordBackward, isDeleteWordForward, isKillToEnd } from '../keyboard/index.ts';
+
+// Hex colors for ultrathink gradient (cyan → magenta → cyan)
+const ULTRATHINK_GRADIENT_HEX = [
+  '#00ffff', // cyan
+  '#00d7ff', // turquoise
+  '#00afff', // light blue
+  '#af00ff', // purple
+  '#ff00ff', // magenta
+  '#ff00ff', // magenta
+  '#af00ff', // purple
+  '#00afff', // light blue
+  '#00d7ff', // turquoise
+  '#00ffff', // cyan
+];
+
+// Find all occurrences of "ultrathink" (case-insensitive) and return their ranges
+const findUltrathinkRanges = (text: string): Array<{ start: number; end: number }> => {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const lowerText = text.toLowerCase();
+  let index = 0;
+  while ((index = lowerText.indexOf('ultrathink', index)) !== -1) {
+    ranges.push({ start: index, end: index + 10 });
+    index += 10;
+  }
+  return ranges;
+};
+
+// Get gradient color for a character position within ultrathink
+const getUltrathinkColor = (posInWord: number): string => {
+  return ULTRATHINK_GRADIENT_HEX[posInWord % ULTRATHINK_GRADIENT_HEX.length]!;
+};
 
 export interface TextInputProps {
   // Required
@@ -572,6 +603,19 @@ export const TextInput: React.FC<TextInputProps> = ({
   const selStart = selection ? Math.min(selection.anchor, selection.active) : -1;
   const selEnd = selection ? Math.max(selection.anchor, selection.active) : -1;
 
+  // Find ultrathink occurrences for gradient coloring
+  const ultrathinkRanges = findUltrathinkRanges(value);
+
+  // Helper to check if position is in an ultrathink range and get gradient color
+  const getUltrathinkStyle = (pos: number): string | null => {
+    for (const range of ultrathinkRanges) {
+      if (pos >= range.start && pos < range.end) {
+        return getUltrathinkColor(pos - range.start);
+      }
+    }
+    return null;
+  };
+
   for (let i = 0; i <= displayValue.length; i++) {
     const char = i < displayValue.length ? displayValue[i]! : ' ';
     const isAtCursor = i === cursor && !disabled;
@@ -579,6 +623,9 @@ export const TextInput: React.FC<TextInputProps> = ({
     // For newlines, show a visible space when cursor/selected, otherwise render the newline
     const isNewline = char === '\n';
     const displayChar = isNewline ? ' ' : char;
+
+    // Check for ultrathink gradient (use original value position, not masked)
+    const ultrathinkColor = !mask ? getUltrathinkStyle(i) : null;
 
     if (i === displayValue.length) {
       if (isAtCursor) {
@@ -591,6 +638,9 @@ export const TextInput: React.FC<TextInputProps> = ({
     } else if (isSelected) {
       parts.push(<Text key={i} backgroundColor="cyan" color="black">{displayChar}</Text>);
       if (isNewline) parts.push(<Text key={`${i}-nl`}>{'\n'}</Text>);
+    } else if (ultrathinkColor) {
+      // Apply ultrathink gradient color
+      parts.push(<Text key={i} color={ultrathinkColor}>{char}</Text>);
     } else {
       parts.push(<Text key={i}>{char}</Text>);
     }

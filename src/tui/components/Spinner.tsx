@@ -1,6 +1,7 @@
-import React, { memo, useState, useEffect } from 'react';
+import React, { memo, useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { formatDuration } from '../utils/markdown.js';
+import { renderUltrathinkGradient } from '../utils/gradient.js';
 
 // Full braille cell spinner - more vertically centered than top-weighted dots
 const SPINNER_FRAMES = ['⣷', '⣯', '⣟', '⡿', '⢿', '⣻', '⣽', '⣾'];
@@ -51,17 +52,32 @@ export interface ThinkingIndicatorProps {
   status?: string;
   elapsedMs?: number;
   animated?: boolean;
+  isUltrathink?: boolean;
 }
 
 /**
  * Thinking indicator with optional animated spinner and elapsed time
+ * Supports ultrathink mode with gradient text display
  */
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = memo(
-  ({ status, elapsedMs, animated = true }) => {
+  ({ status, elapsedMs, animated = true, isUltrathink = false }) => {
+    // Pre-compute gradient string for ultrathink display (memoized for perf)
+
     return (
       <Box paddingLeft={1} marginY={1}>
-        {animated ? <AnimatedSpinner /> : <Text color="yellow">●</Text>}
-        <Text color="gray"> {status || 'Thinking...'}</Text>
+        {animated ? (
+          <AnimatedSpinner color={isUltrathink ? 'magenta' : 'yellow'} />
+        ) : (
+          <Text color={isUltrathink ? 'magenta' : 'yellow'}>●</Text>
+        )}
+        {isUltrathink ? (
+          <>
+            <Text> </Text>
+            <Text>{renderUltrathinkGradient("Deep thinking...")}</Text>
+          </>
+        ) : (
+          <Text color="gray"> {status || 'Thinking...'}</Text>
+        )}
         {elapsedMs !== undefined && elapsedMs >= 1000 && (
           <Text dimColor> ({formatDuration(elapsedMs)})</Text>
         )}
