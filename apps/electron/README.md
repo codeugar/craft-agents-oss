@@ -13,7 +13,7 @@ bun run electron:start   # Build and run
 ## Architecture
 
 ```
-electron-app/
+apps/electron/
 ├── src/
 │   ├── main/           # Electron main process
 │   │   ├── index.ts    # Window creation, app lifecycle

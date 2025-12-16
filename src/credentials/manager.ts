@@ -13,7 +13,7 @@ import type { CredentialBackend } from './backends/types.ts';
 import type { CredentialId, CredentialType, StoredCredential } from './types.ts';
 import { SecureStorageBackend } from './backends/secure-storage.ts';
 import { EnvironmentBackend } from './backends/env.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 
 export class CredentialManager {
   private backends: CredentialBackend[] = [];

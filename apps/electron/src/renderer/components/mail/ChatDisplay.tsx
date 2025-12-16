@@ -37,6 +37,17 @@ interface ChatDisplayProps {
   onDelete: () => void
 }
 
+/**
+ * ChatDisplay - Main chat interface for a selected session
+ *
+ * Structure:
+ * - Toolbar: Delete button, More options dropdown
+ * - Session Header: Avatar, workspace name, message count, timestamp
+ * - Messages Area: Scrollable list of MessageBubble components
+ * - Input Area: Textarea + Send button
+ *
+ * Shows empty state when no session is selected
+ */
 export function ChatDisplay({
   session,
   onSendMessage,
@@ -68,9 +79,10 @@ export function ChatDisplay({
 
   return (
     <div className="flex h-full flex-col min-w-0">
-      {/* Toolbar */}
-      <div className="flex items-center p-2">
+      {/* === TOOLBAR: Action buttons at top === */}
+      <div className="flex h-[52px] items-center px-2">
         <div className="flex items-center gap-2">
+          {/* Delete Button with Tooltip */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="ghost" size="icon" disabled={!session} onClick={onDelete}>
@@ -82,6 +94,7 @@ export function ChatDisplay({
           </Tooltip>
         </div>
         <Separator orientation="vertical" className="mx-2 h-6 ml-auto" />
+        {/* More Options Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" disabled={!session}>
@@ -98,21 +111,25 @@ export function ChatDisplay({
 
       {session ? (
         <div className="flex flex-1 flex-col min-h-0 min-w-0">
-          {/* Session header */}
+          {/* === SESSION HEADER: Avatar, name, message count, timestamp === */}
           <div className="flex items-start p-4">
             <div className="flex items-start gap-4 text-sm">
+              {/* Workspace Avatar: First letter of name */}
               <Avatar>
                 <AvatarFallback>
                   {session.workspaceName?.charAt(0).toUpperCase() || 'W'}
                 </AvatarFallback>
               </Avatar>
               <div className="grid gap-1">
+                {/* Workspace Name */}
                 <div className="font-semibold">{session.workspaceName || 'Chat'}</div>
+                {/* Message Count */}
                 <div className="line-clamp-1 text-xs text-muted-foreground">
                   {session.messages.length} message{session.messages.length !== 1 ? 's' : ''}
                 </div>
               </div>
             </div>
+            {/* Last Message Timestamp (right side) */}
             {session.lastMessageAt && (
               <div className="ml-auto text-xs text-muted-foreground">
                 {format(new Date(session.lastMessageAt), "PPpp")}
@@ -121,10 +138,11 @@ export function ChatDisplay({
           </div>
           <Separator />
 
-          {/* Messages area */}
+          {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <ScrollArea className="flex-1 min-w-0">
             <div className="p-4 space-y-4 min-w-0">
               {session.messages.length === 0 ? (
+                /* Empty State: Welcome message for new sessions */
                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                   <div className="size-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
                     <MessageSquare className="size-7 text-primary" />
@@ -133,6 +151,7 @@ export function ChatDisplay({
                   <p className="text-sm mt-1">Start a conversation by typing a message below.</p>
                 </div>
               ) : (
+                /* Message List */
                 session.messages.map(message => (
                   <MessageBubble
                     key={message.id}
@@ -142,16 +161,18 @@ export function ChatDisplay({
                   />
                 ))
               )}
+              {/* Scroll Anchor: For auto-scroll to bottom */}
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
           <Separator className="mt-auto" />
 
-          {/* Input area */}
+          {/* === INPUT AREA: Textarea + Send button === */}
           <div className="p-4">
             <form onSubmit={handleSubmit}>
               <div className="grid gap-4">
+                {/* Message Textarea: Disabled when processing */}
                 <Textarea
                   className="p-4"
                   placeholder={`Message ${session.workspaceName || 'Chat'}...`}
@@ -161,9 +182,11 @@ export function ChatDisplay({
                   disabled={session.isProcessing}
                 />
                 <div className="flex items-center">
+                  {/* Disclaimer Text */}
                   <p className="text-xs text-muted-foreground">
                     Craft Agents can make mistakes. Please verify important information.
                   </p>
+                  {/* Send Button */}
                   <Button
                     type="submit"
                     size="sm"
@@ -179,6 +202,7 @@ export function ChatDisplay({
           </div>
         </div>
       ) : (
+        /* === EMPTY STATE: No session selected === */
         <div className="p-8 text-center text-muted-foreground flex-1 flex flex-col items-center justify-center">
           <div className="size-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
             <MessageSquare className="size-8 text-muted-foreground/50" />
@@ -191,7 +215,16 @@ export function ChatDisplay({
   )
 }
 
-// Message Bubble Component
+/**
+ * MessageBubble - Renders a single message based on its role
+ *
+ * Message Roles & Styles:
+ * - user:      Right-aligned, blue (bg-primary), white text
+ * - assistant: Left-aligned, gray (bg-muted), clickable URL/file links, streaming cursor
+ * - tool:      Left-aligned, bordered card with tool name header + result preview (max 500 chars)
+ * - error:     Left-aligned, red border/bg, warning icon + error message
+ * - status:    Centered pill badge with pulsing dot (e.g., "Thinking...")
+ */
 interface MessageBubbleProps {
   message: Message
   onOpenFile: (path: string) => void
@@ -199,6 +232,7 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
+  // Detects URLs and file paths in text, makes them clickable buttons
   const detectLinks = (text: string): React.ReactNode => {
     const urlRegex = /(https?:\/\/[^\s]+)/g
     const fileRegex = /((?:\/|~\/)[^\s]+\.(?:md|txt|json|yaml|yml|ts|tsx|js|jsx|py|go|rs|swift|kt|java|c|cpp|h|hpp|css|scss|html|xml|toml|ini|cfg|conf|sh|bash|zsh))/g
@@ -282,6 +316,7 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
     return parts
   }
 
+  // === USER MESSAGE: Right-aligned blue bubble ===
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -292,11 +327,13 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
     )
   }
 
+  // === ASSISTANT MESSAGE: Left-aligned gray bubble with clickable links ===
   if (message.role === 'assistant') {
     return (
       <div className="flex justify-start">
         <div className="max-w-[80%] bg-muted rounded-lg px-4 py-2 break-words">
           <p className="whitespace-pre-wrap text-sm">{detectLinks(message.content)}</p>
+          {/* Streaming Cursor: Pulsing bar while response is being generated */}
           {message.isStreaming && (
             <span className="inline-block w-2 h-4 bg-primary ml-1 animate-pulse rounded-sm" />
           )}
@@ -305,10 +342,12 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
     )
   }
 
+  // === TOOL MESSAGE: Bordered card with header + result preview ===
   if (message.role === 'tool') {
     return (
       <div className="flex justify-start">
         <div className="max-w-[85%] border rounded-lg overflow-hidden">
+          {/* Tool Header: Gear icon + tool name */}
           <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border-b">
             <div className="p-1 rounded bg-primary/10 text-primary">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -318,6 +357,7 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
             </div>
             <span className="text-xs font-semibold uppercase tracking-wide">{message.toolName}</span>
           </div>
+          {/* Tool Result: Shows preview (max 500 chars) or "Running..." spinner */}
           <div className="px-3 py-2">
             {message.toolResult ? (
               <pre className="text-xs text-muted-foreground overflow-x-auto max-h-48 overflow-y-auto font-mono bg-muted/30 p-2 rounded">
@@ -325,6 +365,7 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
                 {message.toolResult.length > 500 && '...'}
               </pre>
             ) : (
+              /* Running Indicator: Pulsing dot + "Running..." text */
               <div className="flex items-center gap-2 text-muted-foreground">
                 <span className="flex h-2 w-2 relative">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
@@ -339,10 +380,12 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
     )
   }
 
+  // === ERROR MESSAGE: Red bordered bubble with warning icon ===
   if (message.role === 'error') {
     return (
       <div className="flex justify-start">
         <div className="max-w-[80%] bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-2 break-words">
+          {/* Error Header: Warning icon + "Error" label */}
           <div className="flex items-center gap-2 text-xs text-destructive mb-1 font-semibold">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -355,10 +398,12 @@ function MessageBubble({ message, onOpenFile, onOpenUrl }: MessageBubbleProps) {
     )
   }
 
+  // === STATUS MESSAGE: Centered pill badge with pulsing dot ===
   if (message.role === 'status') {
     return (
       <div className="flex justify-center my-2">
         <div className="px-3 py-1 rounded-full bg-muted border text-xs font-medium text-muted-foreground flex items-center gap-2">
+          {/* Pulsing Status Indicator */}
           <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>
           {message.content}
         </div>

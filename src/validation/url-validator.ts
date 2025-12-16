@@ -8,7 +8,7 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import { SUMMARIZATION_MODEL } from '../config/models.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 import { parseError, parseSDKErrorText, type AgentError } from '../agent/errors.ts';
 import { getLastApiError } from '../cache-ttl-interceptor.ts';
 

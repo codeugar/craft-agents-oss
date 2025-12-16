@@ -1,6 +1,6 @@
 import { getCredentialManager } from '../credentials';
 import { CraftApi, getTeamIdFromProfile } from '../clients/craftApi';
-import { debug } from '../tui/utils/debug';
+import { debug } from '../utils/debug';
 
 const REFRESH_BUFFER_MS = 60 * 60 * 1000;
 const CRAFT_API_BASE_URL = 'https://api.craft.do';

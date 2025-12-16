@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { SUMMARIZATION_MODEL } from '../config/models.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from './debug.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 
 // Token limit for summarization trigger (roughly ~60KB of text)

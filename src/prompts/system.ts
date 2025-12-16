@@ -1,6 +1,6 @@
 import { formatPreferencesForPrompt } from '../config/preferences.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 
 /**
  * Get the current date/time context string

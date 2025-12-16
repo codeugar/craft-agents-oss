@@ -29,7 +29,7 @@ import {
   getApiKeyCredentialAsync,
 } from './cache.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 
 /**
  * Configuration for SubAgentManager

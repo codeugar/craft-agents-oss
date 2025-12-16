@@ -2,11 +2,47 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Important:** Keep this file up-to-date whenever functionality changes. This should always reflect the current state of the codebase, including architecture, interfaces, and key patterns.
+**Important:** Keep documentation up-to-date whenever functionality changes. Update the relevant files based on what you changed:
+
+| If you change... | Update these docs |
+|------------------|-------------------|
+| `src/` (agent, auth, config, credentials, mcp, prompts, utils) | This file (`CLAUDE.md`) |
+| `apps/electron/` | `apps/electron/CLAUDE.md`, `apps/electron/README.md` |
+| `apps/tui/` | `apps/tui/CLAUDE.md`, `apps/tui/README.md` |
+| `packages/core/` | `packages/core/CLAUDE.md`, `packages/core/README.md` |
+| `packages/session-manager/` | `packages/session-manager/CLAUDE.md`, `packages/session-manager/README.md` |
+| Monorepo structure, commands, releases | This file (`CLAUDE.md`), root `README.md` |
 
 ## Project Overview
 
-Craft Agent is a Claude Code-like terminal interface for managing Craft documents. It uses the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) to interact with Claude models and connects to Craft MCP servers for document operations. Supports multiple workspaces with separate conversations and OAuth authentication.
+Craft Agent is a Claude Code-like interface for managing Craft documents. It uses the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) to interact with Claude models and connects to Craft MCP servers for document operations. Supports multiple workspaces with separate conversations and OAuth authentication.
+
+**Two interfaces available:**
+- **TUI (Terminal)** - Interactive CLI similar to Claude Code
+- **Electron (Desktop)** - GUI with multi-session inbox view
+
+## Monorepo Structure
+
+This is a Bun-based monorepo with the following organization:
+
+```
+craft-tui-agent/
+├── apps/
+│   ├── electron/          # Electron desktop app (GUI)
+│   └── tui/               # Terminal interface (CLI)
+├── packages/
+│   ├── core/              # Shared types and utilities
+│   └── session-manager/   # Session orchestration (event-driven)
+└── src/                   # Core business logic (agent, auth, storage)
+```
+
+**Current State:** This is a transitional architecture. The `packages/` contain shared types and session management, but most business logic still lives in `src/`. Apps use relative imports (`../../../src/`) to access it.
+
+**Sub-project documentation:**
+- [`apps/electron/CLAUDE.md`](apps/electron/CLAUDE.md) - Electron app details
+- [`apps/tui/CLAUDE.md`](apps/tui/CLAUDE.md) - TUI app details
+- [`packages/core/CLAUDE.md`](packages/core/CLAUDE.md) - Core types
+- [`packages/session-manager/CLAUDE.md`](packages/session-manager/CLAUDE.md) - Session management
 
 ## Commands
 
@@ -14,20 +50,24 @@ Craft Agent is a Claude Code-like terminal interface for managing Craft document
 # Install dependencies
 bun install
 
-# Run the application
-bun start                # or: bun run src/index.tsx
+# ===== TUI (Terminal) =====
+bun start                # Run TUI
+bun dev                  # Development with auto-reload
 
-# Development with auto-reload
-bun dev
+# ===== Electron (Desktop) =====
+bun run electron:start   # Build and run Electron app
+bun run electron:build   # Build only
+bun run electron:dev     # Vite dev server (renderer only)
 
-# Type checking
-bun run typecheck
+# ===== Type Checking =====
+bun run typecheck        # Check root project
+bun run typecheck:all    # Check all packages
 
-# Install globally (creates 'craft' command)
-bun link
+# ===== Global Install =====
+bun link                 # Creates 'craft' command
 ```
 
-**CLI Flags:**
+**TUI CLI Flags:**
 - `--url, -u` - Override MCP server URL
 - `--token, -t` - Override bearer token (testing)
 - `--model, -m` - Override model selection
@@ -63,9 +103,12 @@ bash scripts/uninstall.sh
 
 ## Project Structure
 
+### Core Business Logic (`src/`)
+
+This directory contains the shared business logic used by both TUI and Electron apps:
+
 ```
 src/
-├── index.tsx                 # CLI entry point, setup routing
 ├── agent/
 │   └── craft-agent.ts        # Claude Agent SDK wrapper
 ├── agents/
@@ -93,50 +136,54 @@ src/
 │   └── validation.ts         # SDK-based MCP connection validation
 ├── prompts/
 │   └── system.ts             # System prompt with date/time and preferences
-├── utils/
-│   └── summarize.ts          # Shared summarization for large tool results
-└── tui/
-    ├── App.tsx               # Main app, command routing
-    ├── components/
-    │   ├── ApiAuth.tsx           # API key entry for REST APIs
-    │   ├── ApiKeyChange.tsx      # Change API key dialog
-    │   ├── AskUserQuestion.tsx   # Interactive question UI for SDK hooks
-    │   ├── Header.tsx            # Status bar (model, workspace, tokens, cost)
-    │   ├── Input.tsx             # Main chat input with history & file handling
-    │   ├── McpAuth.tsx           # OAuth flow for MCP servers
-    │   ├── Messages.tsx          # Message display with streaming
-    │   ├── ModelSelector.tsx     # Model selection UI
-    │   ├── Setup.tsx             # First-run configuration wizard
-    │   ├── Spinner.tsx           # Thinking indicator
-    │   ├── TextInput.tsx         # Shared text input (cursor nav, selection, masking)
-    │   ├── ToolCall.tsx          # Tool execution visualization
-    │   ├── WorkspaceAdd.tsx      # Add new workspace wizard
-    │   ├── WorkspaceRename.tsx   # Rename workspace dialog
-    │   └── WorkspaceSelector.tsx # Workspace switcher
-    ├── hooks/
-    │   ├── useAgent.ts           # Agent state, streaming, token tracking
-    │   ├── useElapsedTime.ts     # Track elapsed time during processing
-    │   ├── useHistory.ts         # Command history (arrow keys)
-    │   └── useResize.ts          # Terminal resize handling
-    ├── keyboard/
-    │   ├── index.ts              # Public exports
-    │   ├── sequences.ts          # Terminal escape sequence definitions
-    │   ├── actions.ts            # Keyboard action types
-    │   └── useKeyboard.ts        # Input normalization hook
-    └── utils/
-        ├── files.ts              # File attachment processing
-        ├── markdown.ts           # Markdown rendering with Shiki
-        ├── terminalProgress.ts   # Progress bar display
-        └── toolStatus.ts         # Tool status tracking
+└── utils/
+    ├── debug.ts              # Debug logging to /tmp/craft-debug.log
+    ├── files.ts              # File attachment processing (shared with TUI)
+    └── summarize.ts          # Shared summarization for large tool results
+```
+
+> **Note:** TUI components and hooks live in `apps/tui/src/`. This `src/` directory contains only shared business logic used by both TUI and Electron apps.
+
+### Workspace Packages (`packages/`)
+
+```
+packages/
+├── core/                     # @craft-agent/core
+│   └── src/
+│       ├── types/            # Workspace, Session, Message, Agent types
+│       └── utils/            # Shared utilities (debug)
+└── session-manager/          # @craft-agent/session-manager
+    └── src/
+        ├── session-manager.ts  # Event-driven session orchestration
+        └── event-emitter.ts    # Type-safe EventEmitter base
+```
+
+### Applications (`apps/`)
+
+```
+apps/
+├── electron/                 # @craft-agent/electron
+│   └── src/
+│       ├── main/             # Electron main process
+│       ├── preload/          # Context bridge
+│       ├── renderer/         # React UI (Vite + shadcn)
+│       └── shared/           # IPC types
+└── tui/                      # @craft-agent/tui
+    └── src/
+        ├── components/       # Ink/React terminal components
+        ├── hooks/            # TUI-specific hooks
+        ├── keyboard/         # Keyboard handling
+        └── utils/            # Terminal utilities
 ```
 
 ## Architecture
 
-### Entry Point (`src/index.tsx`)
+### Entry Point (`apps/tui/src/index.tsx`)
 - Uses `meow` for CLI argument parsing
 - Enables bracketed paste mode for file drag-drop
 - Routes to Setup wizard or main App based on config
 - Config stored in `~/.craft-agent/config.json`
+- Imports business logic from `../../../src/`
 
 ### Agent Layer (`src/agent/craft-agent.ts`)
 Core `CraftAgent` class that:
@@ -183,7 +230,7 @@ interface Workspace {
 - **Workspace OAuth (`workspace_oauth::{workspaceId}`)**: For MCP server authentication. Each MCP server has its own OAuth, separate from Craft platform.
 - The `getWorkspaceAccessTokenAsync()` function does NOT fall back to Craft OAuth - MCP servers require their own credentials.
 
-### Setup Flow (`src/tui/components/Setup.tsx`)
+### Setup Flow (`apps/tui/src/components/Setup.tsx`)
 The setup wizard uses a "Craft-first" flow:
 
 1. **Welcome** - Introduction
@@ -199,7 +246,7 @@ The setup wizard uses a "Craft-first" flow:
 
 **Existing MCP shortcut:** If user already has a workspace configured, setup skips steps 2-3 and goes directly to billing method selection.
 
-**CraftSpaceSelector** (`src/tui/components/craftAuth/CraftSpaceSelector.tsx`):
+**CraftSpaceSelector** (`apps/tui/src/components/craftAuth/CraftSpaceSelector.tsx`):
 - After selecting a space, checks for existing fullSpace MCP links
 - If found: shows list with existing links + "Create new" option
 - If none: auto-creates a new MCP link named "Craft Agent MCP"
@@ -390,13 +437,13 @@ Shared summarization utility: `src/utils/summarize.ts`
 - Local callback server on port 8914
 - Automatic token refresh
 
-### TUI Layer (`src/tui/`)
+### TUI Layer (`apps/tui/src/`)
 **App.tsx** - Main component handling:
 - Slash commands: `/help`, `/clear`, `/paste`, `/tools`, `/settings`, `/prefs`, `/setup`, `/cost`, `/model`, `/workspace`, `/debug`, `/exit`
 - Modal state (model selector, workspace selector, etc.)
 - Message persistence
 
-**useAgent hook** - State management:
+**useAgent hook** (`hooks/core/useAgent.ts`) - State management:
 - 50ms throttled streaming updates
 - Token usage tracking (input, output, cache, cost)
 - Permission and question queue handling
@@ -470,7 +517,7 @@ Opus is expensive ($15/MTok input vs $3/MTok for Sonnet). The 2x cache write cos
 | 5-minute (default) | 1.25x base | 0.1x base |
 | 1-hour (extended) | 2x base | 0.1x base |
 
-### Keyboard Input Layer (`src/tui/keyboard/`)
+### Keyboard Input Layer (`apps/tui/src/keyboard/`)
 
 Centralized detection helpers for keyboard shortcuts. Works WITH Ink's `useInput` (not as a wrapper).
 
@@ -544,7 +591,7 @@ Different terminals/Ink versions may deliver only the raw character without sett
 
 **Why Header Works But Input Didn't:** Header always renders in exactly 1 line (never wraps). `previousLineCount` always matches actual output. Input with character-by-character cursor rendering can wrap to multiple lines depending on terminal width.
 
-**The Solution (`src/tui/hooks/useResize.ts`):**
+**The Solution (`apps/tui/src/hooks/core/useResize.ts`):**
 1. **Debounce resize events (50ms)** - Prevents multiple clears during drag resize
 2. **Clear screen synchronously** before any state updates (`\x1b[2J\x1b[3J\x1b[H`)
 3. **Increment staticResetKey** via callback in same setTimeout - React 18 batches both state updates
@@ -563,7 +610,7 @@ useResize(handleTerminalResize);
 
 **Key insight:** The `/clear` command worked perfectly because it clears screen THEN updates state. We replicated this pattern for resize with debouncing to prevent flicker.
 
-### TextInput Component (`src/tui/components/TextInput.tsx`)
+### TextInput Component (`apps/tui/src/components/TextInput.tsx`)
 Shared text input used by all input dialogs (API keys, bearer tokens, workspace names, etc.).
 
 **Features:**
@@ -588,7 +635,7 @@ Shared text input used by all input dialogs (API keys, bearer tokens, workspace 
 
 Debug logging is disabled by default. Enable it with the `--debug` flag to write logs to `/tmp/craft-debug.log`.
 
-Use the `debug()` function from `src/tui/utils/debug.ts` to add log entries. These calls are no-ops unless `--debug` is passed.
+Use the `debug()` function from `src/utils/debug.ts` to add log entries. These calls are no-ops unless `--debug` is passed.
 
 **Important:** Never trim or truncate log output (e.g., using `.substring()`). Full log content is essential for debugging.
 
@@ -603,10 +650,19 @@ tail -f /tmp/craft-debug.log
 
 ## Tech Stack
 
-- **Runtime**: Bun
-- **TUI**: Ink 4.x (React for CLIs)
+### Core
+- **Runtime**: Bun (package manager, bundler, runtime)
 - **AI**: @anthropic-ai/claude-agent-sdk
 - **MCP**: @modelcontextprotocol/sdk (via Agent SDK)
-- **Credentials**: AES-256-GCM encrypted file storage (no OS keychain)
+- **Credentials**: AES-256-GCM encrypted file storage
+
+### TUI App
+- **Framework**: Ink 5.x (React for CLIs)
 - **Markdown**: marked + marked-terminal + Shiki syntax highlighting
 - **CLI**: meow for argument parsing
+
+### Electron App
+- **Framework**: Electron + React
+- **UI**: shadcn/ui + Tailwind CSS v4
+- **Bundler**: esbuild (main/preload) + Vite (renderer)
+- **IPC**: Type-safe channels with event streaming

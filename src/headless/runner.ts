@@ -3,7 +3,7 @@ import { CraftMcpClient } from '../mcp/client.ts';
 import { SubAgentManager } from '../agents/manager.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { getWorkspaceAccessTokenAsync, listSessions, getOrCreateSessionById, updateSessionSdkId } from '../config/storage.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import type {
   HeadlessConfig,

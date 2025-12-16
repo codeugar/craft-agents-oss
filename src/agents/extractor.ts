@@ -9,7 +9,7 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import type { McpServerConfig, ApiConfig, Concern } from './types.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 import { EXTRACTION_MODEL } from '../config/models.ts';
 
 export interface ExtractionResult {

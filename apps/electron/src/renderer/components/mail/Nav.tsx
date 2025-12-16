@@ -12,13 +12,24 @@ interface NavProps {
   isCollapsed: boolean
   links: {
     title: string
-    label?: string
+    label?: string       // Optional badge (e.g., count)
     icon: LucideIcon
-    variant: "default" | "ghost"
+    variant: "default" | "ghost"  // "default" = highlighted, "ghost" = subtle
     onClick?: () => void
   }[]
 }
 
+/**
+ * Nav - Vertical list of navigation buttons with icons
+ *
+ * Renders differently based on collapsed state:
+ * - Expanded: Full button with icon, title, and optional label badge
+ * - Collapsed: Icon-only button wrapped in Tooltip (shows title + label on hover)
+ *
+ * Link variants:
+ * - "default": Highlighted style (used for active/selected items)
+ * - "ghost": Subtle style (used for inactive items)
+ */
 export function Nav({ links, isCollapsed }: NavProps) {
   return (
     <div
@@ -28,6 +39,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
       <nav className="grid gap-1 px-2 group-data-[collapsed=true]:justify-center group-data-[collapsed=true]:px-2">
         {links.map((link, index) =>
           isCollapsed ? (
+            /* Collapsed Mode: Icon-only button with Tooltip */
             <Tooltip key={index} delayDuration={0}>
               <TooltipTrigger asChild>
                 <button
@@ -43,6 +55,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
                   <span className="sr-only">{link.title}</span>
                 </button>
               </TooltipTrigger>
+              {/* Tooltip: Shows title + label on hover */}
               <TooltipContent side="right" className="flex items-center gap-4">
                 {link.title}
                 {link.label && (
@@ -53,6 +66,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
               </TooltipContent>
             </Tooltip>
           ) : (
+            /* Expanded Mode: Full button with icon, title, and label */
             <button
               key={index}
               onClick={link.onClick}
@@ -65,6 +79,7 @@ export function Nav({ links, isCollapsed }: NavProps) {
             >
               <link.icon className="mr-2 h-5 w-5" />
               {link.title}
+              {/* Label Badge: Shows count or status on the right */}
               {link.label && (
                 <span
                   className={cn(

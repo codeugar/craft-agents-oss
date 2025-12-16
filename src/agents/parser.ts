@@ -9,7 +9,7 @@
 
 import yaml from 'js-yaml';
 import type { SubAgentDefinition, McpServerConfig } from './types.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 
 /**
  * Block structure from Craft MCP blocks_get response

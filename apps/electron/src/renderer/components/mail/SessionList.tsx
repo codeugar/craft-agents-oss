@@ -15,10 +15,22 @@ interface SessionListProps {
   onUnarchive?: (sessionId: string) => void
 }
 
+/**
+ * SessionList - Scrollable list of session cards
+ *
+ * Each card displays:
+ * - Workspace name + processing indicator (pulsing dot)
+ * - Relative timestamp ("2 hours ago")
+ * - Message count + agent name (if applicable)
+ * - Preview text (first 300 chars of last message)
+ * - Processing badge when agent is working
+ *
+ * Hover actions: Archive/Unarchive, Delete
+ */
 export function SessionList({ items, onDelete, onArchive, onUnarchive }: SessionListProps) {
   const [session, setSession] = useSession()
 
-  // Sort sessions by lastMessageAt descending
+  // Sort by most recent activity first
   const sortedItems = [...items].sort((a, b) =>
     (b.lastMessageAt || 0) - (a.lastMessageAt || 0)
   )
@@ -27,6 +39,7 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
     <ScrollArea className="h-screen">
       <div className="flex flex-col gap-2 p-4 pt-0">
         {sortedItems.length === 0 ? (
+          /* Empty State */
           <p className="text-sm text-muted-foreground text-center py-8">
             No conversations yet
           </p>
@@ -36,11 +49,12 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
             const preview = lastMessage?.content?.slice(0, 300) || 'New conversation'
 
             return (
+              /* Session Card: Clickable button that selects the session */
               <button
                 key={item.id}
                 className={cn(
                   "group flex flex-col items-start gap-2 rounded-lg border p-3 text-left text-sm transition-all hover:bg-accent relative",
-                  session.selected === item.id && "bg-muted"
+                  session.selected === item.id && "bg-muted"  // Selected state
                 )}
                 onClick={() =>
                   setSession({
@@ -49,14 +63,18 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                   })
                 }
               >
+                {/* Card Header Row */}
                 <div className="flex w-full flex-col gap-1">
                   <div className="flex items-center">
                     <div className="flex items-center gap-2">
+                      {/* Workspace Name */}
                       <div className="font-semibold">{item.workspaceName || 'Workspace'}</div>
+                      {/* Processing Indicator: Pulsing blue dot */}
                       {item.isProcessing && (
                         <span className="flex h-2 w-2 rounded-full bg-primary animate-pulse" />
                       )}
                     </div>
+                    {/* Relative Timestamp */}
                     <div
                       className={cn(
                         "ml-auto text-xs",
@@ -70,6 +88,7 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                       }) : ''}
                     </div>
                   </div>
+                  {/* Meta Row: Message count + Agent name */}
                   <div className="flex items-center gap-2 text-xs font-medium">
                     <span>{item.messages.length} message{item.messages.length !== 1 ? 's' : ''}</span>
                     {item.agentName && (
@@ -80,17 +99,20 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                     )}
                   </div>
                 </div>
+                {/* Preview Text: First 300 chars of last message */}
                 <div className="line-clamp-2 text-xs text-muted-foreground">
                   {preview}
                 </div>
+                {/* Processing Badge */}
                 {item.isProcessing && (
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary">Processing</Badge>
                   </div>
                 )}
 
-                {/* Action buttons - shown on hover */}
+                {/* Hover Action Buttons: Archive, Unarchive, Delete */}
                 <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Archive Button (shown in Inbox view) */}
                   {onArchive && (
                     <Button
                       variant="ghost"
@@ -105,6 +127,7 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                       <Archive className="size-3.5 text-muted-foreground hover:text-foreground" />
                     </Button>
                   )}
+                  {/* Unarchive Button (shown in Archive view) */}
                   {onUnarchive && (
                     <Button
                       variant="ghost"
@@ -119,6 +142,7 @@ export function SessionList({ items, onDelete, onArchive, onUnarchive }: Session
                       <ArchiveRestore className="size-3.5 text-muted-foreground hover:text-foreground" />
                     </Button>
                   )}
+                  {/* Delete Button */}
                   <Button
                     variant="ghost"
                     size="icon"

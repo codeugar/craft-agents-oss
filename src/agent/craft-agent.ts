@@ -11,8 +11,8 @@ import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { updatePreferences, loadPreferences, type UserPreferences } from '../config/preferences.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
-import type { FileAttachment } from '../tui/utils/files.ts';
-import { debug } from '../tui/utils/debug.ts';
+import type { FileAttachment } from '../utils/files.ts';
+import { debug } from '../utils/debug.ts';
 import { estimateTokens, summarizeLargeResult, TOKEN_LIMIT } from '../utils/summarize.ts';
 // Documentation is now served via external HTTP MCP at agents.craft.do/docs/mcp
 

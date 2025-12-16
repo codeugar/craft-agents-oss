@@ -20,7 +20,7 @@ import type {
   CachedSubAgent,
   AgentRegistry,
 } from './types.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
 const AGENTS_DIR = join(CONFIG_DIR, 'agents');

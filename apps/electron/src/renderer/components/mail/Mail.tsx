@@ -18,12 +18,6 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { Separator } from "@/components/ui/separator"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -60,14 +54,21 @@ interface MailProps {
   onRefreshAgents: () => void
 }
 
-// Group agents by folder path
+/**
+ * AgentFolder - Hierarchical structure for organizing agents
+ * Agents can be nested in folders up to 3 levels deep
+ */
 interface AgentFolder {
-  name: string
-  path: string[]
-  agents: SubAgentMetadata[]
-  subfolders: AgentFolder[]
+  name: string                    // Folder name (empty string for root)
+  path: string[]                  // Full path from root
+  agents: SubAgentMetadata[]      // Agents directly in this folder
+  subfolders: AgentFolder[]       // Nested folders
 }
 
+/**
+ * Groups flat agent list into hierarchical folder structure
+ * Uses agent.folderPath to determine nesting
+ */
 function groupAgentsByFolder(agents: SubAgentMetadata[]): AgentFolder {
   const root: AgentFolder = { name: '', path: [], agents: [], subfolders: [] }
 
@@ -104,82 +105,127 @@ interface AgentTreeProps {
   getConversationCount: (agentId: string) => number
 }
 
+// Union type for sorting agents and folders together alphabetically
+type TreeItem =
+  | { type: 'agent'; agent: SubAgentMetadata }
+  | { type: 'folder'; folder: AgentFolder }
+
+/**
+ * AgentTree - Recursive component for rendering agent folder hierarchy
+ *
+ * Elements:
+ * - Collapsible folder with FolderOpen/ChevronRight icons
+ * - Vertical connector line for nested items
+ * - Agent buttons with Bot icon, name, and conversation count
+ */
 function AgentTree({ folder, level, isCollapsed, selectedAgentId, onSelectAgent, getConversationCount }: AgentTreeProps) {
   const [isOpen, setIsOpen] = React.useState(true)
 
   if (isCollapsed && level > 0) return null
 
+  // Combine agents and folders into a single sorted list
+  const items: TreeItem[] = React.useMemo(() => {
+    const agentItems: TreeItem[] = folder.agents.map(agent => ({ type: 'agent', agent }))
+    const folderItems: TreeItem[] = folder.subfolders.map(f => ({ type: 'folder', folder: f }))
+    const all = [...agentItems, ...folderItems]
+    // Sort alphabetically by name, folders and agents interleaved
+    all.sort((a, b) => {
+      const nameA = a.type === 'agent' ? a.agent.name.split('/').pop()! : a.folder.name
+      const nameB = b.type === 'agent' ? b.agent.name.split('/').pop()! : b.folder.name
+      return nameA.localeCompare(nameB)
+    })
+    return all
+  }, [folder.agents, folder.subfolders])
+
+  // isInsideFolder: true for agents nested inside a folder (indentation handled by container)
+  const renderAgent = (agent: SubAgentMetadata, _isInsideFolder: boolean) => (
+    <button
+      key={agent.id}
+      onClick={() => onSelectAgent(agent.id, agent.name)}
+      className={cn(
+        "flex items-center gap-2 w-full py-1.5 px-2 hover:bg-accent rounded-md text-sm",
+        selectedAgentId === agent.id && "bg-accent"
+      )}
+    >
+      <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <span className="truncate">{agent.name.split('/').pop()}</span>
+      <span className="ml-auto text-xs text-muted-foreground/50 opacity-0 group-hover/agents:opacity-100 transition-opacity">
+        {getConversationCount(agent.id)}
+      </span>
+    </button>
+  )
+
   return (
-    <div className={cn(level > 0 && "ml-3")}>
+    <div className={cn(level > 1 && "ml-3")}>
       {folder.name && (
         <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-          <CollapsibleTrigger className="flex items-center gap-1 w-full py-1 px-2 hover:bg-accent rounded-md text-sm">
-            <ChevronRight className={cn("h-3 w-3 transition-transform", isOpen && "rotate-90")} />
-            <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+          <CollapsibleTrigger className="group flex items-center gap-2 w-full py-1.5 px-2 hover:bg-accent rounded-md text-sm">
+            <div className="relative h-3.5 w-3.5 shrink-0">
+              <FolderOpen className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground transition-opacity group-hover:opacity-0" />
+              <ChevronRight className={cn(
+                "absolute inset-0 h-3.5 w-3.5 text-muted-foreground transition-opacity opacity-0 group-hover:opacity-100",
+                isOpen && "rotate-90"
+              )} />
+            </div>
             <span className="truncate">{folder.name}</span>
           </CollapsibleTrigger>
-          <CollapsibleContent>
-            {folder.agents.map(agent => (
-              <button
-                key={agent.id}
-                onClick={() => onSelectAgent(agent.id, agent.name)}
-                className={cn(
-                  "flex items-center gap-2 w-full py-1.5 px-2 ml-4 hover:bg-accent rounded-md text-sm",
-                  selectedAgentId === agent.id && "bg-accent"
-                )}
-              >
-                <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="truncate">{agent.name.split('/').pop()}</span>
-                <span className="ml-auto text-xs text-muted-foreground">{getConversationCount(agent.id)}</span>
-              </button>
-            ))}
-            {folder.subfolders.map(subfolder => (
+          <CollapsibleContent className="relative">
+            {/* Vertical connector line - aligned with center of chevron (px-2 + half of w-3.5) */}
+            <div className="absolute left-[15px] top-0 bottom-1.5 w-px bg-border rounded-full" />
+            <div className="pl-6">
+              {items.map(item =>
+                item.type === 'agent' ? (
+                  renderAgent(item.agent, true)
+                ) : (
+                  <AgentTree
+                    key={item.folder.path.join('/')}
+                    folder={item.folder}
+                    level={level + 1}
+                    isCollapsed={isCollapsed}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={onSelectAgent}
+                    getConversationCount={getConversationCount}
+                  />
+                )
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+      {!folder.name && (
+        <>
+          {items.map(item =>
+            item.type === 'agent' ? (
+              renderAgent(item.agent, false)
+            ) : (
               <AgentTree
-                key={subfolder.path.join('/')}
-                folder={subfolder}
+                key={item.folder.path.join('/')}
+                folder={item.folder}
                 level={level + 1}
                 isCollapsed={isCollapsed}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={onSelectAgent}
                 getConversationCount={getConversationCount}
               />
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-      {!folder.name && (
-        <>
-          {folder.agents.map(agent => (
-            <button
-              key={agent.id}
-              onClick={() => onSelectAgent(agent.id, agent.name)}
-              className={cn(
-                "flex items-center gap-2 w-full py-1.5 px-2 hover:bg-accent rounded-md text-sm",
-                selectedAgentId === agent.id && "bg-accent"
-              )}
-            >
-              <Bot className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="truncate">{agent.name}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{getConversationCount(agent.id)}</span>
-            </button>
-          ))}
-          {folder.subfolders.map(subfolder => (
-            <AgentTree
-              key={subfolder.path.join('/')}
-              folder={subfolder}
-              level={level + 1}
-              isCollapsed={isCollapsed}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={onSelectAgent}
-              getConversationCount={getConversationCount}
-            />
-          ))}
+            )
+          )}
         </>
       )}
     </div>
   )
 }
 
+/**
+ * Mail - Main 3-panel layout container
+ *
+ * Layout: [Sidebar 20%] | [Session List + Chat Display 80%]
+ *         The right side is split into [Session List 40%] | [Chat Display 60%]
+ *
+ * View Modes:
+ * - 'inbox': Shows non-archived sessions
+ * - 'archive': Shows archived sessions
+ * - 'agent': Shows sessions for a specific agent
+ */
 export function Mail({
   workspaces,
   sessions,
@@ -273,13 +319,16 @@ export function Mail({
 
   return (
     <TooltipProvider delayDuration={0}>
+      {/* === OUTER LAYOUT: Sidebar | Main Content === */}
       <ResizablePanelGroup
         direction="horizontal"
         onLayout={(sizes: number[]) => {
-          localStorage.setItem('mail-layout', JSON.stringify(sizes))
+          localStorage.setItem('mail-layout-outer', JSON.stringify(sizes))
         }}
         className="h-full items-stretch"
       >
+        {/* === PANEL 1: SIDEBAR (Left) ===
+            Collapsible navigation with workspace switcher, nav links, and agent tree */}
         <ResizablePanel
           defaultSize={defaultLayout[0]}
           collapsedSize={navCollapsedSize}
@@ -301,12 +350,13 @@ export function Mail({
           )}
         >
           <div className="flex h-full flex-col">
-            {/* Top section */}
+            {/* Sidebar Top Section */}
             <div className="flex-1 flex flex-col min-h-0">
+              {/* WorkspaceSwitcher: Dropdown to select active workspace */}
               <div
                 className={cn(
-                  "flex h-13 items-center justify-center shrink-0",
-                  isCollapsed ? "h-13" : "px-2"
+                  "flex h-[52px] items-center justify-center shrink-0",
+                  isCollapsed ? "h-[52px]" : "px-2"
                 )}
               >
                 <WorkspaceSwitcher
@@ -317,19 +367,20 @@ export function Mail({
                 />
               </div>
               <Separator />
+              {/* Primary Nav: Inbox, Archive, New Chat */}
               <Nav
                 isCollapsed={isCollapsed}
                 links={[
                   {
                     title: "Inbox",
-                    label: String(inboxCount),
+                    label: String(inboxCount),  // Badge: non-archived count
                     icon: Inbox,
                     variant: viewMode === 'inbox' ? "default" : "ghost",
                     onClick: handleInboxClick,
                   },
                   {
                     title: "Archive",
-                    label: String(archiveCount),
+                    label: String(archiveCount),  // Badge: archived count
                     icon: Archive,
                     variant: viewMode === 'archive' ? "default" : "ghost",
                     onClick: handleArchiveClick,
@@ -344,10 +395,11 @@ export function Mail({
                 ]}
               />
               <Separator />
-              {/* Agent list */}
+              {/* Agent Tree: Hierarchical list of agents (expanded mode only) */}
               {!isCollapsed && (
-                <div className="flex-1 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2">
+                <div className="group/agents flex-1 min-h-0 flex flex-col overflow-hidden">
+                  {/* Agents Section Header with Refresh button */}
+                  <div className="flex items-center justify-between px-4 py-2 shrink-0">
                     <span className="text-xs font-medium text-muted-foreground">Agents</span>
                     <button
                       onClick={onRefreshAgents}
@@ -356,7 +408,8 @@ export function Mail({
                       Refresh
                     </button>
                   </div>
-                  <ScrollArea className="h-[calc(100%-2.5rem)]">
+                  {/* Scrollable Agent Tree */}
+                  <ScrollArea className="flex-1 min-h-0">
                     <div className="px-2 pb-2">
                       {agents.length === 0 ? (
                         <p className="text-xs text-muted-foreground px-2 py-4">
@@ -376,6 +429,7 @@ export function Mail({
                   </ScrollArea>
                 </div>
               )}
+              {/* Agents Icon: Shown when sidebar is collapsed */}
               {isCollapsed && (
                 <Nav
                   isCollapsed={isCollapsed}
@@ -391,9 +445,10 @@ export function Mail({
               )}
             </div>
 
-            {/* Bottom section - Settings */}
+            {/* Sidebar Bottom Section */}
             <div className="mt-auto shrink-0">
               <Separator />
+              {/* Settings Nav */}
               <Nav
                 isCollapsed={isCollapsed}
                 links={[
@@ -409,67 +464,65 @@ export function Mail({
             </div>
           </div>
         </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={defaultLayout[1]} minSize={15} className="overflow-hidden min-w-0">
-          <Tabs defaultValue="all" className="h-full flex flex-col min-w-0">
-            <div className="flex items-center px-4 py-2 min-w-0">
-              <h1 className="text-xl font-bold truncate">{listTitle}</h1>
-              <TabsList className="ml-auto shrink-0">
-                <TabsTrigger
-                  value="all"
-                  className="text-muted-foreground"
-                >
-                  All
-                </TabsTrigger>
-                <TabsTrigger
-                  value="recent"
-                  className="text-muted-foreground"
-                >
-                  Recent
-                </TabsTrigger>
-              </TabsList>
-            </div>
-            <Separator />
-            <div className="bg-background/95 p-4 backdrop-blur supports-backdrop-filter:bg-background/60 min-w-0">
-              <form>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    placeholder="Search"
-                    className="pl-10"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
+
+        <ResizableHandle />
+
+        {/* === PANEL 2: MAIN CONTENT (Right) ===
+            Nested resizable layout: Session List | Chat Display */}
+        <ResizablePanel defaultSize={defaultLayout[1] + defaultLayout[2]} minSize={45} className="overflow-hidden min-w-0">
+          {/* Inner Layout: Session List (40%) | Chat Display (60%) */}
+          <ResizablePanelGroup
+            direction="horizontal"
+            onLayout={(sizes: number[]) => {
+              localStorage.setItem('mail-layout-inner', JSON.stringify(sizes))
+            }}
+            className="h-full"
+          >
+            {/* === SESSION LIST PANEL === */}
+            <ResizablePanel defaultSize={40} minSize={25} className="overflow-hidden min-w-0">
+              <div className="h-full flex flex-col min-w-0">
+                {/* Header: Dynamic title (Conversations/Archive/Agent name) */}
+                <div className="flex h-[52px] items-center px-4 min-w-0">
+                  <h1 className="text-xl font-bold truncate">{listTitle}</h1>
                 </div>
-              </form>
-            </div>
-            <TabsContent value="all" className="m-0">
-              <SessionList
-                items={filteredSessions}
-                onDelete={onDeleteSession}
-                onArchive={viewMode !== 'archive' ? onArchiveSession : undefined}
-                onUnarchive={viewMode === 'archive' ? onUnarchiveSession : undefined}
+                <Separator />
+                {/* Search Bar: Filters by workspace, message, or agent name */}
+                <div className="bg-background/95 p-4 backdrop-blur supports-backdrop-filter:bg-background/60 min-w-0">
+                  <form>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Input
+                        placeholder="Search"
+                        className="pl-10"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </form>
+                </div>
+                {/* SessionList: Scrollable list of session cards */}
+                <SessionList
+                  items={filteredSessions}
+                  onDelete={onDeleteSession}
+                  onArchive={viewMode !== 'archive' ? onArchiveSession : undefined}
+                  onUnarchive={viewMode === 'archive' ? onUnarchiveSession : undefined}
+                />
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle />
+
+            {/* === CHAT DISPLAY PANEL === */}
+            <ResizablePanel defaultSize={60} minSize={35} className="overflow-hidden min-w-0">
+              <ChatDisplay
+                session={selectedSession}
+                onSendMessage={(message) => selectedSession && onSendMessage(selectedSession.id, message)}
+                onOpenFile={onOpenFile}
+                onOpenUrl={onOpenUrl}
+                onDelete={() => selectedSession && onDeleteSession(selectedSession.id)}
               />
-            </TabsContent>
-            <TabsContent value="recent" className="m-0">
-              <SessionList
-                items={filteredSessions.slice(0, 10)}
-                onDelete={onDeleteSession}
-                onArchive={viewMode !== 'archive' ? onArchiveSession : undefined}
-                onUnarchive={viewMode === 'archive' ? onUnarchiveSession : undefined}
-              />
-            </TabsContent>
-          </Tabs>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={defaultLayout[2]} minSize={30} className="overflow-hidden min-w-0">
-          <ChatDisplay
-            session={selectedSession}
-            onSendMessage={(message) => selectedSession && onSendMessage(selectedSession.id, message)}
-            onOpenFile={onOpenFile}
-            onOpenUrl={onOpenUrl}
-            onDelete={() => selectedSession && onDeleteSession(selectedSession.id)}
-          />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
     </TooltipProvider>

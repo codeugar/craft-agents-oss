@@ -8,7 +8,7 @@
 import { query, type McpServerStatus } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import { CraftMcpClient } from './client.js';
-import { debug } from '@/tui/utils/debug.js';
+import { debug } from '../utils/debug.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import { parseError, type AgentError } from '../agent/errors.ts';
 import { getLastApiError } from '../cache-ttl-interceptor.ts';

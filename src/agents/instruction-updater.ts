@@ -9,7 +9,7 @@
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import { getDefaultOptions } from '../agent/options.ts';
 import { getWorkspaceAccessTokenAsync } from '../config/storage.ts';
-import { debug } from '../tui/utils/debug.ts';
+import { debug } from '../utils/debug.ts';
 import { INSTRUCTION_UPDATE_MODEL } from '../config/models.ts';
 
 export interface UpdateInstructionsContext {

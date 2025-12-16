@@ -1,4 +1,4 @@
-import { debug } from '@/tui/utils/debug';
+import { debug } from '../utils/debug';
 import { createServer, type Server } from 'http';
 import { URL } from 'url';
 import { CRAFT_LOGO_HTML } from '../branding.ts';

@@ -2,11 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Important:** Keep this file and `README.md` up-to-date whenever functionality changes. After making changes to this package, update the documentation to reflect the current state.
+
 ## Overview
 
 This is the Electron desktop app for Craft Agent - a GUI alternative to the TUI. It provides a multi-threaded chat interface for interacting with Claude via Craft workspaces.
 
-**Important:** This app reuses the parent `craft-tui-agent` codebase. The main process imports directly from `../../../src/` (the TUI's source). Dependencies are managed in the root `package.json`.
+**Note:** This app reuses the parent `craft-tui-agent` codebase. The main process imports directly from `../../../src/` (the TUI's source). Dependencies are managed in the root `package.json`.
 
 ## UI Components
 
@@ -20,7 +22,7 @@ Available components in `src/renderer/components/ui/`:
 To add new shadcn components:
 ```bash
 # From project root
-cd electron-app && npx shadcn@latest add <component-name>
+cd apps/electron && npx shadcn@latest add <component-name>
 ```
 
 Icons: Use [Lucide React](https://lucide.dev/icons/) (`lucide-react` package).
@@ -30,6 +32,7 @@ Icons: Use [Lucide React](https://lucide.dev/icons/) (`lucide-react` package).
 All commands run from the **project root** (not this directory):
 
 ```bash
+bun run electron:dev          # Hot reload dev mode (recommended for development)
 bun run electron:build        # Build all (main, preload, renderer, resources)
 bun run electron:start        # Build and run the app
 
@@ -40,10 +43,19 @@ bun run electron:build:renderer  # Bundle React UI (Vite)
 bun run electron:build:resources # Copy icons
 ```
 
+### Hot Reload Development
+
+`bun run electron:dev` provides hot reload for faster development:
+
+- **Renderer (React)**: Vite HMR - instant updates without restart
+- **Main/Preload**: esbuild watch - rebuilds on save (requires Electron restart to take effect)
+
+The renderer loads from `http://localhost:5173` in dev mode instead of file://, enabling Vite's Hot Module Replacement.
+
 ## Architecture
 
 ```
-electron-app/
+apps/electron/
 ├── src/
 │   ├── main/           # Electron main process (Node.js)
 │   │   ├── index.ts    # Window creation, app lifecycle, nativeTheme listener

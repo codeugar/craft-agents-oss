@@ -1,4 +1,4 @@
-import { debug } from "../tui/utils/debug";
+import { debug } from "../utils/debug";
 
 const VERSIONS_URL = 'https://agents.craft.do';
 

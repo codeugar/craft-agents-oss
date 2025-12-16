@@ -1,7 +1,7 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { join } from "path";
 import { homedir } from "os";
-import { debug } from "../tui/utils/debug";
+import { debug } from "../utils/debug";
 
 declare const CRAFT_AGENT_CLI_VERSION: string | undefined;
 

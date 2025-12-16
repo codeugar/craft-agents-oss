@@ -18,6 +18,17 @@ interface WorkspaceSwitcherProps {
   onSelect: (workspaceId: string) => void
 }
 
+/**
+ * WorkspaceSwitcher - Dropdown to select active workspace
+ *
+ * Elements:
+ * - SelectTrigger: Button showing current workspace avatar + name
+ * - Avatar: Circular badge with first letter of workspace name
+ * - SelectContent: Dropdown menu listing all workspaces
+ * - SelectItem: Individual workspace option (avatar + name)
+ *
+ * When sidebar is collapsed: Shows only the avatar (icon-only mode)
+ */
 export function WorkspaceSwitcher({
   isCollapsed,
   workspaces,
@@ -28,6 +39,7 @@ export function WorkspaceSwitcher({
 
   return (
     <Select value={activeWorkspaceId || undefined} onValueChange={onSelect}>
+      {/* Trigger Button: Shows current workspace */}
       <SelectTrigger
         className={cn(
           "flex items-center gap-2 [&>span]:line-clamp-1 [&>span]:flex [&>span]:w-full [&>span]:items-center [&>span]:gap-1 [&>span]:truncate [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0",
@@ -37,16 +49,19 @@ export function WorkspaceSwitcher({
         aria-label="Select workspace"
       >
         <SelectValue placeholder="Select workspace">
+          {/* Workspace Avatar: First letter of name */}
           <Avatar className="h-5 w-5">
             <AvatarFallback className="text-xs bg-primary text-primary-foreground">
               {selectedWorkspace?.name?.charAt(0) || 'W'}
             </AvatarFallback>
           </Avatar>
+          {/* Workspace Name: Hidden when collapsed */}
           <span className={cn("ml-2", isCollapsed && "hidden")}>
             {selectedWorkspace?.name || 'Select workspace'}
           </span>
         </SelectValue>
       </SelectTrigger>
+      {/* Dropdown Content: List of all workspaces */}
       <SelectContent>
         {workspaces.map((workspace) => (
           <SelectItem key={workspace.id} value={workspace.id}>

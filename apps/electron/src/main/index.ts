@@ -8,6 +8,9 @@ import { IPC_CHANNELS } from '../shared/types'
 // Check if running in development mode
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+// Vite dev server URL for hot reload
+const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
 let mainWindow: BrowserWindow | null = null
 let sessionManager: SessionManager | null = null
 
@@ -62,8 +65,12 @@ function createWindow(): void {
     }
   })
 
-  // Load the renderer
-  mainWindow.loadFile(join(__dirname, 'renderer/index.html'))
+  // Load the renderer - from Vite dev server in dev mode, or file in production
+  if (VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(VITE_DEV_SERVER_URL)
+  } else {
+    mainWindow.loadFile(join(__dirname, 'renderer/index.html'))
+  }
 
   // Open DevTools only in development mode
   if (isDev) {

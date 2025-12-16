@@ -6,7 +6,7 @@ import { createHash } from "crypto";
 import { homedir } from "os";
 import { join } from "path";
 import * as tar from "tar";
-import { debug } from "../tui/utils/debug";
+import { debug } from "../utils/debug";
 import { getUpdateToVersion, getCurrentVersion } from "./version";
 
 const pipelineAsync = promisify(pipeline);

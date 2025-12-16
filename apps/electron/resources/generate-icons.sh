@@ -72,5 +72,5 @@ ls -la icon.*
 
 echo ""
 echo "Next steps:"
-echo "1. Update electron-app/src/main/index.ts to use icon.icns on macOS"
+echo "1. Update apps/electron/src/main/index.ts to use icon.icns on macOS"
 echo "2. Run: bun run electron:build:resources"
