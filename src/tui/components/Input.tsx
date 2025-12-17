@@ -10,6 +10,8 @@ export interface InputProps {
   onRemoveAttachment?: () => void;
   onClearAttachments?: () => void;
   onPastedText?: (text: string) => void;
+  /** Callback when Ctrl+C is pressed (for double-press exit behavior) */
+  onCtrlC?: () => void;
   disabled?: boolean;
   history?: string[];
   placeholder?: string;
@@ -37,6 +39,7 @@ export const Input: React.FC<InputProps> = ({
   onRemoveAttachment,
   onClearAttachments,
   onPastedText,
+  onCtrlC,
   disabled = false,
   history = [],
   placeholder,
@@ -136,6 +139,20 @@ export const Input: React.FC<InputProps> = ({
   useInput(
     (input, key) => {
       if (disabled) return;
+
+      // Handle Ctrl+C for exit warning / double-press exit
+      const isCtrlC = input === '\x03' || (key.ctrl && input === 'c');
+      if (isCtrlC && onCtrlC) {
+        // Clear input if there's text
+        if (value.length > 0) {
+          setValue('');
+        }
+        if (onClearAttachments) {
+          onClearAttachments();
+        }
+        onCtrlC();
+        return;
+      }
 
       // Handle Ctrl+R for history search
       if (isHistorySearch(input, key)) {

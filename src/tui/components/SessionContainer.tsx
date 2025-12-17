@@ -206,6 +206,21 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   const [staticResetKey, setStaticResetKey] = useState(0);
   const [pendingAttachments, setPendingAttachments] = useState<FileAttachment[]>([]);
 
+  // Ctrl+C double-press exit state
+  const [lastCtrlCTime, setLastCtrlCTime] = useState<number | null>(null);
+  const [showExitWarning, setShowExitWarning] = useState(false);
+
+  // Auto-dismiss exit warning after 500ms
+  useEffect(() => {
+    if (showExitWarning) {
+      const timer = setTimeout(() => {
+        setShowExitWarning(false);
+        setLastCtrlCTime(null);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [showExitWarning]);
+
   // Consolidated modal state - replaces 11 separate useState calls
   const { activeModal, openModal, closeModal, isOpen, hasOpenModal } = useModalState();
 
@@ -432,6 +447,17 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     setPendingAttachments([]);
   }, []);
 
+  // Handle Ctrl+C from Input component (double-press to exit)
+  const handleInputCtrlC = useCallback(() => {
+    const now = Date.now();
+    if (lastCtrlCTime && (now - lastCtrlCTime) < 500) {
+      exitApp();
+    } else {
+      setLastCtrlCTime(now);
+      setShowExitWarning(true);
+    }
+  }, [lastCtrlCTime, exitApp]);
+
   const handlePastedText = useCallback((text: string) => {
     const { attachments, errors } = processInputWithFiles(text);
 
@@ -535,7 +561,19 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       } else if (isProcessing) {
         interrupt();
       } else {
-        exitApp();
+        // Only handle if Input is not rendered (Input handles its own Ctrl+C)
+        const inputIsRendered = !hasOpenModal && !pendingPermission && !pendingQuestion && !pendingMcpAuth && !pendingApiAuth && !pendingReview;
+        if (!inputIsRendered) {
+          // Double-press logic for modals/overlays
+          const now = Date.now();
+          if (lastCtrlCTime && (now - lastCtrlCTime) < 500) {
+            exitApp();
+          } else {
+            setLastCtrlCTime(now);
+            setShowExitWarning(true);
+          }
+        }
+        // If inputIsRendered, do nothing - Input component handles Ctrl+C via onCtrlC
       }
     }
 
@@ -762,6 +800,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
             onRemoveAttachment={handleRemoveAttachment}
             onClearAttachments={handleClearAttachments}
             onPastedText={handlePastedText}
+            onCtrlC={handleInputCtrlC}
             disabled={isProcessing}
             history={history}
             attachmentCount={pendingAttachments.length}
@@ -786,6 +825,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           tokenDisplay={tokenDisplayMode}
           showCost={showCostSetting}
           version={getCurrentVersion()}
+          exitWarning={showExitWarning}
         />
       </Box>
     </Box>
