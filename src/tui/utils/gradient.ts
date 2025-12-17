@@ -9,11 +9,13 @@ const ULTRATHINK_GRADIENT = [51, 45, 39, 129, 201, 201, 129, 39, 45, 51];
 /**
  * Render text with ultrathink gradient coloring
  * Applies a symmetrical cyan→magenta→cyan gradient character by character
+ * @param text The text to render with gradient
+ * @param offset Optional offset to shift the gradient (for animation)
  */
-export function renderUltrathinkGradient(text: string = 'ultrathink'): string {
+export function renderUltrathinkGradient(text: string = 'ultrathink', offset: number = 0): string {
   return text
     .split('')
-    .map((char, i) => `\x1b[38;5;${ULTRATHINK_GRADIENT[i % ULTRATHINK_GRADIENT.length]}m${char}`)
+    .map((char, i) => `\x1b[38;5;${ULTRATHINK_GRADIENT[(i + offset) % ULTRATHINK_GRADIENT.length]}m${char}`)
     .join('') + '\x1b[0m';
 }
 

@@ -57,11 +57,22 @@ export interface ThinkingIndicatorProps {
 
 /**
  * Thinking indicator with optional animated spinner and elapsed time
- * Supports ultrathink mode with gradient text display
+ * Supports ultrathink mode with shimmering glass gradient text display
  */
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = memo(
   ({ status, elapsedMs, animated = true, isUltrathink = false }) => {
-    // Pre-compute gradient string for ultrathink display (memoized for perf)
+    // Animate gradient offset for shimmering glass effect
+    const [gradientOffset, setGradientOffset] = useState(0);
+
+    useEffect(() => {
+      if (!isUltrathink || !animated) return;
+
+      const interval = setInterval(() => {
+        setGradientOffset((prev) => (prev + 1) % 10);
+      }, 120); // Smooth shimmer animation
+
+      return () => clearInterval(interval);
+    }, [isUltrathink, animated]);
 
     return (
       <Box paddingLeft={1} marginY={1}>
@@ -73,7 +84,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = memo(
         {isUltrathink ? (
           <>
             <Text> </Text>
-            <Text>{renderUltrathinkGradient("Deep thinking...")}</Text>
+            <Text>{renderUltrathinkGradient("Deep thinking...", gradientOffset)}</Text>
           </>
         ) : (
           <Text color="gray"> {status || 'Thinking...'}</Text>

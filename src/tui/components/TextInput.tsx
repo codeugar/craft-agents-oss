@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Text, useInput } from 'ink';
 import { isShiftOrAltEnter, isLineStart, isLineEnd, isShiftVariant, isWordLeft, isWordRight, isClearLine, isCancel, isDeleteWordBackward, isDeleteWordForward, isKillToEnd } from '../keyboard/index.ts';
 
@@ -28,9 +28,9 @@ const findUltrathinkRanges = (text: string): Array<{ start: number; end: number 
   return ranges;
 };
 
-// Get gradient color for a character position within ultrathink
-const getUltrathinkColor = (posInWord: number): string => {
-  return ULTRATHINK_GRADIENT_HEX[posInWord % ULTRATHINK_GRADIENT_HEX.length]!;
+// Get gradient color for a character position within ultrathink (with animation offset)
+const getUltrathinkColor = (posInWord: number, offset: number = 0): string => {
+  return ULTRATHINK_GRADIENT_HEX[(posInWord + offset) % ULTRATHINK_GRADIENT_HEX.length]!;
 };
 
 export interface TextInputProps {
@@ -208,6 +208,20 @@ export const TextInput: React.FC<TextInputProps> = ({
   // Force re-render when cursor/selection changes (without syncing back)
   const [, forceUpdate] = useState(0);
   const triggerRender = () => forceUpdate(n => n + 1);
+
+  // Animate gradient offset for shimmering ultrathink effect
+  const [gradientOffset, setGradientOffset] = useState(0);
+  const hasUltrathink = value.toLowerCase().includes('ultrathink');
+
+  useEffect(() => {
+    if (!hasUltrathink) return;
+
+    const interval = setInterval(() => {
+      setGradientOffset((prev) => (prev + 1) % 10);
+    }, 120); // Smooth shimmer animation
+
+    return () => clearInterval(interval);
+  }, [hasUltrathink]);
 
   // Reset cursor when value changes externally (e.g., history navigation, parent reset)
   const prevValueRef = useRef(value);
@@ -610,7 +624,7 @@ export const TextInput: React.FC<TextInputProps> = ({
   const getUltrathinkStyle = (pos: number): string | null => {
     for (const range of ultrathinkRanges) {
       if (pos >= range.start && pos < range.end) {
-        return getUltrathinkColor(pos - range.start);
+        return getUltrathinkColor(pos - range.start, gradientOffset);
       }
     }
     return null;
