@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Plan } from '../../agents/plan-types.ts';
+import type { Plan } from '../../../../src/agents/plan-types.ts';
 
 export type PlanAction =
   | { type: 'start' }

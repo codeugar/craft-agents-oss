@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Plan, PlanStep } from '../../agents/plan-types.ts';
-import { savePlanToFile } from '../../config/storage.ts';
+import type { Plan, PlanStep } from '../../../../src/agents/plan-types.ts';
+import { savePlanToFile } from '../../../../src/config/storage.ts';
 
 /**
  * Step action in the interactive plan review (like git interactive rebase)
