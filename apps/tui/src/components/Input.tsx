@@ -3,7 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import { getCommandHint, getAgentHint, getTabCompletion, type HintData } from '../utils/filtering.ts';
 import { TextInput } from './TextInput.tsx';
 import { isHistorySearch, isAbort } from '../keyboard/index.ts';
-import { debug } from '../utils/debug.ts';
+import { debug } from '../../../../src/utils/debug.ts';
 
 export interface InputProps {
   onSubmit: (input: string) => void;
@@ -180,10 +180,10 @@ export const Input: React.FC<InputProps> = ({
           return;
         }
 
-        // Left/Right arrows accept match and allow editing
+        // Left/Right arrows, Enter, or Tab accept match and exit search mode
+        // TextInput will handle cursor movement on the next render
         if (key.leftArrow || key.rightArrow || key.return || key.tab) {
           acceptSearch();
-          // Don't return - let TextInput handle cursor movement
           return;
         }
 

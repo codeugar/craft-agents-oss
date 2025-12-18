@@ -102,11 +102,18 @@ export async function prepareCodeBlocks(text: string): Promise<void> {
 
     try {
       // Get tokens and convert to ANSI with color replacements
+      // Note: lang is cast to any because Shiki's BundledLanguage type is very strict,
+      // but we handle unsupported languages gracefully in the catch block
       const result = hl.codeToTokens(code, { lang: lang as any, theme: 'tokyo-night' });
       const highlighted = tokensToANSI(result.tokens);
       codeBlockCache.set(key, highlighted);
-    } catch {
+    } catch (err) {
       // Fallback to plain styling if language not supported
+      // This commonly happens for less common languages not in our bundle
+      if (process.env.NODE_ENV === 'development') {
+        // Only log in development to avoid noise in production
+        console.debug?.(`[markdown] Shiki highlighting failed for lang "${lang}":`, err);
+      }
       codeBlockCache.set(key, chalk.white(code));
     }
   });

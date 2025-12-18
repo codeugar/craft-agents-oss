@@ -1712,14 +1712,15 @@ The goal is to have clean, actionable instructions without unanswered questions.
 
     debug('[completeReview] User answered concerns, saving to document');
 
-    // Build clarifications object for saving to Craft document
-    const pendingReviewData = pendingReview; // Get derived value
-    if (!pendingReviewData) return;
+    // Derive pending review data directly from agentState to avoid circular reference
+    // (pendingReview is defined later in this hook)
+    const currentStatus = agentState.status;
+    if (currentStatus.status !== 'needs_review') return;
 
     const clarifications: PendingClarifications = {
-      agentName: pendingReviewData.agentName,
-      agentId: pendingReviewData.agentId,
-      definition: pendingReviewData.definition,
+      agentName: currentStatus.agentName,
+      agentId: currentStatus.agentId,
+      definition: currentStatus.definition,
       answers,
       refinementRound: 0,
     };
@@ -1744,7 +1745,7 @@ The goal is to have clean, actionable instructions without unanswered questions.
 
     // Save clarifications to Craft document (after continuing the flow)
     await saveClarificationsWithData(clarifications);
-  }, [agentState, pendingReview, saveClarificationsWithData, activationComplete]);
+  }, [agentState, saveClarificationsWithData, activationComplete]);
 
   // Skip review - user wants to skip clarifications and continue with activation
   const skipReview = useCallback(async () => {
@@ -1888,32 +1889,38 @@ The goal is to have clean, actionable instructions without unanswered questions.
 
   // Derive pending auth/review states from useAgentState for backward compatibility
   // These match the legacy PendingMcpAuthRequest, PendingApiAuthRequest, PendingReviewRequest interfaces
-  const pendingMcpAuth: PendingMcpAuthRequest | null = agentState.isNeedsMcpAuth
-    ? {
-        servers: agentState.pendingMcpServers!,
-        agentId: agentState.agentId!,
-        agentName: agentState.agentName!,
-        definition: (agentState.status as { definition: SubAgentDefinition }).definition,
-      }
-    : null;
+  // Use status discriminator for proper type narrowing instead of type assertions
+  const agentStatus = agentState.status;
 
-  const pendingApiAuth: PendingApiAuthRequest | null = agentState.isNeedsApiAuth
-    ? {
-        apis: agentState.pendingApis!,
-        agentId: agentState.agentId!,
-        agentName: agentState.agentName!,
-        definition: (agentState.status as { definition: SubAgentDefinition }).definition,
-      }
-    : null;
+  const pendingMcpAuth: PendingMcpAuthRequest | null =
+    agentStatus.status === 'needs_mcp_auth'
+      ? {
+          servers: agentStatus.servers,
+          agentId: agentStatus.agentId,
+          agentName: agentStatus.agentName,
+          definition: agentStatus.definition,
+        }
+      : null;
 
-  const pendingReview: PendingReviewRequest | null = agentState.isNeedsReview
-    ? {
-        agentId: agentState.agentId!,
-        agentName: agentState.agentName!,
-        definition: (agentState.status as { definition: SubAgentDefinition }).definition,
-        concerns: agentState.pendingConcerns!,
-      }
-    : null;
+  const pendingApiAuth: PendingApiAuthRequest | null =
+    agentStatus.status === 'needs_api_auth'
+      ? {
+          apis: agentStatus.apis,
+          agentId: agentStatus.agentId,
+          agentName: agentStatus.agentName,
+          definition: agentStatus.definition,
+        }
+      : null;
+
+  const pendingReview: PendingReviewRequest | null =
+    agentStatus.status === 'needs_review'
+      ? {
+          agentId: agentStatus.agentId,
+          agentName: agentStatus.agentName,
+          definition: agentStatus.definition,
+          concerns: agentStatus.concerns,
+        }
+      : null;
 
   // ============================================
   // Plan Mode Functions
