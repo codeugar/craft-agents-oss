@@ -73,10 +73,10 @@ export interface McpValidationResult {
 }
 
 /**
- * Agent setup status - indicates if agent needs setup or auth
+ * Agent activation status - indicates if agent needs activation or auth
  */
 export interface AgentSetupStatus {
-  needsSetup: boolean  // Agent definition has never been extracted
+  needsSetup: boolean  // Agent definition has never been extracted (needs activation)
   needsAuth: boolean   // Definition exists but credentials are missing
   reason?: string
 }
@@ -132,6 +132,7 @@ export interface CraftSpace {
   id: string
   name: string
   teamId?: string | null
+  iconUrl?: string | null
 }
 
 /**
@@ -215,6 +216,7 @@ export type SessionEvent =
   | { type: 'error'; sessionId: string; error: string }
   | { type: 'typed_error'; sessionId: string; error: TypedError }
   | { type: 'complete'; sessionId: string }
+  | { type: 'interrupted'; sessionId: string }
   | { type: 'status'; sessionId: string; message: string }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'agent_status'; sessionId: string; status: AgentStatus }
@@ -403,7 +405,7 @@ export interface ElectronAPI {
   startWorkspaceMcpOAuth(mcpUrl: string): Promise<OAuthResult & { accessToken?: string; clientId?: string }>
   saveOnboardingConfig(config: {
     authType?: AuthType  // Optional - if not provided, preserves existing auth type (for add workspace)
-    workspace?: { name: string; mcpUrl: string }  // Optional - if not provided, only updates billing
+    workspace?: { name: string; mcpUrl: string; iconUrl?: string }  // Optional - if not provided, only updates billing
     credential?: string  // API key or OAuth token based on authType
     mcpCredentials?: { accessToken: string; clientId?: string }  // MCP OAuth credentials
   }): Promise<OnboardingSaveResult>

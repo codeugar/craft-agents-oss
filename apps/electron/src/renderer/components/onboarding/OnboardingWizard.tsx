@@ -15,6 +15,7 @@ export interface OnboardingState {
   completionStatus: 'saving' | 'complete'
   selectedSpaceId: string | null
   selectedSpaceName: string | null
+  selectedSpaceIconUrl: string | null
   billingMethod: BillingMethod | null
   isExistingUser: boolean
   errorMessage?: string
@@ -35,7 +36,7 @@ interface OnboardingWizardProps {
   onLogin: () => void
   onOpenLoginManually?: () => void
   onRetryLogin?: () => void
-  onSelectSpace: (spaceId: string, spaceName: string) => void
+  onSelectSpace: (spaceId: string, spaceName: string, iconUrl?: string) => void
   onSelectBillingMethod: (method: BillingMethod) => void
   onSubmitCredential: (credential: string) => void
   onStartOAuth?: () => void

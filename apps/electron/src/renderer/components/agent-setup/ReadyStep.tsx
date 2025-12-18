@@ -1,4 +1,5 @@
-import { CheckCircle2, Server, Globe, Sparkles, Zap } from "lucide-react"
+import { CheckCircle2, Globe, Zap } from "lucide-react"
+import { McpIcon } from "@/components/icons/McpIcon"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -40,8 +41,7 @@ export function ReadyStep({
 
   return (
     <StepFormLayout
-      icon={<Sparkles />}
-      iconVariant="success"
+      grow
       title={`${agentName} is ready`}
       description="All authentication is complete. Activate the agent to start using it."
       actions={
@@ -58,7 +58,7 @@ export function ReadyStep({
         </>
       }
     >
-      <ScrollArea className="h-[280px]">
+      <ScrollArea className="h-full">
         <div className="space-y-4 pr-4">
           {/* Capabilities */}
           {capabilities.length > 0 && (
@@ -88,7 +88,7 @@ export function ReadyStep({
                     key={server.name}
                     className="flex items-center gap-2 text-sm"
                   >
-                    <Server className="size-4 text-muted-foreground" />
+                    <McpIcon className="size-4 text-muted-foreground" />
                     <span className="flex-1 truncate">{server.name}</span>
                     <CheckCircle2 className="size-4 text-green-500" />
                   </div>

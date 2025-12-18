@@ -567,9 +567,9 @@ console.log(example);
         firstName: 'Test',
         lastName: 'User',
         spaces: [
-          { id: 'mock-user-id', name: 'Personal Space', teamId: null },
-          { id: 'space-work-1', name: 'Work Space', teamId: 'team-1' },
-          { id: 'space-shared-1', name: 'Shared Projects', teamId: null },
+          { id: 'mock-user-id', name: 'Personal Space', teamId: null, iconUrl: 'https://picsum.photos/seed/personal/200' },
+          { id: 'space-work-1', name: 'Work Space', teamId: 'team-1', iconUrl: 'https://picsum.photos/seed/work/200' },
+          { id: 'space-shared-1', name: 'Shared Projects', teamId: null, iconUrl: null },
         ],
         teams: [
           { id: 'team-1', name: 'Work Team', isPrivate: false, role: 'admin', tier: 'pro' },
@@ -618,8 +618,8 @@ console.log(example);
   },
 
   async saveOnboardingConfig(config: {
-    authType: import('../../shared/types').AuthType
-    workspace: { name: string; mcpUrl: string }
+    authType?: import('../../shared/types').AuthType
+    workspace?: { name: string; mcpUrl: string; iconUrl?: string }
     credential?: string
     mcpCredentials?: { accessToken: string; clientId?: string }
   }) {
@@ -669,9 +669,9 @@ console.log(example);
         firstName: 'Test',
         lastName: 'User',
         spaces: [
-          { id: 'mock-user-id', name: 'Personal Space', teamId: null },
-          { id: 'space-work-1', name: 'Work Space', teamId: 'team-1' },
-          { id: 'space-shared-1', name: 'Shared Projects', teamId: null },
+          { id: 'mock-user-id', name: 'Personal Space', teamId: null, iconUrl: 'https://picsum.photos/seed/personal/200' },
+          { id: 'space-work-1', name: 'Work Space', teamId: 'team-1', iconUrl: 'https://picsum.photos/seed/work/200' },
+          { id: 'space-shared-1', name: 'Shared Projects', teamId: null, iconUrl: null },
         ],
         teams: [
           { id: 'team-1', name: 'Work Team', isPrivate: false, role: 'admin', tier: 'pro' },

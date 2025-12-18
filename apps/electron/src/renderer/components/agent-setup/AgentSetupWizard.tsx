@@ -6,10 +6,18 @@ import { ApiAuthStep, type ApiConfig, type ApiAuthStatus } from "./ApiAuthStep"
 import { ReadyStep } from "./ReadyStep"
 import { ActiveStep } from "./ActiveStep"
 import { ErrorStep } from "./ErrorStep"
-import { AgentSetupStepIndicator, type AgentSetupStep } from "./AgentSetupStepIndicator"
+
+export type AgentSetupStep =
+  | 'extracting'
+  | 'review'
+  | 'mcp-auth'
+  | 'api-auth'
+  | 'ready'
+  | 'active'
+  | 'error'
 
 // Re-export types for convenience
-export type { Concern, McpServerConfig, McpServerAuthStatus, ApiConfig, ApiAuthStatus, AgentSetupStep }
+export type { Concern, McpServerConfig, McpServerAuthStatus, ApiConfig, ApiAuthStatus }
 
 export interface AgentSetupState {
   /** Current step in the flow */
@@ -109,10 +117,6 @@ export function AgentSetupWizard({
     isLoading = false,
   } = state
 
-  const hasConcerns = concerns.length > 0
-  const hasMcpServers = mcpServers.filter(s => s.requiresAuth).length > 0
-  const hasApis = apis.filter(a => a.auth?.type !== 'none').length > 0
-
   const renderStep = () => {
     switch (step) {
       case 'extracting':
@@ -203,17 +207,6 @@ export function AgentSetupWizard({
 
   return (
     <div className={cn("flex h-full flex-col items-center justify-center p-8", className)}>
-      {/* Step indicator */}
-      <div className="mb-8">
-        <AgentSetupStepIndicator
-          currentStep={step}
-          hasConcerns={hasConcerns}
-          hasMcpServers={hasMcpServers}
-          hasApis={hasApis}
-        />
-      </div>
-
-      {/* Step content */}
       {renderStep()}
     </div>
   )

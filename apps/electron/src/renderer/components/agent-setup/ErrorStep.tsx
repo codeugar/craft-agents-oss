@@ -1,4 +1,4 @@
-import { AlertCircle, RotateCcw, X } from "lucide-react"
+import { RotateCcw, X } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { Button } from "@/components/ui/button"
 
@@ -26,10 +26,8 @@ export function ErrorStep({
 }: ErrorStepProps) {
   return (
     <StepFormLayout
-      icon={<AlertCircle />}
-      iconVariant="error"
-      title="Setup failed"
-      description={`Something went wrong while setting up ${agentName}.`}
+      title="Activation failed"
+      description={`Something went wrong while activating ${agentName}.`}
       actions={
         <>
           <BackButton onClick={onCancel}>

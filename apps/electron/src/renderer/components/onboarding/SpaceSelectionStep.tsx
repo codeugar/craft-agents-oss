@@ -3,6 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { Check, ChevronDown, User, Users, Globe } from "lucide-react"
 import { Spinner } from "@/components/ui/loading-indicator"
+import { CrossfadeAvatar } from "@/components/ui/avatar"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
 
 export interface CraftSpace {
@@ -21,45 +22,33 @@ interface SpaceSelectionStepProps {
   categories: SpaceCategory[]
   selectedSpaceId: string | null
   isLoading?: boolean
-  onSelect: (spaceId: string, spaceName: string) => void
+  onSelect: (spaceId: string, spaceName: string, iconUrl?: string) => void
   onContinue: () => void
   onBack: () => void
   /** Optional cancel callback (shows Cancel button when provided) */
   onCancel?: () => void
 }
 
-function SpaceIcon({ type, iconUrl }: { type: CraftSpace['type']; iconUrl?: string }) {
-  if (iconUrl) {
-    return (
-      <img
-        src={iconUrl}
-        alt=""
-        className="size-8 rounded-lg object-cover"
-      />
-    )
-  }
-
-  const iconClass = "size-4 text-muted-foreground"
+/** Returns fallback icon for space type */
+function SpaceTypeFallback({ type }: { type: CraftSpace['type'] }) {
+  const iconClass = "size-4"
 
   switch (type) {
     case 'personal':
-      return (
-        <div className="flex size-8 items-center justify-center rounded-lg bg-blue-500/10">
-          <User className={cn(iconClass, "text-blue-500")} />
-        </div>
-      )
+      return <User className={cn(iconClass, "text-blue-500")} />
     case 'team':
-      return (
-        <div className="flex size-8 items-center justify-center rounded-lg bg-purple-500/10">
-          <Users className={cn(iconClass, "text-purple-500")} />
-        </div>
-      )
+      return <Users className={cn(iconClass, "text-purple-500")} />
     case 'shared':
-      return (
-        <div className="flex size-8 items-center justify-center rounded-lg bg-green-500/10">
-          <Globe className={cn(iconClass, "text-green-500")} />
-        </div>
-      )
+      return <Globe className={cn(iconClass, "text-green-500")} />
+  }
+}
+
+/** Returns background class for space type fallback */
+function getSpaceTypeBgClass(type: CraftSpace['type']): string {
+  switch (type) {
+    case 'personal': return 'bg-blue-500/10'
+    case 'team': return 'bg-purple-500/10'
+    case 'shared': return 'bg-green-500/10'
   }
 }
 
@@ -156,14 +145,20 @@ export function SpaceSelectionStep({
                       return (
                         <button
                           key={space.id}
-                          onClick={() => onSelect(space.id, space.name)}
+                          onClick={() => onSelect(space.id, space.name, space.iconUrl)}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                             "hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                             isSelected && "bg-primary/10 hover:bg-primary/15"
                           )}
                         >
-                          <SpaceIcon type={space.type} iconUrl={space.iconUrl} />
+                          <CrossfadeAvatar
+                            src={space.iconUrl}
+                            alt={space.name}
+                            className="size-8 rounded-lg ring-1 ring-border/50"
+                            fallbackClassName={cn("rounded-lg", getSpaceTypeBgClass(space.type))}
+                            fallback={<SpaceTypeFallback type={space.type} />}
+                          />
                           <span className="flex-1 truncate text-sm font-medium">
                             {space.name}
                           </span>

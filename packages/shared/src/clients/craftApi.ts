@@ -193,7 +193,12 @@ const profileResponseSchema = z.object({
     userId: z.string(),
     firstName: z.string(),
     lastName: z.string(),
-    spaces: z.array(z.object({ id: z.string(), name: z.string(), teamId: z.string().nullable().optional() })),
+    spaces: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        teamId: z.string().nullable().optional(),
+        logoUrl: z.string().nullable().optional(),
+    })),
     teams: z.array(z.object({
         id: z.string(),
         isPrivate: z.boolean(),

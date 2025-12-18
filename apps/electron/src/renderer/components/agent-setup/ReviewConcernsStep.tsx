@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { AlertCircle, HelpCircle, AlertTriangle, FileQuestion } from "lucide-react"
+import { HelpCircle, AlertTriangle, FileQuestion, AlertCircle } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -82,9 +82,8 @@ export function ReviewConcernsStep({
 
   return (
     <StepFormLayout
-      icon={<AlertCircle />}
-      iconVariant="primary"
-      title="Review agent setup"
+      grow
+      title="Review before activation"
       description={`${agentName} has ${concerns.length} item${concerns.length === 1 ? '' : 's'} that need your input before activation.`}
       actions={
         <>
@@ -100,7 +99,7 @@ export function ReviewConcernsStep({
         </>
       }
     >
-      <ScrollArea className="h-[320px]">
+      <ScrollArea className="h-full">
         <div className="space-y-4 pr-4">
           {concerns.map((concern, index) => {
             const config = concernTypeConfig[concern.type]

@@ -21,6 +21,7 @@ export interface Workspace {
   isPublic?: boolean;         // DEPRECATED: Use mcpAuthType instead
   createdAt: number;
   sessionId?: string;  // SDK session ID for conversation continuity
+  iconUrl?: string;    // Space icon URL from Craft profile
 }
 
 export type AuthType = 'api_key' | 'oauth_token' | 'craft_credits';

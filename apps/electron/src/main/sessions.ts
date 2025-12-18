@@ -706,8 +706,9 @@ export class SessionManager {
 
       for await (const event of chatIterator) {
         console.log('[SessionManager] Got event:', event.type)
-        if (managed.abortController?.signal.aborted) {
-          console.log('[SessionManager] Aborted')
+        // Check if cancelled - break immediately (interrupted event already sent by cancelProcessing)
+        if (managed.abortController?.signal.aborted || !managed.isProcessing) {
+          console.log('[SessionManager] Aborted, breaking out of event loop')
           break
         }
         this.processEvent(managed, event)
@@ -721,6 +722,7 @@ export class SessionManager {
           }
         }
       }
+
       console.log('[SessionManager] Chat completed')
     } catch (error) {
       console.error('[SessionManager] Error in chat:', error)
@@ -743,9 +745,31 @@ export class SessionManager {
 
   async cancelProcessing(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (managed?.abortController) {
+    if (!managed?.isProcessing) {
+      return // Not processing, nothing to cancel
+    }
+
+    console.log('[SessionManager] Cancelling processing for session:', sessionId)
+
+    // Call agent.interrupt() directly like TUI does - this signals the SDK
+    if (managed.agent) {
+      managed.agent.interrupt()
+    }
+
+    // Also abort the controller as backup
+    if (managed.abortController) {
       managed.abortController.abort()
     }
+
+    // Set state immediately (no polling) - just like TUI's interruptedRef pattern
+    managed.isProcessing = false
+    managed.abortController = undefined
+
+    // Send interrupted event immediately
+    this.sendEvent({ type: 'interrupted', sessionId })
+
+    // Persist session
+    this.persistSession(managed)
   }
 
   /**

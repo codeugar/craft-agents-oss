@@ -7,7 +7,6 @@ import { ReadyStep } from '@/components/agent-setup/ReadyStep'
 import { ActiveStep } from '@/components/agent-setup/ActiveStep'
 import { ErrorStep } from '@/components/agent-setup/ErrorStep'
 import { AgentSetupWizard, type AgentSetupState } from '@/components/agent-setup/AgentSetupWizard'
-import { AgentSetupStepIndicator } from '@/components/agent-setup/AgentSetupStepIndicator'
 import { AgentSetupDemo } from '@/components/agent-setup/AgentSetupDemo'
 
 // Sample data for testing
@@ -94,61 +93,6 @@ const createAgentSetupState = (overrides: Partial<AgentSetupState> = {}): AgentS
 })
 
 export const agentSetupComponents: ComponentEntry[] = [
-  // Step Indicator
-  {
-    id: 'agent-setup-step-indicator',
-    name: 'AgentSetupStepIndicator',
-    category: 'Agent Setup',
-    description: 'Progress dots showing current step in agent setup flow',
-    component: AgentSetupStepIndicator,
-    props: [
-      {
-        name: 'currentStep',
-        description: 'Current step in the flow',
-        control: {
-          type: 'select',
-          options: [
-            { label: 'Extracting', value: 'extracting' },
-            { label: 'Review', value: 'review' },
-            { label: 'MCP Auth', value: 'mcp-auth' },
-            { label: 'API Auth', value: 'api-auth' },
-            { label: 'Ready', value: 'ready' },
-            { label: 'Active', value: 'active' },
-            { label: 'Error', value: 'error' },
-          ],
-        },
-        defaultValue: 'extracting',
-      },
-      {
-        name: 'hasConcerns',
-        description: 'Show review step',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-      {
-        name: 'hasMcpServers',
-        description: 'Show MCP auth step',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-      {
-        name: 'hasApis',
-        description: 'Show API auth step',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-    ],
-    variants: [
-      { name: 'All Steps - Extracting', props: { currentStep: 'extracting', hasConcerns: true, hasMcpServers: true, hasApis: true } },
-      { name: 'All Steps - Review', props: { currentStep: 'review', hasConcerns: true, hasMcpServers: true, hasApis: true } },
-      { name: 'All Steps - MCP Auth', props: { currentStep: 'mcp-auth', hasConcerns: true, hasMcpServers: true, hasApis: true } },
-      { name: 'All Steps - API Auth', props: { currentStep: 'api-auth', hasConcerns: true, hasMcpServers: true, hasApis: true } },
-      { name: 'All Steps - Ready', props: { currentStep: 'ready', hasConcerns: true, hasMcpServers: true, hasApis: true } },
-      { name: 'Minimal - Only Extract + Ready', props: { currentStep: 'extracting', hasConcerns: false, hasMcpServers: false, hasApis: false } },
-      { name: 'No Review', props: { currentStep: 'mcp-auth', hasConcerns: false, hasMcpServers: true, hasApis: true } },
-    ],
-  },
-
   // Extracting Step
   {
     id: 'extracting-step',

@@ -16,12 +16,15 @@ export interface AddWorkspaceState {
   step: AddWorkspaceStep
   selectedSpaceId: string | null
   selectedSpaceName: string | null
+  selectedSpaceIconUrl: string | null
   errorMessage?: string
 }
 
 interface UseAddWorkspaceOptions {
   onComplete: () => void
   onCancel: () => void
+  /** Existing workspace names to filter out from space selection */
+  existingWorkspaceNames?: string[]
 }
 
 interface UseAddWorkspaceReturn {
@@ -30,7 +33,7 @@ interface UseAddWorkspaceReturn {
 
   // Actions
   handleLogin: () => void
-  handleSelectSpace: (spaceId: string, spaceName: string) => void
+  handleSelectSpace: (spaceId: string, spaceName: string, iconUrl?: string) => void
   handleContinue: () => void
   handleBack: () => void
   handleCancel: () => void
@@ -39,11 +42,13 @@ interface UseAddWorkspaceReturn {
 export function useAddWorkspace({
   onComplete,
   onCancel,
+  existingWorkspaceNames = [],
 }: UseAddWorkspaceOptions): UseAddWorkspaceReturn {
   const [state, setState] = useState<AddWorkspaceState>({
     step: 'loading',
     selectedSpaceId: null,
     selectedSpaceName: null,
+    selectedSpaceIconUrl: null,
   })
 
   const [spaceCategories, setSpaceCategories] = useState<SpaceCategory[]>([])
@@ -56,9 +61,17 @@ export function useAddWorkspace({
     teams: Array<{ id: string; name: string; isPrivate: boolean; role: string }>,
     userId: string
   ): SpaceCategory[] => {
-    const personalSpace = spaces.find(s => s.id === userId)
-    const teamSpaces = spaces.filter(s => s.id !== userId && s.teamId)
-    const otherSpaces = spaces.filter(s => s.id !== userId && !s.teamId)
+    // Filter out spaces that already have workspaces
+    const existingNamesSet = new Set(existingWorkspaceNames.map(n => n.toLowerCase()))
+    const availableSpaces = spaces.filter(s => !existingNamesSet.has(s.name.toLowerCase()))
+
+    const personalSpace = availableSpaces.find(s => s.id === userId)
+    const teamSpaces = availableSpaces.filter(s => s.id !== userId && s.teamId)
+    const otherSpaces = availableSpaces.filter(s => s.id !== userId && !s.teamId)
+
+    // Sort helper - alphabetical by name
+    const sortByName = <T extends { name: string }>(arr: T[]) =>
+      [...arr].sort((a, b) => a.name.localeCompare(b.name))
 
     const categories: SpaceCategory[] = []
 
@@ -69,6 +82,7 @@ export function useAddWorkspace({
           id: personalSpace.id,
           name: personalSpace.name,
           type: 'personal',
+          iconUrl: personalSpace.iconUrl ?? undefined,
         }],
       })
     }
@@ -76,10 +90,11 @@ export function useAddWorkspace({
     if (teamSpaces.length > 0) {
       categories.push({
         name: 'Your Spaces',
-        spaces: teamSpaces.map(s => ({
+        spaces: sortByName(teamSpaces).map(s => ({
           id: s.id,
           name: s.name,
           type: 'team' as const,
+          iconUrl: s.iconUrl ?? undefined,
         })),
       })
     }
@@ -87,16 +102,17 @@ export function useAddWorkspace({
     if (otherSpaces.length > 0) {
       categories.push({
         name: 'Other Spaces',
-        spaces: otherSpaces.map(s => ({
+        spaces: sortByName(otherSpaces).map(s => ({
           id: s.id,
           name: s.name,
           type: 'shared' as const,
+          iconUrl: s.iconUrl ?? undefined,
         })),
       })
     }
 
     return categories
-  }, [])
+  }, [existingWorkspaceNames])
 
   // On mount, check for existing Craft auth
   useEffect(() => {
@@ -160,11 +176,12 @@ export function useAddWorkspace({
   }, [categorizeSpaces])
 
   // Select a space
-  const handleSelectSpace = useCallback((spaceId: string, spaceName: string) => {
+  const handleSelectSpace = useCallback((spaceId: string, spaceName: string, iconUrl?: string) => {
     setState(s => ({
       ...s,
       selectedSpaceId: spaceId,
       selectedSpaceName: spaceName,
+      selectedSpaceIconUrl: iconUrl ?? null,
     }))
   }, [])
 
@@ -209,6 +226,7 @@ export function useAddWorkspace({
           workspace: {
             name: state.selectedSpaceName!,
             mcpUrl,
+            iconUrl: state.selectedSpaceIconUrl ?? undefined,
           },
           mcpCredentials,
         })
@@ -233,7 +251,7 @@ export function useAddWorkspace({
     } else if (state.step === 'complete') {
       onComplete()
     }
-  }, [state.step, state.selectedSpaceId, state.selectedSpaceName, craftToken, onComplete])
+  }, [state.step, state.selectedSpaceId, state.selectedSpaceName, state.selectedSpaceIconUrl, craftToken, onComplete])
 
   // Go back
   const handleBack = useCallback(() => {

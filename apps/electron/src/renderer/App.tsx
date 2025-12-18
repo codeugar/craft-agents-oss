@@ -71,6 +71,7 @@ export default function App() {
   const addWorkspace = useAddWorkspace({
     onComplete: handleAddWorkspaceComplete,
     onCancel: handleAddWorkspaceCancel,
+    existingWorkspaceNames: workspaces.map(w => w.name),
   })
 
   // Check auth state on mount
@@ -96,7 +97,7 @@ export default function App() {
   }, [])
 
   // Tab system
-  const { openShortcutsTab } = useTabs()
+  const { openShortcutsTab, closeChatTabBySession } = useTabs()
 
   // Global shortcut: Cmd+/ to show keyboard shortcuts
   useGlobalShortcuts({
@@ -311,6 +312,21 @@ export default function App() {
             case 'complete':
               return { ...session, isProcessing: false }
 
+            case 'interrupted':
+              return {
+                ...session,
+                isProcessing: false,
+                messages: [
+                  ...session.messages,
+                  {
+                    id: generateMessageId(),
+                    role: 'info' as const,
+                    content: 'Response interrupted',
+                    timestamp: Date.now()
+                  }
+                ]
+              }
+
             case 'title_generated':
               return { ...session, name: event.title }
 
@@ -359,9 +375,12 @@ export default function App() {
   }, [agents])
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
+    // Close the tab first to prevent race conditions where the tab
+    // tries to render while the session is being deleted
+    closeChatTabBySession(sessionId)
     await window.electronAPI.deleteSession(sessionId)
     setSessions(prev => prev.filter(s => s.id !== sessionId))
-  }, [])
+  }, [closeChatTabBySession])
 
   const handleArchiveSession = useCallback(async (sessionId: string) => {
     await window.electronAPI.archiveSession(sessionId)

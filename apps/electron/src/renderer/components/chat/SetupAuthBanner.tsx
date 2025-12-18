@@ -10,10 +10,10 @@ interface SetupAuthBannerProps {
 }
 
 /**
- * SetupAuthBanner - Shows when an agent needs setup or authentication
+ * SetupAuthBanner - Shows when an agent needs activation or authentication
  *
  * States:
- * - 'setup': Agent has never been configured (needs initial setup)
+ * - 'setup': Agent has never been configured (needs initial activation)
  * - 'auth': Agent exists but needs re-authentication
  * - 'hidden': No banner shown
  */
@@ -29,7 +29,7 @@ export function SetupAuthBanner({
 
   // Default descriptions when no reason provided
   const defaultDescription = isSetup
-    ? "Set up this agent to start chatting."
+    ? "Activate this agent to start chatting."
     : "Re-authenticate to continue using this agent."
 
   return (
@@ -37,7 +37,7 @@ export function SetupAuthBanner({
       <div className="rounded-lg border border-foreground/10 bg-card p-5 text-center">
         {/* Title */}
         <h3 className="text-sm font-semibold text-foreground font-sans">
-          {isSetup ? 'Agent needs setup' : 'Authentication required'}
+          {isSetup ? `Activate ${agentName || 'agent'}` : 'Authentication required'}
         </h3>
 
         {/* Description */}
@@ -48,9 +48,9 @@ export function SetupAuthBanner({
         {/* Action Button */}
         <Button
           onClick={onAction}
-          className="mt-4 w-full text-sm rounded-lg bg-foreground/5 text-foregdound hover:bg-foreground/10"
+          className="mt-4 w-full text-xs rounded-lg bg-foreground/5 text-foregdound hover:bg-foreground/10"
         >
-          {isSetup ? 'Set Up Agent' : 'Authenticate'}
+          {isSetup ? 'Activate' : 'Authenticate'}
         </Button>
       </div>
     </div>

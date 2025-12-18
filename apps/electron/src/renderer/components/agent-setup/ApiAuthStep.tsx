@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { KeyRound, CheckCircle2, Clock, SkipForward, Globe } from "lucide-react"
+import { CheckCircle2, Clock, SkipForward, Globe } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -126,8 +126,7 @@ export function ApiAuthStep({
 
   return (
     <StepFormLayout
-      icon={<KeyRound />}
-      iconVariant="primary"
+      grow
       title="Configure API credentials"
       description={`${agentName} uses ${apis.length} API${apis.length === 1 ? '' : 's'} that ${apis.length === 1 ? 'requires' : 'require'} credentials.`}
       actions={
@@ -143,7 +142,7 @@ export function ApiAuthStep({
         </>
       }
     >
-      <ScrollArea className="h-[320px]">
+      <ScrollArea className="h-full">
         <div className="space-y-3 pr-4">
           {apis.map((api) => {
           const status = apiStatus[api.name]

@@ -1,4 +1,4 @@
-import { CheckCircle2, MessageSquare, ArrowRight } from "lucide-react"
+import { MessageSquare, ArrowRight } from "lucide-react"
 import { StepFormLayout, ContinueButton } from "@/components/onboarding/primitives"
 import { Button } from "@/components/ui/button"
 
@@ -23,8 +23,6 @@ export function ActiveStep({
 }: ActiveStepProps) {
   return (
     <StepFormLayout
-      icon={<CheckCircle2 />}
-      iconVariant="success"
       title={`${agentName} is active`}
       description="The agent is now ready. Start a conversation or close this tab to continue."
       actions={

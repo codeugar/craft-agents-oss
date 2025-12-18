@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
-import { Bot, Server, Key, AlertCircle, CheckCircle2, ExternalLink } from "lucide-react"
+import { Bot, Key, AlertCircle, CheckCircle2, ExternalLink } from "lucide-react"
+import { McpIcon } from "@/components/icons/McpIcon"
 import { Spinner } from "@/components/ui/loading-indicator"
 import {
   Dialog,
@@ -309,7 +310,7 @@ export function AgentAuthDialog({
           {step === 'mcp-confirm' && currentMcpServer && (
             <div className="space-y-4 py-2">
               <div className="flex items-start gap-3">
-                <Server className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+                <McpIcon className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{currentMcpServer.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{currentMcpServer.url}</p>
@@ -325,7 +326,7 @@ export function AgentAuthDialog({
           {step === 'mcp-authenticating' && currentMcpServer && (
             <div className="space-y-4 py-2">
               <div className="flex items-start gap-3">
-                <Server className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+                <McpIcon className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{currentMcpServer.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{currentMcpServer.url}</p>
@@ -346,7 +347,7 @@ export function AgentAuthDialog({
           {step === 'mcp-bearer' && currentMcpServer && (
             <div className="space-y-4 py-2">
               <div className="flex items-start gap-3">
-                <Server className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
+                <McpIcon className="h-5 w-5 mt-0.5 text-muted-foreground shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{currentMcpServer.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{currentMcpServer.url}</p>

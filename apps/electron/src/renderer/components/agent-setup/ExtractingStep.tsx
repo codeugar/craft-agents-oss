@@ -1,4 +1,3 @@
-import { Bot } from "lucide-react"
 import { StepFormLayout, BackButton } from "@/components/onboarding/primitives"
 import { Spinner } from "@/components/ui/loading-indicator"
 
@@ -25,11 +24,11 @@ export function ExtractingStep({
   return (
     <StepFormLayout
       iconElement={
-        <div className="mb-2 flex size-16 items-center justify-center">
+        <div className="flex size-16 items-center justify-center">
           <Spinner className="text-4xl text-primary" />
         </div>
       }
-      title={`Setting up ${agentName}`}
+      title={`Activating ${agentName}`}
       description={message}
       actions={
         onCancel && (

@@ -1,5 +1,4 @@
 import * as React from "react"
-import { useRef, useState, useEffect } from "react"
 import { Check, Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -10,7 +9,8 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { CrossfadeAvatar } from "@/components/ui/avatar"
+import { FadingText } from "@/components/ui/fading-text"
 import type { Workspace } from "../../../shared/types"
 
 interface WorkspaceSwitcherProps {
@@ -19,53 +19,6 @@ interface WorkspaceSwitcherProps {
   activeWorkspaceId: string | null
   onSelect: (workspaceId: string) => void
   onAddWorkspace?: () => void
-}
-
-/**
- * FadingText - Text that fades with gradient only when overflowing
- */
-function FadingText({
-  children,
-  className,
-  fadeWidth = 36
-}: {
-  children: React.ReactNode
-  className?: string
-  fadeWidth?: number
-}) {
-  const ref = useRef<HTMLSpanElement>(null)
-  const [isOverflowing, setIsOverflowing] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-
-    const checkOverflow = () => {
-      setIsOverflowing(el.scrollWidth > el.clientWidth)
-    }
-
-    checkOverflow()
-
-    const observer = new ResizeObserver(checkOverflow)
-    observer.observe(el)
-
-    return () => observer.disconnect()
-  }, [children])
-
-  return (
-    <span
-      ref={ref}
-      className={cn(
-        "min-w-0 overflow-hidden whitespace-nowrap",
-        className
-      )}
-      style={isOverflowing ? {
-        maskImage: `linear-gradient(to right, black calc(100% - ${fadeWidth}px), transparent)`
-      } : undefined}
-    >
-      {children}
-    </span>
-  )
 }
 
 /**
@@ -102,12 +55,14 @@ export function WorkspaceSwitcher({
           )}
           aria-label="Select workspace"
         >
-          {/* Workspace Avatar: First letter of name */}
-          <Avatar className="h-4 w-4 shrink-0">
-            <AvatarFallback className="text-[10px] bg-primary text-primary-foreground">
-              {selectedWorkspace?.name?.charAt(0) || 'W'}
-            </AvatarFallback>
-          </Avatar>
+          {/* Workspace Avatar: Image with crossfade, border, first letter fallback */}
+          <CrossfadeAvatar
+            src={selectedWorkspace?.iconUrl}
+            alt={selectedWorkspace?.name}
+            className="h-4 w-4 ring-1 ring-border/50"
+            fallbackClassName="bg-primary text-primary-foreground text-[10px]"
+            fallback={selectedWorkspace?.name?.charAt(0) || 'W'}
+          />
           {/* Workspace Name: Hidden when collapsed, gradient fade on overflow */}
           {!isCollapsed && (
             <FadingText className="ml-1 font-sans min-w-0 text-sm" fadeWidth={36}>
@@ -128,11 +83,13 @@ export function WorkspaceSwitcher({
             )}
           >
             <div className="flex items-center gap-3 font-sans">
-              <Avatar className="h-5 w-5">
-                <AvatarFallback className="text-xs bg-muted">
-                  {workspace.name.charAt(0)}
-                </AvatarFallback>
-              </Avatar>
+              <CrossfadeAvatar
+                src={workspace.iconUrl}
+                alt={workspace.name}
+                className="h-5 w-5 ring-1 ring-border/50"
+                fallbackClassName="bg-muted text-xs"
+                fallback={workspace.name.charAt(0)}
+              />
               {workspace.name}
             </div>
             {activeWorkspaceId === workspace.id && (

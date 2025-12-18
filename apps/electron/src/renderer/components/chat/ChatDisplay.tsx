@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Paperclip,
   ArrowUp,
+  Square,
   Bot,
   AlertTriangle,
 } from "lucide-react"
@@ -39,7 +40,7 @@ interface ChatDisplayProps {
   onModelChange: (model: string) => void
   /** Ref for the textarea, used for external focus control */
   textareaRef?: React.RefObject<HTMLTextAreaElement>
-  /** When true, disables input (e.g., when agent needs setup) */
+  /** When true, disables input (e.g., when agent needs activation) */
   disabled?: boolean
   /** Pending permission request for this session */
   pendingPermission?: PermissionRequest
@@ -69,8 +70,9 @@ export function ChatDisplay({
   pendingPermission,
   onRespondToPermission,
 }: ChatDisplayProps) {
-  // Input is disabled when explicitly disabled prop is true OR session is processing
-  const isInputDisabled = disabled || session?.isProcessing
+  // Input is only disabled when explicitly disabled (e.g., agent needs activation)
+  // User can type during streaming - submitting will stop the stream and send
+  const isInputDisabled = disabled
   const [input, setInput] = React.useState("")
   const [attachments, setAttachments] = React.useState<FileAttachment[]>([])
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
@@ -253,13 +255,33 @@ export function ChatDisplay({
     })
   }, [session?.id, session?.messages])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const hasContent = input.trim() || attachments.length > 0
     if (!hasContent || isInputDisabled) return
+
+    // If currently processing, stop the stream first
+    if (session?.isProcessing) {
+      try {
+        await window.electronAPI.cancelProcessing(session.id)
+        // Small delay to let the cancellation complete
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        console.error('[ChatDisplay] Failed to cancel before send:', error)
+      }
+    }
+
     onSendMessage(input.trim(), attachments.length > 0 ? attachments : undefined)
     setInput("")
     setAttachments([])
+  }
+
+  const handleStop = () => {
+    if (!session?.isProcessing) return
+    // Fire and forget - don't await, UI updates when 'complete' event arrives
+    window.electronAPI.cancelProcessing(session.id).catch(error => {
+      console.error('[ChatDisplay] Failed to cancel processing:', error)
+    })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -272,9 +294,13 @@ export function ChatDisplay({
       e.preventDefault()
       handleSubmit(e)
     }
-    // Escape to blur textarea
+    // Escape to stop streaming (if processing) or blur textarea
     if (e.key === 'Escape') {
-      textareaRef.current?.blur()
+      if (session?.isProcessing) {
+        handleStop()
+      } else {
+        textareaRef.current?.blur()
+      }
     }
   }
 
@@ -407,15 +433,35 @@ export function ChatDisplay({
                   {/* Spacer */}
                   <div className="flex-1" />
 
-                  {/* Send Button */}
-                  <Button
-                    type="submit"
-                    size="icon"
-                    className="h-7 w-7 rounded-full shrink-0"
-                    disabled={(!input.trim() && attachments.length === 0) || isInputDisabled}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
+                  {/* Send/Stop Button - show send if there's content, stop if processing with no content */}
+                  {(() => {
+                    const hasContent = input.trim() || attachments.length > 0
+                    // Show send button if there's content OR not processing
+                    if (hasContent || !session?.isProcessing) {
+                      return (
+                        <Button
+                          type="submit"
+                          size="icon"
+                          className="h-7 w-7 rounded-full shrink-0"
+                          disabled={!hasContent || disabled}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                      )
+                    }
+                    // Show stop button when processing with no content
+                    return (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="secondary"
+                        className="h-7 w-7 rounded-full shrink-0 hover:bg-foreground/15 active:bg-foreground/20"
+                        onClick={handleStop}
+                      >
+                        <Square className="h-3 w-3 fill-current" />
+                      </Button>
+                    )
+                  })()}
                 </div>
               </div>
             </form>
@@ -653,6 +699,15 @@ function MessageBubble({ message, onOpenFile, onOpenUrl, renderMode = 'minimal' 
           label={message.content}
           className="text-sm"
         />
+      </div>
+    )
+  }
+
+  // === INFO MESSAGE: Simple italic text (for interruptions, etc.) ===
+  if (message.role === 'info') {
+    return (
+      <div className="flex justify-start pl-1">
+        <span className="text-sm text-muted-foreground italic">{message.content}</span>
       </div>
     )
   }

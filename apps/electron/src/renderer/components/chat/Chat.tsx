@@ -34,6 +34,7 @@ import {
   StyledDropdownMenuItem,
 } from "@/components/ui/styled-dropdown"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { FadingText } from "@/components/ui/fading-text"
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -167,53 +168,6 @@ interface AgentTreeProps {
   }
   /** Agent status indicators */
   agentStatus?: Map<string, SidebarAgentStatus>
-}
-
-/**
- * FadingText - Text that fades with gradient only when overflowing
- */
-function FadingText({
-  children,
-  className,
-  fadeWidth = 24
-}: {
-  children: React.ReactNode
-  className?: string
-  fadeWidth?: number
-}) {
-  const ref = useRef<HTMLSpanElement>(null)
-  const [isOverflowing, setIsOverflowing] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-
-    const checkOverflow = () => {
-      setIsOverflowing(el.scrollWidth > el.clientWidth)
-    }
-
-    checkOverflow()
-
-    const observer = new ResizeObserver(checkOverflow)
-    observer.observe(el)
-
-    return () => observer.disconnect()
-  }, [children])
-
-  return (
-    <span
-      ref={ref}
-      className={cn(
-        "min-w-0 overflow-hidden whitespace-nowrap",
-        className
-      )}
-      style={isOverflowing ? {
-        maskImage: `linear-gradient(to right, black calc(100% - ${fadeWidth}px), transparent)`
-      } : undefined}
-    >
-      {children}
-    </span>
-  )
 }
 
 // Union type for sorting agents and folders together alphabetically
@@ -1208,7 +1162,6 @@ export function Chat({
                     },
                   ]}
                 />
-                <Separator className="bg-foreground/10" />
                 {/* Agent Tree: Hierarchical list of agents */}
                 <div className="group/agents flex-1 min-h-0 flex flex-col overflow-hidden pt-0.5">
                   {/* Agents Section Header with menu */}
@@ -1354,7 +1307,7 @@ export function Chat({
                   </Button>
                 </motion.div>
                 <Separator />
-                {/* Setup/Auth Banner - shows when agent needs setup or authentication */}
+                {/* Activation/Auth Banner - shows when agent needs activation or authentication */}
                 <SetupAuthBanner
                   state={viewMode === 'agent' ? bannerState.state : 'hidden'}
                   agentName={selectedAgentId ? agents.find(a => a.id === selectedAgentId)?.displayName || agents.find(a => a.id === selectedAgentId)?.name : undefined}

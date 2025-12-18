@@ -102,7 +102,7 @@ export const chatComponents: ComponentEntry[] = [
     id: 'setup-auth-banner',
     name: 'SetupAuthBanner',
     category: 'Chat',
-    description: 'Shows when an agent needs setup or authentication',
+    description: 'Shows when an agent needs activation or authentication',
     component: SetupAuthBanner,
     props: [
       {

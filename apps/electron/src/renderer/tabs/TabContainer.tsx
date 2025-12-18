@@ -34,6 +34,7 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from '@/components/ui/styled-dropdown'
+import { Separator } from '@/components/ui/separator'
 import { useChatContext } from '@/context/ChatContext'
 import { getSessionTitle } from '@/utils/session'
 import { TabBar } from './TabBar'
@@ -46,7 +47,7 @@ interface TabContainerProps {
 }
 
 export function TabContainer({ className }: TabContainerProps) {
-  const { activeTab, tabs } = useTabs()
+  const { activeTab, tabs, isTabBarVisible } = useTabs()
   const { sessions } = useChatContext()
 
   // Rename dialog state
@@ -119,6 +120,8 @@ export function TabContainer({ className }: TabContainerProps) {
           onOpenRename={handleOpenRename}
         />
       )}
+      {/* Separator only when tab bar is hidden */}
+      {!isTabBarVisible && <Separator />}
       {/* Tab bar - below header, only when multiple tabs */}
       <TabBar />
       {/* Content */}
@@ -146,8 +149,8 @@ interface TabHeaderProps {
 
 function TabHeader({ title, subtitle, tab, showAgentBadge, onOpenRename }: TabHeaderProps) {
   return (
-    <div className="flex h-[50px] shrink-0 items-center pl-5 pr-2 min-w-0 gap-3 relative z-50 titlebar-no-drag">
-      <div className="flex-1 min-w-0 flex flex-col justify-center">
+    <div className="flex h-[50px] shrink-0 items-center pl-5 pr-2 min-w-0 gap-3 relative z-50">
+      <div className="flex-1 min-w-0 flex flex-col justify-center select-none">
         <div className="flex items-center gap-2">
           <h1 className="text-sm font-semibold truncate font-sans leading-tight">{title}</h1>
           {showAgentBadge && (
@@ -156,7 +159,9 @@ function TabHeader({ title, subtitle, tab, showAgentBadge, onOpenRename }: TabHe
         </div>
         <p className="text-[11px] opacity-50 font-sans leading-tight truncate">{subtitle}</p>
       </div>
-      <TabHeaderActions tab={tab} onOpenRename={onOpenRename} />
+      <div className="titlebar-no-drag">
+        <TabHeaderActions tab={tab} onOpenRename={onOpenRename} />
+      </div>
     </div>
   )
 }
@@ -207,9 +212,12 @@ function TabHeaderActions({ tab, onOpenRename }: TabHeaderActionsProps) {
 
   const handleDelete = React.useCallback(() => {
     if (session) {
+      // Close the tab immediately to prevent race conditions
+      // (the session removal from state happens async, tab must close first)
+      closeTab(tab.id)
       onDeleteSession(session.id)
     }
-  }, [session, onDeleteSession])
+  }, [session, onDeleteSession, closeTab, tab.id])
 
   const handleClose = React.useCallback(() => {
     closeTab(tab.id)

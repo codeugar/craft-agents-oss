@@ -110,6 +110,7 @@ export function registerOnboardingHandlers(): void {
             id: s.id,
             name: s.name,
             teamId: s.teamId,
+            iconUrl: s.logoUrl,  // API returns logoUrl, UI uses iconUrl
           })),
           teams: profile.teams.map(t => ({
             id: t.id,
@@ -152,6 +153,7 @@ export function registerOnboardingHandlers(): void {
             id: s.id,
             name: s.name,
             teamId: s.teamId,
+            iconUrl: s.logoUrl,  // API returns logoUrl, UI uses iconUrl
           })),
           teams: profile.teams.map(t => ({
             id: t.id,
@@ -260,7 +262,7 @@ export function registerOnboardingHandlers(): void {
   // Save onboarding configuration
   ipcMain.handle(IPC_CHANNELS.ONBOARDING_SAVE_CONFIG, async (_event, config: {
     authType?: AuthType  // Optional - if not provided, preserves existing auth type
-    workspace?: { name: string; mcpUrl: string }  // Optional - if not provided, only updates billing
+    workspace?: { name: string; mcpUrl: string; iconUrl?: string }  // Optional - if not provided, only updates billing
     credential?: string
     mcpCredentials?: { accessToken: string; clientId?: string }
   }): Promise<OnboardingSaveResult> => {
@@ -301,6 +303,7 @@ export function registerOnboardingHandlers(): void {
           mcpUrl: config.workspace.mcpUrl,
           mcpAuthType: (config.mcpCredentials ? 'workspace_oauth' : 'public') as 'workspace_oauth' | 'workspace_bearer' | 'public',
           createdAt: Date.now(),
+          iconUrl: config.workspace.iconUrl,
         }
 
         // Save MCP credentials if provided

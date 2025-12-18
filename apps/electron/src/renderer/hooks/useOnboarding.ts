@@ -39,7 +39,7 @@ interface UseOnboardingReturn {
   handleRetryLogin: () => void
 
   // Space selection
-  handleSelectSpace: (spaceId: string, spaceName: string) => void
+  handleSelectSpace: (spaceId: string, spaceName: string, iconUrl?: string) => void
 
   // Billing
   handleSelectBillingMethod: (method: BillingMethod) => void
@@ -91,6 +91,7 @@ export function useOnboarding({
     completionStatus: 'saving',
     selectedSpaceId: null,
     selectedSpaceName: null,
+    selectedSpaceIconUrl: null,
     billingMethod: null,
     isExistingUser: !initialSetupNeeds?.needsCraftAuth, // Has Craft auth + workspace, just needs billing
   })
@@ -124,6 +125,10 @@ export function useOnboarding({
     const teamSpaces = spaces.filter(s => s.id !== userId && s.teamId)
     const otherSpaces = spaces.filter(s => s.id !== userId && !s.teamId)
 
+    // Sort helper - alphabetical by name
+    const sortByName = <T extends { name: string }>(arr: T[]) =>
+      [...arr].sort((a, b) => a.name.localeCompare(b.name))
+
     const categories: SpaceCategory[] = []
 
     if (personalSpace) {
@@ -133,6 +138,7 @@ export function useOnboarding({
           id: personalSpace.id,
           name: personalSpace.name,
           type: 'personal',
+          iconUrl: personalSpace.iconUrl ?? undefined,
         }],
       })
     }
@@ -140,10 +146,11 @@ export function useOnboarding({
     if (teamSpaces.length > 0) {
       categories.push({
         name: 'Your Spaces',
-        spaces: teamSpaces.map(s => ({
+        spaces: sortByName(teamSpaces).map(s => ({
           id: s.id,
           name: s.name,
           type: 'team' as const,
+          iconUrl: s.iconUrl ?? undefined,
         })),
       })
     }
@@ -151,10 +158,11 @@ export function useOnboarding({
     if (otherSpaces.length > 0) {
       categories.push({
         name: 'Other Spaces',
-        spaces: otherSpaces.map(s => ({
+        spaces: sortByName(otherSpaces).map(s => ({
           id: s.id,
           name: s.name,
           type: 'shared' as const,
+          iconUrl: s.iconUrl ?? undefined,
         })),
       })
     }
@@ -311,11 +319,12 @@ export function useOnboarding({
   }, [handleLogin])
 
   // Select a space
-  const handleSelectSpace = useCallback((spaceId: string, spaceName: string) => {
+  const handleSelectSpace = useCallback((spaceId: string, spaceName: string, iconUrl?: string) => {
     setState(s => ({
       ...s,
       selectedSpaceId: spaceId,
       selectedSpaceName: spaceName,
+      selectedSpaceIconUrl: iconUrl ?? null,
     }))
   }, [])
 
@@ -513,6 +522,7 @@ export function useOnboarding({
         workspace: {
           name: workspaceName,
           mcpUrl,
+          iconUrl: state.selectedSpaceIconUrl ?? undefined,
         },
         credential,
         mcpCredentials: mcpCredentials || undefined,
@@ -534,7 +544,7 @@ export function useOnboarding({
         errorMessage: error instanceof Error ? error.message : 'Failed to save configuration',
       }))
     }
-  }, [state.billingMethod, state.selectedSpaceName, state.isExistingUser, selectedMcpLink, mcpCredentials])
+  }, [state.billingMethod, state.selectedSpaceName, state.selectedSpaceIconUrl, state.isExistingUser, selectedMcpLink, mcpCredentials])
 
   // Finish onboarding
   const handleFinish = useCallback(() => {
@@ -557,6 +567,7 @@ export function useOnboarding({
       completionStatus: 'saving',
       selectedSpaceId: null,
       selectedSpaceName: null,
+      selectedSpaceIconUrl: null,
       billingMethod: null,
       isExistingUser: false,
       errorMessage: undefined,

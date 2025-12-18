@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { Server, ExternalLink, Key, CheckCircle2, Clock, SkipForward } from "lucide-react"
+import { ExternalLink, Key, CheckCircle2, Clock, SkipForward } from "lucide-react"
+import { McpIcon } from "@/components/icons/McpIcon"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -116,8 +117,7 @@ export function McpAuthStep({
 
   return (
     <StepFormLayout
-      icon={<Server />}
-      iconVariant="primary"
+      grow
       title="Connect MCP servers"
       description={`${agentName} uses ${servers.length} external server${servers.length === 1 ? '' : 's'} that ${servers.length === 1 ? 'needs' : 'need'} authentication.`}
       actions={
@@ -133,7 +133,7 @@ export function McpAuthStep({
         </>
       }
     >
-      <ScrollArea className="h-[320px]">
+      <ScrollArea className="h-full">
         <div className="space-y-3 pr-4">
           {servers.map((server, index) => {
           const status = serverStatus[server.name]
@@ -155,7 +155,7 @@ export function McpAuthStep({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Server className="size-4 text-muted-foreground" />
+                    <McpIcon className="size-4 text-muted-foreground" />
                     <span className="font-medium text-sm">{server.name}</span>
                     {getStatusBadge(status)}
                   </div>

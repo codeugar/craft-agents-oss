@@ -15,14 +15,14 @@ const sampleSpaceCategories: SpaceCategory[] = [
   {
     name: 'Recommended',
     spaces: [
-      { id: 'personal-1', name: 'Personal Space', type: 'personal' },
+      { id: 'personal-1', name: 'Personal Space', type: 'personal', iconUrl: 'https://picsum.photos/seed/personal/200' },
     ],
   },
   {
     name: 'Your Spaces',
     spaces: [
-      { id: 'team-1', name: 'Engineering Team', type: 'team' },
-      { id: 'team-2', name: 'Design Team', type: 'team' },
+      { id: 'team-1', name: 'Engineering Team', type: 'team', iconUrl: 'https://picsum.photos/seed/engineering/200' },
+      { id: 'team-2', name: 'Design Team', type: 'team', iconUrl: 'https://picsum.photos/seed/design/200' },
       { id: 'team-3', name: 'Marketing', type: 'team' },
     ],
   },
@@ -30,7 +30,7 @@ const sampleSpaceCategories: SpaceCategory[] = [
     name: 'Other Spaces',
     spaces: [
       { id: 'shared-1', name: 'Company Wiki', type: 'shared' },
-      { id: 'shared-2', name: 'Project Docs', type: 'shared' },
+      { id: 'shared-2', name: 'Project Docs', type: 'shared', iconUrl: 'https://picsum.photos/seed/docs/200' },
     ],
   },
 ]
@@ -42,6 +42,7 @@ const createOnboardingState = (overrides: Partial<OnboardingState> = {}): Onboar
   completionStatus: 'complete',
   selectedSpaceId: null,
   selectedSpaceName: null,
+  selectedSpaceIconUrl: null,
   billingMethod: null,
   isExistingUser: false,
   ...overrides,
@@ -191,7 +192,7 @@ export const onboardingComponents: ComponentEntry[] = [
     ],
     mockData: () => ({
       categories: sampleSpaceCategories,
-      onSelect: (id: string) => console.log('[Playground] Selected space:', id),
+      onSelect: (id: string, name: string, iconUrl?: string) => console.log('[Playground] Selected space:', id, name, iconUrl),
       onContinue: noopHandler,
       onBack: noopHandler,
     }),
@@ -453,7 +454,7 @@ export const onboardingComponents: ComponentEntry[] = [
       onLogin: noopHandler,
       onOpenLoginManually: noopHandler,
       onRetryLogin: noopHandler,
-      onSelectSpace: (id: string) => console.log('[Playground] Selected space:', id),
+      onSelectSpace: (id: string, name: string, iconUrl?: string) => console.log('[Playground] Selected space:', id, name, iconUrl),
       onSelectBillingMethod: (method: string) => console.log('[Playground] Selected billing:', method),
       onSubmitCredential: (cred: string) => console.log('[Playground] Submitted:', cred),
       onStartOAuth: noopHandler,

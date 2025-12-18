@@ -167,8 +167,8 @@ export class AgentService {
   }
 
   /**
-   * Get detailed setup status for an agent
-   * Distinguishes between "needs setup" (no definition extracted) and "needs auth" (definition exists but missing credentials)
+   * Get detailed activation status for an agent
+   * Distinguishes between "needs activation" (no definition extracted) and "needs auth" (definition exists but missing credentials)
    */
   async getAgentSetupStatus(workspaceId: string, agentId: string): Promise<AgentSetupStatus> {
     try {
@@ -181,7 +181,7 @@ export class AgentService {
         return {
           needsSetup: true,
           needsAuth: false,
-          reason: 'Agent needs initial setup'
+          reason: 'Configure connections and credentials to get started.'
         }
       }
 

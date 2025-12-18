@@ -131,6 +131,8 @@ interface StepFormLayoutProps {
   actions?: React.ReactNode
   /** Form content */
   children?: React.ReactNode
+  /** Whether children should grow to fill available space (for scrollable content) */
+  grow?: boolean
   className?: string
 }
 
@@ -151,12 +153,17 @@ export function StepFormLayout({
   description,
   actions,
   children,
+  grow = false,
   className
 }: StepFormLayoutProps) {
   return (
-    <div className={cn("flex w-[28rem] flex-col items-center", className)}>
+    <div className={cn(
+      "flex w-[28rem] flex-col items-center",
+      grow && "h-full max-h-[600px]",
+      className
+    )}>
       {iconElement && (
-        <div className="mb-6">
+        <div className="mb-6 shrink-0">
           {iconElement}
         </div>
       )}
@@ -166,16 +173,21 @@ export function StepFormLayout({
         </StepIcon>
       )}
 
-      <StepHeader title={title} description={description} />
+      <div className="shrink-0">
+        <StepHeader title={title} description={description} />
+      </div>
 
       {children && (
-        <div className="mt-8 w-full">
+        <div className={cn(
+          "mt-6 w-full",
+          grow && "flex-1 min-h-0"
+        )}>
           {children}
         </div>
       )}
 
       {actions && (
-        <StepActions variant="flex" className="mt-8 w-full">
+        <StepActions variant="flex" className="mt-6 w-full shrink-0">
           {actions}
         </StepActions>
       )}

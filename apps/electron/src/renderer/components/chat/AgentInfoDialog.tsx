@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { Bot, Server, Wrench, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Bot, Wrench, AlertCircle, CheckCircle2 } from "lucide-react"
+import { McpIcon } from "@/components/icons/McpIcon"
 import { Spinner } from "@/components/ui/loading-indicator"
 import {
   Dialog,
@@ -127,7 +128,7 @@ export function AgentInfoDialog({
               {/* MCP Servers */}
               <div>
                 <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                  <Server className="h-4 w-4" />
+                  <McpIcon className="h-4 w-4" />
                   MCP Servers
                 </h4>
                 {authStatus?.mcpServers && authStatus.mcpServers.length > 0 ? (
