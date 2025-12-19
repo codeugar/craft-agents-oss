@@ -16,6 +16,8 @@ import type { ModalName } from '../modals/useModalState.ts';
 import type { Message } from '../../components/Messages.tsx';
 import type { SubAgentDefinition } from '@craft-agent/shared/agents';
 import { PLAN_MODE_ENTER_MESSAGE, PLAN_MODE_ENTER_PROMPT } from '@craft-agent/shared/agents';
+import type { TokenUsage } from '../core/useAgent.ts';
+import { formatContextDisplay } from '../../utils/context-formatter.ts';
 
 /**
  * Result of command execution
@@ -48,6 +50,7 @@ export interface UseCommandsProps {
   setModel: (model: string) => void;
   setWorkspace: (workspace: Workspace) => void;
   startNewSession: () => Session;
+  tokenUsage: TokenUsage;
 
   // Modal control
   openModal: (name: ModalName) => void;
@@ -108,6 +111,7 @@ export function useCommands(props: UseCommandsProps) {
     setModel,
     setWorkspace,
     startNewSession,
+    tokenUsage,
     openModal,
     pendingAttachments,
     setPendingAttachments,
@@ -339,6 +343,29 @@ export function useCommands(props: UseCommandsProps) {
       case '/credits':
         openModal('balance');
         return { handled: true };
+
+      case '/context': {
+        // Context window limits (all current models use 200k)
+        const contextWindow = 200000;
+        const autocompactBuffer = 45000; // ~22.5% reserved by SDK
+
+        // Build transcript path (same as /debug command)
+        let transcriptPath: string | undefined;
+        if (session.sdkSessionId) {
+          const projectSlug = process.cwd().replace(/\//g, '-');
+          transcriptPath = `${homedir()}/.claude/projects/${projectSlug}/${session.sdkSessionId}.jsonl`;
+        }
+
+        const output = formatContextDisplay({
+          model,
+          contextWindow,
+          autocompactBuffer,
+          totalUsed: tokenUsage.contextTokens,
+          transcriptPath,
+        });
+
+        return { handled: true, message: { content: output, type: 'system' } };
+      }
 
       // ============================================
       // Model Commands
@@ -781,6 +808,7 @@ export function useCommands(props: UseCommandsProps) {
     setModel,
     setWorkspace,
     startNewSession,
+    tokenUsage,
     openModal,
     pendingAttachments,
     setPendingAttachments,

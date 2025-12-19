@@ -379,6 +379,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     setModel,
     setWorkspace,
     startNewSession,
+    tokenUsage,
     openModal,
     pendingAttachments,
     setPendingAttachments,
