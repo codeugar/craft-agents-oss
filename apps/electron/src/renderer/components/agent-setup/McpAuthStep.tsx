@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { ExternalLink, CheckCircle2, Clock, SkipForward } from "lucide-react"
 import { McpIcon } from "@/components/icons/McpIcon"
+import { ServiceLogo } from "@/components/ui/service-logo"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,11 +16,16 @@ export interface McpServerConfig {
   url: string
   requiresAuth?: boolean
   description?: string
+  logo?: string
 }
 
 export type McpServerAuthStatus = 'pending' | 'authenticating' | 'authenticated' | 'skipped' | 'bearer-input'
 
 interface McpAuthStepProps {
+  /** Workspace ID for logo resolution */
+  workspaceId: string
+  /** Agent ID for logo resolution */
+  agentId: string
   /** Name of the agent */
   agentName: string
   /** MCP servers that need authentication */
@@ -49,6 +55,8 @@ interface McpAuthStepProps {
  * User can authenticate via OAuth or enter bearer token as fallback.
  */
 export function McpAuthStep({
+  workspaceId,
+  agentId,
   agentName,
   servers,
   serverStatus = {},
@@ -150,7 +158,12 @@ export function McpAuthStep({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <McpIcon className="size-4 text-muted-foreground" />
+                    <ServiceLogo
+                      logo={server.logo}
+                      name={server.name}
+                      fallbackIcon={<McpIcon className="size-2.5" />}
+                      className="size-5 rounded"
+                    />
                     <span className="font-medium text-sm">{server.name}</span>
                     {getStatusBadge(status)}
                   </div>

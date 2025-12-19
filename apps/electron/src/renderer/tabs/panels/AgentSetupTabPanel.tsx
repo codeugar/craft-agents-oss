@@ -34,6 +34,7 @@ type ApiAuthStatus = 'pending' | 'configured' | 'skipped'
 function mapStatusToWizardStep(status: AgentStatus): AgentSetupStep {
   switch (status.status) {
     case 'idle':
+      return 'start'
     case 'extracting':
       return 'extracting'
     case 'needs_review':
@@ -48,7 +49,7 @@ function mapStatusToWizardStep(status: AgentStatus): AgentSetupStep {
     case 'error':
       return 'error'
     default:
-      return 'extracting'
+      return 'start'
   }
 }
 
@@ -66,12 +67,10 @@ export default function AgentSetupTabPanel({ tab }: AgentSetupTabPanelProps) {
   const { openChatTab, closeTab } = useTabs()
   const { onCreateSession } = useChatContext()
 
-  // Auto-activate on mount when idle
-  useEffect(() => {
-    if (agentState.isIdle) {
-      agentState.activate()
-    }
-  }, [agentState.isIdle, agentState.activate])
+  // Start setup handler - called when user clicks "Set Up Agent"
+  const handleStart = useCallback(async () => {
+    await agentState.activate()
+  }, [agentState])
 
   // Initialize per-item status when agent status changes
   useEffect(() => {
@@ -216,16 +215,19 @@ export default function AgentSetupTabPanel({ tab }: AgentSetupTabPanelProps) {
     }
   }, [agentState, workspaceId, agentId, agentName, onCreateSession, openChatTab, closeTab, tab.id])
 
-  // Handle close/cancel
-  const handleClose = useCallback(() => {
+  // Handle close/cancel - reset agent state and clear intermediate artifacts
+  const handleClose = useCallback(async () => {
+    // Reset agent state: cancels extraction, clears credentials, clears cache
+    await agentState.reset()
     closeTab(tab.id)
-  }, [closeTab, tab.id])
+  }, [agentState, closeTab, tab.id])
 
   // Build wizard state from agent state
   // For mcpServers and apis, prefer definition when available (ready state),
   // otherwise use pending lists (auth steps)
   const wizardState: AgentSetupState = {
     step: mapStatusToWizardStep(agentState.status),
+    workspaceId,
     agentId,
     agentName: agentState.agentName || agentName,
     extractionMessage: agentState.extractionMessage || undefined,
@@ -245,6 +247,7 @@ export default function AgentSetupTabPanel({ tab }: AgentSetupTabPanelProps) {
         state={wizardState}
         onCancel={handleClose}
         onBack={handleClose}
+        onStart={handleStart}
         onSubmitReview={handleSubmitReview}
         onStartMcpOAuth={handleStartMcpOAuth}
         onSubmitMcpBearer={handleSubmitMcpBearer}

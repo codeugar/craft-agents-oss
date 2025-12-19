@@ -330,6 +330,18 @@ export function setAuthType(authType: AuthType): void {
   saveConfig(config);
 }
 
+export function getModel(): string | null {
+  const config = loadStoredConfig();
+  return config?.model ?? null;
+}
+
+export function setModel(model: string): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  config.model = model;
+  saveConfig(config);
+}
+
 export function getTokenDisplay(): TokenDisplayMode {
   const config = loadStoredConfig();
   return config?.tokenDisplay || 'hidden';

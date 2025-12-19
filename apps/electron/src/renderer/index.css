@@ -121,11 +121,11 @@
   --dark-h: 270;        /* hue - 270 = neutral */
 
   /* Lightness scale - from darkest to lightest */
-  --dark-l-bg: 0.18;        /* background */
-  --dark-l-surface-1: 0.18; /* primary-foreground, destructive-foreground */
-  --dark-l-surface-2: 0.19; /* card */
-  --dark-l-surface-3: 0.21; /* popover */
-  --dark-l-surface-4: 0.23; /* secondary, muted */
+  --dark-l-bg: 0.2;        /* background */
+  --dark-l-surface-1: 0.21; /* primary-foreground, destructive-foreground */
+  --dark-l-surface-2: 0.22; /* card */
+  --dark-l-surface-3: 0.23; /* popover */
+  --dark-l-surface-4: 0.24; /* secondary, muted */
   --dark-l-surface-5: 0.27; /* accent */
   --dark-l-border: 0.29;    /* border */
   --dark-l-input: 0.33;     /* input */

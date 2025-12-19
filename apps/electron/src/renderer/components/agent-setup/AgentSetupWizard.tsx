@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { StartStep } from "./StartStep"
 import { ExtractingStep } from "./ExtractingStep"
 import { ReviewConcernsStep, type Concern } from "./ReviewConcernsStep"
 import { McpAuthStep, type McpServerConfig, type McpServerAuthStatus } from "./McpAuthStep"
@@ -8,6 +9,7 @@ import { ActiveStep } from "./ActiveStep"
 import { ErrorStep } from "./ErrorStep"
 
 export type AgentSetupStep =
+  | 'start'
   | 'extracting'
   | 'review'
   | 'mcp-auth'
@@ -22,6 +24,8 @@ export type { Concern, McpServerConfig, McpServerAuthStatus, ApiConfig, ApiAuthS
 export interface AgentSetupState {
   /** Current step in the flow */
   step: AgentSetupStep
+  /** Workspace ID */
+  workspaceId: string
   /** Agent ID */
   agentId: string
   /** Agent display name */
@@ -53,6 +57,8 @@ interface AgentSetupWizardProps {
   onCancel?: () => void
   /** Called when user goes back a step */
   onBack?: () => void
+  /** Called when user starts the setup (from start step) */
+  onStart?: () => void
   /** Called when user submits concern answers */
   onSubmitReview?: (answers: Record<number, string>) => void
   /** Called to start OAuth for an MCP server */
@@ -89,6 +95,7 @@ export function AgentSetupWizard({
   state,
   onCancel,
   onBack,
+  onStart,
   onSubmitReview,
   onStartMcpOAuth,
   onSubmitMcpBearer,
@@ -105,6 +112,8 @@ export function AgentSetupWizard({
 }: AgentSetupWizardProps) {
   const {
     step,
+    workspaceId,
+    agentId,
     agentName,
     extractionMessage,
     concerns = [],
@@ -119,6 +128,15 @@ export function AgentSetupWizard({
 
   const renderStep = () => {
     switch (step) {
+      case 'start':
+        return (
+          <StartStep
+            agentName={agentName}
+            onStart={onStart}
+            onCancel={onCancel}
+          />
+        )
+
       case 'extracting':
         return (
           <ExtractingStep
@@ -142,6 +160,8 @@ export function AgentSetupWizard({
       case 'mcp-auth':
         return (
           <McpAuthStep
+            workspaceId={workspaceId}
+            agentId={agentId}
             agentName={agentName}
             servers={mcpServers.filter(s => s.requiresAuth)}
             serverStatus={mcpServerStatus}
@@ -157,6 +177,8 @@ export function AgentSetupWizard({
       case 'api-auth':
         return (
           <ApiAuthStep
+            workspaceId={workspaceId}
+            agentId={agentId}
             agentName={agentName}
             apis={apis.filter(a => a.auth?.type !== 'none')}
             apiStatus={apiStatus}

@@ -29,6 +29,16 @@ export interface ExtractionProgressEvent {
 }
 
 /**
+ * Handle for a cancellable extraction operation
+ */
+export interface ExtractionHandle {
+  /** Promise that resolves with the extraction result */
+  result: Promise<ExtractionResult>;
+  /** Cancel the extraction - stops the query and returns empty result */
+  cancel: () => void;
+}
+
+/**
  * Format tool name into a human-readable progress message
  */
 function formatToolMessage(toolName: string): string {
@@ -646,5 +656,380 @@ Rules:
       concerns: [],
       capabilities: [],
     };
+  }
+}
+
+/**
+ * Start a cancellable extraction operation
+ *
+ * Returns an ExtractionHandle with:
+ * - result: Promise<ExtractionResult> that resolves when extraction completes
+ * - cancel(): void to interrupt the extraction
+ *
+ * When cancelled, the result promise resolves with an empty ExtractionResult.
+ */
+export function startExtraction(
+  documentId: string,
+  agentName: string,
+  model: string,
+  mcpUrl: string,
+  mcpToken?: string,
+  onProgress?: (event: ExtractionProgressEvent) => void,
+): ExtractionHandle {
+  let cancelled = false;
+  let queryHandle: ReturnType<typeof query> | null = null;
+
+  const result = (async (): Promise<ExtractionResult> => {
+    // Delegate to the existing extraction function but with cancellation check
+    // We need to run the extraction in a way that we can interrupt it
+    debug('[extractor] Starting cancellable extraction for agent:', agentName);
+
+    try {
+      // Build options just like extractAgentDefinition
+      const mcpServers: Options['mcpServers'] = {
+        craft: {
+          type: 'http',
+          url: mcpUrl,
+          ...(mcpToken ? { headers: { Authorization: `Bearer ${mcpToken}` } } : {}),
+        },
+      };
+
+      const systemPrompt = buildExtractionSystemPrompt();
+      const prompt = buildExtractionPrompt(documentId, agentName);
+
+      const options: Options = {
+        ...getDefaultOptions(),
+        model: EXTRACTION_MODEL,
+        systemPrompt,
+        mcpServers,
+        maxTurns: 10,
+        tools: { type: 'preset', preset: 'claude_code' },
+        permissionMode: 'acceptEdits',
+        canUseTool: async (_toolName, input) => {
+          return { behavior: 'allow' as const, updatedInput: input as Record<string, unknown> };
+        },
+        stderr: (data: string) => {
+          debug('[extractor] SDK stderr:', data);
+        },
+        outputFormat: buildExtractionOutputFormat(),
+      };
+
+      debug('[extractor] Running cancellable query with MCP URL:', mcpUrl);
+
+      // Create query and store handle for interrupt
+      queryHandle = query({ prompt, options });
+
+      let extractionResult: ExtractionResult | null = null;
+
+      for await (const message of queryHandle) {
+        // Check if cancelled
+        if (cancelled) {
+          debug('[extractor] Extraction cancelled, breaking loop');
+          break;
+        }
+
+        // Process progress events
+        if (message.type === 'assistant') {
+          for (const block of message.message.content) {
+            if (block.type === 'tool_use') {
+              debug('[extractor] Tool call:', block.name, JSON.stringify(block.input));
+              onProgress?.({
+                type: 'tool_start',
+                toolName: block.name,
+                message: formatToolMessage(block.name),
+              });
+            }
+          }
+        }
+
+        // Extract result
+        if (message.type === 'result' && message.subtype === 'success') {
+          if (message.structured_output) {
+            extractionResult = message.structured_output as ExtractionResult;
+          } else if (message.result) {
+            extractionResult = parseExtractionResult(message.result);
+          }
+        }
+      }
+
+      if (cancelled) {
+        debug('[extractor] Returning empty result due to cancellation');
+        return { instructions: '', mcpServers: [], apis: [], concerns: [], capabilities: [] };
+      }
+
+      if (!extractionResult) {
+        debug('[extractor] No structured output received');
+        return { instructions: '', mcpServers: [], apis: [], concerns: [], capabilities: [] };
+      }
+
+      debug(
+        '[extractor] Extracted',
+        extractionResult.instructions?.length || 0,
+        'chars of instructions,',
+        extractionResult.mcpServers?.length || 0,
+        'MCP servers,',
+        extractionResult.apis?.length || 0,
+        'APIs,',
+        extractionResult.concerns?.length || 0,
+        'concerns',
+      );
+
+      return {
+        instructions: extractionResult.instructions || '',
+        instructionsBlockId: extractionResult.instructionsBlockId || undefined,
+        mcpServers: extractionResult.mcpServers || [],
+        apis: extractionResult.apis || [],
+        info: extractionResult.info || [],
+        concerns: extractionResult.concerns || [],
+        capabilities: extractionResult.capabilities || [],
+      };
+    } catch (error) {
+      if (cancelled) {
+        debug('[extractor] Extraction cancelled (error in cancelled state)');
+        return { instructions: '', mcpServers: [], apis: [], concerns: [], capabilities: [] };
+      }
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      debug('[extractor] Cancellable extraction failed:', errorMessage);
+      return { instructions: '', mcpServers: [], apis: [], concerns: [], capabilities: [] };
+    }
+  })();
+
+  return {
+    result,
+    cancel: () => {
+      debug('[extractor] Cancel requested');
+      cancelled = true;
+      if (queryHandle) {
+        queryHandle.interrupt();
+      }
+    },
+  };
+}
+
+/**
+ * Build the system prompt for extraction
+ */
+function buildExtractionSystemPrompt(): string {
+  return `You are an agent definition extractor.
+
+CRITICAL OUTPUT RULES - YOU MUST FOLLOW THESE:
+- Your final response must be ONLY a JSON object
+- NO text before the JSON (no "Here is", "Perfect!", etc.)
+- NO text after the JSON
+- NO explanations or commentary
+- Start directly with { and end with }
+
+Your task:
+1. Use mcp__craft__blocks_get to read Craft documents
+2. Extract agent instructions from the content
+3. Return ONLY the JSON object - nothing else`;
+}
+
+/**
+ * Build the extraction prompt
+ */
+function buildExtractionPrompt(documentId: string, agentName: string): string {
+  // This is the same prompt from extractAgentDefinition
+  // Extracted to a function for reuse
+  return `Extract agent definition from Craft document ID "${documentId}" (agent: "${agentName}").
+
+CRITICAL ID DISTINCTION:
+- Document ID: "${documentId}" - This is the ID of the agent's document. Use this when referring to "the document" or "this document".
+- Block IDs: The nested blocks inside the document have their own IDs (e.g., for Instructions subpage). Use these only when referring to specific blocks within the document.
+- NEVER use a block ID when you mean the document ID. They are different!
+
+=== INCREMENTAL LOADING STRATEGY ===
+
+Use a conservative, step-by-step approach to minimize unnecessary data loading:
+
+STEP 1: Get Document Outline (REQUIRED)
+- Call mcp__craft__blocks_get with id="${documentId}" and maxDepth=1
+- This gives you the top-level structure: document title and immediate children
+- Examine the block titles/content to identify:
+  * Instructions section (PRIORITY) - Look for pages named "Instructions", "AI Instructions",
+    "Agent Instructions", "System Prompt", "Prompt", "Behavior", "Persona", or similar
+  * If no such section exists, the document root content IS the instructions
+  * "MCP Servers" or similar sections (may contain server configs)
+  * Code blocks at the top level (may contain inline configs)
+  * Any section names suggesting APIs, integrations, or configurations
+
+STEP 2: Load Instructions Content (REQUIRED)
+There are two valid document structures:
+
+A) Document has an Instructions-like subpage:
+   Look for a root-level page with a name that suggests it contains agent instructions:
+   - Exact matches: "Instructions", "AI Instructions", "Agent Instructions"
+   - Similar names: "System Prompt", "Prompt", "Behavior", "Persona", "Config"
+   - Any page that contextually appears to define how the agent should behave
+
+   If found:
+   - Note that block's ID (different from ${documentId})
+   - Call mcp__craft__blocks_get with id="[instructions_block_id]" and maxDepth=2
+   - Use that block ID as instructionsBlockId
+
+B) Document root IS the instructions (no Instructions-like subpage):
+   - The content from Step 1 IS the instructions
+   - Leave instructionsBlockId empty/null (there is no dedicated instructions block)
+   - This is a valid structure, NOT an error
+
+Both structures are equally valid. Do NOT add info messages about missing Instructions sections.
+
+STEP 3: Selectively Load Additional Sections (CONDITIONAL)
+Only load additional sections if Step 1 revealed potentially relevant content:
+
+a) MCP Server Sections:
+   - If you see a section like "MCP Servers", "Servers", "Integrations", "Configuration":
+     * Load that specific block with maxDepth=1 or maxDepth=2
+   - If top-level code blocks exist, they may already contain server configs from Step 1
+
+b) API Documentation Sections:
+   - If you see sections like "APIs", "REST APIs", "Endpoints", "Integration Guide":
+     * Load that specific block with maxDepth=2
+   - Look for sections containing words: curl, fetch, API, endpoint, request
+
+c) Code Blocks Discovery:
+   - If you saw code blocks in Step 1 outline but couldn't read their content:
+     * Load those specific blocks to see if they contain MCP or API configs
+
+STEP 4: Final Pass (ONLY IF NEEDED)
+- If after Steps 1-3 you still haven't found expected content:
+  * You may load the full document with maxDepth=3 as a fallback
+  * But ONLY do this if the incremental approach failed to find Instructions
+- Most documents should NOT need this step
+
+=== EXTRACTION REQUIREMENTS ===
+
+From the loaded content, extract:
+
+1. INSTRUCTIONS - Extract EXACT original instructions without modification
+2. MCP SERVER CONFIGURATIONS - Only HTTP/HTTPS URLs
+3. REST API DOCUMENTATION - Comprehensive API docs
+4. INFO MESSAGES - Warnings and notices
+5. CAPABILITIES SUMMARY - 3-8 key capabilities
+6. CONCERNS - Issues needing clarification
+
+=== OUTPUT FORMAT ===
+
+Return ONLY valid JSON:
+{
+  "instructions": "[EXACT instruction content from document]",
+  "instructionsBlockId": "[block ID of Instructions subpage, OR empty if at root]",
+  "mcpServers": [{ "name": "myserver", "url": "https://example.com/mcp", "requiresAuth": false }],
+  "apis": [{ "name": "exa", "baseUrl": "https://api.exa.ai", "auth": { "type": "header", "headerName": "x-api-key" }, "documentation": "..." }],
+  "info": [],
+  "capabilities": [],
+  "concerns": []
+}`;
+}
+
+/**
+ * Build the output format schema for extraction
+ */
+function buildExtractionOutputFormat(): Options['outputFormat'] {
+  return {
+    type: 'json_schema',
+    schema: {
+      type: 'object',
+      properties: {
+        instructions: {
+          type: 'string',
+          description: 'The complete agent instructions',
+        },
+        instructionsBlockId: {
+          type: 'string',
+          description: 'Block ID of the instructions section',
+        },
+        mcpServers: {
+          type: 'array',
+          description: 'MCP server configurations',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              url: { type: 'string' },
+              requiresAuth: { type: 'boolean' },
+            },
+          },
+        },
+        apis: {
+          type: 'array',
+          description: 'REST APIs detected',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              baseUrl: { type: 'string' },
+              auth: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['none', 'header', 'bearer', 'query', 'basic'] },
+                  headerName: { type: 'string' },
+                  queryParam: { type: 'string' },
+                  authScheme: { type: 'string' },
+                  credentialLabel: { type: 'string' },
+                  secretLabel: { type: 'string' },
+                },
+              },
+              documentation: { type: 'string' },
+              docsUrl: { type: 'string' },
+            },
+            required: ['name', 'baseUrl', 'documentation'],
+          },
+        },
+        info: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        capabilities: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        concerns: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['confusing', 'conflicting', 'missing', 'general'] },
+              description: { type: 'string' },
+              context: { type: 'string' },
+              suggestedQuestion: { type: 'string' },
+              suggestedAnswers: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+            },
+            required: ['type', 'description'],
+          },
+        },
+      },
+      required: ['instructions', 'instructionsBlockId'],
+    },
+  };
+}
+
+/**
+ * Parse extraction result from text
+ */
+function parseExtractionResult(text: string): ExtractionResult | null {
+  try {
+    let jsonText = text.trim();
+
+    // Strategy 1: Direct parse
+    if (jsonText.startsWith('{')) {
+      return JSON.parse(jsonText) as ExtractionResult;
+    }
+
+    // Strategy 2: Extract from code block
+    const codeBlockMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (codeBlockMatch && codeBlockMatch[1]) {
+      return JSON.parse(codeBlockMatch[1].trim()) as ExtractionResult;
+    }
+
+    // Strategy 3: Find JSON object anywhere
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]) as ExtractionResult;
+    }
+
+    return null;
+  } catch {
+    return null;
   }
 }

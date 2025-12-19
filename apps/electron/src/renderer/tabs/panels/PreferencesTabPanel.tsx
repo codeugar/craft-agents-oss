@@ -30,7 +30,6 @@ interface PreferencesFormState {
   timezone: string
   language: string
   city: string
-  region: string
   country: string
   notes: string
 }
@@ -40,7 +39,6 @@ const emptyFormState: PreferencesFormState = {
   timezone: '',
   language: '',
   city: '',
-  region: '',
   country: '',
   notes: '',
 }
@@ -54,7 +52,6 @@ function parsePreferences(json: string): PreferencesFormState {
       timezone: prefs.timezone || '',
       language: prefs.language || '',
       city: prefs.location?.city || '',
-      region: prefs.location?.region || '',
       country: prefs.location?.country || '',
       notes: prefs.notes || '',
     }
@@ -71,10 +68,9 @@ function serializePreferences(state: PreferencesFormState): string {
   if (state.timezone) prefs.timezone = state.timezone
   if (state.language) prefs.language = state.language
 
-  if (state.city || state.region || state.country) {
+  if (state.city || state.country) {
     const location: Record<string, string> = {}
     if (state.city) location.city = state.city
-    if (state.region) location.region = state.region
     if (state.country) location.country = state.country
     prefs.location = location
   }
@@ -197,9 +193,13 @@ export default function PreferencesTabPanel({ tab }: PreferencesTabPanelProps) {
       {/* Header with actions */}
       <div className="px-4 py-3 border-b flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-mono">
+          <button
+            onClick={() => window.electronAPI.showInFolder('~/.craft-agent/preferences.json')}
+            className="text-xs text-muted-foreground font-mono hover:text-foreground hover:underline transition-colors cursor-pointer"
+            title="Open in Finder"
+          >
             ~/.craft-agent/preferences.json
-          </span>
+          </button>
         </div>
         <div className={`flex items-center gap-1.5 transition-opacity ${isDirty ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
           <button
@@ -266,12 +266,6 @@ export default function PreferencesTabPanel({ tab }: PreferencesTabPanelProps) {
               placeholder="e.g., New York"
             />
             <FormField
-              label="Region"
-              value={formState.region}
-              onChange={(v) => updateField('region', v)}
-              placeholder="e.g., NY"
-            />
-            <FormField
               label="Country"
               value={formState.country}
               onChange={(v) => updateField('country', v)}
@@ -287,7 +281,7 @@ export default function PreferencesTabPanel({ tab }: PreferencesTabPanelProps) {
             value={formState.notes}
             onChange={(e) => updateField('notes', e.target.value)}
             placeholder="Any additional information you'd like to share with the AI assistant..."
-            className="min-h-[120px] text-sm resize-none"
+            className="min-h-[120px] text-sm resize-y"
           />
         </section>
       </div>

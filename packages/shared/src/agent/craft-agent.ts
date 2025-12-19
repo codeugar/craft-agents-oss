@@ -40,6 +40,10 @@ export type { PlanReviewResult, PlanQuestion, SwarmConfig } from './plan-tools.t
 export { enterCraftPlanMode, exitCraftPlanMode, getCurrentPlanFilePath } from './plan-tools.ts';
 // Documentation is now served via external HTTP MCP at agents.craft.do/docs/mcp
 
+// Import and re-export AgentEvent from core (single source of truth)
+import type { AgentEvent } from '@craft-agent/core/types';
+export type { AgentEvent };
+
 export interface CraftAgentConfig {
   workspace: Workspace;
   session?: Session;           // Current session (primary isolation boundary)
@@ -48,19 +52,6 @@ export interface CraftAgentConfig {
   onSdkSessionIdUpdate?: (sdkSessionId: string) => void;  // Callback when SDK session ID is captured
   isHeadless?: boolean;        // Running in headless mode (disables plan mode tools)
 }
-
-// Message types for streaming - kept for TUI compatibility
-export type AgentEvent =
-  | { type: 'status'; message: string }
-  | { type: 'text_delta'; text: string }
-  | { type: 'text_complete'; text: string }
-  | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string }
-  | { type: 'tool_result'; toolUseId: string; result: string; isError: boolean; input?: Record<string, unknown> }
-  | { type: 'permission_request'; requestId: string; toolName: string; command: string; description: string }
-  | { type: 'ask_user'; requestId: string; questions: Question[] }
-  | { type: 'error'; message: string }
-  | { type: 'typed_error'; error: AgentError }
-  | { type: 'complete'; usage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; costUsd?: number } };
 
 // Permission request tracking
 interface PendingPermission {
@@ -1529,6 +1520,10 @@ export class CraftAgent {
 
       // Process SDK messages and convert to AgentEvents
       let receivedComplete = false;
+      // Track text waiting for stop_reason from message_delta
+      let pendingTextForStopReason: string | null = null;
+      // Track current turn ID from message_start (correlation ID for grouping events)
+      let currentTurnId: string | null = null;
       try {
         for await (const message of this.currentQuery) {
           // Capture session ID for conversation continuity
@@ -1538,7 +1533,15 @@ export class CraftAgent {
             this.config.onSdkSessionIdUpdate?.(message.session_id);
           }
 
-          const events = this.convertSDKMessage(message, pendingToolUses, emittedToolStarts);
+          const events = this.convertSDKMessage(
+            message,
+            pendingToolUses,
+            emittedToolStarts,
+            pendingTextForStopReason,
+            (text) => { pendingTextForStopReason = text; },
+            currentTurnId,
+            (id) => { currentTurnId = id; }
+          );
           for (const event of events) {
             if (event.type === 'complete') {
               receivedComplete = true;
@@ -1833,7 +1836,11 @@ export class CraftAgent {
   private convertSDKMessage(
     message: SDKMessage,
     pendingToolUses: Map<string, { name: string; input: Record<string, unknown> }>,
-    emittedToolStarts: Set<string>
+    emittedToolStarts: Set<string>,
+    pendingText: string | null,
+    setPendingText: (text: string | null) => void,
+    turnId: string | null,
+    setTurnId: (id: string | null) => void
   ): AgentEvent[] {
     const events: AgentEvent[] = [];
 
@@ -1888,6 +1895,7 @@ export class CraftAgent {
                 toolUseId: block.id,
                 input: block.input as Record<string, unknown>,
                 intent,
+                turnId: turnId || undefined,
               });
             } else {
               // Update input if we have more complete data now
@@ -1908,6 +1916,7 @@ export class CraftAgent {
                   toolUseId: block.id,
                   input: newInput,
                   intent,
+                  turnId: turnId || undefined,
                 });
               }
             }
@@ -1915,7 +1924,10 @@ export class CraftAgent {
         }
 
         if (textContent) {
-          events.push({ type: 'text_complete', text: textContent });
+          // Don't emit text_complete yet - wait for message_delta to get actual stop_reason
+          // The assistant message arrives with stop_reason: null during streaming
+          // The actual stop_reason comes in the message_delta event
+          setPendingText(textContent);
         }
         break;
       }
@@ -1927,8 +1939,25 @@ export class CraftAgent {
         if (this.onDebug && event.type !== 'content_block_delta') {
           this.onDebug(`stream_event: ${event.type}, content_type=${(event as any).content_block?.type || (event as any).delta?.type || 'n/a'}`);
         }
+        // Capture turn ID from message_start (arrives before any content events)
+        // This ID correlates all events in an assistant turn
+        if (event.type === 'message_start') {
+          const messageId = (event as any).message?.id;
+          if (messageId) {
+            setTurnId(messageId);
+          }
+        }
+        // message_delta contains the actual stop_reason - emit pending text now
+        if (event.type === 'message_delta') {
+          const stopReason = (event as any).delta?.stop_reason;
+          if (pendingText) {
+            const isIntermediate = stopReason === 'tool_use';
+            events.push({ type: 'text_complete', text: pendingText, isIntermediate, turnId: turnId || undefined });
+            setPendingText(null);
+          }
+        }
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          events.push({ type: 'text_delta', text: event.delta.text });
+          events.push({ type: 'text_delta', text: event.delta.text, turnId: turnId || undefined });
         } else if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
           const toolBlock = event.content_block;
           // Only emit if not already emitted
@@ -1943,6 +1972,7 @@ export class CraftAgent {
               toolName: toolBlock.name,
               toolUseId: toolBlock.id,
               input: {},
+              turnId: turnId || undefined,
             });
           }
         }
@@ -2020,6 +2050,7 @@ export class CraftAgent {
               result: resultStr,
               isError,
               input: toolUse?.input,
+              turnId: turnId || undefined,
             });
 
             pendingToolUses.delete(toolUseId);

@@ -73,6 +73,8 @@ export interface McpServerConfig {
   description?: string;
   /** Tools available on this server (populated after connection) */
   tools?: string[];
+  /** Local logo filename (e.g., "craft.png") stored in agent's logos directory */
+  logo?: string;
 }
 
 /**
@@ -118,6 +120,8 @@ export interface ApiConfig {
   documentation?: string;
   /** Link to official API documentation if found */
   docsUrl?: string;
+  /** Local logo filename (e.g., "exa.png") stored in agent's logos directory */
+  logo?: string;
 }
 
 /**
@@ -181,7 +185,7 @@ export interface AgentRegistry {
  *                                                                            error
  */
 export type AgentStatus =
-  | { status: 'idle' }
+  | { status: 'idle'; needsSetup?: boolean; needsAuth?: boolean; reason?: string }
   | { status: 'extracting'; agentId: string; agentName: string; message: string }
   | { status: 'needs_review'; agentId: string; agentName: string; definition: SubAgentDefinition; concerns: Concern[] }
   | { status: 'needs_mcp_auth'; agentId: string; agentName: string; definition: SubAgentDefinition; servers: McpServerConfig[] }

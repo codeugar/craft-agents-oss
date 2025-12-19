@@ -19,6 +19,7 @@ export { SpaceSelectionStep, type CraftSpace, type SpaceCategory } from './Space
 export { BillingMethodStep, type BillingMethod } from './BillingMethodStep'
 export { CredentialsStep, type CredentialStatus } from './CredentialsStep'
 export { CompletionStep } from './CompletionStep'
+export { ReauthScreen } from './ReauthScreen'
 
 // Main wizard container
 export { OnboardingWizard, type OnboardingState } from './OnboardingWizard'

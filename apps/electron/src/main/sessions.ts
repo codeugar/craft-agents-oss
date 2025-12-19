@@ -254,9 +254,10 @@ export class SessionManager {
     // Create AgentStateManager
     const stateManager = new AgentStateManager(workspaceId, subAgentManager)
 
-    // Subscribe to status changes and broadcast to all windows for this workspace
-    stateManager.on('status', (status) => {
-      this.broadcastAgentStatus(workspaceId, agentId, status)
+    // Subscribe to status changes and broadcast complete state to all windows
+    // Uses broadcastAgentState() to include needsSetup/needsAuth/reason
+    stateManager.on('status', async () => {
+      await this.broadcastAgentState(workspaceId, agentId)
     })
 
     // Cache it
@@ -267,25 +268,67 @@ export class SessionManager {
   }
 
   /**
-   * Broadcast agent status change to all windows
+   * Broadcast complete agent state to all windows
+   * Single source of truth - call this after ANY agent state change
+   * Computes full state: status + needsSetup + needsAuth + reason
    */
-  private broadcastAgentStatus(workspaceId: string, agentId: string, status: AgentStatus): void {
+  async broadcastAgentState(workspaceId: string, agentId: string): Promise<void> {
     if (!this.windowManager) return
 
-    // Broadcast to all windows (they filter by workspaceId)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.AGENT_STATUS_CHANGED, workspaceId, agentId, status)
-    console.log(`[SessionManager] Broadcast agent status: ${status.status} for ${agentId}`)
+    // Get current status from state manager
+    const stateManager = this.getAgentStateManager(workspaceId, agentId)
+    const status = stateManager?.getStatus() ?? { status: 'idle' as const }
+
+    // Compute setup requirements
+    const { agentService } = await import('./agent-service')
+    const setupStatus = await agentService.getAgentSetupStatus(workspaceId, agentId)
+
+    // Build complete state
+    const completeState = {
+      ...status,
+      needsSetup: setupStatus.needsSetup,
+      needsAuth: setupStatus.needsAuth,
+      reason: setupStatus.reason,
+    }
+
+    // Broadcast to all windows
+    this.windowManager.broadcastToAll(IPC_CHANNELS.AGENT_STATUS_CHANGED, workspaceId, agentId, completeState)
+    console.log(`[SessionManager] Broadcast agent state: ${status.status}, needsSetup=${setupStatus.needsSetup}, needsAuth=${setupStatus.needsAuth} for ${agentId}`)
   }
+
 
   /**
    * Get current agent status (agent-scoped)
+   * Auto-activates agents that are already configured (have credentials)
    */
   async getAgentStatus(workspaceId: string, agentId: string): Promise<AgentStatus> {
     const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (!stateManager) {
-      return { status: 'idle' }
+    if (stateManager) {
+      return stateManager.getStatus()
     }
-    return stateManager.getStatus()
+
+    // No state manager yet - check if agent is already configured
+    // If credentials exist, auto-activate instead of returning 'idle'
+    const { agentService } = await import('./agent-service')
+    const setupStatus = await agentService.getAgentSetupStatus(workspaceId, agentId)
+
+    if (!setupStatus.needsSetup && !setupStatus.needsAuth) {
+      // Agent is already configured - auto-activate it
+      console.log(`[SessionManager] Auto-activating already-configured agent ${agentId}`)
+      // Don't await - let it run in background and return 'extracting' state
+      this.activateAgent(workspaceId, agentId).catch(err => {
+        console.error(`[SessionManager] Auto-activation failed for ${agentId}:`, err)
+      })
+      return { status: 'extracting', agentId, agentName: agentId, message: 'Activating...' }
+    }
+
+    // Agent needs setup or auth - return idle with setup info attached
+    return {
+      status: 'idle',
+      needsSetup: setupStatus.needsSetup,
+      needsAuth: setupStatus.needsAuth,
+      reason: setupStatus.reason
+    }
   }
 
   /**
@@ -1011,7 +1054,7 @@ The goal is to have clean, actionable instructions without unanswered questions.
       case 'text_delta':
         // AgentEvent uses `text` not `delta`
         managed.streamingText += event.text
-        this.sendEvent({ type: 'text_delta', sessionId, delta: event.text }, workspaceId)
+        this.sendEvent({ type: 'text_delta', sessionId, delta: event.text, turnId: event.turnId }, workspaceId)
         break
 
       case 'text_complete':
@@ -1023,11 +1066,13 @@ The goal is to have clean, actionable instructions without unanswered questions.
           id: generateMessageId(),
           role: 'assistant',
           content: event.text,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          isIntermediate: event.isIntermediate,
+          turnId: event.turnId
         }
         managed.messages.push(assistantMessage)
         managed.streamingText = ''
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId }, workspaceId)
 
         // Generate title asynchronously after first assistant response
         if (shouldGenerateTitle) {
@@ -1062,7 +1107,8 @@ The goal is to have clean, actionable instructions without unanswered questions.
             toolName: event.toolName,
             toolUseId: event.toolUseId,
             toolInput: event.input,
-            toolStatus: 'pending'
+            toolStatus: 'pending',
+            turnId: event.turnId
           }
           managed.messages.push(toolStartMessage)
         }
@@ -1072,7 +1118,8 @@ The goal is to have clean, actionable instructions without unanswered questions.
           sessionId,
           toolName: event.toolName,
           toolUseId: event.toolUseId,
-          toolInput: event.input
+          toolInput: event.input,
+          turnId: event.turnId
         }, workspaceId)
         break
 
@@ -1107,7 +1154,8 @@ The goal is to have clean, actionable instructions without unanswered questions.
           sessionId,
           toolUseId: event.toolUseId,
           toolName: toolName,
-          result: event.result || ''
+          result: event.result || '',
+          turnId: event.turnId
         }, workspaceId)
         break
 

@@ -72,6 +72,7 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener(IPC_CHANNELS.AGENT_STATUS_CHANGED, handler)
     }
   },
+  // @deprecated Use onAgentStatusChanged instead - broadcastAgentState() sends complete state
   onAgentAuthChanged: (callback: (workspaceId: string, agentId: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, workspaceId: string, agentId: string) => {
       callback(workspaceId, agentId)
@@ -112,6 +113,7 @@ const api: ElectronAPI = {
   // Shell operations
   openUrl: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_URL, url),
   openFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_FILE, path),
+  showInFolder: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.SHOW_IN_FOLDER, path),
 
   // Menu event listeners
   onMenuNewChat: (callback: () => void) => {
@@ -162,6 +164,10 @@ const api: ElectronAPI = {
   getBillingMethod: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_BILLING_METHOD),
   updateBillingMethod: (authType: AuthType, credential?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE_BILLING_METHOD, authType, credential),
+
+  // Settings - Model
+  getModel: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_MODEL),
+  setModel: (model: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MODEL, model),
 
   // User Preferences
   readPreferences: () => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_READ),

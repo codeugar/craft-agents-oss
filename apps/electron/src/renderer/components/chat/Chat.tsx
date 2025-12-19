@@ -12,8 +12,12 @@ import {
   CircleAlert,
   CloudOff,
   PowerOff,
+  Globe,
 } from "lucide-react"
+import { McpIcon } from "../icons/McpIcon"
 import { Spinner } from "@/components/ui/loading-indicator"
+import { AvatarGroup } from "@/components/ui/avatar-group"
+import { ServiceLogo } from "@/components/ui/service-logo"
 import { AppMenu } from "../AppMenu"
 import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
@@ -47,7 +51,8 @@ import { LeftSidebar } from "./LeftSidebar"
 import { AgentContextMenu, type AgentAction } from "./AgentContextMenu"
 import { SetupAuthBanner, type BannerState } from "./SetupAuthBanner"
 import { useSession } from "@/hooks/useSession"
-import { TabContainer, useTabs } from "@/tabs"
+import { useAgentState } from "@/hooks/useAgentState"
+import { TabContainer, useTabs, type ChatTab } from "@/tabs"
 import { ChatProvider, type ChatContextType } from "@/context/ChatContext"
 import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useFocusZone, useGlobalShortcuts } from "@/hooks/keyboard"
@@ -115,6 +120,15 @@ type SidebarAgentStatus =
   | 'error'        // Error state
 
 /**
+ * SidebarServiceLogos - Logo info for MCP servers and APIs
+ * Used to display avatar group in sidebar when agent is ready
+ */
+interface SidebarServiceLogos {
+  mcpLogos: Array<{ name: string; logo?: string }>
+  apiLogos: Array<{ name: string; logo?: string }>
+}
+
+/**
  * Groups flat agent list into hierarchical folder structure
  * Uses agent.folderPath to determine nesting
  */
@@ -167,6 +181,8 @@ interface AgentTreeProps {
   }
   /** Agent status indicators */
   agentStatus?: Map<string, SidebarAgentStatus>
+  /** Agent service logos for ready agents */
+  agentLogos?: Map<string, SidebarServiceLogos>
 }
 
 // Union type for sorting agents and folders together alphabetically
@@ -203,6 +219,7 @@ function AgentTree({
   onFocusItem,
   getItemProps,
   agentStatus,
+  agentLogos,
 }: AgentTreeProps) {
   // Track which agent has an open context menu
   const [openMenuAgentId, setOpenMenuAgentId] = React.useState<string | null>(null)
@@ -254,22 +271,55 @@ function AgentTree({
         <FadingText>
           {agent.displayName || agent.name.split('/').pop()}
         </FadingText>
-        {/* Status indicator based on SidebarAgentStatus - all shown on hover only */}
+        {/* Status indicator based on SidebarAgentStatus - visible on hover or when selected */}
         {(() => {
           const status = agentStatus?.get(agent.id)
-          const hoverClasses = "ml-auto shrink-0 opacity-0 group-hover/agents:opacity-100 transition-opacity"
+          const baseClasses = "ml-auto shrink-0 transition-opacity"
+          // Show on hover, or always when agent is selected
+          const visibilityClasses = isSelected(agent.id)
+            ? "opacity-100"
+            : "opacity-0 group-hover/agents:opacity-100"
+          // Color adapts to selected state background
+          const colorClasses = isSelected(agent.id)
+            ? "text-primary-foreground/60 dark:text-foreground/40"
+            : "text-foreground/40"
           switch (status) {
             case 'loading':
-              return <Spinner className={cn("text-sm text-foreground/40", hoverClasses)} />
+              return <Spinner className={cn("text-sm", baseClasses, visibilityClasses, colorClasses)} />
             case 'needs_setup':
-              return <PowerOff className={cn("h-3.5 w-3.5 text-foreground/40", hoverClasses)} />
+              return <PowerOff className={cn("h-3.5 w-3.5", baseClasses, visibilityClasses, colorClasses)} />
             case 'needs_auth':
-              return <CloudOff className={cn("h-3.5 w-3.5 text-foreground/40", hoverClasses)} />
+              return <CloudOff className={cn("h-3.5 w-3.5", baseClasses, visibilityClasses, colorClasses)} />
             case 'error':
-              return <CircleAlert className={cn("h-3.5 w-3.5 text-foreground/40", hoverClasses)} />
-            default:
-              // idle, ready, or undefined - no indicator shown
-              return null
+              return <CircleAlert className={cn("h-3.5 w-3.5", baseClasses, visibilityClasses, colorClasses)} />
+            default: {
+              // Ready state - show service logos if available
+              const logos = agentLogos?.get(agent.id)
+              if (!logos || (logos.mcpLogos.length === 0 && logos.apiLogos.length === 0)) {
+                return null
+              }
+              const allServices = [...logos.mcpLogos, ...logos.apiLogos]
+              return (
+                <AvatarGroup
+                  max={3}
+                  className={cn(baseClasses, visibilityClasses)}
+                >
+                  {allServices.map((service, i) => (
+                    <ServiceLogo
+                      key={i}
+                      logo={service.logo}
+                      name={service.name}
+                      fallbackIcon={
+                        i < logos.mcpLogos.length
+                          ? <McpIcon className="h-2 w-2" />
+                          : <Globe className="h-2 w-2" />
+                      }
+                      className="h-4 w-4 rounded-full"
+                    />
+                  ))}
+                </AvatarGroup>
+              )
+            }
           }
         })()}
       </button>
@@ -310,6 +360,7 @@ function AgentTree({
       onFocusItem={onFocusItem}
       getItemProps={getItemProps}
       agentStatus={agentStatus}
+      agentLogos={agentLogos}
     />
   )
 
@@ -426,12 +477,26 @@ export function Chat({
 
   // Agent status indicators - tracks setup/auth status for sidebar icons
   const [agentStatus, setAgentStatus] = React.useState<Map<string, SidebarAgentStatus>>(new Map())
+  // Agent service logos - extracted from definition when agent is ready/active
+  const [agentLogos, setAgentLogos] = React.useState<Map<string, SidebarServiceLogos>>(new Map())
 
-  // Banner state for selected agent (setup needed vs auth needed)
-  const [bannerState, setBannerState] = React.useState<{
-    state: BannerState
-    reason?: string
-  }>({ state: 'hidden' })
+  // Agent state for selected agent via AgentStateManager (single source of truth)
+  // This ensures the banner in the session list shows the same state as ChatTabPanel
+  const selectedAgentState = useAgentState(
+    activeWorkspaceId,
+    viewMode === 'agent' ? selectedAgentId : null
+  )
+
+  // Banner state from centralized hook (single source of truth)
+  const bannerState = React.useMemo((): { state: BannerState; reason?: string } => {
+    if (viewMode !== 'agent' || !selectedAgentId) {
+      return { state: 'hidden' }
+    }
+    return {
+      state: selectedAgentState.bannerState,
+      reason: selectedAgentState.bannerReason ?? undefined
+    }
+  }, [viewMode, selectedAgentId, selectedAgentState.bannerState, selectedAgentState.bannerReason])
 
   // Unified sidebar keyboard navigation state
   // Load expanded folders from localStorage (default: all collapsed)
@@ -614,6 +679,58 @@ export function Chat({
     }
   }, [session.selected, activeWorkspaceId])
 
+  // Sync tab activation with sidebar state (reverse direction)
+  // When user clicks a tab in the tab bar:
+  // 1. session.selected - to highlight the session in the list
+  // 2. viewMode/selectedAgentId - only if session isn't visible in current view
+  // Does NOT sync when:
+  // - Tab change was initiated by sidebar (session already selected)
+  // - Opening a new tab (session already selected before tab exists)
+  const prevActiveTabIdRef = React.useRef<string | null>(null)
+  const sessionSelectedRef = React.useRef(session.selected)
+  sessionSelectedRef.current = session.selected
+  const filteredSessionsRef = React.useRef(filteredSessions)
+  filteredSessionsRef.current = filteredSessions
+
+  React.useEffect(() => {
+    const currentTabId = activeTab?.id ?? null
+
+    // Only sync when the tab actually changes
+    if (currentTabId === prevActiveTabIdRef.current) {
+      return
+    }
+    prevActiveTabIdRef.current = currentTabId
+
+    if (activeTab?.type === 'chat') {
+      const chatTab = activeTab as ChatTab
+
+      // If session is already selected, this was initiated by sidebar/new session
+      // The sidebar is already in the correct state, no sync needed
+      if (sessionSelectedRef.current === chatTab.sessionId) {
+        return
+      }
+
+      // Tab bar click - update session selection
+      setSession({ selected: chatTab.sessionId })
+
+      // Check if session is visible in current view
+      const isVisibleInCurrentView = filteredSessionsRef.current.some(
+        s => s.id === chatTab.sessionId
+      )
+
+      // Only change view if session isn't visible in current list
+      if (!isVisibleInCurrentView) {
+        if (chatTab.agentId) {
+          setViewMode('agent')
+          setSelectedAgentId(chatTab.agentId)
+        } else {
+          setViewMode('inbox')
+          setSelectedAgentId(null)
+        }
+      }
+    }
+  }, [activeTab, setSession])
+
   // Track if sessions have been loaded at least once
   const sessionsLoadedRef = React.useRef(false)
 
@@ -686,27 +803,74 @@ export function Chat({
     localStorage.setItem('sidebar-expanded-folders', JSON.stringify([...expandedFolders]))
   }, [expandedFolders])
 
-  // Fetch setup/auth status for all agents when agents list changes
+  // Helper to map AgentStatus to SidebarAgentStatus (centralized logic)
+  const mapAgentStatusToSidebar = React.useCallback((status: import('../../../shared/types').AgentStatus): SidebarAgentStatus => {
+    switch (status.status) {
+      case 'idle':
+        // Use centralized setup info from status
+        if (status.needsAuth) {
+          return 'needs_auth'
+        }
+        if (status.needsSetup) {
+          return 'needs_setup'
+        }
+        return 'ready'
+      case 'extracting':
+        return 'loading'
+      case 'needs_review':
+      case 'needs_mcp_auth':
+      case 'needs_api_auth':
+        return 'needs_auth'
+      case 'ready':
+      case 'active':
+        return 'ready'
+      case 'error':
+        return 'error'
+      default:
+        return 'needs_setup'
+    }
+  }, [])
+
+  // Extract logo info from AgentStatus when status is ready/active
+  // Returns null if no MCP servers or APIs (nothing to display)
+  const extractLogosFromStatus = React.useCallback((status: import('../../../shared/types').AgentStatus): SidebarServiceLogos | null => {
+    if (status.status !== 'ready' && status.status !== 'active') {
+      return null
+    }
+    const def = status.definition
+    const mcpLogos = def.mcpServers?.map(s => ({ name: s.name, logo: s.logo })) ?? []
+    const apiLogos = def.apis?.map(a => ({ name: a.name, logo: a.logo })) ?? []
+
+    // Don't return anything if there are no services to display
+    if (mcpLogos.length === 0 && apiLogos.length === 0) {
+      return null
+    }
+
+    return { mcpLogos, apiLogos }
+  }, [])
+
+  // Fetch status for all agents when agents list changes (uses centralized getAgentStatus)
   React.useEffect(() => {
     if (!activeWorkspaceId || agents.length === 0) {
       setAgentStatus(new Map())
+      setAgentLogos(new Map())
       return
     }
 
-    // Fetch status for each agent
     const fetchStatuses = async () => {
       const newStatus = new Map<string, SidebarAgentStatus>()
+      const newLogos = new Map<string, SidebarServiceLogos>()
 
       await Promise.all(
         agents.map(async (agent) => {
           try {
-            const result = await window.electronAPI.getAgentSetupStatus(activeWorkspaceId, agent.id)
-            if (result.needsSetup) {
-              newStatus.set(agent.id, 'needs_setup')
-            } else if (result.needsAuth) {
-              newStatus.set(agent.id, 'needs_auth')
-            } else {
-              newStatus.set(agent.id, 'ready')
+            const result = await window.electronAPI.getAgentStatus(activeWorkspaceId, agent.id)
+            newStatus.set(agent.id, mapAgentStatusToSidebar(result))
+
+            // Extract logos if agent is ready/active
+            const logos = extractLogosFromStatus(result)
+            if (logos) {
+              newLogos.set(agent.id, logos)
             }
           } catch {
             newStatus.set(agent.id, 'error')
@@ -715,135 +879,49 @@ export function Chat({
       )
 
       setAgentStatus(newStatus)
+      setAgentLogos(newLogos)
     }
 
     fetchStatuses()
-  }, [activeWorkspaceId, agents])
+  }, [activeWorkspaceId, agents, mapAgentStatusToSidebar, extractLogosFromStatus])
 
-  // Listen for agent status changes from AgentStateManager broadcasts
-  // This is the PRIMARY way sidebar updates when agent state changes (e.g., from setup wizard)
+  // Listen for agent status changes from broadcastAgentState()
+  // This is now the SINGLE listener for all agent state changes:
+  // - Status changes (extracting, ready, active, error)
+  // - Auth changes (credentials saved/cleared)
+  // - Reset (credentials and cache cleared)
+  // The complete state (status + needsSetup + needsAuth) is always included
   React.useEffect(() => {
     const cleanup = window.electronAPI.onAgentStatusChanged((workspaceId, agentId, status) => {
-      // Only update if this is for our active workspace
       if (workspaceId !== activeWorkspaceId) return
-
-      // Map AgentStatus to SidebarAgentStatus
-      let sidebarStatus: SidebarAgentStatus
-      switch (status.status) {
-        case 'extracting':
-          sidebarStatus = 'loading'
-          break
-        case 'needs_review':
-        case 'needs_mcp_auth':
-        case 'needs_api_auth':
-          sidebarStatus = 'needs_auth'
-          break
-        case 'ready':
-        case 'active':
-          sidebarStatus = 'ready'
-          break
-        case 'error':
-          sidebarStatus = 'error'
-          break
-        default:
-          sidebarStatus = 'needs_setup'
-      }
 
       setAgentStatus(prev => {
         const next = new Map(prev)
-        next.set(agentId, sidebarStatus)
+        next.set(agentId, mapAgentStatusToSidebar(status))
         return next
       })
 
-      // Also update banner state if this is the selected agent
-      if (agentId === selectedAgentId && viewMode === 'agent') {
-        if (status.status === 'idle') {
-          setBannerState({ state: 'setup' })
-        } else if (status.status === 'extracting') {
-          setBannerState({ state: 'activating' })
-        } else if (status.status === 'needs_review' || status.status === 'needs_mcp_auth' || status.status === 'needs_api_auth') {
-          setBannerState({ state: 'activating' })
-        } else if (status.status === 'ready' || status.status === 'active') {
-          setBannerState({ state: 'hidden' })
-        } else if (status.status === 'error') {
-          setBannerState({ state: 'error', reason: status.error })
+      // Update logos if status includes definition
+      const logos = extractLogosFromStatus(status)
+      setAgentLogos(prev => {
+        const next = new Map(prev)
+        if (logos) {
+          next.set(agentId, logos)
+        } else {
+          next.delete(agentId)
         }
-      }
+        return next
+      })
     })
 
     return cleanup
-  }, [activeWorkspaceId, selectedAgentId, viewMode])
-
-  // Listen for agent auth changes (e.g., from direct credential saving) and update status
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onAgentAuthChanged(async (workspaceId, agentId) => {
-      // Only update if this is for our active workspace
-      if (workspaceId !== activeWorkspaceId) return
-
-      try {
-        const result = await window.electronAPI.getAgentSetupStatus(workspaceId, agentId)
-        setAgentStatus(prev => {
-          const next = new Map(prev)
-          if (result.needsSetup) {
-            next.set(agentId, 'needs_setup')
-          } else if (result.needsAuth) {
-            next.set(agentId, 'needs_auth')
-          } else {
-            next.set(agentId, 'ready')
-          }
-          return next
-        })
-
-        // Also update banner state if this is the selected agent
-        if (agentId === selectedAgentId && viewMode === 'agent') {
-          if (result.needsSetup) {
-            setBannerState({ state: 'setup', reason: result.reason })
-          } else if (result.needsAuth) {
-            setBannerState({ state: 'mcp_auth', reason: result.reason })
-          } else {
-            setBannerState({ state: 'hidden' })
-          }
-        }
-      } catch {
-        setAgentStatus(prev => {
-          const next = new Map(prev)
-          next.set(agentId, 'error')
-          return next
-        })
-      }
-    })
-
-    return cleanup
-  }, [activeWorkspaceId, selectedAgentId, viewMode])
-
-  // Set banner state synchronously from cached agentStatus when agent is selected
-  React.useEffect(() => {
-    if (viewMode !== 'agent' || !selectedAgentId || !activeWorkspaceId) {
-      setBannerState({ state: 'hidden' })
-      return
-    }
-
-    // Use cached status to set banner state immediately (no flash)
-    const cachedStatus = agentStatus.get(selectedAgentId)
-    if (cachedStatus === 'needs_setup') {
-      setBannerState({ state: 'setup' })
-    } else if (cachedStatus === 'needs_auth') {
-      setBannerState({ state: 'activating' })
-    } else if (cachedStatus === 'loading') {
-      setBannerState({ state: 'activating' })
-    } else if (cachedStatus === 'error') {
-      setBannerState({ state: 'error' })
-    } else {
-      setBannerState({ state: 'hidden' })
-    }
-  }, [viewMode, selectedAgentId, activeWorkspaceId, agentStatus])
+  }, [activeWorkspaceId, mapAgentStatusToSidebar, extractLogosFromStatus])
 
   // Handler functions (defined before the unified list so they can be referenced)
   const handleSelectAgent = useCallback(async (agentId: string, _agentName: string) => {
     if (!activeWorkspaceId) return
 
-    // Always select the agent - banner will show if setup/auth needed
-    // The useEffect above will check status and update bannerState
+    // Always select the agent - banner state is derived from useAgentState hook
     setSelectedAgentId(agentId)
     setViewMode('agent')
   }, [activeWorkspaceId])
@@ -895,6 +973,14 @@ export function Chat({
     if (!activeWorkspaceId) return
 
     switch (action.type) {
+      case 'new_conversation':
+        // Create a new conversation with this agent
+        setSelectedAgentId(action.agent.id)
+        setViewMode('agent')
+        const newSession = await onCreateSession(activeWorkspaceId, action.agent.id)
+        setSession({ selected: newSession.id })
+        break
+
       case 'info':
         // Open agent info in a tab
         openAgentInfoTab(action.agent.id, activeWorkspaceId, action.agent.displayName || action.agent.name)
@@ -906,23 +992,14 @@ export function Chat({
         const resetSuccess = await window.electronAPI.resetAgent(activeWorkspaceId, action.agent.id)
         if (resetSuccess) {
           console.log('[Chat] Agent reset successfully:', action.agent.name)
-          // Mark as needing setup since credentials were cleared
-          setAgentStatus(prev => new Map(prev).set(action.agent.id, 'needs_setup'))
-          // Update banner if this is the currently selected agent
-          if (action.agent.id === selectedAgentId && viewMode === 'agent') {
-            setBannerState({ state: 'setup' })
-          }
+          // Sidebar and banners will update automatically via AGENT_STATUS_CHANGED broadcast
         } else {
           console.error('[Chat] Failed to reset agent:', action.agent.name)
           setAgentStatus(prev => new Map(prev).set(action.agent.id, 'error'))
-          // Update banner to show error if this is the selected agent
-          if (action.agent.id === selectedAgentId && viewMode === 'agent') {
-            setBannerState({ state: 'setup', reason: 'Failed to reset agent' })
-          }
         }
         break
     }
-  }, [activeWorkspaceId, openAgentInfoTab, selectedAgentId, viewMode])
+  }, [activeWorkspaceId, openAgentInfoTab, onCreateSession, setSession])
 
   // Unified sidebar items: nav buttons + tree items
   // This creates one continuous navigable list for the entire sidebar
@@ -1283,6 +1360,7 @@ export function Chat({
                             onFocusItem={setFocusedSidebarItemId}
                             getItemProps={getSidebarItemProps}
                             agentStatus={agentStatus}
+                            agentLogos={agentLogos}
                           />
                         )}
                       </motion.div>

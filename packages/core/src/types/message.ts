@@ -72,6 +72,10 @@ export interface Message {
   attachments?: StoredAttachment[];
   isError?: boolean;
   isStreaming?: boolean;
+  // Intermediate text (commentary between tool calls, not final response)
+  isIntermediate?: boolean;
+  // Turn ID: Correlation ID from the API's message.id, groups all messages in an assistant turn
+  turnId?: string;
   // Error-specific fields (for typed errors with diagnostics)
   errorCode?: string;
   errorTitle?: string;
@@ -113,13 +117,35 @@ export interface TokenUsage {
 }
 
 /**
+ * Recovery action for typed errors
+ */
+export interface RecoveryAction {
+  /** Keyboard shortcut (single letter) */
+  key: string;
+  /** Description of the action */
+  label: string;
+  /** Slash command to execute (e.g., '/credits') */
+  command?: string;
+  /** Custom action type for special handling */
+  action?: 'retry' | 'settings' | 'credits' | 'reauth';
+}
+
+/**
  * Typed error from agent
  */
 export interface TypedError {
+  /** Error code for programmatic handling */
   code: string;
+  /** User-friendly title */
   title: string;
+  /** Detailed message explaining what went wrong */
   message: string;
+  /** Suggested recovery actions */
+  actions?: RecoveryAction[];
+  /** Whether auto-retry is possible */
   canRetry: boolean;
+  /** Retry delay in ms (if canRetry is true) */
+  retryDelayMs?: number;
   /** Diagnostic check results for debugging (e.g., "✓ Credits: 150") */
   details?: string[];
   /** Original error message for debugging */
@@ -151,19 +177,32 @@ export interface PermissionRequest {
 }
 
 /**
+ * Usage data emitted by CraftAgent in 'complete' events
+ * Note: This is a subset of TokenUsage - totalTokens/contextTokens are computed by consumers
+ */
+export interface AgentEventUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  costUsd?: number;
+}
+
+/**
  * Events emitted by CraftAgent during chat
+ * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
  */
 export type AgentEvent =
   | { type: 'status'; message: string }
-  | { type: 'text_delta'; text: string }
-  | { type: 'text_complete'; text: string }
-  | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string }
-  | { type: 'tool_result'; toolUseId: string; result: string; isError: boolean; input?: Record<string, unknown> }
+  | { type: 'text_delta'; text: string; turnId?: string }
+  | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string }
+  | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; turnId?: string }
+  | { type: 'tool_result'; toolUseId: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string }
   | { type: 'permission_request'; requestId: string; toolName: string; command: string; description: string }
   | { type: 'ask_user'; requestId: string; questions: Question[] }
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
-  | { type: 'complete'; usage?: TokenUsage };
+  | { type: 'complete'; usage?: AgentEventUsage };
 
 /**
  * Generate a unique message ID

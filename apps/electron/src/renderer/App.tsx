@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, SetupNeeds } from '../shared/types'
 import { generateMessageId } from '../shared/types'
 import { Chat } from '@/components/chat/Chat'
-import { OnboardingWizard } from '@/components/onboarding'
+import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { AddWorkspaceFlow } from '@/components/AddWorkspaceFlow'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FocusProvider } from '@/context/FocusContext'
@@ -12,7 +12,7 @@ import { useTabs } from '@/tabs'
 import { Spinner } from '@/components/ui/loading-indicator'
 import { DEFAULT_MODEL } from '@config/models'
 
-type AppState = 'loading' | 'onboarding' | 'ready' | 'adding-workspace'
+type AppState = 'loading' | 'onboarding' | 'reauth' | 'ready' | 'adding-workspace'
 
 export default function App() {
   // App state: loading -> check auth -> onboarding or ready
@@ -80,6 +80,34 @@ export default function App() {
     }
   }, [windowMode])
 
+  // Reauth login handler - re-authenticate with Craft when session expired
+  const handleReauthLogin = useCallback(async () => {
+    const result = await window.electronAPI.startCraftOAuth()
+    if (result.success) {
+      // Re-check setup needs after successful login
+      const needs = await window.electronAPI.getSetupNeeds()
+      if (needs.isFullyConfigured) {
+        setAppState('ready')
+      } else {
+        // Still needs more setup (shouldn't happen normally, but handle gracefully)
+        setSetupNeeds(needs)
+        setAppState('onboarding')
+      }
+    } else {
+      throw new Error(result.error || 'Login failed')
+    }
+  }, [])
+
+  // Reauth logout handler - clear everything and start fresh
+  const handleReauthLogout = useCallback(async () => {
+    const confirmed = await window.electronAPI.showLogoutConfirmation()
+    if (confirmed) {
+      await window.electronAPI.logout()
+      // Reset to full onboarding
+      setSetupNeeds(null)
+      setAppState('onboarding')
+    }
+  }, [])
 
   // Check auth state and get window's workspace ID on mount
   useEffect(() => {
@@ -107,7 +135,11 @@ export default function App() {
 
         if (needs.isFullyConfigured) {
           setAppState('ready')
+        } else if (needs.needsReauth) {
+          // Session expired - show simple re-login screen (preserves conversations)
+          setAppState('reauth')
         } else {
+          // New user or needs full setup - show full onboarding
           setAppState('onboarding')
         }
       } catch (error) {
@@ -134,12 +166,18 @@ export default function App() {
     ],
   })
 
-  // Load workspaces and sessions when app is ready
+  // Load workspaces, sessions, and model when app is ready
   useEffect(() => {
     if (appState !== 'ready') return
 
     window.electronAPI.getWorkspaces().then(setWorkspaces)
     window.electronAPI.getSessions().then(setSessions)
+    // Load stored model preference
+    window.electronAPI.getModel().then((storedModel) => {
+      if (storedModel) {
+        setCurrentModel(storedModel)
+      }
+    })
   }, [appState])
 
   // Load agents when window's workspace is set
@@ -190,7 +228,9 @@ export default function App() {
             case 'text_delta': {
               const lastMsg = session.messages[session.messages.length - 1]
 
-              if (lastMsg?.role === 'assistant' && lastMsg.isStreaming) {
+              // Append to existing streaming assistant if same turnId or no turnId
+              if (lastMsg?.role === 'assistant' && lastMsg.isStreaming &&
+                  (!event.turnId || lastMsg.turnId === event.turnId)) {
                 return {
                   ...session,
                   messages: [
@@ -209,7 +249,8 @@ export default function App() {
                     role: 'assistant' as const,
                     content: event.delta,
                     timestamp: Date.now(),
-                    isStreaming: true
+                    isStreaming: true,
+                    turnId: event.turnId
                   }
                 ]
               }
@@ -217,16 +258,22 @@ export default function App() {
 
             case 'text_complete': {
               const msgs = session.messages
-              const lastAssistant = msgs[msgs.length - 1]
-              if (lastAssistant?.role === 'assistant') {
+              // Find assistant message by turnId (not by position, since tools may be inserted after)
+              const assistantIndex = event.turnId
+                ? msgs.findIndex(m => m.role === 'assistant' && m.turnId === event.turnId)
+                : msgs.findLastIndex(m => m.role === 'assistant' && m.isStreaming)
+
+              if (assistantIndex !== -1) {
+                const assistantMsg = msgs[assistantIndex]
                 return {
                   ...session,
                   // Set isProcessing false immediately to prevent brief "Thinking..." flash
                   // If more tools run after this, tool_start will set it back to true
                   isProcessing: false,
                   messages: [
-                    ...msgs.slice(0, -1),
-                    { ...lastAssistant, content: event.text, isStreaming: false }
+                    ...msgs.slice(0, assistantIndex),
+                    { ...assistantMsg, content: event.text, isStreaming: false, isIntermediate: event.isIntermediate, turnId: event.turnId },
+                    ...msgs.slice(assistantIndex + 1)
                   ]
                 }
               }
@@ -263,7 +310,8 @@ export default function App() {
                     timestamp: Date.now(),
                     toolName: event.toolName,
                     toolUseId: event.toolUseId,
-                    toolInput: event.toolInput
+                    toolInput: event.toolInput,
+                    turnId: event.turnId
                   }
                 ]
               }
@@ -561,6 +609,12 @@ export default function App() {
     }
   }, [windowWorkspaceId])
 
+  const handleModelChange = useCallback((model: string) => {
+    setCurrentModel(model)
+    // Persist to config so it's remembered across launches
+    window.electronAPI.setModel(model)
+  }, [])
+
   const handleRespondToPermission = useCallback(async (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
     // Send response to main process
     const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
@@ -639,6 +693,7 @@ export default function App() {
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
         needsCraftAuth: true,
+        needsReauth: false,
         needsBillingConfig: true,
         needsCredentials: true,
         isFullyConfigured: false,
@@ -678,6 +733,16 @@ export default function App() {
           <p className="text-sm text-muted-foreground">Loading...</p>
         </div>
       </div>
+    )
+  }
+
+  // Reauth state - session expired, need to re-login
+  if (appState === 'reauth') {
+    return (
+      <ReauthScreen
+        onLogin={handleReauthLogin}
+        onLogout={handleReauthLogout}
+      />
     )
   }
 
@@ -732,7 +797,7 @@ export default function App() {
             defaultLayout={[20, 32, 48]}
             currentModel={currentModel}
             menuNewChatTrigger={menuNewChatTrigger}
-            onModelChange={setCurrentModel}
+            onModelChange={handleModelChange}
             onSelectWorkspace={handleSelectWorkspace}
             onCreateSession={handleCreateSession}
             onDeleteSession={handleDeleteSession}

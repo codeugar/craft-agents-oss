@@ -2,7 +2,6 @@ import * as React from "react"
 import { useEffect } from "react"
 import { useAtom } from "jotai"
 import {
-  MessageSquare,
   Sparkles,
   ChevronDown,
   ChevronUp,
@@ -10,7 +9,6 @@ import {
   Paperclip,
   ArrowUp,
   Square,
-  Bot,
   AlertTriangle,
   CheckCircle2,
   XCircle,
@@ -28,6 +26,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { Markdown, CollapsibleMarkdownProvider, type RenderMode } from "@/components/markdown"
+import { IntermediateMessage } from "./IntermediateMessage"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import { AttachmentPreview, FileTypeIcon, getFileTypeLabel } from "./AttachmentPreview"
 import { LoadingIndicator } from "@/components/ui/loading-indicator"
@@ -336,14 +335,7 @@ export function ChatDisplay({
               {session.messages.length === 0 ? (
                 /* Empty State: Welcome message for new sessions */
                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground px-8">
-                  <div className="size-14 rounded-xl bg-muted flex items-center justify-center mb-3">
-                    {session.agentName ? (
-                      <Bot className="size-7 text-muted-foreground/50" />
-                    ) : (
-                      <MessageSquare className="size-7 text-muted-foreground/50" />
-                    )}
-                  </div>
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-sm font-medium">
                     {session.agentName ? `Chat with ${session.agentName}` : `Welcome to ${session.workspaceName}`}
                   </p>
                   <p className="text-xs mt-1 text-center">Start a conversation by typing a message below.</p>
@@ -454,7 +446,7 @@ export function ChatDisplay({
                   <textarea
                     ref={textareaRef}
                     className="w-full min-h-[100px] px-4 py-3 bg-transparent outline-none text-sm placeholder:text-muted-foreground resize-none focus-visible:ring-0"
-                    placeholder={`Message ${session.workspaceName || 'Chat'}...`}
+                    placeholder={`Message ${session.agentName || session.workspaceName || 'Chat'}...`}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -785,6 +777,17 @@ function MessageBubble({
 
   // === ASSISTANT MESSAGE: Left-aligned gray bubble with markdown rendering ===
   if (message.role === 'assistant') {
+    // Intermediate messages (commentary between tool calls) get special treatment
+    if (message.isIntermediate) {
+      return (
+        <IntermediateMessage
+          content={message.content}
+          onOpenUrl={onOpenUrl}
+          onOpenFile={onOpenFile}
+        />
+      )
+    }
+
     return (
       <div className="flex justify-start">
         <div className="max-w-[80%] bg-muted rounded-lg pl-6 pr-4 py-3 break-words min-w-0">

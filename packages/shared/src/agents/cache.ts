@@ -11,7 +11,7 @@
  *     └── definition.json     # Cached agent definition
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type {
@@ -164,12 +164,12 @@ export function saveDefinition(
 }
 
 /**
- * Clear definition cache for an agent
+ * Clear definition cache for an agent (deletes entire agent folder including logos)
  */
 export function clearDefinition(workspaceId: string, agentId: string): void {
-  const path = getDefinitionPath(workspaceId, agentId);
-  if (existsSync(path)) {
-    unlinkSync(path);
+  const agentDir = join(AGENTS_DIR, workspaceId, agentId);
+  if (existsSync(agentDir)) {
+    rmSync(agentDir, { recursive: true, force: true });
   }
 }
 

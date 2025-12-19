@@ -1,4 +1,4 @@
-import { Info, RotateCcw } from "lucide-react"
+import { Info, MessageSquarePlus, RotateCcw } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -9,6 +9,7 @@ import {
 import type { SubAgentMetadata } from "../../../shared/types"
 
 export type AgentAction =
+  | { type: 'new_conversation'; agent: SubAgentMetadata }
   | { type: 'info'; agent: SubAgentMetadata }
   | { type: 'reset'; agent: SubAgentMetadata }
 
@@ -35,6 +36,11 @@ export function AgentContextMenu({
         {children}
       </ContextMenuTrigger>
       <StyledContextMenuContent>
+        <StyledContextMenuItem onClick={() => onAction({ type: 'new_conversation', agent })}>
+          <MessageSquarePlus />
+          New Conversation
+        </StyledContextMenuItem>
+        <StyledContextMenuSeparator />
         <StyledContextMenuItem onClick={() => onAction({ type: 'info', agent })}>
           <Info />
           Info

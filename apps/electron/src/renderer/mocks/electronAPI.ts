@@ -458,6 +458,13 @@ console.log(example);
     alert(`[Dev Mode] Would open file:\n${path}`)
   },
 
+  async showInFolder(path: string): Promise<void> {
+    console.log('[Mock] Show in folder:', path)
+    // In browser dev mode, we can't open local folders
+    // Just log a message
+    alert(`[Dev Mode] Would show in Finder:\n${path}`)
+  },
+
   // ===== Permission Response =====
 
   async respondToPermission(_sessionId: string, _requestId: string, _allowed: boolean, _alwaysAllow: boolean): Promise<boolean> {
@@ -597,6 +604,7 @@ console.log(example);
     // Mock: return needs that trigger onboarding
     return {
       needsCraftAuth: true,
+      needsReauth: false,
       needsBillingConfig: true,
       needsCredentials: true,
       isFullyConfigured: false,
@@ -742,6 +750,22 @@ console.log(example);
     await sleep(200)
     console.log('[Mock] updateBillingMethod called:', authType, credential ? '(with credential)' : '(no credential)')
     // Mock: just log, no actual update
+  },
+
+  // ===== Model Settings =====
+
+  async getModel() {
+    await sleep(50)
+    console.log('[Mock] getModel called')
+    // Mock: return stored model from localStorage or null
+    return localStorage.getItem('craft-agent-model')
+  },
+
+  async setModel(model: string) {
+    await sleep(50)
+    console.log('[Mock] setModel called:', model)
+    // Mock: store in localStorage for persistence in browser dev mode
+    localStorage.setItem('craft-agent-model', model)
   },
 
   // ===== User Preferences =====

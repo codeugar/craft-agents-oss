@@ -43,8 +43,10 @@ export interface AuthState {
 }
 
 export interface SetupNeeds {
-  /** No Craft token or workspace → show craft-login + space selection */
+  /** No Craft token AND no workspace → show full onboarding (new user) */
   needsCraftAuth: boolean;
+  /** Has workspace but token expired/missing → show simple re-login screen */
+  needsReauth: boolean;
   /** No billing type configured → show billing picker */
   needsBillingConfig: boolean;
   /** Billing type set but missing credentials → show credential entry */
@@ -109,19 +111,25 @@ export async function getAuthState(): Promise<AuthState> {
  * Derive what setup steps are needed based on current auth state
  */
 export function getSetupNeeds(state: AuthState): SetupNeeds {
-  // Need Craft auth if missing token OR missing workspace
-  const needsCraftAuth = !state.craft.hasToken || !state.workspace.hasWorkspace;
+  // Distinguish between new user vs returning user with expired token:
+  // - needsCraftAuth: No token AND no workspace → full onboarding (new user)
+  // - needsReauth: Has workspace but token missing → simple re-login (session expired)
+  const needsCraftAuth = !state.craft.hasToken && !state.workspace.hasWorkspace;
+  const needsReauth = !state.craft.hasToken && state.workspace.hasWorkspace;
 
   // Need billing config if no billing type is set
   const needsBillingConfig = state.billing.type === null;
 
   // Need credentials if billing type is set but credentials are missing
+  // Note: For craft_credits, hasCredentials depends on Craft token, so if needsReauth is true,
+  // needsCredentials would also be true. We handle this by checking needsReauth first in the UI.
   const needsCredentials = state.billing.type !== null && !state.billing.hasCredentials;
 
   return {
     needsCraftAuth,
+    needsReauth,
     needsBillingConfig,
     needsCredentials,
-    isFullyConfigured: !needsCraftAuth && !needsBillingConfig && !needsCredentials,
+    isFullyConfigured: !needsCraftAuth && !needsReauth && !needsBillingConfig && !needsCredentials,
   };
 }

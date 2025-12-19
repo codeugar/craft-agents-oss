@@ -92,66 +92,35 @@ export default function ChatTabPanel({ tab }: ChatTabPanelProps) {
     }
   }, [isReady, session?.agentId, markActive])
 
-  // Determine agent setup state for input area indicator
-  // Maps agent state to SetupAuthBanner state
-  // Note: Main process handles auto-activation for already-configured idle agents
+  // Agent setup state from centralized hook (single source of truth)
+  // Maps agentState.bannerState to SetupAuthBanner props with appropriate onAction
   const agentSetupState = React.useMemo(() => {
     if (!session?.agentId) return undefined
 
-    // Agent needs initial activation (main process returns 'idle' only if setup is truly needed)
-    if (agentState.isIdle) {
-      return {
-        state: 'setup' as const,
-        agentName: agentState.agentName || session.agentName,
-        onAction: handleActivateAgent,
+    // Hidden state - no banner needed
+    if (agentState.bannerState === 'hidden') {
+      return undefined
+    }
+
+    // Determine action based on banner state
+    const getAction = () => {
+      switch (agentState.bannerState) {
+        case 'setup':
+          return handleActivateAgent
+        case 'error':
+          return () => agentState.reload()
+        default:
+          return handleOpenSetupWizard
       }
     }
-    // Agent is being extracted/activated
-    if (agentState.isExtracting) {
-      return {
-        state: 'activating' as const,
-        agentName: agentState.agentName || session.agentName,
-        reason: agentState.extractionMessage || undefined,
-        onAction: handleOpenSetupWizard,
-      }
+
+    return {
+      state: agentState.bannerState,
+      agentName: agentState.agentName || session.agentName,
+      reason: agentState.bannerReason ?? undefined,
+      onAction: getAction(),
     }
-    // Agent needs review (questions to answer)
-    if (agentState.isNeedsReview) {
-      return {
-        state: 'review' as const,
-        agentName: agentState.agentName || session.agentName,
-        onAction: handleOpenSetupWizard,
-      }
-    }
-    // Agent needs MCP server authentication
-    if (agentState.isNeedsMcpAuth) {
-      return {
-        state: 'mcp_auth' as const,
-        agentName: agentState.agentName || session.agentName,
-        onAction: handleOpenSetupWizard,
-      }
-    }
-    // Agent needs API credentials
-    if (agentState.isNeedsApiAuth) {
-      return {
-        state: 'api_auth' as const,
-        agentName: agentState.agentName || session.agentName,
-        onAction: handleOpenSetupWizard,
-      }
-    }
-    // Agent activation failed
-    if (agentState.isError) {
-      return {
-        state: 'error' as const,
-        agentName: agentState.agentName || session.agentName,
-        reason: agentState.errorMessage || undefined,
-        onAction: () => agentState.reload(),
-      }
-    }
-    // Agent is ready or active - no banner needed
-    // (ready state auto-transitions to active via useEffect above)
-    return undefined
-  }, [session?.agentId, session?.agentName, agentState, handleActivateAgent, handleOpenSetupWizard])
+  }, [session?.agentId, session?.agentName, agentState.bannerState, agentState.bannerReason, agentState.agentName, agentState.reload, handleActivateAgent, handleOpenSetupWizard])
 
   // Handle missing session (deleted while tab was open)
   if (!session) {

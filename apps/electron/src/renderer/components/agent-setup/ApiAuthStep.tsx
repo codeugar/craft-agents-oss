@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { CheckCircle2, Clock, SkipForward, Globe } from "lucide-react"
+import { ServiceLogo } from "@/components/ui/service-logo"
 import { StepFormLayout, BackButton, ContinueButton } from "@/components/onboarding/primitives"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -22,11 +23,16 @@ export interface ApiConfig {
     secretLabel?: string
   }
   description?: string
+  logo?: string
 }
 
 export type ApiAuthStatus = 'pending' | 'configured' | 'skipped'
 
 interface ApiAuthStepProps {
+  /** Workspace ID for logo resolution */
+  workspaceId: string
+  /** Agent ID for logo resolution */
+  agentId: string
   /** Name of the agent */
   agentName: string
   /** APIs that need credentials */
@@ -52,6 +58,8 @@ interface ApiAuthStepProps {
  * Supports API keys, bearer tokens, and basic auth.
  */
 export function ApiAuthStep({
+  workspaceId,
+  agentId,
   agentName,
   apis,
   apiStatus = {},
@@ -163,7 +171,12 @@ export function ApiAuthStep({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <Globe className="size-4 text-muted-foreground" />
+                    <ServiceLogo
+                      logo={api.logo}
+                      name={api.name}
+                      fallbackIcon={<Globe className="size-2.5" />}
+                      className="size-5 rounded"
+                    />
                     <span className="font-medium text-sm">{api.name}</span>
                     {getStatusBadge(status)}
                   </div>

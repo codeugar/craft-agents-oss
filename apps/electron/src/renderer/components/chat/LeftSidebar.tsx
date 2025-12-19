@@ -55,8 +55,7 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId }:
                 "focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
                 link.variant === "default"
                   ? "bg-primary text-primary-foreground dark:bg-muted dark:text-foreground"
-                  : "hover:bg-accent",
-                isFocused && link.variant !== "default" && "bg-foreground/5"
+                  : "hover:bg-foreground/5"
               )}
             >
               <link.icon className={cn(

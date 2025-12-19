@@ -1,6 +1,7 @@
 // Agent Setup Components
 // Step-by-step wizard for activating sub-agents
 
+export { StartStep } from './StartStep'
 export { ExtractingStep } from './ExtractingStep'
 export { ReviewConcernsStep } from './ReviewConcernsStep'
 export { McpAuthStep } from './McpAuthStep'

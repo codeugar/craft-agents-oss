@@ -80,6 +80,7 @@ const demoCapabilities = [
 export function AgentSetupDemo() {
   const [state, setState] = useState<AgentSetupState>({
     step: 'extracting',
+    workspaceId: 'demo-workspace',
     agentId: 'demo-agent-123',
     agentName: 'Code Assistant',
     extractionMessage: 'Reading agent configuration...',
@@ -117,6 +118,7 @@ export function AgentSetupDemo() {
   const handleCancel = useCallback(() => {
     setState({
       step: 'extracting',
+      workspaceId: 'demo-workspace',
       agentId: 'demo-agent-123',
       agentName: 'Code Assistant',
       extractionMessage: 'Reading agent configuration...',

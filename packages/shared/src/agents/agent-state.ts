@@ -376,6 +376,7 @@ export class AgentStateManager extends TypedEventEmitter<AgentStateEvents> {
 
   /**
    * Reset current agent (clear cache AND credentials)
+   * Also cancels any running extraction
    * Returns to idle state
    */
   async reset(): Promise<void> {
@@ -386,6 +387,9 @@ export class AgentStateManager extends TypedEventEmitter<AgentStateEvents> {
     }
 
     debug('[AgentStateManager.reset] Resetting agent:', agentId);
+
+    // Cancel any running extraction FIRST
+    this.subAgentManager.cancelExtraction(agentId);
 
     // Clear definition cache
     clearDefinition(this.workspaceId, agentId);

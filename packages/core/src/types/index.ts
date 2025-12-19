@@ -31,6 +31,8 @@ export type {
   Message,
   StoredMessage,
   TokenUsage,
+  AgentEventUsage,
+  RecoveryAction,
   TypedError,
   Question,
   PermissionRequest,

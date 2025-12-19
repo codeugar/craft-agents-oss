@@ -18,7 +18,7 @@
  * ```
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type {
   AgentStatus,
   AgentActivateOptions,
@@ -29,6 +29,7 @@ import type {
   ApiConfig,
   Concern,
 } from '@craft-agent/shared/agents'
+import type { BannerState } from '../components/chat/SetupAuthBanner'
 
 export interface UseAgentStateResult {
   // Current status (discriminated union)
@@ -43,6 +44,11 @@ export interface UseAgentStateResult {
   isReady: boolean
   isActive: boolean
   isError: boolean
+
+  // Idle state setup info (from centralized status)
+  needsSetup: boolean
+  needsAuth: boolean
+  idleReason: string | null
 
   // Current data (derived from status, type-safe)
   activeDefinition: SubAgentDefinition | null
@@ -69,6 +75,10 @@ export interface UseAgentStateResult {
 
   // Loading state for async operations
   isLoading: boolean
+
+  // Derived banner state (centralized mapping for all components)
+  bannerState: BannerState
+  bannerReason: string | null
 }
 
 /**
@@ -135,6 +145,51 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
   const pendingConcerns = status.status === 'needs_review' ? status.concerns : null
   const pendingMcpServers = status.status === 'needs_mcp_auth' ? status.servers : null
   const pendingApis = status.status === 'needs_api_auth' ? status.apis : null
+
+  // Idle state setup info (from centralized status)
+  const needsSetup = status.status === 'idle' && status.needsSetup === true
+  const needsAuth = status.status === 'idle' && status.needsAuth === true
+  const idleReason = status.status === 'idle' ? status.reason ?? null : null
+
+  // Centralized banner state derivation (single source of truth for all components)
+  const bannerState = useMemo((): BannerState => {
+    switch (status.status) {
+      case 'idle':
+        // Check centralized setup info
+        if (status.needsAuth && !status.needsSetup) {
+          return 'mcp_auth'
+        }
+        return 'setup'
+      case 'extracting':
+        return 'activating'
+      case 'needs_review':
+        return 'review'
+      case 'needs_mcp_auth':
+        return 'mcp_auth'
+      case 'needs_api_auth':
+        return 'api_auth'
+      case 'ready':
+      case 'active':
+        return 'hidden'
+      case 'error':
+        return 'error'
+      default:
+        return 'hidden'
+    }
+  }, [status])
+
+  const bannerReason = useMemo((): string | null => {
+    switch (status.status) {
+      case 'idle':
+        return status.reason ?? null
+      case 'extracting':
+        return extractionMessage
+      case 'error':
+        return errorMessage
+      default:
+        return null
+    }
+  }, [status, extractionMessage, errorMessage])
 
   // Actions - now use (workspaceId, agentId) from hook params
   const activate = useCallback(
@@ -250,6 +305,9 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
     isReady,
     isActive,
     isError,
+    needsSetup,
+    needsAuth,
+    idleReason,
     activeDefinition,
     agentId: derivedAgentId,
     agentName: derivedAgentName,
@@ -268,5 +326,7 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
     reset,
     markActive,
     isLoading,
+    bannerState,
+    bannerReason,
   }
 }

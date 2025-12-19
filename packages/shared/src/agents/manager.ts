@@ -17,7 +17,7 @@ import type {
 } from './types.ts';
 import { createApiServer, type ApiCredential, type BasicAuthCredential } from './api-tools.ts';
 import { normalizeAgentName } from './parser.ts';
-import { extractAgentDefinition, type ExtractionProgressEvent } from './extractor.ts';
+import { startExtraction, type ExtractionProgressEvent, type ExtractionHandle } from './extractor.ts';
 import {
   loadRegistry,
   saveRegistry,
@@ -28,6 +28,7 @@ import {
   saveServerCredentialsAsync,
   getApiKeyCredentialAsync,
 } from './cache.ts';
+import { getLogoUrl } from '../utils/logo.ts';
 import { CraftOAuth, getMcpBaseUrl } from '../auth/oauth.ts';
 import { debug } from '../utils/debug.ts';
 
@@ -80,6 +81,8 @@ export class SubAgentManager {
   private registry: AgentRegistry | null = null;
   /** Cache for API servers (created once per agent activation) */
   private apiServerCache: Map<string, ReturnType<typeof createApiServer>> = new Map();
+  /** Track pending extractions for cancellation */
+  private pendingExtractions: Map<string, ExtractionHandle> = new Map();
 
   constructor(workspaceId: string, mcpClient: CraftMcpClient, config: SubAgentManagerConfig) {
     this.workspaceId = workspaceId;
@@ -243,9 +246,11 @@ export class SubAgentManager {
     }
 
     try {
-      // Use agentic extraction - Claude will fetch the document using MCP tools
-      debug('[getDefinition] starting agentic extraction for documentId:', metadata.documentId, 'onProgress:', !!onProgress);
-      const extracted = await extractAgentDefinition(
+      // Use cancellable extraction - Claude will fetch the document using MCP tools
+      debug('[getDefinition] starting cancellable extraction for documentId:', metadata.documentId, 'onProgress:', !!onProgress);
+
+      // Create extraction handle for potential cancellation
+      const handle = startExtraction(
         metadata.documentId,
         metadata.name,
         this.config.model,
@@ -253,6 +258,18 @@ export class SubAgentManager {
         this.config.mcpToken,
         onProgress,
       );
+
+      // Track the extraction so it can be cancelled
+      this.pendingExtractions.set(agentId, handle);
+
+      // Await the result
+      let extracted;
+      try {
+        extracted = await handle.result;
+      } finally {
+        // Remove from pending map regardless of outcome
+        this.pendingExtractions.delete(agentId);
+      }
 
       // Check if extraction actually got content
       if (!extracted.instructions || extracted.instructions.trim().length === 0) {
@@ -278,6 +295,9 @@ export class SubAgentManager {
         'instructionsBlockId:', definition.instructionsBlockId || 'none',
         'mcpServers:', definition.mcpServers?.length || 0);
 
+      // Add logo URLs for MCP servers and APIs
+      this.enrichWithLogos(definition);
+
       // Cache the definition to file
       saveDefinition(this.workspaceId, metadata, definition);
 
@@ -285,6 +305,26 @@ export class SubAgentManager {
     } catch (error) {
       debug('[getDefinition] failed to fetch agent definition:', error);
       return null;
+    }
+  }
+
+  /**
+   * Add logo URLs to MCP servers and APIs
+   * Uses Google Favicon API URLs - browser handles caching
+   */
+  private enrichWithLogos(definition: SubAgentDefinition): void {
+    // Add logo URLs for MCP servers
+    if (definition.mcpServers) {
+      for (const server of definition.mcpServers) {
+        server.logo = getLogoUrl(server.url) || undefined;
+      }
+    }
+
+    // Add logo URLs for APIs
+    if (definition.apis) {
+      for (const api of definition.apis) {
+        api.logo = getLogoUrl(api.baseUrl) || undefined;
+      }
     }
   }
 
@@ -702,6 +742,34 @@ export class SubAgentManager {
   clearApiServerCache(): void {
     debug(`[manager.clearApiServerCache] Clearing ${this.apiServerCache.size} cached servers`);
     this.apiServerCache.clear();
+  }
+
+  /**
+   * Cancel any pending extraction for an agent
+   * Called when user cancels agent activation
+   */
+  cancelExtraction(agentId: string): void {
+    const handle = this.pendingExtractions.get(agentId);
+    if (handle) {
+      debug(`[manager.cancelExtraction] Cancelling extraction for agent: ${agentId}`);
+      handle.cancel();
+      this.pendingExtractions.delete(agentId);
+    } else {
+      debug(`[manager.cancelExtraction] No pending extraction for agent: ${agentId}`);
+    }
+  }
+
+  /**
+   * Cancel all pending extractions
+   * Called when manager is being disposed
+   */
+  cancelAllExtractions(): void {
+    debug(`[manager.cancelAllExtractions] Cancelling ${this.pendingExtractions.size} pending extractions`);
+    for (const [agentId, handle] of this.pendingExtractions) {
+      debug(`[manager.cancelAllExtractions] Cancelling extraction for: ${agentId}`);
+      handle.cancel();
+    }
+    this.pendingExtractions.clear();
   }
 
   /**

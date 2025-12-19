@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,6 +26,7 @@ import { useSession } from "@/hooks/useSession"
 import { useFocusZone, useRovingTabIndex } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
 import { getSessionTitle } from "@/utils/session"
+import { getSessionPreview } from "@/utils/preview"
 import type { Session } from "../../../shared/types"
 
 interface SessionItemProps {
@@ -121,19 +123,55 @@ function SessionItem({
             {preview}
           </div>
         </button>
-        {/* More menu dropdown - outside button, visible on hover or when menu is open */}
+        {/* Action buttons - visible on hover or when menu is open */}
         <div
           className={cn(
             "absolute right-2 top-3 transition-opacity z-10",
             menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           )}
         >
-          <DropdownMenu onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <div className="p-1 rounded hover:bg-foreground/10 data-[state=open]:bg-foreground/10 cursor-pointer">
-                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </DropdownMenuTrigger>
+          {/* Button group: Archive + More */}
+          <div className="flex items-center rounded-[8px] overflow-hidden border border-transparent hover:border-border/50">
+            {/* Archive/Unarchive button */}
+            {onArchive && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="p-1.5 hover:bg-foreground/10 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onArchive(item.id)
+                    }}
+                  >
+                    <Archive className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>Archive</TooltipContent>
+              </Tooltip>
+            )}
+            {onUnarchive && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className="p-1.5 hover:bg-foreground/10 cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onUnarchive(item.id)
+                    }}
+                  >
+                    <ArchiveRestore className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>Unarchive</TooltipContent>
+              </Tooltip>
+            )}
+            {/* More menu */}
+            <DropdownMenu onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <div className="p-1.5 hover:bg-foreground/10 data-[state=open]:bg-foreground/10 cursor-pointer">
+                  <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                </div>
+              </DropdownMenuTrigger>
             <StyledDropdownMenuContent align="end">
               <StyledDropdownMenuItem onClick={onOpenInNewTab}>
                 <ExternalLink />
@@ -162,7 +200,8 @@ function SessionItem({
                 Delete
               </StyledDropdownMenuItem>
             </StyledDropdownMenuContent>
-          </DropdownMenu>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
       {isLast && <Separator />}
@@ -332,8 +371,7 @@ export function SessionList({
           </p>
         ) : (
           sortedItems.map((item, index) => {
-            const lastMessage = item.messages[item.messages.length - 1]
-            const preview = lastMessage?.content?.slice(0, 300) || 'New chat'
+            const preview = getSessionPreview(item.messages)
             const itemProps = getItemProps(item, index)
 
             return (

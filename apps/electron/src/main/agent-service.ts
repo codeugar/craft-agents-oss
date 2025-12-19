@@ -235,21 +235,7 @@ export class AgentService {
       const mcpServers = await manager.getMcpServersWithAuthStatus(definition, agentId)
       const apis = await manager.getApisWithAuthStatus(definition, agentId)
 
-      return {
-        mcpServers: mcpServers.map(s => ({
-          name: s.name,
-          url: s.url,
-          requiresAuth: s.requiresAuth,
-          hasAuth: s.hasAuth,
-          tools: s.tools,
-        })),
-        apis: apis.map(a => ({
-          name: a.name,
-          baseUrl: a.baseUrl,
-          auth: a.auth,
-          hasAuth: a.hasAuth,
-        })),
-      }
+      return { mcpServers, apis }
     } catch (error) {
       console.error('[AgentService] Error getting auth status:', error)
       return { mcpServers: [], apis: [] }
@@ -286,27 +272,6 @@ export class AgentService {
       return definition !== null
     } catch (error) {
       console.error('[AgentService] Error reloading agent:', error)
-      return false
-    }
-  }
-
-  /**
-   * Reset agent: clear ALL cached data (definition + credentials)
-   * User will need to re-authenticate on next activation
-   */
-  async resetAgent(workspaceId: string, agentId: string): Promise<boolean> {
-    try {
-      // Clear definition cache
-      clearDefinition(workspaceId, agentId)
-      console.log(`[AgentService] Cleared definition cache for agent ${agentId}`)
-
-      // Clear all credentials for this agent
-      await clearAgentCredentialsAsync(workspaceId, agentId)
-      console.log(`[AgentService] Cleared credentials for agent ${agentId}`)
-
-      return true
-    } catch (error) {
-      console.error('[AgentService] Error resetting agent:', error)
       return false
     }
   }

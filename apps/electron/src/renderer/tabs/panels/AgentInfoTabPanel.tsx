@@ -2,12 +2,14 @@
  * AgentInfoTabPanel
  *
  * Displays agent details including capabilities, MCP servers, and APIs.
+ * Shows activation banner if agent hasn't been set up yet.
  * Content extracted from AgentInfoDialog.
  */
 
 import * as React from 'react'
-import { useEffect, useState } from 'react'
-import { Wrench, AlertCircle, CheckCircle2, ChevronRight, Lock } from 'lucide-react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
+import { AlertCircle, CheckCircle2, ChevronRight, Lock, Globe } from 'lucide-react'
+import { ServiceLogo } from '@/components/ui/service-logo'
 import { McpIcon } from '@/components/icons/McpIcon'
 import { Spinner } from '@/components/ui/loading-indicator'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +20,9 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { SetupAuthBanner, type BannerState } from '@/components/chat/SetupAuthBanner'
+import { useAgentState } from '@/hooks/useAgentState'
+import { useTabs } from '../useTabs'
 import type {
   SubAgentDefinition,
   AgentAuthStatus,
@@ -34,19 +39,33 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
 
   const [definition, setDefinition] = useState<SubAgentDefinition | null>(null)
   const [authStatus, setAuthStatus] = useState<AgentAuthStatus | null>(null)
-  const [definitionLoading, setDefinitionLoading] = useState(true)
-  const [toolsLoading, setToolsLoading] = useState(true)
+  const [definitionLoading, setDefinitionLoading] = useState(false)
+  const [toolsLoading, setToolsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch definition and auth status on mount
-  // Definition loads first to show content immediately, auth status loads tools
+  // Get agent state to determine if agent is activated
+  const agentState = useAgentState(workspaceId, agentId)
+  const { openAgentSetupTab } = useTabs()
+
+  // Banner state from centralized hook (single source of truth)
+  const bannerState = useMemo((): { state: BannerState; reason?: string } => ({
+    state: agentState.bannerState,
+    reason: agentState.bannerReason ?? undefined
+  }), [agentState.bannerState, agentState.bannerReason])
+
+  // Handle banner action - open setup tab
+  const handleBannerAction = useCallback(() => {
+    openAgentSetupTab(agentId, workspaceId, agentInfoTab.label)
+  }, [agentId, workspaceId, agentInfoTab.label, openAgentSetupTab])
+
+  // Always try to fetch definition and auth status (may return cached/partial data)
   useEffect(() => {
     let isMounted = true
     setDefinitionLoading(true)
     setToolsLoading(true)
     setError(null)
 
-    // Fetch definition first (shows content immediately)
+    // Fetch definition (may return cached data even for non-activated agents)
     window.electronAPI.getAgentDefinition(workspaceId, agentId)
       .then((def) => {
         if (!isMounted) return
@@ -55,8 +74,13 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
       })
       .catch((err) => {
         if (!isMounted) return
-        setError(err.message || 'Failed to load agent definition')
-        setDefinitionLoading(false)
+        // Don't show error for non-activated agents - just means no cached data
+        if (agentState.isIdle) {
+          setDefinitionLoading(false)
+        } else {
+          setError(err.message || 'Failed to load agent definition')
+          setDefinitionLoading(false)
+        }
       })
 
     // Fetch auth status (includes MCP server tools)
@@ -74,7 +98,7 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
     return () => {
       isMounted = false
     }
-  }, [workspaceId, agentId])
+  }, [workspaceId, agentId, agentState.isIdle])
 
   return (
     <ScrollArea className="h-full">
@@ -82,7 +106,8 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
         {/* Agent name as title */}
         <h2 className="text-lg font-semibold mb-4">{agentInfoTab.label}</h2>
 
-        {definitionLoading && (
+        {/* Show loading spinner only when we expect to get data (not for idle agents) */}
+        {definitionLoading && !agentState.isIdle && (
           <div className="flex items-center justify-center py-8">
             <Spinner className="text-lg text-muted-foreground" />
           </div>
@@ -93,6 +118,17 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
             <AlertCircle className="h-4 w-4" />
             {error}
           </div>
+        )}
+
+        {/* Show banner when no definition and not loading (or needs setup - show immediately) */}
+        {!definition && (!definitionLoading || agentState.needsSetup) && bannerState.state !== 'hidden' && (
+          <SetupAuthBanner
+            state={bannerState.state}
+            agentName={agentInfoTab.label}
+            reason={bannerState.reason}
+            onAction={handleBannerAction}
+            variant="inputAreaCover"
+          />
         )}
 
         {definition && !definitionLoading && (
@@ -142,9 +178,19 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
 
                     return (
                       <li key={i} className="bg-muted/50 rounded-md px-4 py-3 select-none">
-                        <div className="font-medium">{server.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          {server.url}
+                        <div className="flex items-start gap-3">
+                          <ServiceLogo
+                            logo={server.logo}
+                            name={server.name}
+                            fallbackIcon={<McpIcon className="h-3.5 w-3.5 text-muted-foreground" />}
+                            className="h-6 w-6 rounded-md ring-1 ring-border/30 shrink-0 mt-0.5"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium">{server.name}</div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {server.url}
+                            </div>
+                          </div>
                         </div>
                         {/* Tools section - show loading or tools */}
                         {toolsLoading ? (
@@ -212,19 +258,26 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
               )}
             </div>
 
-            {/* APIs */}
-            {(authStatus?.apis?.length || definition?.apis?.length) && (
-              <>
-                <Separator />
-                <div>
-                  <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                    <Wrench className="h-4 w-4" />
-                    REST APIs
-                  </h4>
-                  {authStatus?.apis && authStatus.apis.length > 0 ? (
-                    <ul className="text-sm space-y-2">
-                      {authStatus.apis.map((api, i) => (
-                        <li key={i} className="bg-muted/50 rounded-md p-2">
+            <Separator />
+
+            {/* API Connections */}
+            <div>
+              <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                <Globe className="h-4 w-4" />
+                API Connections
+              </h4>
+              {authStatus?.apis && authStatus.apis.length > 0 ? (
+                <ul className="text-sm space-y-2">
+                  {authStatus.apis.map((api, i) => (
+                    <li key={i} className="bg-muted/50 rounded-md px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <ServiceLogo
+                          logo={api.logo}
+                          name={api.name}
+                          fallbackIcon={<Globe className="h-3.5 w-3.5 text-muted-foreground" />}
+                          className="h-6 w-6 rounded-md ring-1 ring-border/30 shrink-0 mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
                           <div className="font-medium">{api.name}</div>
                           <div className="text-xs text-muted-foreground truncate">
                             {api.baseUrl}
@@ -253,13 +306,23 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
                               )}
                             </div>
                           )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : definition?.apis && definition.apis.length > 0 ? (
-                    <ul className="text-sm space-y-2">
-                      {definition.apis.map((api, i) => (
-                        <li key={i} className="bg-muted/50 rounded-md p-2">
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : definition?.apis && definition.apis.length > 0 ? (
+                <ul className="text-sm space-y-2">
+                  {definition.apis.map((api, i) => (
+                    <li key={i} className="bg-muted/50 rounded-md px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <ServiceLogo
+                          logo={api.logo}
+                          name={api.name}
+                          fallbackIcon={<Globe className="h-3.5 w-3.5 text-muted-foreground" />}
+                          className="h-6 w-6 rounded-md ring-1 ring-border/30 shrink-0 mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
                           <div className="font-medium">{api.name}</div>
                           <div className="text-xs text-muted-foreground truncate">
                             {api.baseUrl}
@@ -269,20 +332,31 @@ export default function AgentInfoTabPanel({ tab }: AgentInfoTabPanelProps) {
                               Auth: {api.auth.type}
                             </Badge>
                           )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              </>
-            )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No API connections configured
+                </p>
+              )}
+            </div>
           </div>
         )}
 
-        {!definition && !definitionLoading && !error && (
-          <p className="text-sm text-muted-foreground py-4">
-            No definition available. This agent may need to be activated first.
-          </p>
+        {/* Show activation/setup banner at the bottom when there's content but agent needs further setup */}
+        {definition && bannerState.state !== 'hidden' && !definitionLoading && (
+          <div className="mt-6">
+            <SetupAuthBanner
+              state={bannerState.state}
+              agentName={agentInfoTab.label}
+              reason={bannerState.reason}
+              onAction={handleBannerAction}
+              variant="inputAreaCover"
+            />
+          </div>
         )}
       </div>
     </ScrollArea>

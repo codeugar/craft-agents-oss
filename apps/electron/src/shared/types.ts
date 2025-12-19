@@ -101,6 +101,7 @@ export interface McpServerWithAuthStatus {
   requiresAuth?: boolean
   hasAuth: boolean  // Whether credentials have been provided
   tools?: string[]
+  logo?: string  // Local logo filename (e.g., "craft.png")
 }
 
 /**
@@ -111,6 +112,7 @@ export interface ApiWithAuthStatus {
   baseUrl: string
   auth?: { type: string; credentialLabel?: string; secretLabel?: string }
   hasAuth: boolean  // Whether credentials have been provided
+  logo?: string  // Local logo filename (e.g., "exa.png")
 }
 
 /**
@@ -208,11 +210,12 @@ export interface Session {
 }
 
 // Events sent from main to renderer
+// turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
-  | { type: 'text_delta'; sessionId: string; delta: string }
-  | { type: 'text_complete'; sessionId: string; text: string }
-  | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown> }
-  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string }
+  | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
+  | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string }
+  | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; turnId?: string }
+  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string }
   | { type: 'error'; sessionId: string; error: string }
   | { type: 'typed_error'; sessionId: string; error: TypedError }
   | { type: 'complete'; sessionId: string }
@@ -275,7 +278,8 @@ export const IPC_CHANNELS = {
 
   // Events from main to renderer
   SESSION_EVENT: 'session:event',
-  AGENT_STATUS_CHANGED: 'agent:statusChanged',    // Broadcast: { workspaceId, agentId, status }
+  AGENT_STATUS_CHANGED: 'agent:statusChanged',    // Broadcast: { workspaceId, agentId, status } - complete state including needsSetup/needsAuth
+  /** @deprecated Use AGENT_STATUS_CHANGED instead - broadcastAgentState() sends complete state */
   AGENT_AUTH_CHANGED: 'agent:authChanged',
 
   // File operations
@@ -295,6 +299,7 @@ export const IPC_CHANNELS = {
   // Shell operations (open external URLs/files)
   OPEN_URL: 'shell:openUrl',
   OPEN_FILE: 'shell:openFile',
+  SHOW_IN_FOLDER: 'shell:showInFolder',
 
   // Menu actions (main → renderer)
   MENU_NEW_CHAT: 'menu:newChat',
@@ -323,6 +328,10 @@ export const IPC_CHANNELS = {
   // Settings - Billing
   SETTINGS_GET_BILLING_METHOD: 'settings:getBillingMethod',
   SETTINGS_UPDATE_BILLING_METHOD: 'settings:updateBillingMethod',
+
+  // Settings - Model
+  SETTINGS_GET_MODEL: 'settings:getModel',
+  SETTINGS_SET_MODEL: 'settings:setModel',
 
   // User Preferences
   PREFERENCES_READ: 'preferences:read',
@@ -386,7 +395,9 @@ export interface ElectronAPI {
 
   // Event listeners
   onSessionEvent(callback: (event: SessionEvent) => void): () => void
+  /** Listens for complete agent state changes (status + needsSetup + needsAuth) */
   onAgentStatusChanged(callback: (workspaceId: string, agentId: string, status: AgentStatus) => void): () => void
+  /** @deprecated Use onAgentStatusChanged instead - broadcastAgentState() sends complete state via AGENT_STATUS_CHANGED */
   onAgentAuthChanged(callback: (workspaceId: string, agentId: string) => void): () => void
 
   // File operations
@@ -406,6 +417,7 @@ export interface ElectronAPI {
   // Shell operations
   openUrl(url: string): Promise<void>
   openFile(path: string): Promise<void>
+  showInFolder(path: string): Promise<void>
 
   // Menu event listeners
   onMenuNewChat(callback: () => void): () => void
@@ -439,6 +451,10 @@ export interface ElectronAPI {
   // Settings - Billing
   getBillingMethod(): Promise<BillingMethodInfo>
   updateBillingMethod(authType: AuthType, credential?: string): Promise<void>
+
+  // Settings - Model
+  getModel(): Promise<string | null>
+  setModel(model: string): Promise<void>
 
   // User Preferences
   readPreferences(): Promise<{ content: string; exists: boolean }>

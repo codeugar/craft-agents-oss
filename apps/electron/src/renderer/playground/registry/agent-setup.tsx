@@ -85,9 +85,13 @@ const sampleApis: ApiConfig[] = [
 
 const noopHandler = () => console.log('[Playground] Action triggered')
 
+const DEMO_WORKSPACE_ID = 'demo-workspace'
+const DEMO_AGENT_ID = 'sample-agent-123'
+
 const createAgentSetupState = (overrides: Partial<AgentSetupState> = {}): AgentSetupState => ({
   step: 'extracting',
-  agentId: 'sample-agent-123',
+  workspaceId: DEMO_WORKSPACE_ID,
+  agentId: DEMO_AGENT_ID,
   agentName: 'Code Assistant',
   ...overrides,
 })
@@ -223,6 +227,8 @@ export const agentSetupComponents: ComponentEntry[] = [
       },
     ],
     mockData: () => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      agentId: DEMO_AGENT_ID,
       servers: sampleMcpServers.filter(s => s.requiresAuth),
       serverStatus: {},
       onStartOAuth: (name: string) => console.log('[Playground] Start OAuth:', name),
@@ -297,6 +303,8 @@ export const agentSetupComponents: ComponentEntry[] = [
       },
     ],
     mockData: () => ({
+      workspaceId: DEMO_WORKSPACE_ID,
+      agentId: DEMO_AGENT_ID,
       apis: sampleApis,
       apiStatus: {},
       onSubmitCredentials: (name: string, creds: unknown) => console.log('[Playground] Credentials:', name, creds),

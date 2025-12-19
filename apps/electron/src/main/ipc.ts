@@ -10,7 +10,7 @@ import { agentService } from './agent-service'
 import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo } from '../shared/types'
 import { readFileAttachment } from '@craft-agent/shared/utils'
-import { getSessionAttachmentsPath, getAuthType, setAuthType, getPreferencesPath } from '@craft-agent/shared/config'
+import { getSessionAttachmentsPath, getAuthType, setAuthType, getPreferencesPath, getModel, setModel } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { MarkItDown } from 'markitdown-js'
 
@@ -440,8 +440,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // Reset agent (clear all cached data including credentials)
+  // Uses sessionManager.resetAgent() to properly reset AgentStateManager state
   ipcMain.handle(IPC_CHANNELS.RESET_AGENT, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.resetAgent(workspaceId, agentId)
+    await sessionManager.resetAgent(workspaceId, agentId)
+    // Broadcast complete state after reset
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
+    return true
   })
 
   // Agent authentication - get detailed requirements
@@ -452,12 +456,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Agent authentication - start OAuth flow for MCP server
   ipcMain.handle(IPC_CHANNELS.START_MCP_OAUTH, async (_event, workspaceId: string, agentId: string, serverUrl: string, serverName: string) => {
     const result = await agentService.startMcpOAuth(workspaceId, agentId, serverUrl, serverName)
-    // Notify renderer of auth change on success (only to workspace's window)
+    // Broadcast complete state on success
     if (result.success) {
-      const window = windowManager.getWindowByWorkspace(workspaceId)
-      if (window) {
-        window.webContents.send(IPC_CHANNELS.AGENT_AUTH_CHANGED, workspaceId, agentId)
-      }
+      await sessionManager.broadcastAgentState(workspaceId, agentId)
     }
     return result
   })
@@ -465,21 +466,15 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Agent authentication - save bearer token for MCP server
   ipcMain.handle(IPC_CHANNELS.SAVE_MCP_BEARER, async (_event, workspaceId: string, agentId: string, serverName: string, token: string) => {
     await agentService.saveMcpBearer(workspaceId, agentId, serverName, token)
-    // Notify renderer of auth change (only to workspace's window)
-    const window = windowManager.getWindowByWorkspace(workspaceId)
-    if (window) {
-      window.webContents.send(IPC_CHANNELS.AGENT_AUTH_CHANGED, workspaceId, agentId)
-    }
+    // Broadcast complete state after saving
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
   })
 
   // Agent authentication - save API credentials
   ipcMain.handle(IPC_CHANNELS.SAVE_API_CREDENTIALS, async (_event, workspaceId: string, agentId: string, apiName: string, credential: string) => {
     await agentService.saveApiCredentials(workspaceId, agentId, apiName, credential)
-    // Notify renderer of auth change (only to workspace's window)
-    const window = windowManager.getWindowByWorkspace(workspaceId)
-    if (window) {
-      window.webContents.send(IPC_CHANNELS.AGENT_AUTH_CHANGED, workspaceId, agentId)
-    }
+    // Broadcast complete state after saving
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
   })
 
   // Agent authentication - validate MCP connection
@@ -518,7 +513,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Deactivate agent (agent-scoped)
   ipcMain.handle(IPC_CHANNELS.AGENT_DEACTIVATE, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.deactivateAgent(workspaceId, agentId)
+    sessionManager.deactivateAgent(workspaceId, agentId)
+    // Broadcast complete state after deactivation
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
   })
 
   // Reload agent (clear cache, re-extract) (agent-scoped)
@@ -528,12 +525,16 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Reset agent (clear cache AND credentials) (agent-scoped)
   ipcMain.handle(IPC_CHANNELS.AGENT_RESET, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.resetAgent(workspaceId, agentId)
+    await sessionManager.resetAgent(workspaceId, agentId)
+    // Broadcast complete state after reset
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
   })
 
   // Mark agent as active (agent-scoped)
   ipcMain.handle(IPC_CHANNELS.AGENT_MARK_ACTIVE, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.markAgentActive(workspaceId, agentId)
+    sessionManager.markAgentActive(workspaceId, agentId)
+    // Broadcast complete state after marking active
+    await sessionManager.broadcastAgentState(workspaceId, agentId)
   })
 
   // Shell operations - open URL in external browser
@@ -567,6 +568,19 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       const message = error instanceof Error ? error.message : 'Unknown error'
       console.error('[IPC] openFile error:', message)
       throw new Error(`Failed to open file: ${message}`)
+    }
+  })
+
+  // Shell operations - show file in folder (opens Finder/Explorer with file selected)
+  ipcMain.handle(IPC_CHANNELS.SHOW_IN_FOLDER, async (_event, path: string) => {
+    try {
+      // Validate path is within allowed directories
+      const safePath = await validateFilePath(path)
+      shell.showItemInFolder(safePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      console.error('[IPC] showInFolder error:', message)
+      throw new Error(`Failed to show in folder: ${message}`)
     }
   })
 
@@ -660,6 +674,21 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
 
     console.log(`[IPC] Billing method updated to: ${authType}`)
+  })
+
+  // ============================================================
+  // Settings - Model
+  // ============================================================
+
+  // Get current model (returns stored model or null if not set)
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_MODEL, async (): Promise<string | null> => {
+    return getModel()
+  })
+
+  // Set model preference
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_MODEL, async (_event, model: string) => {
+    setModel(model)
+    console.log(`[IPC] Model updated to: ${model}`)
   })
 
   // ============================================================
