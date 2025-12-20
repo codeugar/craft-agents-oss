@@ -1,12 +1,15 @@
 import * as React from 'react'
+import { PanelRight } from 'lucide-react'
 import { CraftAgentsSymbol } from '@/components/icons/CraftAgentsSymbol'
+import { cn } from '@/lib/utils'
 import { ThemeToggle } from './ThemeToggle'
 import { Sidebar } from './Sidebar'
 import { ComponentPreview } from './ComponentPreview'
-import { PropsPanel } from './PropsPanel'
+import { VariantsSidebar } from './VariantsSidebar'
 import { getCategories, getComponentById, type ComponentVariant } from './registry'
 
 const SELECTED_STORAGE_KEY = 'playground-selected-component'
+const VARIANTS_SIDEBAR_KEY = 'playground-variants-sidebar-open'
 
 export function PlaygroundApp() {
   const categories = React.useMemo(() => getCategories(), [])
@@ -28,6 +31,14 @@ export function PlaygroundApp() {
   })
   const [props, setProps] = React.useState<Record<string, unknown>>({})
   const [selectedVariant, setSelectedVariant] = React.useState<string | null>(null)
+  const [variantsSidebarOpen, setVariantsSidebarOpen] = React.useState(() => {
+    try {
+      const stored = localStorage.getItem(VARIANTS_SIDEBAR_KEY)
+      return stored !== 'false' // Default to open
+    } catch {
+      return true
+    }
+  })
 
   // Persist selected component to localStorage
   React.useEffect(() => {
@@ -41,6 +52,15 @@ export function PlaygroundApp() {
       // Ignore storage errors
     }
   }, [selectedId])
+
+  // Persist variants sidebar state
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(VARIANTS_SIDEBAR_KEY, String(variantsSidebarOpen))
+    } catch {
+      // Ignore storage errors
+    }
+  }, [variantsSidebarOpen])
 
   const selectedComponent = selectedId ? getComponentById(selectedId) : null
 
@@ -84,41 +104,53 @@ export function PlaygroundApp() {
             Design System Playground
           </h1>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            onClick={() => setVariantsSidebarOpen(!variantsSidebarOpen)}
+            className={cn(
+              'p-2 rounded-md transition-colors',
+              variantsSidebarOpen
+                ? 'bg-foreground/10 text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-foreground/5'
+            )}
+            title={variantsSidebarOpen ? 'Hide variants' : 'Show variants'}
+          >
+            <PanelRight className="w-4 h-4" />
+          </button>
+        </div>
       </header>
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
+        {/* Left Sidebar - Component list */}
         <Sidebar
           categories={categories}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
 
-        {/* Content area */}
+        {/* Content area - full height preview */}
         {selectedComponent ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Preview */}
-            <ComponentPreview
-              component={selectedComponent}
-              props={props}
-            />
-
-            {/* Props panel */}
-            <PropsPanel
-              component={selectedComponent}
-              props={props}
-              onPropsChange={handlePropsChange}
-              selectedVariant={selectedVariant}
-              onVariantSelect={handleVariantSelect}
-            />
-          </div>
+          <ComponentPreview
+            component={selectedComponent}
+            props={props}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             Select a component from the sidebar
           </div>
         )}
+
+        {/* Right Sidebar - Variants & Props */}
+        <VariantsSidebar
+          component={selectedComponent}
+          selectedVariant={selectedVariant}
+          onVariantSelect={handleVariantSelect}
+          props={props}
+          onPropsChange={handlePropsChange}
+          isOpen={variantsSidebarOpen}
+        />
       </div>
     </div>
   )

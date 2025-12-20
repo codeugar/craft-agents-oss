@@ -12,8 +12,12 @@ import {
   CircleSlash,
   Zap,
   ShieldOff,
+  SquareSlash,
+  Brain,
+  FileCheck,
+  X,
 } from "lucide-react"
-import { motion } from "motion/react"
+import { motion, AnimatePresence } from "motion/react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -35,6 +39,41 @@ import { SetupAuthBanner, type BannerState } from "./SetupAuthBanner"
 import { MODELS, getModelDisplayName } from "@config/models"
 import { TurnCard } from "./TurnCard"
 import { groupMessagesByTurn, type Turn, type AssistantTurn, type UserTurn, type SystemTurn } from "./turn-utils"
+
+/** Slash command options */
+type SlashCommandOption = 'plan' | 'ultrathink' | 'skip-permissions'
+
+interface SlashCommandConfig {
+  id: SlashCommandOption
+  label: string
+  description: string
+  icon: React.ReactNode
+  activeStyle: string
+}
+
+const SLASH_COMMANDS: SlashCommandConfig[] = [
+  {
+    id: 'plan',
+    label: 'Plan Mode',
+    description: 'Enter planning mode for complex tasks',
+    icon: <Brain className="h-3.5 w-3.5" />,
+    activeStyle: 'bg-blue-500/10 text-blue-500 border-blue-500/30',
+  },
+  {
+    id: 'ultrathink',
+    label: 'Ultrathink',
+    description: 'Extended reasoning for complex problems',
+    icon: <Zap className="h-3.5 w-3.5" />,
+    activeStyle: 'bg-gradient-to-r from-violet-500/20 via-fuchsia-500/20 to-pink-500/20 text-fuchsia-500 border-fuchsia-500/30 shadow-[0_0_12px_rgba(217,70,239,0.2)]',
+  },
+  {
+    id: 'skip-permissions',
+    label: 'Skip Permissions',
+    description: 'Auto-approve all permission prompts',
+    icon: <ShieldOff className="h-3.5 w-3.5" />,
+    activeStyle: 'bg-red-500/10 text-red-500 border-red-500/30',
+  },
+]
 
 /** Agent setup state for showing setup indicator in input area */
 interface AgentSetupState {
@@ -72,16 +111,80 @@ interface ChatDisplayProps {
   /** Skip all permission prompts automatically */
   skipPermissions?: boolean
   onSkipPermissionsChange?: (enabled: boolean) => void
+  /** Enable plan mode for complex tasks */
+  planModeEnabled?: boolean
+  onPlanModeChange?: (enabled: boolean) => void
 }
 
 /**
- * ThinkingIndicator - Shows "Thinking..." with elapsed time
+ * Processing status messages - cycles through these randomly
+ * Inspired by Claude Code's playful status messages
+ */
+const PROCESSING_MESSAGES = [
+  'Thinking...',
+  'Pondering...',
+  'Contemplating...',
+  'Reasoning...',
+  'Processing...',
+  'Computing...',
+  'Considering...',
+  'Reflecting...',
+  'Deliberating...',
+  'Cogitating...',
+  'Ruminating...',
+  'Musing...',
+  'Working on it...',
+  'On it...',
+  'Crunching...',
+  'Brewing...',
+  'Connecting dots...',
+  'Mulling it over...',
+  'Deep in thought...',
+  'Hmm...',
+  'Let me see...',
+  'One moment...',
+  'Hold on...',
+  'Bear with me...',
+  'Just a sec...',
+  'Hang tight...',
+  'Getting there...',
+  'Almost...',
+  'Working...',
+  'Busy busy...',
+  'Whirring...',
+  'Churning...',
+  'Percolating...',
+  'Simmering...',
+  'Cooking...',
+  'Baking...',
+  'Stirring...',
+  'Spinning up...',
+  'Warming up...',
+  'Revving...',
+  'Buzzing...',
+  'Humming...',
+  'Ticking...',
+  'Clicking...',
+  'Whizzing...',
+  'Zooming...',
+  'Zipping...',
+  'Chugging...',
+  'Trucking...',
+  'Rolling...',
+]
+
+/**
+ * ProcessingIndicator - Shows cycling status messages with elapsed time
  * Matches TurnCard header layout for visual continuity
  */
-function ThinkingIndicator() {
+function ProcessingIndicator() {
   const [elapsed, setElapsed] = React.useState(0)
+  const [messageIndex, setMessageIndex] = React.useState(() =>
+    Math.floor(Math.random() * PROCESSING_MESSAGES.length)
+  )
   const startTimeRef = React.useRef(Date.now())
 
+  // Update elapsed time every second
   React.useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
@@ -89,19 +192,53 @@ function ThinkingIndicator() {
     return () => clearInterval(interval)
   }, [])
 
+  // Cycle through messages every 10 seconds
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setMessageIndex(prev => {
+        // Pick a random different message
+        let next = Math.floor(Math.random() * PROCESSING_MESSAGES.length)
+        while (next === prev && PROCESSING_MESSAGES.length > 1) {
+          next = Math.floor(Math.random() * PROCESSING_MESSAGES.length)
+        }
+        return next
+      })
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const currentMessage = PROCESSING_MESSAGES[messageIndex]
+
   return (
     <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
       {/* Spinner in same location as TurnCard chevron */}
       <div className="w-3 h-3 flex items-center justify-center shrink-0">
         <Spinner className="text-[10px]" />
       </div>
-      {/* Label with elapsed time inline */}
-      <span>
-        Thinking...
+      {/* Label with crossfade animation + layout animation for smooth repositioning */}
+      <motion.span className="relative h-5 flex items-center" layout>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.span
+            key={currentMessage}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: 'easeInOut' }}
+            layout
+          >
+            {currentMessage}
+          </motion.span>
+        </AnimatePresence>
         {elapsed >= 1 && (
-          <span className="text-muted-foreground/60 ml-1">{elapsed}s</span>
+          <motion.span
+            className="text-muted-foreground/60 ml-1"
+            layout
+            transition={{ duration: 0.4, ease: 'easeInOut' }}
+          >
+            {elapsed}s
+          </motion.span>
         )}
-      </span>
+      </motion.span>
     </div>
   )
 }
@@ -133,6 +270,8 @@ export function ChatDisplay({
   onUltrathinkChange,
   skipPermissions = false,
   onSkipPermissionsChange,
+  planModeEnabled = false,
+  onPlanModeChange,
 }: ChatDisplayProps) {
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -141,6 +280,10 @@ export function ChatDisplay({
   const [attachments, setAttachments] = React.useState<FileAttachment[]>([])
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
+  // Slash command menu state
+  const [slashMenuOpen, setSlashMenuOpen] = React.useState(false) // Autocomplete from typing
+  const [slashDropdownOpen, setSlashDropdownOpen] = React.useState(false) // Button dropdown
+  const [slashFilter, setSlashFilter] = React.useState("")
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
   const prevSessionIdRef = React.useRef<string | null>(null)
@@ -470,8 +613,8 @@ export function ChatDisplay({
                   })
                 })()
               )}
-              {/* Thinking Indicator - always visible while processing */}
-              {session.isProcessing && <ThinkingIndicator />}
+              {/* Processing Indicator - always visible while processing */}
+              {session.isProcessing && <ProcessingIndicator />}
               {/* Scroll Anchor: For auto-scroll to bottom */}
               <div ref={messagesEndRef} />
             </div>
@@ -520,6 +663,59 @@ export function ChatDisplay({
                 </motion.div>
               )}
 
+              {/* Slash Command Autocomplete Menu - uses DropdownMenu for keyboard nav */}
+              <DropdownMenu open={slashMenuOpen} onOpenChange={(open) => {
+                setSlashMenuOpen(open)
+                if (!open) {
+                  setSlashFilter("")
+                  textareaRef.current?.focus()
+                }
+              }}>
+                <DropdownMenuTrigger asChild>
+                  <div className="absolute bottom-full left-4 w-0 h-0" />
+                </DropdownMenuTrigger>
+                <StyledDropdownMenuContent side="top" align="start" sideOffset={8} className="w-72 p-1">
+                  {SLASH_COMMANDS.filter(cmd =>
+                    !slashFilter || cmd.label.toLowerCase().includes(slashFilter.toLowerCase()) || cmd.id.includes(slashFilter.toLowerCase())
+                  ).map((cmd) => {
+                    const isActive =
+                      (cmd.id === 'plan' && planModeEnabled) ||
+                      (cmd.id === 'ultrathink' && ultrathinkEnabled) ||
+                      (cmd.id === 'skip-permissions' && skipPermissions)
+                    return (
+                      <StyledDropdownMenuItem
+                        key={cmd.id}
+                        onClick={() => {
+                          if (cmd.id === 'plan') onPlanModeChange?.(!planModeEnabled)
+                          else if (cmd.id === 'ultrathink') onUltrathinkChange?.(!ultrathinkEnabled)
+                          else if (cmd.id === 'skip-permissions') onSkipPermissionsChange?.(!skipPermissions)
+                          // Remove the /command from input
+                          setInput(prev => prev.replace(/(?:^|\s)\/\w*$/, '').trim())
+                        }}
+                        className={cn(
+                          "flex items-start gap-3 px-3 py-2.5 cursor-pointer",
+                          isActive && "bg-foreground/5"
+                        )}
+                      >
+                        <div className="mt-0.5 shrink-0">{cmd.icon}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium">{cmd.label}</div>
+                          <div className="text-xs text-muted-foreground whitespace-normal">{cmd.description}</div>
+                        </div>
+                        {isActive && <FileCheck className="h-4 w-4 mt-0.5 shrink-0 text-green-500" />}
+                      </StyledDropdownMenuItem>
+                    )
+                  })}
+                  {SLASH_COMMANDS.filter(cmd =>
+                    !slashFilter || cmd.label.toLowerCase().includes(slashFilter.toLowerCase()) || cmd.id.includes(slashFilter.toLowerCase())
+                  ).length === 0 && (
+                    <div className="px-3 py-3 text-sm text-muted-foreground text-center">
+                      No matching commands
+                    </div>
+                  )}
+                </StyledDropdownMenuContent>
+              </DropdownMenu>
+
               {/* Normal Input Form - fades when permission/setup shows */}
               <motion.form
                 initial={false}
@@ -550,29 +746,89 @@ export function ChatDisplay({
                     loadingCount={loadingCount}
                   />
 
-                  {/* Textarea - 4 lines minimum height */}
-                  <textarea
-                    ref={textareaRef}
-                    className="w-full min-h-[72px] pl-5 pr-4 pt-4 pb-3 bg-transparent outline-none text-sm placeholder:text-muted-foreground resize-none focus-visible:ring-0"
-                    placeholder={`Message ${session.agentName || session.workspaceName || 'Chat'}...`}
-                    value={input}
-                    onChange={(e) => {
-                      let value = e.target.value
-                      // Auto-capitalize first letter
-                      if (value.length > 0) {
-                        value = value.charAt(0).toUpperCase() + value.slice(1)
-                      }
-                      setInput(value)
-                    }}
-                    onKeyDown={handleKeyDown}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                    disabled={isInputDisabled}
-                    rows={3}
-                  />
+                  {/* Textarea */}
+                  <div className="relative">
+                    <textarea
+                      ref={textareaRef}
+                      className="w-full min-h-[72px] pl-5 pr-4 pt-4 pb-3 bg-transparent outline-none text-sm placeholder:text-muted-foreground resize-none focus-visible:ring-0"
+                      placeholder={`Message ${session.agentName || session.workspaceName || 'Chat'}...`}
+                      value={input}
+                      onChange={(e) => {
+                        let value = e.target.value
 
-                  {/* Bottom Row: Attach, Model selector, Send */}
+                        // Check for slash command trigger anywhere: find /word pattern
+                        // Match / followed by word chars, where / is either at start or after whitespace
+                        const slashMatch = value.match(/(?:^|\s)\/(\w*)$/)
+                        if (slashMatch) {
+                          // Open menu and set filter based on text after /
+                          setSlashMenuOpen(true)
+                          setSlashFilter(slashMatch[1] || "")
+                        } else if (slashMenuOpen) {
+                          // Close menu if no longer typing slash command
+                          setSlashMenuOpen(false)
+                          setSlashFilter("")
+                        }
+
+                        // Auto-capitalize first letter (but not for slash commands)
+                        if (value.length > 0 && value.charAt(0) !== '/') {
+                          value = value.charAt(0).toUpperCase() + value.slice(1)
+                        }
+                        setInput(value)
+                      }}
+                      onKeyDown={handleKeyDown}
+                      onDragOver={handleDragOver}
+                      onDrop={handleDrop}
+                      disabled={isInputDisabled}
+                      rows={3}
+                    />
+                  </div>
+
+                  {/* Bottom Row: Slash commands, Attach, Model selector, Active badges, Send */}
                   <div className="flex items-center gap-1 px-2 py-2 border-t border-border/50">
+                    {/* Slash Command Button - opens dropdown menu */}
+                    <DropdownMenu open={slashDropdownOpen} onOpenChange={setSlashDropdownOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          disabled={isInputDisabled}
+                        >
+                          <SquareSlash className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <StyledDropdownMenuContent side="top" align="start" sideOffset={8} className="w-72 p-1">
+                        {SLASH_COMMANDS.map((cmd) => {
+                          const isActive =
+                            (cmd.id === 'plan' && planModeEnabled) ||
+                            (cmd.id === 'ultrathink' && ultrathinkEnabled) ||
+                            (cmd.id === 'skip-permissions' && skipPermissions)
+                          return (
+                            <StyledDropdownMenuItem
+                              key={cmd.id}
+                              onClick={() => {
+                                if (cmd.id === 'plan') onPlanModeChange?.(!planModeEnabled)
+                                else if (cmd.id === 'ultrathink') onUltrathinkChange?.(!ultrathinkEnabled)
+                                else if (cmd.id === 'skip-permissions') onSkipPermissionsChange?.(!skipPermissions)
+                              }}
+                              className={cn(
+                                "flex items-start gap-3 px-3 py-2.5 cursor-pointer",
+                                isActive && "bg-foreground/5"
+                              )}
+                            >
+                              <div className="mt-0.5 shrink-0">{cmd.icon}</div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium">{cmd.label}</div>
+                                <div className="text-xs text-muted-foreground whitespace-normal">{cmd.description}</div>
+                              </div>
+                              {isActive && <FileCheck className="h-4 w-4 mt-0.5 shrink-0 text-green-500" />}
+                            </StyledDropdownMenuItem>
+                          )
+                        })}
+                      </StyledDropdownMenuContent>
+                    </DropdownMenu>
+
                     {/* Attach File Button */}
                     <Button
                       type="button"
@@ -610,34 +866,42 @@ export function ChatDisplay({
                       </StyledDropdownMenuContent>
                     </DropdownMenu>
 
-                    {/* Advanced Options - Clickable Tags */}
-                    <button
-                      type="button"
-                      onClick={() => onUltrathinkChange?.(!ultrathinkEnabled)}
-                      className={cn(
-                        "h-6 px-2.5 text-[11px] font-medium rounded-[4px] flex items-center gap-1.5 transition-all",
-                        ultrathinkEnabled
-                          ? "bg-gradient-to-r from-violet-500/20 via-fuchsia-500/20 to-pink-500/20 text-fuchsia-500 border border-fuchsia-500/30 shadow-[0_0_12px_rgba(217,70,239,0.2)]"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground border border-transparent"
-                      )}
-                    >
-                      <Zap className={cn("h-3 w-3", ultrathinkEnabled && "fill-fuchsia-500")} />
-                      <span>Ultrathink</span>
-                    </button>
+                    {/* Active Options - Badges with X to remove */}
+                    {planModeEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => onPlanModeChange?.(false)}
+                        className="h-6 px-2 text-[11px] font-medium rounded-[4px] flex items-center gap-1 transition-all bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20"
+                      >
+                        <Brain className="h-3 w-3" />
+                        <span>Plan</span>
+                        <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+                      </button>
+                    )}
 
-                    <button
-                      type="button"
-                      onClick={() => onSkipPermissionsChange?.(!skipPermissions)}
-                      className={cn(
-                        "h-6 px-2.5 text-[11px] font-medium rounded-[4px] flex items-center gap-1.5 transition-all",
-                        skipPermissions
-                          ? "bg-red-500/10 text-red-500 border border-red-500/30"
-                          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground border border-transparent"
-                      )}
-                    >
-                      <ShieldOff className="h-3 w-3" />
-                      <span>Skip Permissions</span>
-                    </button>
+                    {ultrathinkEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => onUltrathinkChange?.(false)}
+                        className="h-6 px-2 text-[11px] font-medium rounded-[4px] flex items-center gap-1 transition-all bg-gradient-to-r from-violet-500/20 via-fuchsia-500/20 to-pink-500/20 text-fuchsia-500 border border-fuchsia-500/30 shadow-[0_0_12px_rgba(217,70,239,0.2)] hover:from-violet-500/30 hover:via-fuchsia-500/30 hover:to-pink-500/30"
+                      >
+                        <Zap className="h-3 w-3 fill-fuchsia-500" />
+                        <span>Ultrathink</span>
+                        <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+                      </button>
+                    )}
+
+                    {skipPermissions && (
+                      <button
+                        type="button"
+                        onClick={() => onSkipPermissionsChange?.(false)}
+                        className="h-6 px-2 text-[11px] font-medium rounded-[4px] flex items-center gap-1 transition-all bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20"
+                      >
+                        <ShieldOff className="h-3 w-3" />
+                        <span>Skip Perms</span>
+                        <X className="h-3 w-3 ml-0.5 opacity-60 hover:opacity-100" />
+                      </button>
+                    )}
 
                     {/* Spacer */}
                     <div className="flex-1" />
@@ -885,7 +1149,7 @@ function MessageBubble({
     return <ErrorMessage message={message} />
   }
 
-  // === STATUS MESSAGE: Matches ThinkingIndicator layout for visual consistency ===
+  // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
   if (message.role === 'status') {
     return (
       <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">

@@ -320,6 +320,69 @@ const emptyStreamingResponse: ResponseContent = {
 }
 
 // ============================================================================
+// Helper: Generate many activities for stress testing
+// ============================================================================
+
+/** Tool names and file paths for realistic variety */
+const toolVariety = [
+  { tool: 'Read', getInput: (i: number) => ({ file_path: `/src/components/feature-${i}.tsx` }) },
+  { tool: 'Grep', getInput: (i: number) => ({ pattern: `pattern${i}`, path: 'src/' }) },
+  { tool: 'Glob', getInput: (i: number) => ({ pattern: `**/*${i}*.ts` }) },
+  { tool: 'Bash', getInput: (i: number) => ({ command: `npm test -- file${i}` }) },
+  { tool: 'Write', getInput: (i: number) => ({ file_path: `/src/utils/helper-${i}.ts` }) },
+  { tool: 'Edit', getInput: (i: number) => ({ file_path: `/src/lib/module-${i}.ts` }) },
+]
+
+const commentaryVariety = [
+  "Let me check this file for relevant code...",
+  "I found some interesting patterns here.",
+  "This looks like what we need.",
+  "Searching for related implementations...",
+  "Found a match, examining the details.",
+  "This module handles the core logic.",
+  "Let me verify this works correctly.",
+  "Checking for any edge cases...",
+]
+
+/**
+ * Generate a realistic sequence of activities with mixed tools and commentary.
+ * Alternates between tool calls and intermediate messages for realism.
+ */
+function generateManyActivities(count: number): ActivityItem[] {
+  const activities: ActivityItem[] = []
+  let timestamp = now - (count * 100)
+
+  for (let i = 0; i < count; i++) {
+    // Every 3rd item is an intermediate message
+    if (i % 3 === 0 && i > 0) {
+      activities.push({
+        id: `intermediate-${i}`,
+        type: 'intermediate',
+        status: 'completed',
+        content: commentaryVariety[i % commentaryVariety.length],
+        timestamp: timestamp,
+      })
+    } else {
+      const toolInfo = toolVariety[i % toolVariety.length]
+      activities.push({
+        id: `tool-${i}`,
+        type: 'tool',
+        status: 'completed',
+        toolName: toolInfo.tool,
+        toolInput: toolInfo.getInput(i),
+        timestamp: timestamp,
+      })
+    }
+    timestamp += 100
+  }
+
+  return activities
+}
+
+/** Pre-generated 75 activities for playground */
+const manyActivities75 = generateManyActivities(75)
+
+// ============================================================================
 // Component Entry
 // ============================================================================
 
@@ -515,6 +578,19 @@ export const turnCardComponents: ComponentEntry[] = [
           response: shortResponse,
           isStreaming: false,
           isComplete: true,
+        },
+      },
+      // Extreme: 75 steps (real-world stress test)
+      {
+        name: 'Extreme: 75 Steps',
+        description: 'Stress test with 75 activities - tests scrolling, animation limits, and performance',
+        props: {
+          activities: manyActivities75,
+          response: longResponse,
+          isStreaming: false,
+          isComplete: true,
+          defaultExpanded: true,
+          intent: 'Comprehensive codebase analysis',
         },
       },
       // Expanded by default

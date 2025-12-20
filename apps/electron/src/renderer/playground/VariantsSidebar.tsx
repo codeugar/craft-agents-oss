@@ -1,83 +1,99 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-import type { ComponentEntry, PropDefinition, ComponentVariant } from './registry'
+import type { ComponentEntry, ComponentVariant, PropDefinition } from './registry'
 
-interface PropsPanelProps {
-  component: ComponentEntry
-  props: Record<string, unknown>
-  onPropsChange: (props: Record<string, unknown>) => void
+interface VariantsSidebarProps {
+  component: ComponentEntry | null
   selectedVariant: string | null
   onVariantSelect: (variant: ComponentVariant) => void
+  props: Record<string, unknown>
+  onPropsChange: (props: Record<string, unknown>) => void
+  isOpen: boolean
 }
 
-export function PropsPanel({
+export function VariantsSidebar({
   component,
-  props,
-  onPropsChange,
   selectedVariant,
   onVariantSelect,
-}: PropsPanelProps) {
+  props,
+  onPropsChange,
+  isOpen,
+}: VariantsSidebarProps) {
+  if (!isOpen || !component) return null
+
+  const hasVariants = component.variants && component.variants.length > 0
+  const hasProps = component.props.length > 0
+
   const handlePropChange = (name: string, value: unknown) => {
     onPropsChange({ ...props, [name]: value })
   }
 
   return (
-    <div className="h-72 border-t border-border bg-background overflow-y-auto">
-      <div className="p-4 space-y-4">
-        {/* Variants */}
-        {component.variants && component.variants.length > 0 && (
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Variants
-            </label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {component.variants.map(variant => (
-                <button
-                  key={variant.name}
-                  onClick={() => onVariantSelect(variant)}
-                  className={cn(
-                    'px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-                    selectedVariant === variant.name
-                      ? 'bg-foreground text-background'
-                      : 'bg-foreground/5 text-foreground hover:bg-foreground/10'
-                  )}
-                >
-                  {variant.name}
-                </button>
-              ))}
-            </div>
+    <div className="w-72 shrink-0 border-l border-border bg-background overflow-y-auto">
+      {/* Variants Section */}
+      {hasVariants && (
+        <div className="p-4 border-b border-border">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Variants
+          </h2>
+          <div className="space-y-1">
+            {component.variants!.map(variant => (
+              <button
+                key={variant.name}
+                onClick={() => onVariantSelect(variant)}
+                className={cn(
+                  'w-full text-left px-3 py-2 rounded-md text-sm transition-colors',
+                  selectedVariant === variant.name
+                    ? 'bg-foreground/10 text-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground'
+                )}
+              >
+                <div>{variant.name}</div>
+                {variant.description && (
+                  <div className="text-xs mt-0.5 line-clamp-2 text-muted-foreground">
+                    {variant.description}
+                  </div>
+                )}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Props */}
-        {component.props.length > 0 && (
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Props
-            </label>
-            <div className="mt-2 space-y-3">
-              {component.props.map(propDef => (
-                <PropControl
-                  key={propDef.name}
-                  definition={propDef}
-                  value={props[propDef.name]}
-                  onChange={value => handlePropChange(propDef.name, value)}
-                />
-              ))}
-            </div>
+      {/* Props Section */}
+      {hasProps && (
+        <div className="p-4">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Props
+          </h2>
+          <div className="space-y-3">
+            {component.props.map(propDef => (
+              <PropControl
+                key={propDef.name}
+                definition={propDef}
+                value={props[propDef.name]}
+                onChange={value => handlePropChange(propDef.name, value)}
+              />
+            ))}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* No controls message */}
-        {component.props.length === 0 && (!component.variants || component.variants.length === 0) && (
+      {/* Empty state */}
+      {!hasVariants && !hasProps && (
+        <div className="p-4">
           <p className="text-sm text-muted-foreground italic">
-            This component has no configurable props.
+            No variants or props defined.
           </p>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
+
+// ============================================================================
+// PropControl Component
+// ============================================================================
 
 interface PropControlProps {
   definition: PropDefinition
@@ -90,7 +106,7 @@ function PropControl({ definition, value, onChange }: PropControlProps) {
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-0.5">
         <label className="text-sm font-medium text-foreground">
           {name}
         </label>
@@ -128,7 +144,7 @@ function PropControl({ definition, value, onChange }: PropControlProps) {
           value={String(value ?? '')}
           onChange={e => onChange(e.target.value)}
           placeholder={control.placeholder}
-          rows={control.rows ?? 4}
+          rows={control.rows ?? 3}
           className="w-full px-3 py-1.5 rounded-md bg-foreground/5 border border-border text-sm font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring"
         />
       )}

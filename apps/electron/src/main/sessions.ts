@@ -1126,7 +1126,21 @@ export class SessionManager {
         break
 
       case 'status':
-        this.sendEvent({ type: 'status', sessionId, message: event.message }, workspaceId)
+        this.sendEvent({
+          type: 'status',
+          sessionId,
+          message: event.message,
+          statusType: event.message.includes('Compacting') ? 'compacting' : undefined
+        }, workspaceId)
+        break
+
+      case 'info':
+        this.sendEvent({
+          type: 'info',
+          sessionId,
+          message: event.message,
+          statusType: event.message.startsWith('Compacted') ? 'compaction_complete' : undefined
+        }, workspaceId)
         break
 
       case 'error':

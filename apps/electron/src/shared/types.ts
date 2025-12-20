@@ -221,7 +221,8 @@ export type SessionEvent =
   | { type: 'typed_error'; sessionId: string; error: TypedError }
   | { type: 'complete'; sessionId: string }
   | { type: 'interrupted'; sessionId: string; message: Message }
-  | { type: 'status'; sessionId: string; message: string }
+  | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }
+  | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete' }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'agent_status'; sessionId: string; status: AgentStatus }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }

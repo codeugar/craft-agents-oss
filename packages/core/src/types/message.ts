@@ -79,6 +79,8 @@ export interface Message {
   isIntermediate?: boolean;
   // Turn ID: Correlation ID from the API's message.id, groups all messages in an assistant turn
   turnId?: string;
+  // Status type for special status messages (e.g., compacting)
+  statusType?: 'compacting' | 'compaction_complete';
   // Error-specific fields (for typed errors with diagnostics)
   errorCode?: string;
   errorTitle?: string;
@@ -227,6 +229,7 @@ export interface AgentEventUsage {
  */
 export type AgentEvent =
   | { type: 'status'; message: string }
+  | { type: 'info'; message: string }
   | { type: 'text_delta'; text: string; turnId?: string }
   | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; turnId?: string }

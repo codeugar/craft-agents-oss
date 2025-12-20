@@ -31,6 +31,12 @@ const SIZE_CONFIG = {
   spinnerSize: 'text-[10px]',
   /** Small spinner for header */
   spinnerSizeSmall: 'text-[8px]',
+  /** Activity row height in pixels (approx for calculation) */
+  activityRowHeight: 24,
+  /** Max visible activities before scrolling (show ~14 items) */
+  maxVisibleActivities: 14,
+  /** Number of items before which we apply staggered animation */
+  staggeredAnimationLimit: 10,
 } as const
 
 // ============================================================================
@@ -269,7 +275,8 @@ function getPreviewText(
   activities: ActivityItem[],
   intent?: string,
   isStreaming?: boolean,
-  hasResponse?: boolean
+  hasResponse?: boolean,
+  isComplete?: boolean
 ): string {
   // If we have an explicit intent, use it
   if (intent) return intent
@@ -281,34 +288,29 @@ function getPreviewText(
   // Check if we're in responding state
   if (isStreaming && hasResponse) return 'Responding...'
 
-  // Fall back to activity summary
-  const runningCount = activities.filter(a => a.status === 'running').length
-  const completedCount = activities.filter(a => a.status === 'completed').length
+  // Get running and completed tools (not intermediate messages)
+  const runningTools = activities.filter(a => a.status === 'running' && a.toolName)
   const errorCount = activities.filter(a => a.status === 'error').length
 
-  if (runningCount > 0) {
-    const running = activities.find(a => a.status === 'running')
-    if (running?.toolName) {
-      return `${getToolDisplayName(running.toolName)}...`
-    }
-    return `Running ${runningCount} tool${runningCount > 1 ? 's' : ''}...`
+  // Show running tool names
+  if (runningTools.length > 0) {
+    const toolNames = runningTools
+      .map(a => getToolDisplayName(a.toolName!))
+      .slice(0, 3) // Max 3 names
+    return `${toolNames.join(', ')}...`
   }
 
-  if (errorCount > 0) {
-    return `${errorCount} error${errorCount > 1 ? 's' : ''}`
-  }
-
-  if (completedCount > 0) {
-    return `Ran ${completedCount} tool${completedCount > 1 ? 's' : ''}`
+  // When complete, show summary (badge already shows count)
+  if (isComplete || (!isStreaming && activities.length > 0)) {
+    const errorSuffix = errorCount > 0
+      ? ` · ${errorCount} error${errorCount > 1 ? 's' : ''}`
+      : ''
+    return `Steps Completed${errorSuffix}`
   }
 
   return 'Starting...'
 }
 
-/** Get failed activity count (only shown if there are failures) */
-function getFailedCount(activities: ActivityItem[]): number {
-  return activities.filter(a => a.status === 'error').length
-}
 
 // ============================================================================
 // Sub-Components
@@ -561,13 +563,8 @@ export function TurnCard({
 
   // Compute preview text with cross-fade animation
   const previewText = useMemo(
-    () => getPreviewText(activities, intent, isStreaming, !!response),
-    [activities, intent, isStreaming, response]
-  )
-
-  const failedCount = useMemo(
-    () => getFailedCount(activities),
-    [activities]
+    () => getPreviewText(activities, intent, isStreaming, !!response, isComplete),
+    [activities, intent, isStreaming, response, isComplete]
   )
 
   // Sort activities by timestamp for correct chronological order
@@ -615,6 +612,11 @@ export function TurnCard({
               </motion.div>
             </div>
 
+            {/* Step count badge */}
+            <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium tabular-nums">
+              {activities.length}
+            </span>
+
             {/* Preview text with crossfade + inline failure count */}
             <span className="relative flex-1 min-w-0 h-5 flex items-center">
               <AnimatePresence initial={false}>
@@ -630,13 +632,6 @@ export function TurnCard({
                 </motion.span>
               </AnimatePresence>
             </span>
-
-            {/* Failure count - shown inline after preview text */}
-            {failedCount > 0 && !isExpanded && (
-              <span className="text-destructive shrink-0">
-                · {failedCount} failed
-              </span>
-            )}
 
             {/* Spacer */}
             <span className="flex-1" />
@@ -660,13 +655,25 @@ export function TurnCard({
                 }}
                 className="overflow-hidden"
               >
-                <div className="pl-4 pr-3 py-0 my-0.5 space-y-0.5 border-l-2 border-muted ml-[16px]">
+                {/* Scrollable container when many activities - subtle background for scroll context */}
+                <div
+                  className={cn(
+                    "pl-4 pr-3 py-0 my-0.5 space-y-0.5 border-l-2 border-muted ml-[16px]",
+                    sortedActivities.length > SIZE_CONFIG.maxVisibleActivities && "bg-muted/30 rounded-r-md overflow-y-auto py-1.5"
+                  )}
+                  style={{
+                    maxHeight: sortedActivities.length > SIZE_CONFIG.maxVisibleActivities
+                      ? SIZE_CONFIG.maxVisibleActivities * SIZE_CONFIG.activityRowHeight
+                      : undefined
+                  }}
+                >
                   {sortedActivities.map((activity, index) => (
                     <motion.div
                       key={activity.id}
                       initial={{ opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.03 }}
+                      // Only first 10 items get staggered delay, rest appear simultaneously
+                      transition={{ delay: index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : 0.3 }}
                     >
                       <ActivityRow activity={activity} />
                     </motion.div>
@@ -677,7 +684,7 @@ export function TurnCard({
                       key="thinking"
                       initial={{ opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: sortedActivities.length * 0.03 }}
+                      transition={{ delay: Math.min(sortedActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03 }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
                       <Spinner className={SIZE_CONFIG.spinnerSize} />

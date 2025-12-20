@@ -288,9 +288,8 @@ export default function App() {
                 const assistantMsg = msgs[assistantIndex]
                 return {
                   ...session,
-                  // Set isProcessing false immediately to prevent brief "Thinking..." flash
-                  // If more tools run after this, tool_start will set it back to true
-                  isProcessing: false,
+                  // Note: Do NOT set isProcessing here - only 'complete' event signals the agent loop is done.
+                  // Setting it false here causes a brief "idle" flash before the next tool_start.
                   messages: [
                     ...msgs.slice(0, assistantIndex),
                     { ...assistantMsg, content: event.text, isStreaming: false, isPending: false, isIntermediate: event.isIntermediate, turnId: event.turnId },
@@ -310,7 +309,7 @@ export default function App() {
                 // Update existing message with complete input (second event has full input)
                 return {
                   ...session,
-                  isProcessing: true, // Ensure processing state is set (tools may run after text_complete)
+                  // isProcessing already true from user message send, stays true until 'complete'
                   messages: session.messages.map((m, i) =>
                     i === existingIndex
                       ? { ...m, toolInput: event.toolInput }
@@ -329,7 +328,7 @@ export default function App() {
                 // Create message AND apply result in one update
                 return {
                   ...session,
-                  isProcessing: true,
+                  // isProcessing already true from user message send, stays true until 'complete'
                   messages: [
                     ...session.messages,
                     {
@@ -351,7 +350,7 @@ export default function App() {
               // Normal case - create new pending tool message
               return {
                 ...session,
-                isProcessing: true, // Ensure processing state is set (tools may run after text_complete)
+                // isProcessing already true from user message send, stays true until 'complete'
                 messages: [
                   ...session.messages,
                   {
@@ -396,11 +395,17 @@ export default function App() {
               return session  // No change yet - will be applied when tool_start arrives
             }
 
-            case 'error':
+            case 'error': {
+              // Fail-safe: Mark any running tools as failed
+              const messagesWithFailedTools = session.messages.map(m =>
+                m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
+                  ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+                  : m
+              )
               return {
                 ...session,
                 messages: [
-                  ...session.messages,
+                  ...messagesWithFailedTools,
                   {
                     id: generateMessageId(),
                     role: 'error' as const,
@@ -409,12 +414,19 @@ export default function App() {
                   }
                 ]
               }
+            }
 
-            case 'typed_error':
+            case 'typed_error': {
+              // Fail-safe: Mark any running tools as failed
+              const messagesWithFailedTools = session.messages.map(m =>
+                m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
+                  ? { ...m, toolStatus: 'error' as const, toolResult: 'Error occurred', isError: true }
+                  : m
+              )
               return {
                 ...session,
                 messages: [
-                  ...session.messages,
+                  ...messagesWithFailedTools,
                   {
                     id: generateMessageId(),
                     role: 'error' as const,
@@ -431,6 +443,7 @@ export default function App() {
                   }
                 ]
               }
+            }
 
             case 'status':
               return {
@@ -441,12 +454,40 @@ export default function App() {
                     id: generateMessageId(),
                     role: 'status' as const,
                     content: event.message,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    statusType: event.statusType
                   }
                 ]
               }
 
-            case 'complete':
+            case 'info': {
+              // If this is a compaction complete, update the existing compacting message
+              if (event.statusType === 'compaction_complete') {
+                return {
+                  ...session,
+                  messages: session.messages.map(m =>
+                    m.role === 'status' && m.statusType === 'compacting'
+                      ? { ...m, role: 'info' as const, content: event.message, statusType: 'compaction_complete' as const }
+                      : m
+                  )
+                }
+              }
+              // Otherwise, add as new info message
+              return {
+                ...session,
+                messages: [
+                  ...session.messages,
+                  {
+                    id: generateMessageId(),
+                    role: 'info' as const,
+                    content: event.message,
+                    timestamp: Date.now()
+                  }
+                ]
+              }
+            }
+
+            case 'complete': {
               // Clear any orphaned tool results (memory cleanup)
               // If any orphans exist, it indicates a bug - tool_start never arrived for some results
               if (orphanedToolResultsRef.current.size > 0) {
@@ -454,18 +495,46 @@ export default function App() {
                   Array.from(orphanedToolResultsRef.current.keys()))
                 orphanedToolResultsRef.current.clear()
               }
-              return { ...session, isProcessing: false }
 
-            case 'interrupted':
+              // Fail-safe: Mark any still-running tools as complete
+              // This ensures tools never get stuck in "running" state if tool_result was lost
+              const hasRunningTools = session.messages.some(m =>
+                m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
+              )
+
+              if (hasRunningTools) {
+                console.warn('[App] Session complete but has running tools - marking as complete')
+                return {
+                  ...session,
+                  isProcessing: false,
+                  messages: session.messages.map(m =>
+                    m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
+                      ? { ...m, toolStatus: 'completed' as const, toolResult: '' }
+                      : m
+                  )
+                }
+              }
+
+              return { ...session, isProcessing: false }
+            }
+
+            case 'interrupted': {
+              // Fail-safe: Mark any running tools as interrupted
+              const messagesWithInterruptedTools = session.messages.map(m =>
+                m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error'
+                  ? { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
+                  : m
+              )
               return {
                 ...session,
                 isProcessing: false,
                 messages: [
-                  ...session.messages,
+                  ...messagesWithInterruptedTools,
                   // Use message from main process (already persisted)
                   event.message as Message
                 ]
               }
+            }
 
             case 'title_generated':
               return { ...session, name: event.title }
