@@ -238,3 +238,11 @@ export function isClearScreen(input: string, key: InkKey): boolean {
 export function isExit(input: string, key: InkKey): boolean {
   return input === '\x04' || (key.ctrl === true && input === 'd');
 }
+
+/**
+ * Ctrl+S - Toggle Safe Mode
+ * Ctrl+S: \x13 (ASCII 19, S is 19th letter)
+ */
+export function isSafeModeToggle(input: string, key: InkKey): boolean {
+  return input === '\x13' || (key.ctrl === true && input === 's');
+}

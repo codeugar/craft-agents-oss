@@ -23,6 +23,7 @@ export interface HeaderProps {
   showClock?: boolean;
   version?: string;
   planMode?: boolean;
+  safeMode?: boolean;
   /** Show "Press Ctrl+C again to exit" warning */
   exitWarning?: boolean;
 }
@@ -44,6 +45,7 @@ export const Header: React.FC<HeaderProps> = memo(({
   showClock = false,
   version,
   planMode = false,
+  safeMode = false,
   exitWarning = false,
 }) => {
   // Live clock state - updates every second when enabled
@@ -123,6 +125,12 @@ export const Header: React.FC<HeaderProps> = memo(({
           <>
             <Text dimColor> </Text>
             <Text backgroundColor="#006400" color="white" bold> PLAN </Text>
+          </>
+        )}
+        {safeMode && (
+          <>
+            <Text dimColor> </Text>
+            <Text backgroundColor="#8B008B" color="white" bold> 🛡 SAFE </Text>
           </>
         )}
 

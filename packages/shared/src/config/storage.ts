@@ -69,6 +69,7 @@ export interface StoredConfig {
   showCost?: boolean;  // Whether to show cost in status bar (only relevant for API Key auth)
   showClock?: boolean;  // Whether to show clock with timezone in header
   cumulativeUsage?: CumulativeUsage;  // Global cumulative cost across all workspaces
+  safeMode?: boolean;  // Safe Mode: require approval for destructive MCP operations (delete, update, move)
 }
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
@@ -366,6 +367,19 @@ export function setShowClock(show: boolean): void {
   const config = loadStoredConfig();
   if (!config) return;
   config.showClock = show;
+  saveConfig(config);
+}
+
+export function getSafeMode(): boolean {
+  const config = loadStoredConfig();
+  // Default to false (off) - Safe Mode is opt-in
+  return config?.safeMode === true;
+}
+
+export function setSafeMode(enabled: boolean): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  config.safeMode = enabled;
   saveConfig(config);
 }
 

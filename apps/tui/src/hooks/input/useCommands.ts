@@ -5,6 +5,8 @@ import {
   getWorkspaces,
   removeWorkspace,
   listPlanFiles,
+  getSafeMode,
+  setSafeMode,
   type Workspace,
   type Session,
 } from '@craft-agent/shared/config';
@@ -82,6 +84,9 @@ export interface UseCommandsProps {
 
   // Exit handler
   exitApp: () => void;
+
+  // Safe mode
+  setSafeModeSetting: (enabled: boolean) => void;
 }
 
 /**
@@ -133,6 +138,7 @@ export function useCommands(props: UseCommandsProps) {
     startCraftPlanning,
     cancelCraftPlanning,
     exitApp,
+    setSafeModeSetting,
   } = props;
 
   const handleCommand = useCallback(async (input: string): Promise<CommandResult> => {
@@ -349,6 +355,20 @@ export function useCommands(props: UseCommandsProps) {
       case '/settings':
         openModal('settings');
         return { handled: true };
+
+      case '/safemode': {
+        const currentMode = getSafeMode();
+        const newMode = !currentMode;
+        setSafeMode(newMode);
+        setSafeModeSetting(newMode);
+        return {
+          handled: true,
+          message: {
+            content: `Safe Mode ${newMode ? 'enabled' : 'disabled'}. ${newMode ? 'Delete/update/move operations will require approval.' : 'All operations will execute without prompts.'}`,
+            type: 'info',
+          },
+        };
+      }
 
       case '/credits':
         openModal('balance');
@@ -824,6 +844,7 @@ export function useCommands(props: UseCommandsProps) {
     startCraftPlanning,
     cancelCraftPlanning,
     exitApp,
+    setSafeModeSetting,
   ]);
 
   return { handleCommand };

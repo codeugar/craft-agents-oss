@@ -37,4 +37,5 @@ export {
   isShiftTab,
   isClearScreen,
   isExit,
+  isSafeModeToggle,
 } from './mappings.ts';

@@ -90,6 +90,7 @@ bun dev
 | `/info` | Show active agent info and available tools |
 | `/plan` | Plan mode menu (start, plans, view, approve, cancel) |
 | `/setup` | Re-run the configuration wizard |
+| `/safemode` | Toggle Safe Mode (require approval for delete/update/move) |
 | `/clear` | Clear conversation (keeps session, starts fresh with Claude) |
 | `/new` | Start a new session |
 | `/resume` | View and resume previous sessions |
@@ -97,6 +98,7 @@ bun dev
 | `Ctrl+C` | Interrupt / Exit |
 | `Ctrl+D` | Exit application (same as `/exit`) |
 | `Ctrl+L` | Clear conversation (same as `/clear`) |
+| `Ctrl+S` | Toggle Safe Mode (same as `/safemode`) |
 | `Up/Down` | Navigate command history |
 | `SHIFT+TAB` | Toggle Plan Mode |
 
@@ -241,6 +243,34 @@ SHIFT+TAB      # Toggle plan mode
 - `Esc` - Clear selections or close
 
 The header shows `PLAN` indicator when active.
+
+## Safe Mode
+
+Safe Mode is an opt-in feature that requires explicit user approval before executing potentially destructive MCP operations.
+
+### Protected Operations
+
+When Safe Mode is enabled, the following operations require approval:
+- **Delete**: `blocks_delete`, `collectionItems_delete`, `tasks_delete`
+- **Update**: `blocks_update`, `collectionItems_update`, `tasks_update`
+- **Move**: `blocks_move`
+
+### Usage
+
+```bash
+Ctrl+S              # Toggle Safe Mode on/off
+/safemode           # Toggle Safe Mode on/off
+/settings           # Also available in Settings menu
+```
+
+When a protected operation is triggered:
+1. A permission prompt appears with the operation details
+2. Press `Y` to allow or `N` to deny
+3. Unlike bash commands, there's no "Always allow" option - each operation requires individual approval
+
+Safe Mode is **off by default** to avoid disrupting existing workflows. Enable it when working with important documents where you want extra confirmation before modifications.
+
+The header shows `🛡 SAFE` indicator when Safe Mode is active.
 
 ## Keyboard Shortcuts
 

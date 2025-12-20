@@ -40,7 +40,7 @@ import {
   useAgentMenuHandlers,
   useSettingsHandlers,
 } from '../hooks/index.ts';
-import { isShiftTab, isClearScreen, isExit } from '../keyboard/index.ts';
+import { isShiftTab, isClearScreen, isExit, isSafeModeToggle } from '../keyboard/index.ts';
 import {
   PLAN_MODE_ENTER_MESSAGE,
   PLAN_MODE_EXIT_MESSAGE,
@@ -56,6 +56,8 @@ import {
   getTokenDisplay,
   getShowCost,
   getShowClock,
+  getSafeMode,
+  setSafeMode,
   loadSession,
   listPlanFiles,
   deletePlanFile,
@@ -245,6 +247,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   const [tokenDisplayMode, setTokenDisplayMode] = useState<TokenDisplayMode>(getTokenDisplay());
   const [showCostSetting, setShowCostSetting] = useState(getShowCost());
   const [showClockSetting, setShowClockSetting] = useState(getShowClock());
+  const [safeModeSetting, setSafeModeSetting] = useState(getSafeMode());
   // Only show welcome banner on truly new sessions (no prior messages)
   // This prevents duplicate banners when switching to workspaces with existing sessions
   const [showWelcome, setShowWelcome] = useState(() => {
@@ -401,6 +404,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     startCraftPlanning,
     cancelCraftPlanning,
     exitApp,
+    setSafeModeSetting,
   });
 
   // Workspace handlers hook - handles workspace selector actions
@@ -463,6 +467,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     setTokenDisplayMode,
     setShowCostSetting,
     setShowClockSetting,
+    setSafeModeSetting,
     addMessage: addLocalMessage,
     resetAgentInstance,
     isProcessing,
@@ -711,8 +716,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     }
 
     if (pendingPermission) {
-      if (pendingPermission.type === 'plan_mode') {
-        // Plan mode permission: Y/N only (no "Always" option)
+      if (pendingPermission.type === 'plan_mode' || pendingPermission.type === 'safe_mode') {
+        // Plan mode and Safe Mode permission: Y/N only (no "Always" option)
         if (input.toLowerCase() === 'y') {
           respondToPermission(true, false);
           return;
@@ -761,6 +766,15 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     if (isClearScreen(input, key)) {
       process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
       resetSession();
+      return;
+    }
+
+    // Ctrl+S: Toggle Safe Mode
+    if (isSafeModeToggle(input, key)) {
+      const newMode = !safeModeSetting;
+      setSafeMode(newMode);
+      setSafeModeSetting(newMode);
+      addLocalMessage(`Safe Mode ${newMode ? 'enabled' : 'disabled'}`, 'info');
       return;
     }
 
@@ -1026,6 +1040,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           tokenDisplay={tokenDisplayMode}
           showCost={showCostSetting}
           showClock={showClockSetting}
+          safeMode={safeModeSetting}
           onAction={settingsHandlers.handleSettingsAction}
           onCancel={settingsHandlers.handleSettingsCancel}
         />
@@ -1104,14 +1119,27 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
 
         {/* Permission prompt */}
         {pendingPermission && (
-          <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginBottom={1}>
-            <Text color="yellow" bold>⚠ Permission Required</Text>
+          <Box flexDirection="column" borderStyle="round" borderColor={pendingPermission.type === 'safe_mode' ? 'magenta' : 'yellow'} paddingX={1} marginBottom={1}>
+            <Text color={pendingPermission.type === 'safe_mode' ? 'magenta' : 'yellow'} bold>
+              {pendingPermission.type === 'safe_mode' ? '🛡 Safe Mode' : '⚠ Permission Required'}
+            </Text>
             {pendingPermission.type === 'plan_mode' ? (
               <>
                 <Text>Craft Agents wants to enter <Text color="cyan" bold>Plan Mode</Text></Text>
                 <Text dimColor>Task: {pendingPermission.command}</Text>
                 <Box marginTop={1}>
                   <Text>Allow? </Text>
+                  <Text color="green" bold>[Y]es</Text>
+                  <Text> / </Text>
+                  <Text color="red" bold>[N]o</Text>
+                </Box>
+              </>
+            ) : pendingPermission.type === 'safe_mode' ? (
+              <>
+                <Text>Protected operation: <Text color="magenta" bold>{pendingPermission.command}</Text></Text>
+                <Text dimColor>Tool: {pendingPermission.toolName.replace(/^mcp__\w+__/, '')}</Text>
+                <Box marginTop={1}>
+                  <Text>Allow this operation? </Text>
                   <Text color="green" bold>[Y]es</Text>
                   <Text> / </Text>
                   <Text color="red" bold>[N]o</Text>
@@ -1204,6 +1232,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           showClock={showClockSetting}
           version={getCurrentVersion()}
           planMode={planMode}
+          safeMode={safeModeSetting}
           exitWarning={showExitWarning}
         />
       </Box>

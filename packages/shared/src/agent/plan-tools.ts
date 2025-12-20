@@ -605,6 +605,59 @@ export function isReadOnlyApiMethod(method: string): boolean {
 }
 
 /**
+ * Patterns matching MCP tools protected by Safe Mode.
+ * These require explicit user approval when safeMode is enabled.
+ */
+export const SAFE_MODE_PROTECTED_PATTERNS = [
+  // Destructive operations
+  /blocks_delete$/,
+  /collectionItems_delete$/,
+  /tasks_delete$/,
+  // Modification operations
+  /blocks_update$/,
+  /blocks_move$/,
+  /collectionItems_update$/,
+  /tasks_update$/,
+];
+
+/**
+ * Check if an MCP tool is protected by Safe Mode
+ */
+export function isSafeModeProtectedTool(toolName: string): boolean {
+  return SAFE_MODE_PROTECTED_PATTERNS.some(pattern => pattern.test(toolName));
+}
+
+/**
+ * Get a human-readable description of a Safe Mode protected operation
+ */
+export function getSafeModeDescription(toolName: string, input: Record<string, unknown>): string {
+  // Extract operation type from tool name (e.g., mcp__craft__blocks_delete -> blocks_delete)
+  const operation = toolName.replace(/^mcp__\w+__/, '');
+
+  // Build context-aware description
+  const idPart = input.id ? ` (ID: ${String(input.id).slice(0, 20)})` : '';
+
+  switch (operation) {
+    case 'blocks_delete':
+      return `Delete block${idPart}`;
+    case 'blocks_update':
+      return `Update block${idPart}`;
+    case 'blocks_move':
+      return `Move block${idPart}`;
+    case 'collectionItems_delete':
+      return `Delete collection item${idPart}`;
+    case 'collectionItems_update':
+      return `Update collection item${idPart}`;
+    case 'tasks_delete':
+      return `Delete task${idPart}`;
+    case 'tasks_update':
+      return `Update task${idPart}`;
+    default:
+      return `Execute ${operation}${idPart}`;
+  }
+}
+
+/**
  * Tools that are always blocked in plan mode
  */
 export const BLOCKED_IN_PLAN_MODE = ['Bash', 'Write', 'Edit'];

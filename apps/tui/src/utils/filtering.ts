@@ -76,6 +76,7 @@ export const COMMANDS: CommandDefinition[] = [
 
   // Configuration
   { command: '/settings', description: 'Open settings menu', category: 'Configuration' },
+  { command: '/safemode', description: 'Toggle Safe Mode (require approval for delete/update/move)', category: 'Configuration' },
   { command: '/prefs', description: 'Your personalisation (name, timezone, etc.)', category: 'Configuration' },
   { command: '/logout', description: 'Clear all settings and credentials', category: 'Configuration' },
 

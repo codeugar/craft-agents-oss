@@ -7,7 +7,8 @@ export type SettingsAction =
   | { type: 'change_auth_mode'; mode: AuthType }
   | { type: 'set_token_display'; mode: TokenDisplayMode }
   | { type: 'set_show_cost'; show: boolean }
-  | { type: 'set_show_clock'; show: boolean };
+  | { type: 'set_show_clock'; show: boolean }
+  | { type: 'set_safe_mode'; enabled: boolean };
 
 interface MenuItem {
   key: string;
@@ -25,6 +26,7 @@ export interface SettingsProps {
   tokenDisplay: TokenDisplayMode;
   showCost: boolean;
   showClock: boolean;
+  safeMode: boolean;
   onAction: (action: SettingsAction) => void;
   onCancel: () => void;
 }
@@ -41,6 +43,7 @@ export const Settings: React.FC<SettingsProps> = ({
   tokenDisplay,
   showCost,
   showClock,
+  safeMode,
   onAction,
   onCancel,
 }) => {
@@ -141,6 +144,28 @@ export const Settings: React.FC<SettingsProps> = ({
       desc: 'Hide clock from status bar',
       action: showClock ? { type: 'set_show_clock', show: false } : null,
       isCurrent: !showClock,
+    },
+    // Safe Mode section
+    {
+      key: 'safe_mode_header',
+      label: '── Safe Mode ──',
+      desc: '',
+      action: null,
+      isHeader: true,
+    },
+    {
+      key: 'safe_mode_on',
+      label: 'Enabled',
+      desc: 'Require approval for delete/update/move',
+      action: safeMode ? null : { type: 'set_safe_mode', enabled: true },
+      isCurrent: safeMode,
+    },
+    {
+      key: 'safe_mode_off',
+      label: 'Disabled',
+      desc: 'Execute all operations without prompts',
+      action: safeMode ? { type: 'set_safe_mode', enabled: false } : null,
+      isCurrent: !safeMode,
     },
     // AI Usage Mode section
     {

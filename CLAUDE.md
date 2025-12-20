@@ -571,6 +571,7 @@ Session File (~/.craft-agent/sessions/{session.id}.json)
 - `/resume` - Switch to a previous session (loads both IDs from that session)
 - `Ctrl+D` - Exit application (same as `/exit`)
 - `Ctrl+L` - Same as `/clear`
+- `Ctrl+S` - Toggle Safe Mode (same as `/safemode`)
 
 **Why `/clear` clears `sdkSessionId`:**
 Without clearing it, Claude would still "remember" the conversation even though UI shows blank. Clearing ensures both UI and Claude start fresh.
@@ -666,6 +667,44 @@ When plan mode is active, the hook blocks external operations:
 - We block ALL external API calls (not just writes)
 - Better integration with Craft's UI components (PlanReview, CraftAskUserQuestion)
 - SDK tools are blocked via `disallowedTools` and PreToolUse hook redirects to Craft versions
+
+### Safe Mode (`packages/shared/src/agent/plan-tools.ts`)
+
+Safe Mode is an opt-in feature requiring explicit user approval for destructive MCP operations.
+
+**Protected operations** (defined in `SAFE_MODE_PROTECTED_PATTERNS`):
+- Delete: `blocks_delete`, `collectionItems_delete`, `tasks_delete`
+- Update: `blocks_update`, `collectionItems_update`, `tasks_update`
+- Move: `blocks_move`
+
+**Configuration:**
+- Stored in `~/.craft-agent/config.json` as `safeMode: boolean`
+- Default: `false` (off)
+- Toggle via `Ctrl+S`, `/safemode` command, or Settings menu
+- Header shows `🛡 SAFE` indicator when active (dark magenta bg, white text)
+
+**How it works:**
+1. PreToolUse hook checks if `getSafeMode()` returns true
+2. If tool matches `SAFE_MODE_PROTECTED_PATTERNS`, permission is requested
+3. User sees prompt with operation details (Y/N only, no "Always allow")
+4. If denied, tool is blocked with reason
+5. If approved, tool executes normally
+
+**Key differences from bash permissions:**
+- No session-based whitelisting (every operation requires approval)
+- Uses magenta color theme to distinguish from bash (yellow) and plan mode
+- Shows tool name and operation type, not full command
+
+**Key functions:**
+```typescript
+// packages/shared/src/agent/plan-tools.ts
+isSafeModeProtectedTool(toolName: string): boolean
+getSafeModeDescription(toolName: string, input: Record<string, unknown>): string
+
+// packages/shared/src/config/storage.ts
+getSafeMode(): boolean
+setSafeMode(enabled: boolean): void
+```
 
 ### Token Counting
 - Tracks: input tokens, output tokens, cache creation, cache read

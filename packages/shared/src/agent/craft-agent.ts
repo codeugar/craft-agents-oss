@@ -8,7 +8,7 @@ import type { Plan } from '../agents/plan-types.ts';
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
-import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, shouldUseExtendedCacheTtl, loadStoredConfig, type Workspace, type Session } from '../config/storage.ts';
+import { getWorkspaceAccessTokenAsync, isWorkspaceTokenExpiredAsync, updateWorkspaceOAuthTokensAsync, shouldUseExtendedCacheTtl, loadStoredConfig, getSafeMode, type Workspace, type Session } from '../config/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { updatePreferences, loadPreferences, type UserPreferences } from '../config/preferences.ts';
@@ -28,6 +28,8 @@ import {
   respondToAskQuestion,
   isReadOnlyMcpTool,
   isReadOnlyApiMethod,
+  isSafeModeProtectedTool,
+  getSafeModeDescription,
   BLOCKED_IN_PLAN_MODE,
   getCurrentPlanFilePath,
   type PlanReviewResult,
@@ -68,7 +70,8 @@ interface PendingPermission {
   toolName: string;
   command: string;
   baseCommand: string;
-  type?: 'bash' | 'plan_mode';  // Type of permission request
+  type?: 'bash' | 'plan_mode' | 'safe_mode';  // Type of permission request
+  mcpInput?: Record<string, unknown>;  // For safe_mode: the tool input
 }
 
 // Dangerous commands that should always require permission (never auto-allow)
@@ -492,7 +495,7 @@ export class CraftAgent {
   private ultrathinkMode: boolean = false;
 
   // Callback for permission requests - set by TUI to receive permission prompts
-  public onPermissionRequest: ((request: { requestId: string; toolName: string; command: string; description: string; type?: 'bash' | 'plan_mode' }) => void) | null = null;
+  public onPermissionRequest: ((request: { requestId: string; toolName: string; command: string; description: string; type?: 'bash' | 'plan_mode' | 'safe_mode'; mcpInput?: Record<string, unknown> }) => void) | null = null;
 
   // Debug callback for status messages
   public onDebug: ((message: string) => void) | null = null;
@@ -1238,20 +1241,76 @@ export class CraftAgent {
                 'EnterPlanMode', 'ExitPlanMode', 'Skill', 'SlashCommand',
               ]);
 
-              // Extract _intent from MCP tool inputs (not built-in SDK tools)
+              // Handle MCP tools: extract _intent and check Safe Mode
               if (!builtInTools.has(input.tool_name)) {
                 const toolInput = input.tool_input as Record<string, unknown>;
                 const intent = toolInput._intent as string | undefined;
 
+                // Store intent for UI display and summarization
                 if (intent) {
-                  // Store intent for UI display and summarization
                   this.toolIntents.set(input.tool_use_id, intent);
                   this.onDebug?.(`Extracted intent for ${input.tool_use_id}: ${intent}`);
+                }
 
-                  // Strip _intent before forwarding to MCP server
-                  const { _intent, ...cleanInput } = toolInput;
+                // Strip _intent before forwarding to MCP server
+                const { _intent, ...cleanInput } = toolInput;
 
-                  // Return with updatedInput - SDK will use this instead of original
+                // Safe Mode: Require permission for protected MCP operations
+                if (getSafeMode() && isSafeModeProtectedTool(input.tool_name)) {
+                  const description = getSafeModeDescription(input.tool_name, cleanInput);
+                  const requestId = `safe-${input.tool_use_id}`;
+                  this.onDebug?.(`[Safe Mode] Requesting permission for ${input.tool_name}: ${description}`);
+
+                  const permissionPromise = new Promise<boolean>((resolve) => {
+                    this.pendingPermissions.set(requestId, {
+                      resolve: (allowed) => resolve(allowed),
+                      toolName: input.tool_name,
+                      command: description,
+                      baseCommand: '',
+                      type: 'safe_mode',
+                      mcpInput: cleanInput,
+                    });
+                  });
+
+                  if (this.onPermissionRequest) {
+                    this.onPermissionRequest({
+                      requestId,
+                      toolName: input.tool_name,
+                      command: description,
+                      description: `Safe Mode: ${description}`,
+                      type: 'safe_mode',
+                      mcpInput: cleanInput,
+                    });
+                  } else {
+                    // No permission handler - block the operation
+                    this.pendingPermissions.delete(requestId);
+                    return {
+                      continue: false,
+                      hookSpecificOutput: {
+                        hookEventName: 'PreToolUse' as const,
+                        decision: 'block',
+                        reason: 'Safe Mode: No permission handler available',
+                      },
+                    };
+                  }
+
+                  const allowed = await permissionPromise;
+                  if (!allowed) {
+                    this.onDebug?.('[Safe Mode] User denied permission');
+                    return {
+                      continue: false,
+                      hookSpecificOutput: {
+                        hookEventName: 'PreToolUse' as const,
+                        decision: 'block',
+                        reason: 'Safe Mode: User denied permission for this operation',
+                      },
+                    };
+                  }
+                  this.onDebug?.('[Safe Mode] User approved operation');
+                }
+
+                // Return with updatedInput if we had _intent (or Safe Mode check passed)
+                if (intent) {
                   return {
                     continue: true,
                     hookSpecificOutput: {

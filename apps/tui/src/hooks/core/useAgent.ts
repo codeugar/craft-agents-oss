@@ -152,7 +152,8 @@ export interface PermissionRequest {
   toolName: string;
   command: string;
   description: string;
-  type?: 'bash' | 'plan_mode';  // Type of permission request
+  type?: 'bash' | 'plan_mode' | 'safe_mode';  // Type of permission request
+  mcpInput?: Record<string, unknown>;  // For safe_mode: the tool input
 }
 
 export interface AskUserQuestionRequest {
