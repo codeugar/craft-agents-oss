@@ -36,6 +36,14 @@ import { type Session, type Message, type SessionEvent, type FileAttachment, typ
 import { generateSessionTitle } from '@craft-agent/shared/utils'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
 
+/**
+ * Feature flags for agent behavior
+ */
+export const AGENT_FLAGS = {
+  /** Disable plan mode tools (EnterCraftAgentsPlanMode, ExitCraftAgentsPlanMode, CraftAskUserQuestion) */
+  planModeEnabled: false,
+} as const
+
 interface ManagedSession {
   id: string
   workspace: Workspace
@@ -666,6 +674,7 @@ export class SessionManager {
       managed.agent = new CraftAgent({
         workspace: managed.workspace,
         model: config?.model,
+        isHeadless: !AGENT_FLAGS.planModeEnabled,
         // Pass session object for conversation resumption (SDK uses sdkSessionId to resume)
         session: managed.sdkSessionId ? {
           id: managed.id,

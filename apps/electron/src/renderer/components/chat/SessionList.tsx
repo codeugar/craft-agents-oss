@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { formatDistanceToNow } from "date-fns"
 import { Archive, ArchiveRestore, Trash2, Pencil, MoreHorizontal, ExternalLink, Flag, FlagOff } from "lucide-react"
+import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -98,8 +99,7 @@ function SessionItem({
             "flex w-full flex-col items-start gap-1.5 pl-7 pr-4 py-3 text-left text-sm transition-all outline-none rounded-[8px]",
             isSelected
               ? "bg-foreground/5 hover:bg-foreground/7"
-              : "hover:bg-foreground/2",
-            "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              : "hover:bg-foreground/2"
           )}
           onClick={handleClick}
           onKeyDown={(e) => {
@@ -131,9 +131,9 @@ function SessionItem({
               )}
             </span>
           </div>
-          {/* Preview Text */}
-          <div className="line-clamp-2 text-xs text-muted-foreground leading-relaxed w-full">
-            {preview}
+          {/* Preview Text - always 2 lines for consistent height */}
+          <div className="line-clamp-2 text-xs text-muted-foreground leading-relaxed w-full min-h-[2lh]">
+            {preview || "\u00A0"}
           </div>
         </button>
         {/* Action buttons - visible on hover or when menu is open */}
@@ -264,10 +264,66 @@ export function SessionList({
     onFocusChatInput?.()
   }, [onFocusChatInput])
 
+  // Toast-wrapped action handlers with undo support
+  const handleArchiveWithToast = useCallback((sessionId: string) => {
+    if (!onArchive) return
+    onArchive(sessionId)
+    toast('Conversation archived', {
+      description: 'Moved to your archive',
+      action: onUnarchive ? {
+        label: 'Undo',
+        onClick: () => onUnarchive(sessionId),
+      } : undefined,
+    })
+  }, [onArchive, onUnarchive])
+
+  const handleUnarchiveWithToast = useCallback((sessionId: string) => {
+    if (!onUnarchive) return
+    onUnarchive(sessionId)
+    toast('Conversation restored', {
+      description: 'Moved back to inbox',
+      action: onArchive ? {
+        label: 'Undo',
+        onClick: () => onArchive(sessionId),
+      } : undefined,
+    })
+  }, [onArchive, onUnarchive])
+
+  const handleFlagWithToast = useCallback((sessionId: string) => {
+    if (!onFlag) return
+    onFlag(sessionId)
+    toast('Conversation flagged', {
+      description: 'Added to your flagged items',
+      action: onUnflag ? {
+        label: 'Undo',
+        onClick: () => onUnflag(sessionId),
+      } : undefined,
+    })
+  }, [onFlag, onUnflag])
+
+  const handleUnflagWithToast = useCallback((sessionId: string) => {
+    if (!onUnflag) return
+    onUnflag(sessionId)
+    toast('Flag removed', {
+      description: 'Removed from flagged items',
+      action: onFlag ? {
+        label: 'Undo',
+        onClick: () => onFlag(sessionId),
+      } : undefined,
+    })
+  }, [onFlag, onUnflag])
+
+  const handleDeleteWithToast = useCallback((sessionId: string) => {
+    onDelete(sessionId)
+    toast('Conversation deleted', {
+      description: 'This action cannot be undone',
+    })
+  }, [onDelete])
+
   // Handle Delete key
   const handleDelete = useCallback((item: Session) => {
-    onDelete(item.id)
-  }, [onDelete])
+    handleDeleteWithToast(item.id)
+  }, [handleDeleteWithToast])
 
   // Roving tabindex for keyboard navigation
   const {
@@ -323,9 +379,9 @@ export function SessionList({
       case 'a':
         e.preventDefault()
         if (onArchive) {
-          onArchive(item.id)
+          handleArchiveWithToast(item.id)
         } else if (onUnarchive) {
-          onUnarchive(item.id)
+          handleUnarchiveWithToast(item.id)
         }
         break
       case 'r':
@@ -333,7 +389,7 @@ export function SessionList({
         handleRenameClick(item.id, getSessionTitle(item))
         break
     }
-  }, [onArchive, onUnarchive, focusZone])
+  }, [onArchive, onUnarchive, handleArchiveWithToast, handleUnarchiveWithToast, focusZone])
 
   const handleRenameClick = (sessionId: string, currentName: string) => {
     setRenameSessionId(sessionId)
@@ -387,11 +443,11 @@ export function SessionList({
                 isLast={index === sortedItems.length - 1}
                 onKeyDown={handleKeyDown}
                 onRenameClick={handleRenameClick}
-                onArchive={onArchive}
-                onUnarchive={onUnarchive}
-                onFlag={onFlag}
-                onUnflag={onUnflag}
-                onDelete={onDelete}
+                onArchive={onArchive ? handleArchiveWithToast : undefined}
+                onUnarchive={onUnarchive ? handleUnarchiveWithToast : undefined}
+                onFlag={onFlag ? handleFlagWithToast : undefined}
+                onUnflag={onUnflag ? handleUnflagWithToast : undefined}
+                onDelete={handleDeleteWithToast}
                 onSelect={(forceNewTab) => {
                   // Always update selection
                   setSession({ ...session, selected: item.id })

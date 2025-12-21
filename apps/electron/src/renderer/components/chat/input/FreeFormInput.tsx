@@ -90,6 +90,8 @@ export interface FreeFormInputProps {
   onInputChange?: (value: string) => void
   /** When true, removes container styling (shadow, bg, rounded) - used when wrapped by InputContainer */
   unstyled?: boolean
+  /** Callback when component height changes (for external animation sync) */
+  onHeightChange?: (height: number) => void
 }
 
 /**
@@ -120,6 +122,7 @@ export function FreeFormInput({
   inputValue,
   onInputChange,
   unstyled = false,
+  onHeightChange,
 }: FreeFormInputProps) {
   // Performance optimization: Always use internal state for typing to avoid parent re-renders
   // Sync FROM parent on mount/change (for restoring drafts)
@@ -160,14 +163,32 @@ export function FreeFormInput({
   const [slashFilter, setSlashFilter] = React.useState('')
 
   const dragCounterRef = React.useRef(0)
+  const containerRef = React.useRef<HTMLDivElement>(null)
 
   // Merge refs
   const internalRef = React.useRef<HTMLTextAreaElement>(null)
   const textareaRef = externalTextareaRef || internalRef
 
+  // Report height changes to parent (for external animation sync)
+  React.useLayoutEffect(() => {
+    if (!onHeightChange || !containerRef.current) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        onHeightChange(entry.contentRect.height)
+      }
+    })
+
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [onHeightChange])
+
+  // Check if running in Electron environment (has electronAPI)
+  const hasElectronAPI = typeof window !== 'undefined' && !!window.electronAPI
+
   // File attachment handlers
   const handleAttachClick = async () => {
-    if (disabled) return
+    if (disabled || !hasElectronAPI) return
     try {
       const paths = await window.electronAPI.openFileDialog()
       for (const path of paths) {
@@ -228,11 +249,13 @@ export function FreeFormInput({
         const mimeType = file.type || 'application/octet-stream'
 
         let thumbnailBase64: string | undefined
-        try {
-          const thumb = await window.electronAPI.generateThumbnail(base64, mimeType)
-          if (thumb) thumbnailBase64 = thumb
-        } catch (err) {
-          console.log('[FreeFormInput] Thumbnail generation failed:', err)
+        if (hasElectronAPI) {
+          try {
+            const thumb = await window.electronAPI.generateThumbnail(base64, mimeType)
+            if (thumb) thumbnailBase64 = thumb
+          } catch (err) {
+            console.log('[FreeFormInput] Thumbnail generation failed:', err)
+          }
         }
 
         resolve({
@@ -262,7 +285,7 @@ export function FreeFormInput({
 
     for (const file of files) {
       const filePath = (file as File & { path?: string }).path
-      if (filePath) {
+      if (filePath && hasElectronAPI) {
         try {
           const attachment = await window.electronAPI.readFileAttachment(filePath)
           if (attachment) {
@@ -350,6 +373,7 @@ export function FreeFormInput({
   return (
     <form onSubmit={handleSubmit}>
       <div
+        ref={containerRef}
         className={cn(
           'overflow-hidden transition-all',
           // Container styling - only when not wrapped by InputContainer
@@ -423,11 +447,21 @@ export function FreeFormInput({
           loadingCount={loadingCount}
         />
 
-        {/* Textarea */}
-        <div className="relative">
+        {/* Textarea with auto-grow via hidden sizer */}
+        <div className="relative min-h-[72px]">
+          {/* Hidden sizer - mirrors content to determine height */}
+          <div
+            className="invisible whitespace-pre-wrap break-words pl-5 pr-4 pt-4 pb-3 text-sm"
+            aria-hidden="true"
+          >
+            {input || placeholder}
+            {/* Extra space for cursor on new line */}
+            {'\n'}
+          </div>
+          {/* Textarea positioned over sizer */}
           <textarea
             ref={textareaRef}
-            className="w-full min-h-[72px] pl-5 pr-4 pt-4 pb-3 bg-transparent outline-none text-sm placeholder:text-muted-foreground resize-none focus-visible:ring-0"
+            className="absolute inset-0 w-full h-full pl-5 pr-4 pt-4 pb-3 bg-transparent outline-none text-sm placeholder:text-muted-foreground resize-none focus-visible:ring-0"
             placeholder={placeholder}
             value={input}
             onChange={handleChange}

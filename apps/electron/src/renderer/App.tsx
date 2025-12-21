@@ -49,8 +49,8 @@ export default function App() {
   }, [skipPermissions])
 
   // Performance: Throttle streaming text state updates to reduce React re-renders
-  // Accumulates deltas in ref, flushes to state every 100ms (or immediately on complete)
-  const STREAMING_THROTTLE_MS = 100
+  // Accumulates deltas in ref, flushes to state every 200ms (or immediately on complete)
+  const STREAMING_THROTTLE_MS = 200
   const DRAFT_SAVE_DEBOUNCE_MS = 500
   const streamingTextRef = useRef<Map<string, { content: string; turnId?: string; timer?: ReturnType<typeof setTimeout> }>>(new Map())
 

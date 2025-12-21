@@ -187,8 +187,8 @@ function ProcessingIndicator({ startTime }: ProcessingIndicatorProps) {
       <div className="w-3 h-3 flex items-center justify-center shrink-0">
         <Spinner className="text-[10px]" />
       </div>
-      {/* Label with crossfade animation + layout animation for smooth repositioning */}
-      <motion.span className="relative h-5 flex items-center" layout>
+      {/* Label with crossfade animation on content change only */}
+      <span className="relative h-5 flex items-center">
         <AnimatePresence mode="wait" initial={false}>
           <motion.span
             key={currentMessage}
@@ -196,21 +196,16 @@ function ProcessingIndicator({ startTime }: ProcessingIndicatorProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.4, ease: 'easeInOut' }}
-            layout
           >
             {currentMessage}
           </motion.span>
         </AnimatePresence>
         {elapsed >= 1 && (
-          <motion.span
-            className="text-muted-foreground/60 ml-1"
-            layout
-            transition={{ duration: 0.4, ease: 'easeInOut' }}
-          >
+          <span className="text-muted-foreground/60 ml-1">
             {formatElapsed(elapsed)}
-          </motion.span>
+          </span>
         )}
-      </motion.span>
+      </span>
     </div>
   )
 }

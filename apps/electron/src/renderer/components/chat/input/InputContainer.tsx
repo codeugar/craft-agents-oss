@@ -42,14 +42,49 @@ export function InputContainer({
 }: InputContainerProps) {
   const mode: InputMode = structuredInput ? 'structured' : 'freeform'
   const measureRef = React.useRef<HTMLDivElement>(null)
-  const [measuredHeight, setMeasuredHeight] = React.useState<number | null>(null)
+  // Separate height states: freeform uses callback, structured uses measuring div
+  const [freeformHeight, setFreeformHeight] = React.useState<number>(FALLBACK_HEIGHTS.freeform)
+  const [structuredHeight, setStructuredHeight] = React.useState<number | null>(null)
   const hasInitializedRef = React.useRef(false)
 
   // Create a stable key for the current content
   const contentKey = mode === 'freeform' ? 'freeform' : `structured-${structuredInput?.type}`
 
-  // Use ResizeObserver to continuously watch content height
+  // Track mode transitions - animate height for a short period after mode change
+  const [isAnimating, setIsAnimating] = React.useState(false)
+  const prevContentKeyRef = React.useRef(contentKey)
+
+  // Detect transition synchronously during render
+  const isTransitioning = prevContentKeyRef.current !== contentKey
+
+  // Should animate if we're in a transition OR still in the animation window
+  const shouldAnimateHeight = isTransitioning || isAnimating
+
   React.useEffect(() => {
+    if (isTransitioning) {
+      prevContentKeyRef.current = contentKey
+      setIsAnimating(true)
+      // Keep animating for the transition duration + a bit extra for measurement settle
+      const timer = setTimeout(() => {
+        setIsAnimating(false)
+      }, TRANSITION_DURATION * 1000 + 100)
+      return () => clearTimeout(timer)
+    }
+  }, [contentKey, isTransitioning])
+
+  // Handle height changes from FreeFormInput (synchronous, no measuring div needed)
+  const handleFreeformHeightChange = React.useCallback((height: number) => {
+    setFreeformHeight(height)
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true
+    }
+  }, [])
+
+  // Use ResizeObserver only for structured inputs (freeform uses onHeightChange callback)
+  React.useEffect(() => {
+    // Skip for freeform - it uses the onHeightChange callback
+    if (mode === 'freeform') return
+
     const measureEl = measureRef.current
     if (!measureEl) return
 
@@ -57,7 +92,7 @@ export function InputContainer({
       for (const entry of entries) {
         const height = entry.contentRect.height
         if (height > 0) {
-          setMeasuredHeight(height)
+          setStructuredHeight(height)
           // Mark as initialized after first measurement
           if (!hasInitializedRef.current) {
             requestAnimationFrame(() => {
@@ -70,27 +105,25 @@ export function InputContainer({
 
     observer.observe(measureEl)
     return () => observer.disconnect()
-  }, [contentKey])
+  }, [contentKey, mode])
 
-  // Use measured height, or fallback if not yet measured
-  const targetHeight = React.useMemo(() => {
-    if (measuredHeight !== null) return measuredHeight
-    if (mode === 'freeform') return FALLBACK_HEIGHTS.freeform
-    if (structuredInput?.type) return FALLBACK_HEIGHTS[structuredInput.type] ?? FALLBACK_HEIGHTS.freeform
-    return FALLBACK_HEIGHTS.freeform
-  }, [measuredHeight, mode, structuredInput?.type])
+  // Use appropriate height source based on mode
+  const targetHeight = mode === 'freeform'
+    ? freeformHeight
+    : (structuredHeight ?? FALLBACK_HEIGHTS[structuredInput?.type ?? 'freeform'] ?? FALLBACK_HEIGHTS.freeform)
 
   const handleStructuredResponse = (response: StructuredResponse) => {
     onStructuredResponse?.(response)
   }
 
-  // Render the current content (used for both measuring and display)
+  // Render the current content (measuring div only for structured, freeform uses callback)
   const renderContent = (forMeasuring: boolean) => {
     if (mode === 'freeform') {
       return (
         <FreeFormInput
           {...freeFormProps}
           textareaRef={forMeasuring ? undefined : textareaRef}
+          onHeightChange={forMeasuring ? undefined : handleFreeformHeightChange}
           unstyled
         />
       )
@@ -106,29 +139,35 @@ export function InputContainer({
 
   return (
     <div className="relative">
-      {/* Hidden measuring div - renders content off-screen to measure natural height */}
-      <div
-        ref={measureRef}
-        className="absolute top-0 left-0 right-0 invisible pointer-events-none"
-        aria-hidden="true"
-      >
-        <div className="rounded-[8px] bg-background overflow-hidden">
-          {renderContent(true)}
+      {/* Hidden measuring div - only needed for structured inputs (freeform uses onHeightChange) */}
+      {mode !== 'freeform' && (
+        <div
+          ref={measureRef}
+          className="absolute top-0 left-0 right-0 invisible pointer-events-none"
+          aria-hidden="true"
+        >
+          <div className="rounded-[8px] bg-background overflow-hidden">
+            {renderContent(true)}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Visible animated container */}
       <motion.div
         className="relative rounded-[8px] bg-background shadow-middle overflow-hidden"
         initial={false}
         animate={{ height: targetHeight }}
-        transition={{ duration: hasInitializedRef.current && measuredHeight !== null ? TRANSITION_DURATION : 0, ease: TRANSITION_EASE }}
+        transition={{
+          // Only animate on mode transitions, not on textarea auto-grow
+          duration: shouldAnimateHeight ? TRANSITION_DURATION : 0,
+          ease: TRANSITION_EASE
+        }}
       >
-        {/* Crossfading content - all children absolute positioned */}
+        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill */}
         <AnimatePresence mode="sync" initial={false}>
           <motion.div
             key={contentKey}
-            className="absolute inset-0"
+            className={mode === 'freeform' ? "absolute bottom-0 left-0 right-0" : "absolute inset-0"}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}

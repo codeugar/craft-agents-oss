@@ -1539,7 +1539,7 @@ export function Chat({
               items={filteredSessions}
               onDelete={handleDeleteSession}
               onArchive={viewMode !== 'archive' ? onArchiveSession : undefined}
-              onUnarchive={viewMode === 'archive' ? onUnarchiveSession : undefined}
+              onUnarchive={onUnarchiveSession}
               onFlag={onFlagSession}
               onUnflag={onUnflagSession}
               onRename={onRenameSession}
