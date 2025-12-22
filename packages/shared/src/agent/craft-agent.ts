@@ -1185,6 +1185,8 @@ export class CraftAgent {
                   'Read', 'Glob', 'Grep',
                   // Web research (allowed but should be used sparingly - see system prompt)
                   'WebFetch', 'WebSearch',
+                  // MCP tool discovery (read-only, helps plan which tools to use)
+                  'MCPSearch',
                   // Plan mode tools
                   'ExitPlanMode',
                   // Write is allowed ONLY for plan files (checked below)
@@ -1195,7 +1197,7 @@ export class CraftAgent {
                 // - Task, TaskOutput: No sub-agent execution during planning
                 // - Bash: No command execution during planning
                 // - AskUserQuestion: Claude should ask in response text, not via tool
-                // - Any MCP tools: No external actions during planning
+                // - MCP tools (mcp__*): No external actions during planning (MCPSearch allowed for discovery)
 
                 // Special handling for Write tool - only allow writing to ~/.claude/plans/
                 if (input.tool_name === 'Write') {

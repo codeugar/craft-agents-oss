@@ -634,6 +634,7 @@ When plan mode is active, the hook blocks external operations:
 // ALLOWED in plan mode:
 - Read, Glob, Grep (local file exploration)
 - WebFetch, WebSearch (use sparingly - quick lookups only)
+- MCPSearch (discover available MCP tools)
 - MCP read tools (blocks_get, document_search, etc.)
 - CraftAskUserQuestion
 - TodoWrite

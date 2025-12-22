@@ -261,6 +261,9 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   const [lastCtrlCTime, setLastCtrlCTime] = useState<number | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
 
+  // Plan mode toggle warning state (when trying to toggle during processing)
+  const [showPlanToggleWarning, setShowPlanToggleWarning] = useState(false);
+
   // Auto-dismiss exit warning after 1000ms
   useEffect(() => {
     if (showExitWarning) {
@@ -271,6 +274,16 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       return () => clearTimeout(timer);
     }
   }, [showExitWarning]);
+
+  // Auto-dismiss plan toggle warning after 1000ms
+  useEffect(() => {
+    if (showPlanToggleWarning) {
+      const timer = setTimeout(() => {
+        setShowPlanToggleWarning(false);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [showPlanToggleWarning]);
 
   // Consolidated modal state - replaces 11 separate useState calls
   const { activeModal, openModal, closeModal, isOpen, hasOpenModal } = useModalState();
@@ -744,16 +757,19 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     // Use synchronous internal state (getPlanModeState) instead of async React state (planMode)
     // to avoid race conditions when toggling quickly
     if (isShiftTab(input, key)) {
+      // Block toggle during processing and show warning
+      if (isProcessing) {
+        setShowPlanToggleWarning(true);
+        return;
+      }
+
       const internalPlanMode = getPlanModeState().isActive;
       if (internalPlanMode) {
         // Exit Craft Agents plan mode (cancel without calling ExitCraftAgentsPlanMode)
         cancelCraftPlanning();
         addLocalMessage(PLAN_MODE_EXIT_MESSAGE, 'system');
-        // Only send exit prompt if not already processing
-        if (!isProcessing) {
-          sendMessage(PLAN_MODE_EXIT_PROMPT);
-        }
-      } else if (!isProcessing) {
+        sendMessage(PLAN_MODE_EXIT_PROMPT);
+      } else {
         // Enter Craft Agents plan mode
         startCraftPlanning();
         addLocalMessage(PLAN_MODE_ENTER_MESSAGE, 'system');
@@ -1234,6 +1250,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           planMode={planMode}
           safeMode={safeModeSetting}
           exitWarning={showExitWarning}
+          planToggleWarning={showPlanToggleWarning}
         />
       </Box>
     </Box>

@@ -4,7 +4,6 @@ import { saveConfig, getConfigPath, generateWorkspaceId, loadStoredConfig, getAc
 import { type AuthState, type SetupNeeds } from '@craft-agent/shared/auth';
 import { getExistingClaudeToken, isClaudeCliInstalled, runClaudeSetupToken } from '@craft-agent/shared/auth';
 import { getCredentialManager } from '@craft-agent/shared/credentials';
-import { validateMcpConnection, getValidationErrorMessage } from '@craft-agent/shared/mcp';
 import { CraftOAuth, getMcpBaseUrl } from '@craft-agent/shared/auth';
 import { TextInput } from './TextInput.tsx';
 import { AnimatedSpinner } from './Spinner.tsx';
@@ -80,6 +79,7 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel, authState, s
   const [mcpOAuthStatus, setMcpOAuthStatus] = useState('');
   const [mcpOAuthResult, setMcpOAuthResult] = useState<OAuthCredentials | null>(null);
   const [mcpOAuthClient, setMcpOAuthClient] = useState<CraftOAuth | null>(null);
+  const [detectedMcpAuthType, setDetectedMcpAuthType] = useState<McpAuthType>('public');
 
   // Billing method state - initialize from authState if available
   const [billingMethod, setBillingMethod] = useState<AuthType>(
@@ -248,30 +248,33 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel, authState, s
   }, [craftToken]);
 
   // Validate MCP connection - called after space selection
+  // Uses checkAuthRequired() pattern (same as WorkspaceAdd.tsx) to properly detect auth needs
   const validateMcp = useCallback(async (urlOverride?: string) => {
     const url = urlOverride || mcpUrl;
     setValidationError(null);
 
     try {
-      const manager = getCredentialManager();
-      const craftOAuthToken = await manager.getCraftOAuth();
+      const mcpBaseUrl = getMcpBaseUrl(url);
+      const oauth = new CraftOAuth(
+        { mcpBaseUrl },
+        {
+          onStatus: (msg) => setMcpOAuthStatus(msg),
+          onError: () => {},
+        }
+      );
 
-      // Try to validate the MCP connection
-      const validationResult = await validateMcpConnection({
-        mcpUrl: url,
-        mcpAccessToken: craftOAuthToken || undefined,
-      });
+      setMcpOAuthStatus('Checking server authentication requirements...');
 
-      if (validationResult.errorType === 'needs-auth') {
-        // MCP server requires OAuth - start OAuth flow
+      const authRequired = await oauth.checkAuthRequired();
+
+      if (authRequired) {
+        // Server requires OAuth - start MCP OAuth flow
         setStep('mcp-auth');
         startMcpOAuth(url);
-      } else if (validationResult.success) {
-        // Connected! Proceed to billing
-        setStep('billing-method');
       } else {
-        // Failed - show error
-        setValidationError(getValidationErrorMessage(validationResult));
+        // Server is truly public - no auth needed
+        setDetectedMcpAuthType('public');
+        setStep('billing-method');
       }
     } catch (err) {
       setValidationError(err instanceof Error ? err.message : 'Failed to validate MCP connection');
@@ -304,6 +307,7 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel, authState, s
         tokenType: tokens.tokenType,
       };
       setMcpOAuthResult(oauthCreds);
+      setDetectedMcpAuthType('workspace_oauth');
       setMcpOAuthClient(null);
       // OAuth successful, proceed to billing
       setStep('billing-method');
@@ -354,9 +358,14 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel, authState, s
           id: workspaceId,
           name: selectedSpaceName || 'Craft Space',
           mcpUrl: mcpUrl,
-          mcpAuthType: mcpOAuthResult ? 'workspace_oauth' as McpAuthType : 'public' as McpAuthType,
+          mcpAuthType: detectedMcpAuthType,
           createdAt: Date.now(),
         };
+      }
+
+      // Guard: Ensure credentials exist when required
+      if (detectedMcpAuthType === 'workspace_oauth' && !mcpOAuthResult) {
+        throw new Error('MCP OAuth credentials required but not obtained. Please restart setup.');
       }
 
       // Save MCP OAuth credentials to workspace if obtained
@@ -404,7 +413,7 @@ export const Setup: React.FC<SetupProps> = ({ onComplete, onCancel, authState, s
       setError(err instanceof Error ? err.message : 'Failed to save configuration');
       setStep('error');
     }
-  }, [apiKey, oauthToken, mcpUrl, selectedSpaceName, onComplete, hasExistingWorkspace, existingWorkspace, mcpOAuthResult]);
+  }, [apiKey, oauthToken, mcpUrl, selectedSpaceName, onComplete, hasExistingWorkspace, existingWorkspace, mcpOAuthResult, detectedMcpAuthType]);
 
   // Billing method selected -> Credentials entry or Save
   const handleBillingMethodSelect = useCallback((method: AuthType) => {

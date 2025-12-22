@@ -361,6 +361,17 @@ Set launchSwarm=true to execute plan steps in parallel using multiple agents.
     teammateCount: z.number().min(1).max(5).optional().describe('Number of parallel agents (default: 3, max: 5)'),
   },
   async (args) => {
+    // If plan mode was already cancelled (e.g., user pressed SHIFT+TAB), don't show review panel
+    if (!planModeState.isActive) {
+      debug('[ExitCraftAgentsPlanMode] Plan mode already inactive, skipping review');
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Plan mode was already exited. The planning session has ended.`,
+        }],
+      };
+    }
+
     // Build the plan object using our Plan type
     const plan: Plan = {
       id: randomUUID(),

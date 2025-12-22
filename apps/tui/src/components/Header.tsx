@@ -26,6 +26,8 @@ export interface HeaderProps {
   safeMode?: boolean;
   /** Show "Press Ctrl+C again to exit" warning */
   exitWarning?: boolean;
+  /** Show "Cannot toggle Plan Mode while processing" warning */
+  planToggleWarning?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = memo(({
@@ -47,6 +49,7 @@ export const Header: React.FC<HeaderProps> = memo(({
   planMode = false,
   safeMode = false,
   exitWarning = false,
+  planToggleWarning = false,
 }) => {
   // Live clock state - updates every second when enabled
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -100,6 +103,16 @@ export const Header: React.FC<HeaderProps> = memo(({
     return (
       <Box justifyContent="space-between">
         <Text color="yellow" bold>Press Ctrl+C again to exit</Text>
+        <Box />
+      </Box>
+    );
+  }
+
+  // Show plan toggle warning when trying to toggle during processing
+  if (planToggleWarning) {
+    return (
+      <Box justifyContent="space-between">
+        <Text color="magenta" bold>Cannot toggle Plan Mode while agent is processing</Text>
         <Box />
       </Box>
     );
