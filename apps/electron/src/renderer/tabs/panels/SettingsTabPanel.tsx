@@ -533,11 +533,12 @@ export default function SettingsTabPanel({
     const loadDefaults = async () => {
       if (!window.electronAPI) return
       try {
-        const [safeMode, skipPerms] = await Promise.all([
-          window.electronAPI.getDefaultSafeMode(),
+        const [modes, skipPerms] = await Promise.all([
+          window.electronAPI.getDefaultModes(),
           window.electronAPI.getDefaultSkipPermissions(),
         ])
-        setDefaultSafeMode(safeMode)
+        // Check if 'safe' mode is in the default modes array
+        setDefaultSafeMode(modes.includes('safe'))
         setDefaultSkipPermissions(skipPerms)
       } catch (error) {
         console.error('Failed to load session defaults:', error)
@@ -551,7 +552,12 @@ export default function SettingsTabPanel({
     if (!window.electronAPI) return
     setDefaultSafeMode(enabled)
     try {
-      await window.electronAPI.setDefaultSafeMode(enabled)
+      // Get current modes, then add or remove 'safe' mode
+      const currentModes = await window.electronAPI.getDefaultModes()
+      const newModes = enabled
+        ? (currentModes.includes('safe') ? currentModes : [...currentModes, 'safe'] as import('../../shared/types').Mode[])
+        : currentModes.filter(m => m !== 'safe')
+      await window.electronAPI.setDefaultModes(newModes)
     } catch (error) {
       console.error('Failed to save default safe mode:', error)
       setDefaultSafeMode(!enabled) // Revert on error

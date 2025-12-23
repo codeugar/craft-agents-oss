@@ -6,6 +6,7 @@ import { getCredentialManager } from '../credentials/index.ts';
 import { isOpusModel } from './models.ts';
 import type { StoredAttachment } from '@craft-agent/core/types';
 import type { Plan } from '../agents/plan-types.ts';
+import type { Mode } from '../agent/mode-manager.ts';
 
 /**
  * OAuth credentials from a fresh authentication flow.
@@ -69,7 +70,7 @@ export interface StoredConfig {
   showCost?: boolean;  // Whether to show cost in status bar (only relevant for API Key auth)
   cumulativeUsage?: CumulativeUsage;  // Global cumulative cost across all workspaces
   // New session defaults
-  defaultSafeMode?: boolean;  // Whether new sessions start with safe mode enabled (default: false)
+  defaultModes?: Mode[];  // Modes enabled by default for new sessions (e.g., ['safe'])
   defaultSkipPermissions?: boolean;  // Whether new sessions auto-approve permissions (default: false)
 }
 
@@ -372,15 +373,19 @@ export function setShowCost(show: boolean): void {
 
 // New session defaults getters/setters
 
-export function getDefaultSafeMode(): boolean {
+export function getDefaultModes(): Mode[] {
   const config = loadStoredConfig();
-  return config?.defaultSafeMode ?? false;
+  // Backward compatibility: if old defaultSafeMode exists, convert it
+  if (config?.defaultModes === undefined && (config as { defaultSafeMode?: boolean })?.defaultSafeMode) {
+    return ['safe'];
+  }
+  return config?.defaultModes ?? [];
 }
 
-export function setDefaultSafeMode(enabled: boolean): void {
+export function setDefaultModes(modes: Mode[]): void {
   const config = loadStoredConfig();
   if (!config) return;
-  config.defaultSafeMode = enabled;
+  config.defaultModes = modes;
   saveConfig(config);
 }
 
@@ -1195,7 +1200,7 @@ export interface Session {
   isFlagged?: boolean;           // Whether this session is flagged
   // Advanced options (persisted per session)
   skipPermissions?: boolean;     // Auto-approve all permission requests
-  safeModeEnabled?: boolean;     // Safe mode active for this session
+  activeModes?: Mode[];          // Active modes for this session (e.g., ['safe'])
   // Todo state (user-controlled) - determines inbox vs completed
   todoState?: TodoState;
   // Read/unread tracking - ID of last message user has read

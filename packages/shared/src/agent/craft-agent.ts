@@ -553,7 +553,7 @@ export class CraftAgent {
 
     // Initialize safe mode state with callbacks
     const sessionId = this.modeSessionId;
-    const initialSafeMode = config.session?.safeModeEnabled ?? false;
+    const initialSafeMode = config.session?.activeModes?.includes('safe') ?? false;
 
     initializeModeState(sessionId, { safeMode: initialSafeMode }, {
       onStateChange: (state) => {

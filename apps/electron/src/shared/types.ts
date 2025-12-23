@@ -13,6 +13,10 @@ import type {
   StoredAttachment as CoreStoredAttachment,
 } from '@craft-agent/core/types';
 
+// Import Mode type from shared package for generic mode handling
+import type { Mode } from '@craft-agent/shared/agent';
+export type { Mode };
+
 export type {
   CoreMessage as Message,
   CoreMessageRole as MessageRole,
@@ -279,7 +283,8 @@ export interface Session {
   isFlagged?: boolean
   // Advanced options (persisted per session)
   skipPermissions?: boolean
-  safeModeEnabled?: boolean  // Whether safe mode (read-only exploration) is enabled for this session
+  /** Active operational modes for this session (e.g., 'safe' for read-only exploration) */
+  activeModes?: Mode[]
   // Todo state (user-controlled) - determines inbox vs completed
   todoState?: TodoState
   // Read/unread tracking - ID of last message user has read
@@ -302,8 +307,8 @@ export type SessionEvent =
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'agent_status'; sessionId: string; status: AgentStatus }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }
-  // Safe mode events
-  | { type: 'safe_mode_changed'; sessionId: string; enabled: boolean }
+  // Mode events (generic for any mode type)
+  | { type: 'mode_changed'; sessionId: string; mode: Mode; enabled: boolean }
   | { type: 'plan_submitted'; sessionId: string; message: CoreMessage }
   | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
 
@@ -330,9 +335,9 @@ export const IPC_CHANNELS = {
   MARK_SESSION_UNREAD: 'sessions:markUnread',
   RESPOND_TO_PERMISSION: 'sessions:respondToPermission',
 
-  // Safe mode
+  // Mode management (generic for any mode type)
+  SET_MODE: 'sessions:setMode',
   RESPOND_TO_ASK_QUESTION: 'sessions:respondToAskQuestion',
-  SET_SAFE_MODE: 'sessions:setSafeMode',
 
   // Workspace management
   GET_WORKSPACES: 'workspaces:get',
@@ -435,8 +440,8 @@ export const IPC_CHANNELS = {
   SETTINGS_SET_MODEL: 'settings:setModel',
 
   // Settings - New Session Defaults
-  SETTINGS_GET_DEFAULT_SAFE_MODE: 'settings:getDefaultSafeMode',
-  SETTINGS_SET_DEFAULT_SAFE_MODE: 'settings:setDefaultSafeMode',
+  SETTINGS_GET_DEFAULT_MODES: 'settings:getDefaultModes',
+  SETTINGS_SET_DEFAULT_MODES: 'settings:setDefaultModes',
   SETTINGS_GET_DEFAULT_SKIP_PERMISSIONS: 'settings:getDefaultSkipPermissions',
   SETTINGS_SET_DEFAULT_SKIP_PERMISSIONS: 'settings:setDefaultSkipPermissions',
 
@@ -558,9 +563,9 @@ export interface ElectronAPI {
   markSessionUnread(sessionId: string): Promise<void>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean): Promise<boolean>
 
-  // Safe mode
+  // Mode management (generic for any mode type)
+  setMode(sessionId: string, mode: Mode, enabled: boolean): Promise<void>
   respondToAskQuestion(sessionId: string, requestId: string, answers: AskQuestionResponse): Promise<boolean>
-  setSafeMode(sessionId: string, enabled: boolean): Promise<void>
 
   // Workspace management
   getWorkspaces(): Promise<Workspace[]>
@@ -668,8 +673,8 @@ export interface ElectronAPI {
   setModel(model: string): Promise<void>
 
   // Settings - New Session Defaults
-  getDefaultSafeMode(): Promise<boolean>
-  setDefaultSafeMode(enabled: boolean): Promise<void>
+  getDefaultModes(): Promise<Mode[]>
+  setDefaultModes(modes: Mode[]): Promise<void>
   getDefaultSkipPermissions(): Promise<boolean>
   setDefaultSkipPermissions(enabled: boolean): Promise<void>
 

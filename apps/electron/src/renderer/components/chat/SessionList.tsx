@@ -477,8 +477,8 @@ interface SessionListProps {
   onSessionSelect?: (session: Session, options: { forceNewTab: boolean }) => void
   /** Called to navigate to a specific view (e.g., 'completed', 'inbox') */
   onNavigateToView?: (view: 'inbox' | 'completed' | 'flagged') => void
-  /** Set of session IDs with safe mode enabled (real-time state) */
-  safeModeSessions?: Set<string>
+  /** Active modes per session (real-time state) */
+  sessionModes?: Map<string, import('../../../shared/types').Mode[]>
   /** Whether search mode is active */
   searchActive?: boolean
   /** Current search query */
@@ -513,7 +513,7 @@ export function SessionList({
   onFocusChatInput,
   onSessionSelect,
   onNavigateToView,
-  safeModeSessions,
+  sessionModes,
   searchActive,
   searchQuery = '',
   onSearchChange,
@@ -825,7 +825,7 @@ export function SessionList({
                       // Open in new tab without changing selection
                       onSessionSelect?.(item, { forceNewTab: true })
                     }}
-                    isSafeModeEnabled={safeModeSessions?.has(item.id)}
+                    isSafeModeEnabled={sessionModes?.get(item.id)?.includes('safe')}
                     searchQuery={searchQuery}
                   />
                 )

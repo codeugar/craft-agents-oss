@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, SetupNeeds, TodoState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, SetupNeeds, TodoState, Mode } from '../shared/types'
 import { getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
 import { generateMessageId } from '../shared/types'
 import { Chat } from '@/components/chat/Chat'
@@ -40,8 +40,8 @@ export default function App() {
   const [ultrathinkSessions, setUltrathinkSessions] = useState<Set<string>>(new Set())
   // Skip permissions per session (session-scoped, not global)
   const [skipPermissionsSessions, setSkipPermissionsSessions] = useState<Set<string>>(new Set())
-  // Safe mode per session (session-scoped)
-  const [safeModeSessions, setSafeModeSessions] = useState<Set<string>>(new Set())
+  // Active modes per session (generic for any mode type)
+  const [sessionModes, setSessionModes] = useState<Map<string, Mode[]>>(new Map())
 
   // Queue for tool_result events that arrive before their tool_start (out-of-order handling)
   // Using ref to avoid stale closure issues in the useEffect event handler
@@ -268,11 +268,14 @@ export default function App() {
         loadedSessions.filter(s => s.skipPermissions).map(s => s.id)
       )
       setSkipPermissionsSessions(skipSessions)
-      // Initialize safeModeSessions from session data
-      const safeSessions = new Set(
-        loadedSessions.filter(s => s.safeModeEnabled).map(s => s.id)
-      )
-      setSafeModeSessions(safeSessions)
+      // Initialize sessionModes from session data (generic for any mode type)
+      const modesMap = new Map<string, Mode[]>()
+      for (const s of loadedSessions) {
+        if (s.activeModes && s.activeModes.length > 0) {
+          modesMap.set(s.id, s.activeModes)
+        }
+      }
+      setSessionModes(modesMap)
     })
     // Load stored model preference
     window.electronAPI.getModel().then((storedModel) => {
@@ -329,15 +332,23 @@ export default function App() {
         return
       }
 
-      // Handle plan mode events
-      if (event.type === 'safe_mode_changed') {
-        console.log('[App] safe_mode_changed:', event.sessionId, event.enabled)
-        setSafeModeSessions(prev => {
-          const next = new Set(prev)
+      // Handle mode change events (generic for any mode type)
+      if (event.type === 'mode_changed') {
+        console.log('[App] mode_changed:', event.sessionId, event.mode, event.enabled)
+        setSessionModes(prev => {
+          const next = new Map(prev)
+          const currentModes = next.get(event.sessionId) || []
           if (event.enabled) {
-            next.add(event.sessionId)
+            if (!currentModes.includes(event.mode)) {
+              next.set(event.sessionId, [...currentModes, event.mode])
+            }
           } else {
-            next.delete(event.sessionId)
+            const filtered = currentModes.filter(m => m !== event.mode)
+            if (filtered.length > 0) {
+              next.set(event.sessionId, filtered)
+            } else {
+              next.delete(event.sessionId)
+            }
           }
           return next
         })
@@ -835,8 +846,13 @@ export default function App() {
     if (session.skipPermissions) {
       setSkipPermissionsSessions(prev => new Set([...prev, session.id]))
     }
-    if (session.safeModeEnabled) {
-      setSafeModeSessions(prev => new Set([...prev, session.id]))
+    // Apply mode defaults (generic for any mode type)
+    if (session.activeModes && session.activeModes.length > 0) {
+      setSessionModes(prev => {
+        const next = new Map(prev)
+        next.set(session.id, session.activeModes!)
+        return next
+      })
     }
 
     return session
@@ -1091,18 +1107,26 @@ export default function App() {
     window.electronAPI.setSkipPermissions(sessionId, enabled)
   }, [])
 
-  const handleSafeModeChange = useCallback((sessionId: string, enabled: boolean) => {
-    setSafeModeSessions(prev => {
-      const next = new Set(prev)
+  const handleModeChange = useCallback((sessionId: string, mode: Mode, enabled: boolean) => {
+    setSessionModes(prev => {
+      const next = new Map(prev)
+      const currentModes = next.get(sessionId) || []
       if (enabled) {
-        next.add(sessionId)
+        if (!currentModes.includes(mode)) {
+          next.set(sessionId, [...currentModes, mode])
+        }
       } else {
-        next.delete(sessionId)
+        const filtered = currentModes.filter(m => m !== mode)
+        if (filtered.length > 0) {
+          next.set(sessionId, filtered)
+        } else {
+          next.delete(sessionId)
+        }
       }
       return next
     })
     // Persist to backend and update agent state
-    window.electronAPI.setSafeMode(sessionId, enabled)
+    window.electronAPI.setMode(sessionId, mode, enabled)
   }, [])
 
   // Handle input draft changes per session with debounced persistence
@@ -1354,8 +1378,8 @@ export default function App() {
             onUltrathinkChange={handleUltrathinkChange}
             skipPermissionsSessions={skipPermissionsSessions}
             onSkipPermissionsChange={handleSkipPermissionsChange}
-            safeModeSessions={safeModeSessions}
-            onSafeModeChange={handleSafeModeChange}
+            sessionModes={sessionModes}
+            onModeChange={handleModeChange}
             // Input drafts per session
             sessionDrafts={sessionDrafts}
             onInputChange={handleInputChange}

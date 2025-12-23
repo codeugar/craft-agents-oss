@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { rm, readFile } from 'fs/promises'
-import { CraftAgent, type AgentEvent, enterMode, exitMode } from '@craft-agent/shared/agent'
+import { CraftAgent, type AgentEvent, enterMode, exitMode, type Mode, isModeActive } from '@craft-agent/shared/agent'
 import type { WindowManager } from './window-manager'
 import {
   loadStoredConfig,
@@ -10,7 +10,7 @@ import {
   getWorkspaceAccessTokenAsync,
   updateSessionMetadata,
   getSessionAttachmentsPath,
-  getDefaultSafeMode,
+  getDefaultModes,
   getDefaultSkipPermissions,
   type Workspace,
   // Session persistence functions
@@ -42,8 +42,8 @@ import { DEFAULT_MODEL } from '@craft-agent/shared/config'
  * Feature flags for agent behavior
  */
 export const AGENT_FLAGS = {
-  /** Enable safe mode (read-only exploration) */
-  safeModeEnabled: true,
+  /** Default modes enabled for new sessions */
+  defaultModesEnabled: true,
 } as const
 
 interface ManagedSession {
@@ -72,7 +72,8 @@ interface ManagedSession {
   isFlagged: boolean
   // Advanced options (persisted per session)
   skipPermissions: boolean
-  safeModeEnabled?: boolean
+  /** Active operational modes for this session */
+  activeModes: Mode[]
   // SDK session ID for conversation continuity
   sdkSessionId?: string
   // Track whether agent was successfully activated via AgentStateManager
@@ -581,7 +582,7 @@ export class SessionManager {
           agentName: storedSession.agentName,
           isFlagged: storedSession.isFlagged ?? false,
           skipPermissions: storedSession.skipPermissions ?? false,
-          safeModeEnabled: storedSession.safeModeEnabled ?? false,
+          activeModes: storedSession.activeModes ?? (storedSession.safeModeEnabled ? ['safe'] : []),
           sdkSessionId: storedSession.sdkSessionId,
           tokenUsage: storedSession.tokenUsage,
           todoState: storedSession.todoState,
@@ -615,7 +616,7 @@ export class SessionManager {
         agentName: managed.agentName,
         isFlagged: managed.isFlagged,
         skipPermissions: managed.skipPermissions,
-        safeModeEnabled: managed.safeModeEnabled,
+        activeModes: managed.activeModes,
         todoState: managed.todoState,
         messages: persistableMessages.map(messageToStored),
         tokenUsage: managed.tokenUsage ?? {
@@ -652,7 +653,7 @@ export class SessionManager {
         agentName: m.agentName,
         isFlagged: m.isFlagged,
         skipPermissions: m.skipPermissions,
-        safeModeEnabled: m.safeModeEnabled,
+        activeModes: m.activeModes,
         todoState: m.todoState,
         lastReadMessageId: m.lastReadMessageId,
       }))
@@ -667,7 +668,7 @@ export class SessionManager {
 
     // Get new session defaults from settings
     const defaultSkipPerms = getDefaultSkipPermissions()
-    const defaultSafeMode = getDefaultSafeMode()
+    const defaultModes = getDefaultModes()
 
     // Use storage layer to create and persist the session
     const storedSession = createStoredSession(workspaceId)
@@ -687,12 +688,13 @@ export class SessionManager {
       agentName,
       isFlagged: false,
       skipPermissions: defaultSkipPerms,
+      activeModes: defaultModes,
     }
 
     this.sessions.set(storedSession.id, managed)
 
     // Persist with agent info or if defaults are set
-    if (agentId || agentName || defaultSkipPerms) {
+    if (agentId || agentName || defaultSkipPerms || defaultModes.length > 0) {
       this.persistSession(managed)
     }
 
@@ -707,7 +709,7 @@ export class SessionManager {
       agentName,
       isFlagged: false,
       skipPermissions: defaultSkipPerms,
-      safeModeEnabled: defaultSafeMode,
+      activeModes: defaultModes,
       todoState: undefined,  // User-controlled, defaults to undefined (treated as 'todo')
     }
   }
@@ -722,7 +724,7 @@ export class SessionManager {
       managed.agent = new CraftAgent({
         workspace: managed.workspace,
         model: config?.model,
-        isHeadless: !AGENT_FLAGS.safeModeEnabled,
+        isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         // Always pass session object - id is required for plan mode callbacks
         // sdkSessionId is optional and used for conversation resumption
         session: {
@@ -748,13 +750,21 @@ export class SessionManager {
         }, managed.workspace.id)
       }
 
-      // Set up safe mode handlers
+      // Set up mode change handlers (safe mode, and future modes)
       managed.agent.onSafeModeChange = (enabled) => {
-        console.log(`[SessionManager] Safe mode changed for session ${managed.id}:`, enabled)
-        managed.safeModeEnabled = enabled
+        console.log(`[SessionManager] Mode 'safe' changed for session ${managed.id}:`, enabled)
+        // Update activeModes array
+        if (enabled) {
+          if (!managed.activeModes.includes('safe')) {
+            managed.activeModes = [...managed.activeModes, 'safe']
+          }
+        } else {
+          managed.activeModes = managed.activeModes.filter(m => m !== 'safe')
+        }
         this.sendEvent({
-          type: 'safe_mode_changed',
+          type: 'mode_changed',
           sessionId: managed.id,
+          mode: 'safe',
           enabled,
         }, managed.workspace.id)
       }
@@ -805,11 +815,11 @@ export class SessionManager {
       // NOTE: Agent definition is now applied in sendMessage() via AgentStateManager.activate()
       // This ensures proper state machine flow: extraction → auth checks → activation
 
-      // Apply session-scoped safe mode state to the newly created agent
+      // Apply session-scoped active modes to the newly created agent
       // This ensures the UI toggle state is reflected in the agent before first message
-      if (managed.safeModeEnabled) {
-        enterMode(managed.id, 'safe')
-        console.log(`[SessionManager] Applied safe mode to agent for session ${managed.id}`)
+      for (const mode of managed.activeModes) {
+        enterMode(managed.id, mode)
+        console.log(`[SessionManager] Applied mode '${mode}' to agent for session ${managed.id}`)
       }
     }
     return managed.agent
@@ -1213,23 +1223,31 @@ export class SessionManager {
   }
 
   /**
-   * Set safe mode for a session
+   * Set a mode for a session (generic for any mode type)
    */
-  setSafeMode(sessionId: string, enabled: boolean): void {
+  setMode(sessionId: string, mode: Mode, enabled: boolean): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      managed.safeModeEnabled = enabled
+      // Update activeModes array
+      if (enabled) {
+        if (!managed.activeModes.includes(mode)) {
+          managed.activeModes = [...managed.activeModes, mode]
+        }
+      } else {
+        managed.activeModes = managed.activeModes.filter(m => m !== mode)
+      }
 
       // Update the mode state for this specific session via mode manager
       if (enabled) {
-        enterMode(sessionId, 'safe')
+        enterMode(sessionId, mode)
       } else {
-        exitMode(sessionId, 'safe')
+        exitMode(sessionId, mode)
       }
 
       this.sendEvent({
-        type: 'safe_mode_changed',
+        type: 'mode_changed',
         sessionId: managed.id,
+        mode,
         enabled,
       }, managed.workspace.id)
       // Persist to disk

@@ -14,6 +14,7 @@ import type {
   SubAgentMetadata,
   FileAttachment,
   PermissionRequest,
+  Mode,
 } from '../../shared/types'
 
 export interface ChatContextType {
@@ -32,8 +33,8 @@ export interface ChatContextType {
   ultrathinkSessions: Set<string>
   /** Session IDs that have skip permissions enabled (session-scoped) */
   skipPermissionsSessions: Set<string>
-  /** Session IDs that have safe mode enabled (session-scoped) */
-  safeModeSessions: Set<string>
+  /** Active modes per session (generic for any mode type) */
+  sessionModes: Map<string, Mode[]>
 
   // Session callbacks
   onCreateSession: (workspaceId: string, agentId?: string) => Promise<Session>
@@ -62,7 +63,7 @@ export interface ChatContextType {
   // Advanced options callbacks (all session-scoped)
   onUltrathinkChange: (sessionId: string, enabled: boolean) => void
   onSkipPermissionsChange: (sessionId: string, enabled: boolean) => void
-  onSafeModeChange: (sessionId: string, enabled: boolean) => void
+  onModeChange: (sessionId: string, mode: Mode, enabled: boolean) => void
 
   // Input draft callback
   onInputChange: (sessionId: string, value: string) => void

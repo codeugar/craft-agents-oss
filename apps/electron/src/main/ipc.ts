@@ -15,7 +15,7 @@ import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type DiffPreviewData, type CodePreviewData, type TerminalPreviewData } from '../shared/types'
 import { readFileAttachment } from '@craft-agent/shared/utils'
 import { getAiCreditTopUpUrl } from '@craft-agent/shared/auth'
-import { getSessionAttachmentsPath, getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultSafeMode, setDefaultSafeMode, getDefaultSkipPermissions, setDefaultSkipPermissions } from '@craft-agent/shared/config'
+import { getSessionAttachmentsPath, getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultModes, setDefaultModes, getDefaultSkipPermissions, setDefaultSkipPermissions } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { MarkItDown } from 'markitdown-js'
 
@@ -236,9 +236,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return sessionManager.respondToAskQuestion(sessionId, requestId, answers)
   })
 
-  // Set safe mode for a session
-  ipcMain.handle(IPC_CHANNELS.SET_SAFE_MODE, async (_event, sessionId: string, enabled: boolean) => {
-    return sessionManager.setSafeMode(sessionId, enabled)
+  // Set a mode for a session (generic for any mode type)
+  ipcMain.handle(IPC_CHANNELS.SET_MODE, async (_event, sessionId: string, mode: import('../shared/types').Mode, enabled: boolean) => {
+    return sessionManager.setMode(sessionId, mode, enabled)
   })
 
   // Read a file (with path validation to prevent traversal attacks)
@@ -762,15 +762,15 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Settings - New Session Defaults
   // ============================================================
 
-  // Get default safe mode for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_DEFAULT_SAFE_MODE, async (): Promise<boolean> => {
-    return getDefaultSafeMode()
+  // Get default modes for new sessions
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_DEFAULT_MODES, async (): Promise<import('../shared/types').Mode[]> => {
+    return getDefaultModes()
   })
 
-  // Set default safe mode for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_DEFAULT_SAFE_MODE, async (_event, enabled: boolean) => {
-    setDefaultSafeMode(enabled)
-    console.log(`[IPC] Default safe mode updated to: ${enabled}`)
+  // Set default modes for new sessions
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_DEFAULT_MODES, async (_event, modes: import('../shared/types').Mode[]) => {
+    setDefaultModes(modes)
+    console.log(`[IPC] Default modes updated to:`, modes)
   })
 
   // Get default skip permissions for new sessions
