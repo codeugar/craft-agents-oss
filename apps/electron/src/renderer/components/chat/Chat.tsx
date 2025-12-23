@@ -6,6 +6,7 @@ import {
   Inbox,
   Settings,
   ChevronRight,
+  ChevronDown,
   FolderOpen,
   MoreHorizontal,
   RotateCw,
@@ -18,6 +19,9 @@ import {
   ListFilter,
   Check,
   Search,
+  Plus,
+  Plug,
+  Pencil,
 } from "lucide-react"
 import { McpIcon } from "../icons/McpIcon"
 import {
@@ -45,6 +49,7 @@ import {
   StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { FadingText } from "@/components/ui/fading-text"
 import {
   Collapsible,
@@ -66,7 +71,8 @@ import { useFocusZone, useGlobalShortcuts } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
 import { getSessionTitle } from "@/utils/session"
 import { closeTabWithCleanup } from "@/utils/closeTabWithCleanup"
-import type { Session, Workspace, SubAgentMetadata, FileAttachment, PermissionRequest, TodoState } from "../../../shared/types"
+import type { Session, Workspace, SubAgentMetadata, FileAttachment, PermissionRequest, TodoState, ConnectionConfig } from "../../../shared/types"
+import { AddConnectionDialog } from "../connections/AddConnectionDialog"
 import { type TodoStateId, DEFAULT_TODO_STATES, getStateColor } from "@/config/todo-states"
 
 type ViewMode = 'inbox' | 'archive' | 'flagged' | 'agent' | `state:${TodoStateId}`
@@ -584,6 +590,34 @@ export function Chat({
   })
   const [focusedSidebarItemId, setFocusedSidebarItemId] = React.useState<string | null>(null)
   const sidebarItemRefs = React.useRef<Map<string, HTMLElement>>(new Map())
+
+  // Connections state
+  const [connections, setConnections] = React.useState<ConnectionConfig[]>([])
+  const [isConnectionsCollapsed, setIsConnectionsCollapsed] = React.useState(false)
+  const [isAddConnectionOpen, setIsAddConnectionOpen] = React.useState(false)
+  const [editingConnection, setEditingConnection] = React.useState<ConnectionConfig | null>(null)
+
+  const handleToggleConnection = React.useCallback((id: string, enabled: boolean) => {
+    setConnections(prev => prev.map(c => c.id === id ? { ...c, enabled } : c))
+  }, [])
+
+  const handleAddConnection = React.useCallback((config: Omit<ConnectionConfig, 'id' | 'enabled'>) => {
+    const newConnection: ConnectionConfig = {
+      ...config,
+      id: crypto.randomUUID(),
+      enabled: true,
+    }
+    setConnections(prev => [...prev, newConnection])
+  }, [])
+
+  const handleEditConnection = React.useCallback((id: string, config: Omit<ConnectionConfig, 'id' | 'enabled'>) => {
+    setConnections(prev => prev.map(c => c.id === id ? { ...c, ...config } : c))
+  }, [])
+
+  const handleOpenEditConnection = React.useCallback((conn: ConnectionConfig) => {
+    setEditingConnection(conn)
+    setIsAddConnectionOpen(true)
+  }, [])
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
 
@@ -1546,6 +1580,60 @@ export function Chat({
                     },
                   ]}
                 />
+                {/* Connections Section */}
+                <div className="pt-0.5">
+                  <Collapsible open={!isConnectionsCollapsed} onOpenChange={() => setIsConnectionsCollapsed(v => !v)}>
+                    {/* Header with three-dot menu */}
+                    <div className="flex items-center justify-between pl-4 pr-2 py-2 shrink-0">
+                      <CollapsibleTrigger className="flex items-center gap-2 group">
+                        <motion.div
+                          animate={{ rotate: isConnectionsCollapsed ? -90 : 0 }}
+                          transition={collapsibleSpring}
+                        >
+                          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                        </motion.div>
+                        <span className="text-xs font-medium text-muted-foreground select-none">Connections</span>
+                      </CollapsibleTrigger>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="p-1 rounded hover:bg-foreground/5 data-[state=open]:bg-foreground/5 text-muted-foreground hover:text-foreground">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <StyledDropdownMenuContent align="end" minWidth="min-w-0">
+                          <StyledDropdownMenuItem onClick={() => setIsAddConnectionOpen(true)}>
+                            <Plus />
+                            Add connection
+                          </StyledDropdownMenuItem>
+                        </StyledDropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    {/* Connection List */}
+                    <AnimatedCollapsibleContent isOpen={!isConnectionsCollapsed}>
+                      <nav className="grid gap-0.5 px-2 pb-1">
+                        {connections.map(conn => (
+                          <div key={conn.id} className="flex items-center justify-between py-[7px] px-2 rounded-md hover:bg-foreground/5 group/conn">
+                            <div className="flex items-center gap-2">
+                              <Plug className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-[13px]">{conn.name}</span>
+                              <button
+                                onClick={() => handleOpenEditConnection(conn)}
+                                className="p-0.5 rounded opacity-0 group-hover/conn:opacity-100 hover:bg-foreground/10 text-muted-foreground hover:text-foreground transition-opacity"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <Switch
+                              checked={conn.enabled}
+                              onCheckedChange={(checked) => handleToggleConnection(conn.id, checked)}
+                              className="scale-75"
+                            />
+                          </div>
+                        ))}
+                      </nav>
+                    </AnimatedCollapsibleContent>
+                  </Collapsible>
+                </div>
                 {/* Agent Tree: Hierarchical list of agents */}
                 <div className="group/agents flex-1 min-h-0 flex flex-col overflow-hidden pt-0.5">
                   {/* Agents Section Header with menu */}
@@ -1919,6 +2007,18 @@ export function Chat({
       </div>
 
       </TooltipProvider>
+
+      {/* Add Connection Dialog */}
+      <AddConnectionDialog
+        open={isAddConnectionOpen}
+        onOpenChange={(open) => {
+          setIsAddConnectionOpen(open)
+          if (!open) setEditingConnection(null)
+        }}
+        onAdd={handleAddConnection}
+        editConnection={editingConnection}
+        onEdit={handleEditConnection}
+      />
     </ChatProvider>
   )
 }

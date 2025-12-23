@@ -450,6 +450,9 @@ export const IPC_CHANNELS = {
   DRAFTS_DELETE: 'drafts:delete',
   DRAFTS_GET_ALL: 'drafts:getAll',
 
+  // Connections
+  CONNECTIONS_START_MCP_OAUTH: 'connections:startMcpOAuth',
+
   // Markdown preview window
   MARKDOWN_PREVIEW_OPEN: 'markdownPreview:open',
   MARKDOWN_PREVIEW_GET_DATA: 'markdownPreview:getData',
@@ -699,6 +702,14 @@ export interface ElectronAPI {
   setDraft(sessionId: string, text: string): Promise<void>
   deleteDraft(sessionId: string): Promise<void>
   getAllDrafts(): Promise<Record<string, string>>
+
+  // Connections
+  startConnectionMcpOAuth(config: {
+    name: string
+    url: string
+    clientId?: string
+    clientSecret?: string
+  }): Promise<{ success: boolean; error?: string; accessToken?: string; clientId?: string }>
 }
 
 /**
@@ -726,6 +737,34 @@ export interface DeepLinkNavigation {
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
+}
+
+// ============================================
+// Connection Types
+// ============================================
+
+/**
+ * Connection type - either MCP server or REST API
+ */
+export type ConnectionType = 'mcp' | 'api'
+
+/**
+ * Connection configuration for external MCP servers and APIs
+ */
+export interface ConnectionConfig {
+  id: string
+  name: string
+  type: ConnectionType
+  enabled: boolean
+  // MCP-specific
+  mcpUrl?: string
+  mcpClientId?: string      // Optional static OAuth config
+  mcpClientSecret?: string  // Optional static OAuth config
+  // API-specific
+  apiUrl?: string
+  apiBearerToken?: string
+  // Auth state
+  isAuthenticated?: boolean
 }
 
 declare global {

@@ -1,19 +1,15 @@
 import * as React from 'react'
+import * as ReactDOM from 'react-dom'
 import {
   Paperclip,
   ArrowUp,
   Square,
   ChevronDown,
   SquareSlash,
+  Check,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-} from '@/components/ui/styled-dropdown'
 import {
   SlashCommandMenu,
   InlineSlashCommand,
@@ -21,7 +17,6 @@ import {
   DEFAULT_SLASH_COMMANDS,
   type SlashCommandId,
 } from '@/components/ui/slash-command-menu'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { MODELS, getModelDisplayName } from '@config/models'
@@ -141,10 +136,15 @@ export function FreeFormInput({
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
   const [slashDropdownOpen, setSlashDropdownOpen] = React.useState(false)
+  const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
   const [isFocused, setIsFocused] = React.useState(false)
 
   const dragCounterRef = React.useRef(0)
   const containerRef = React.useRef<HTMLDivElement>(null)
+  const modelButtonRef = React.useRef<HTMLButtonElement>(null)
+  const [modelDropdownPosition, setModelDropdownPosition] = React.useState<{ top: number; left: number } | null>(null)
+  const slashButtonRef = React.useRef<HTMLButtonElement>(null)
+  const [slashDropdownPosition, setSlashDropdownPosition] = React.useState<{ top: number; left: number } | null>(null)
 
   // Merge refs
   const internalRef = React.useRef<HTMLTextAreaElement>(null)
@@ -490,30 +490,53 @@ export function FreeFormInput({
         {/* Bottom Row: Controls */}
         <div className="flex items-center gap-1 px-2 py-2 border-t border-border/50">
           {/* Slash Command Button */}
-          <Popover open={slashDropdownOpen} onOpenChange={setSlashDropdownOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 shrink-0 rounded-[4px]"
-                disabled={disabled}
-              >
-                <SquareSlash className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" sideOffset={8} className="p-0 w-auto border-0">
-              <SlashCommandMenu
-                commands={DEFAULT_SLASH_COMMANDS}
-                activeCommands={activeCommands}
-                onSelect={(commandId) => {
-                  handleSlashCommand(commandId)
-                  setSlashDropdownOpen(false)
-                }}
-                showFilter
-              />
-            </PopoverContent>
-          </Popover>
+          <div className="relative">
+            <button
+              ref={slashButtonRef}
+              type="button"
+              className="inline-flex items-center justify-center h-7 w-7 shrink-0 rounded-[4px] hover:bg-foreground/5 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+              disabled={disabled}
+              onClick={() => {
+                if (!slashDropdownOpen && slashButtonRef.current) {
+                  const rect = slashButtonRef.current.getBoundingClientRect()
+                  setSlashDropdownPosition({
+                    top: rect.top,
+                    left: rect.left,
+                  })
+                }
+                setSlashDropdownOpen(!slashDropdownOpen)
+              }}
+            >
+              <SquareSlash className="h-4 w-4" />
+            </button>
+            {slashDropdownOpen && slashDropdownPosition && ReactDOM.createPortal(
+              <>
+                <div
+                  className="fixed inset-0 z-[9998]"
+                  onClick={() => setSlashDropdownOpen(false)}
+                />
+                <div
+                  className="fixed rounded-2xl border bg-popover shadow-lg z-[9999] overflow-hidden"
+                  style={{
+                    top: slashDropdownPosition.top - 8,
+                    left: slashDropdownPosition.left,
+                    transform: 'translateY(-100%)',
+                  }}
+                >
+                  <SlashCommandMenu
+                    commands={DEFAULT_SLASH_COMMANDS}
+                    activeCommands={activeCommands}
+                    onSelect={(commandId) => {
+                      handleSlashCommand(commandId)
+                      setSlashDropdownOpen(false)
+                    }}
+                    showFilter
+                  />
+                </div>
+              </>,
+              document.body
+            )}
+          </div>
 
           {/* Attach File Button */}
           <Button
@@ -527,33 +550,81 @@ export function FreeFormInput({
             <Paperclip className="h-4 w-4" />
           </Button>
 
-          {/* Model Selector */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 data-[state=open]:bg-foreground/5"
-              >
-                {getModelDisplayName(currentModel)}
-                <ChevronDown className="opacity-50" style={{ width: 12, height: 12 }} />
-              </Button>
-            </DropdownMenuTrigger>
-            <StyledDropdownMenuContent side="top" align="start" sideOffset={8}>
-              {MODELS.map((model) => (
-                <StyledDropdownMenuItem
-                  key={model.id}
-                  onClick={() => onModelChange(model.id)}
-                  className={cn(currentModel === model.id && 'bg-foreground/10')}
-                >
-                  {model.name}
-                </StyledDropdownMenuItem>
-              ))}
-            </StyledDropdownMenuContent>
-          </DropdownMenu>
-
           {/* Spacer */}
           <div className="flex-1" />
+
+          {/* Model Selector */}
+          <div className="relative">
+            <button
+              ref={modelButtonRef}
+              type="button"
+              className="inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 transition-colors"
+              onClick={() => {
+                if (!modelDropdownOpen && modelButtonRef.current) {
+                  // Calculate position when opening
+                  const rect = modelButtonRef.current.getBoundingClientRect()
+                  setModelDropdownPosition({
+                    top: rect.top,
+                    left: rect.right - 280, // Align right edge of dropdown with right edge of button
+                  })
+                }
+                setModelDropdownOpen(!modelDropdownOpen)
+              }}
+            >
+              {getModelDisplayName(currentModel)}
+              <ChevronDown className="opacity-50" style={{ width: 12, height: 12 }} />
+            </button>
+            {modelDropdownOpen && modelDropdownPosition && ReactDOM.createPortal(
+              <>
+                {/* Backdrop to close on click outside */}
+                <div
+                  className="fixed inset-0 z-[9998]"
+                  onClick={() => setModelDropdownOpen(false)}
+                />
+                <div
+                  className="fixed p-2 min-w-[280px] rounded-2xl border bg-popover shadow-lg z-[9999]"
+                  style={{
+                    top: modelDropdownPosition.top - 8, // 8px gap above button
+                    left: modelDropdownPosition.left,
+                    transform: 'translateY(-100%)', // Position above the calculated point
+                  }}
+                >
+                  <div className="space-y-1">
+                    {MODELS.map((model) => {
+                      const isSelected = currentModel === model.id
+                      const descriptions: Record<string, string> = {
+                        'claude-opus-4-5-20251101': 'Most capable for complex work',
+                        'claude-sonnet-4-5-20250929': 'Best for everyday tasks',
+                        'claude-haiku-4-5-20251001': 'Fastest for quick answers',
+                      }
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            onModelChange(model.id)
+                            setModelDropdownOpen(false)
+                          }}
+                          className="w-full flex items-center justify-between px-2 py-2 rounded-lg hover:bg-accent/50 transition-colors"
+                        >
+                          <div className="text-left">
+                            <div className="font-medium text-sm">{model.name}</div>
+                            <div className="text-xs text-muted-foreground">{descriptions[model.id] || model.description}</div>
+                          </div>
+                          {isSelected ? (
+                            <Check className="h-4 w-4 text-primary shrink-0 ml-3" />
+                          ) : (
+                            <span className="text-xs text-muted-foreground border rounded-full px-2 py-0.5 shrink-0 ml-3">New chat</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>,
+              document.body
+            )}
+          </div>
 
           {/* Send/Stop Button - Always show stop when processing */}
           {isProcessing ? (

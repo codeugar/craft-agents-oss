@@ -895,6 +895,45 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return terminalPreviewWindowManager.getData(sessionId, previewId)
   })
 
+  // ============================================================
+  // Connections
+  // ============================================================
+
+  // Start MCP OAuth flow for a connection
+  ipcMain.handle(IPC_CHANNELS.CONNECTIONS_START_MCP_OAUTH, async (_event, config: {
+    name: string
+    url: string
+    clientId?: string
+    clientSecret?: string
+  }) => {
+    try {
+      const { CraftOAuth, getMcpBaseUrl } = await import('@craft-agent/shared/auth/oauth')
+
+      const oauth = new CraftOAuth(
+        { mcpBaseUrl: getMcpBaseUrl(config.url) },
+        {
+          onStatus: (message) => console.log(`[OAuth] ${config.name}: ${message}`),
+          onError: (error) => console.error(`[OAuth] ${config.name} error: ${error}`),
+        }
+      )
+
+      const { tokens, clientId } = await oauth.authenticate()
+
+      console.log(`[IPC] MCP OAuth complete for connection: ${config.name}`)
+      return {
+        success: true,
+        accessToken: tokens.accessToken,
+        clientId,
+      }
+    } catch (error) {
+      console.error(`[IPC] MCP OAuth failed for connection ${config.name}:`, error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'OAuth authentication failed',
+      }
+    }
+  })
+
   // Register onboarding handlers
   registerOnboardingHandlers(sessionManager)
 }

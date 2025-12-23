@@ -230,6 +230,10 @@ const api: ElectronAPI = {
   setDraft: (sessionId: string, text: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_SET, sessionId, text),
   deleteDraft: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_DELETE, sessionId),
   getAllDrafts: () => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET_ALL),
+
+  // Connections
+  startConnectionMcpOAuth: (config: { name: string; url: string; clientId?: string; clientSecret?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CONNECTIONS_START_MCP_OAUTH, config),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
