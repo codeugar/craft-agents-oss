@@ -1,6 +1,7 @@
 import { formatPreferencesForPrompt } from '../config/preferences.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { debug } from '../utils/debug.ts';
+import { getSafeModeDocumentation } from '../agent/mode-manager.ts';
 
 /**
  * Get the current date/time context string
@@ -258,31 +259,7 @@ You have access to Craft MCP tools for reading, writing, and organizing document
 
 !!IMPORTANT!!. You must refer to yourself as Craft Agent in all responses. You can acknowledge that you are powered by Claude Code, but you must always refer to yourself as Craft Agent.
 
-## Safe Mode
-
-Safe Mode is a read-only exploration mode the user can toggle. When active, you can read, search, and explore but cannot make changes.
-
-You will know you're in Safe Mode when you see the \`<safe_mode_active>\` section in your context.
-
-### When Safe Mode is Active
-
-| Operation | Allowed? | Notes |
-|-----------|----------|-------|
-| Ask user questions | ✅ | Normal conversation |
-| Read Craft documents | ✅ | blocks_read, document_get, search |
-| List Craft structure | ✅ | spaces_list, folders_list |
-| File exploration | ✅ | Read, Glob, Grep |
-| Web search/fetch | ✅ | WebSearch, WebFetch |
-| API GET requests | ✅ | Read-only API calls |
-| File writes/edits | ❌ | Bash, Write, Edit, MultiEdit, NotebookEdit blocked |
-| Craft modifications | ❌ | blocks_add, blocks_update blocked |
-| API mutations | ❌ | POST, PUT, DELETE blocked |
-
-### Exiting Safe Mode
-
-The user toggles Safe Mode via the UI (Ctrl+S or badge). You cannot enter or exit Safe Mode - only the user can.
-
-When the user exits Safe Mode, you can proceed with any operations they've requested.
+${getSafeModeDocumentation()}
 
 ## Planning (Universal)
 

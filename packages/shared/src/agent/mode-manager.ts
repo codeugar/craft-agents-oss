@@ -344,9 +344,10 @@ export function getModeContext(sessionId: string): string | null {
     parts.push('- MCP read operations (blocks_read, search, etc.)');
     parts.push('- API GET requests');
     parts.push('- Asking questions, having conversations');
+    parts.push('- Write/Edit to plans folder (for SubmitPlan)');
     parts.push('');
     parts.push('**Blocked:**');
-    parts.push(`- ${Array.from(config.blockedTools).join(', ')}`);
+    parts.push(`- ${Array.from(config.blockedTools).join(', ')} (except plans folder)`);
     parts.push('- MCP write operations');
     parts.push('- API mutations (POST, PUT, DELETE)');
     parts.push('');
@@ -355,6 +356,52 @@ export function getModeContext(sessionId: string): string | null {
   }
 
   return parts.join('\n');
+}
+
+// ============================================================
+// System Prompt Documentation (generated from MODE_CONFIGS)
+// ============================================================
+
+/**
+ * Generate the Safe Mode documentation section for the system prompt.
+ * This is generated from MODE_CONFIGS to ensure consistency.
+ *
+ * SINGLE SOURCE OF TRUTH: The blocked tools list comes from MODE_CONFIGS.safe.blockedTools
+ */
+export function getSafeModeDocumentation(): string {
+  const config = MODE_CONFIGS.safe;
+  const blockedTools = Array.from(config.blockedTools).join(', ');
+
+  return `## Safe Mode
+
+Safe Mode is a read-only exploration mode the user can toggle. When active, you can read, search, and explore but cannot make changes.
+
+You will know you're in Safe Mode when you see the \`<safe_mode_active>\` section in your context.
+
+### When Safe Mode is Active
+
+| Operation | Allowed? | Notes |
+|-----------|----------|-------|
+| Ask user questions | ✅ | Normal conversation |
+| Read Craft documents | ✅ | blocks_read, document_get, search |
+| List Craft structure | ✅ | spaces_list, folders_list |
+| File exploration | ✅ | Read, Glob, Grep |
+| Web search/fetch | ✅ | WebSearch, WebFetch |
+| API GET requests | ✅ | Read-only API calls |
+| **Plans folder** | ✅ | Write/Edit allowed to session plans folder |
+| File writes/edits | ❌ | ${blockedTools} blocked (except plans folder) |
+| Craft modifications | ❌ | blocks_add, blocks_update blocked |
+| API mutations | ❌ | POST, PUT, DELETE blocked |
+
+### Plans Folder Exception
+
+You CAN use Write, Edit, and MultiEdit to create/modify files in the session's plans folder (\`~/.craft-agent/sessions/{sessionId}/plans/\`). This allows SubmitPlan to work in Safe Mode for creating structured plans.
+
+### Exiting Safe Mode
+
+The user toggles Safe Mode via the UI (${config.shortcutHint} or badge). You cannot enter or exit Safe Mode - only the user can.
+
+When the user exits Safe Mode, you can proceed with any operations they've requested.`;
 }
 
 // ============================================================

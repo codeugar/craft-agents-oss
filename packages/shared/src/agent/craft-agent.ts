@@ -955,7 +955,27 @@ export class CraftAgent {
                 }
 
                 // Block destructive tools (Write, Edit, Bash, etc.)
+                // Exception: Allow Write/Edit to the plans folder for SubmitPlan to work
                 if (isToolBlockedInMode(input.tool_name, 'safe')) {
+                  // Check if this is Write/Edit targeting the plans folder
+                  const isPlansFolderWrite = (input.tool_name === 'Write' || input.tool_name === 'Edit' || input.tool_name === 'MultiEdit')
+                    && this.sessionId
+                    && (() => {
+                      const toolInput = input.tool_input as Record<string, unknown>;
+                      const filePath = toolInput.file_path as string | undefined;
+                      if (!filePath) return false;
+                      const plansDir = getPlansDir(this.sessionId!);
+                      // Normalize paths and check if file is within plans directory
+                      const normalizedPath = filePath.replace(/\\/g, '/');
+                      const normalizedPlansDir = plansDir.replace(/\\/g, '/');
+                      return normalizedPath.startsWith(normalizedPlansDir);
+                    })();
+
+                  if (isPlansFolderWrite) {
+                    this.onDebug?.(`Allowing ${input.tool_name} to plans folder in safe mode`);
+                    return { continue: true };
+                  }
+
                   this.onDebug?.(`BLOCKED in safe mode: ${input.tool_name}`);
                   return {
                     continue: false,
