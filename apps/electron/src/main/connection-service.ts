@@ -195,9 +195,10 @@ export class ConnectionService {
           console.log(`[ConnectionService] Gmail token refreshed successfully for: ${connection.name}`)
 
           // Cache in memory to prevent repeated refresh calls
+          // Default to 1 hour expiry if Google doesn't return expires_in
           cachedToken = {
             accessToken: refreshResult.accessToken,
-            expiresAt: refreshResult.expiresAt,
+            expiresAt: refreshResult.expiresAt ?? (Date.now() + 3600 * 1000),
           }
 
           // Try to persist the new token, but don't fail if storage fails
