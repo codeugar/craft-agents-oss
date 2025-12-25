@@ -706,7 +706,7 @@ export interface ElectronAPI {
     url: string
     clientId?: string
     clientSecret?: string
-  }): Promise<{ success: boolean; error?: string; accessToken?: string; clientId?: string }>
+  }): Promise<{ success: boolean; error?: string; accessToken?: string; refreshToken?: string; expiresAt?: number; clientId?: string }>
   startGmailOAuth(): Promise<{ success: boolean; error?: string; accessToken?: string; refreshToken?: string; expiresAt?: number; email?: string }>
   getConnections(): Promise<ConnectionConfig[]>
   saveConnection(connection: ConnectionConfig): Promise<void>

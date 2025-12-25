@@ -134,6 +134,8 @@ export function AddConnectionDialog({
           mcpClientId: result.clientId || mcpClientId || undefined,
           mcpClientSecret: mcpClientSecret || undefined,
           mcpAccessToken: result.accessToken, // Will be stored in CredentialManager on save
+          mcpRefreshToken: result.refreshToken, // Will be stored in CredentialManager on save
+          mcpExpiresAt: result.expiresAt, // Will be stored in CredentialManager on save
           isAuthenticated: true,
         }
 

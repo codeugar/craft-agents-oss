@@ -598,6 +598,8 @@ export function Chat({
           ...conn,
           enabled: true,
           mcpAccessToken: result.accessToken,
+          mcpRefreshToken: result.refreshToken,
+          mcpExpiresAt: result.expiresAt,
           mcpClientId: result.clientId || conn.mcpClientId,
           isAuthenticated: true,
         }

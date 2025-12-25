@@ -31,8 +31,10 @@ export type GmailServer = ReturnType<typeof createGmailServer>
 export class ConnectionService {
   /**
    * Build MCP server config from connection (with auth headers)
+   * Automatically refreshes expired tokens using the stored refresh token
+   * Returns null if token is expired and cannot be refreshed
    */
-  async buildMcpServerConfig(connection: ConnectionConfig): Promise<McpServerConfig> {
+  async buildMcpServerConfig(connection: ConnectionConfig): Promise<McpServerConfig | null> {
     if (connection.type !== 'mcp') {
       throw new Error(`Not an MCP connection: ${connection.name}`)
     }
@@ -50,17 +52,68 @@ export class ConnectionService {
     if (connection.isAuthenticated) {
       try {
         const manager = getCredentialManager()
-        const creds = await manager.get({ type: 'connection_oauth', connectionId: connection.id })
-        if (creds?.value) {
-          config.headers = {
-            Authorization: `Bearer ${creds.value}`,
-          }
-          console.log(`[ConnectionService] Added auth header for MCP connection: ${connection.name}`)
-        } else {
-          console.warn(`[ConnectionService] No stored token for authenticated connection: ${connection.name}`)
+        const credentialId = { type: 'connection_oauth' as const, connectionId: connection.id }
+        const creds = await manager.get(credentialId)
+
+        if (!creds?.value) {
+          console.warn(`[ConnectionService] No stored token for MCP connection: ${connection.name}`)
+          return null
         }
+
+        let accessToken = creds.value
+        const now = Date.now()
+
+        // Determine token state
+        const isActuallyExpired = creds.expiresAt && creds.expiresAt < now
+        const isWithinRefreshBuffer = creds.expiresAt && creds.expiresAt < now + TOKEN_REFRESH_BUFFER_MS
+        // For legacy credentials without expiresAt, try refresh if we have refresh token and clientId
+        const shouldAttemptRefresh = creds.refreshToken && creds.clientId &&
+          (isWithinRefreshBuffer || !creds.expiresAt)
+
+        if (shouldAttemptRefresh) {
+          console.log(`[ConnectionService] Refreshing MCP token for: ${connection.name}`)
+          try {
+            const { CraftOAuth, getMcpBaseUrl } = await import('@craft-agent/shared/auth/oauth')
+            const oauth = new CraftOAuth({ mcpBaseUrl: getMcpBaseUrl(connection.mcpUrl) }, {})
+            const refreshResult = await oauth.refreshAccessToken(creds.refreshToken!, creds.clientId!)
+            accessToken = refreshResult.accessToken
+            console.log(`[ConnectionService] MCP token refreshed successfully for: ${connection.name}`)
+
+            // Try to persist the new token, but don't fail if storage fails
+            try {
+              await manager.set(credentialId, {
+                value: refreshResult.accessToken,
+                refreshToken: refreshResult.refreshToken || creds.refreshToken,
+                expiresAt: refreshResult.expiresAt,
+                clientId: creds.clientId,
+              })
+            } catch (storageError) {
+              // Log but continue - we still have a valid refreshed token in memory
+              console.warn(`[ConnectionService] Failed to persist refreshed MCP token for ${connection.name}:`, storageError)
+            }
+          } catch (refreshError) {
+            console.error(`[ConnectionService] Failed to refresh MCP token for ${connection.name}:`, refreshError)
+            // Only fail if token is actually expired (not just within buffer)
+            if (isActuallyExpired) {
+              console.warn(`[ConnectionService] Cannot use expired MCP token, refresh failed: ${connection.name}`)
+              return null
+            }
+            // Token still valid (just within buffer), continue with existing token
+            console.log(`[ConnectionService] Using existing MCP token (still valid) for: ${connection.name}`)
+          }
+        } else if (isActuallyExpired && !creds.refreshToken) {
+          // Token is actually expired and we have no way to refresh
+          console.warn(`[ConnectionService] MCP token expired and no refresh token available: ${connection.name}`)
+          return null
+        }
+
+        config.headers = {
+          Authorization: `Bearer ${accessToken}`,
+        }
+        console.log(`[ConnectionService] Added auth header for MCP connection: ${connection.name}`)
       } catch (error) {
         console.error(`[ConnectionService] Failed to get credentials for ${connection.name}:`, error)
+        return null
       }
     }
 
@@ -178,7 +231,10 @@ export class ConnectionService {
 
       try {
         if (conn.type === 'mcp') {
-          mcpServers[conn.name] = await this.buildMcpServerConfig(conn)
+          const mcpConfig = await this.buildMcpServerConfig(conn)
+          if (mcpConfig) {
+            mcpServers[conn.name] = mcpConfig
+          }
         } else if (conn.type === 'api') {
           apiServers[`api_${conn.name}`] = this.buildApiServer(conn)
         } else if (conn.type === 'gmail') {

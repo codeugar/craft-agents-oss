@@ -942,6 +942,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       return {
         success: true,
         accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
         clientId,
       }
     } catch (error) {
@@ -985,13 +987,18 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')
     const manager = getCredentialManager()
 
-    // Store MCP OAuth access token if present
+    // Store MCP OAuth tokens if present (including refresh token and expiry for auto-refresh)
     if (connection.mcpAccessToken) {
       await manager.set(
         { type: 'connection_oauth', connectionId: connection.id },
-        { value: connection.mcpAccessToken }
+        {
+          value: connection.mcpAccessToken,
+          refreshToken: connection.mcpRefreshToken,
+          expiresAt: connection.mcpExpiresAt,
+          clientId: connection.mcpClientId,
+        }
       )
-      console.log(`[IPC] Stored MCP OAuth token for connection: ${connection.id}`)
+      console.log(`[IPC] Stored MCP OAuth tokens for connection: ${connection.id}`)
     }
 
     // Store Gmail OAuth tokens if present
@@ -1009,7 +1016,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
     // Strip tokens before persisting to disk (they're now in CredentialManager)
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { mcpAccessToken, gmailAccessToken, gmailRefreshToken, gmailExpiresAt, ...connectionToSave } = connection
+    const { mcpAccessToken, mcpRefreshToken, mcpExpiresAt, gmailAccessToken, gmailRefreshToken, gmailExpiresAt, ...connectionToSave } = connection
     saveConnection(connectionToSave as ConnectionConfig)
   })
 

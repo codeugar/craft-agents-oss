@@ -1675,6 +1675,8 @@ export interface ConnectionConfig {
   mcpClientId?: string;
   mcpClientSecret?: string;
   mcpAccessToken?: string; // OAuth access token (transient - stored in CredentialManager on save)
+  mcpRefreshToken?: string; // OAuth refresh token (transient - stored in CredentialManager on save)
+  mcpExpiresAt?: number; // Token expiration timestamp (transient - stored in CredentialManager on save)
   // API-specific
   apiUrl?: string;
   apiBearerToken?: string;
