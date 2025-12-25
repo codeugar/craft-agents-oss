@@ -47,8 +47,8 @@ export type {
 
 // Import and re-export auth types for onboarding
 import type { AuthState, SetupNeeds } from '@craft-agent/shared/auth';
-import type { AuthType } from '@craft-agent/shared/config';
-export type { AuthState, SetupNeeds, AuthType };
+import type { AuthType, ConnectionConfig, ConnectionType } from '@craft-agent/shared/config';
+export type { AuthState, SetupNeeds, AuthType, ConnectionConfig, ConnectionType };
 export { generateMessageId } from '@craft-agent/core/types';
 
 /**
@@ -748,35 +748,7 @@ export interface DeepLinkNavigation {
 // Connection Types
 // ============================================
 
-/**
- * Connection type - either MCP server, REST API, or Gmail
- */
-export type ConnectionType = 'mcp' | 'api' | 'gmail'
-
-/**
- * Connection configuration for external MCP servers and APIs
- */
-export interface ConnectionConfig {
-  id: string
-  name: string
-  type: ConnectionType
-  enabled: boolean
-  // MCP-specific
-  mcpUrl?: string
-  mcpClientId?: string      // Optional static OAuth config
-  mcpClientSecret?: string  // Optional static OAuth config
-  mcpAccessToken?: string   // OAuth access token (transient - stored in CredentialManager on save)
-  // API-specific
-  apiUrl?: string
-  apiBearerToken?: string
-  // Gmail-specific
-  gmailEmail?: string       // User's email address
-  gmailAccessToken?: string  // OAuth access token (transient - stored in CredentialManager on save)
-  gmailRefreshToken?: string // OAuth refresh token (transient - stored in CredentialManager on save)
-  gmailExpiresAt?: number   // Token expiration timestamp (transient - stored in CredentialManager on save)
-  // Auth state
-  isAuthenticated?: boolean
-}
+// Note: ConnectionType and ConnectionConfig are re-exported from @craft-agent/shared/config above
 
 declare global {
   interface Window {

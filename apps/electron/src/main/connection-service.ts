@@ -113,37 +113,44 @@ export class ConnectionService {
       }
 
       let accessToken = creds.value
-
-      // Check if token is expired or about to expire
-      // If expiresAt is missing but we have a refresh token, assume expired (legacy credentials)
       const now = Date.now()
-      const isExpired = creds.expiresAt
-        ? creds.expiresAt < now + TOKEN_REFRESH_BUFFER_MS
-        : !!creds.refreshToken // No expiresAt but have refresh token = assume expired
 
-      if (isExpired && creds.refreshToken) {
-        console.log(`[ConnectionService] Refreshing expired Gmail token for: ${connection.name}`)
+      // Determine token state
+      const isActuallyExpired = creds.expiresAt && creds.expiresAt < now
+      const isWithinRefreshBuffer = creds.expiresAt && creds.expiresAt < now + TOKEN_REFRESH_BUFFER_MS
+      // For legacy credentials without expiresAt, try refresh if we have a refresh token
+      const shouldAttemptRefresh = creds.refreshToken && (isWithinRefreshBuffer || !creds.expiresAt)
+
+      if (shouldAttemptRefresh) {
+        console.log(`[ConnectionService] Refreshing Gmail token for: ${connection.name}`)
         try {
-          const refreshResult = await refreshGmailToken(creds.refreshToken)
+          const refreshResult = await refreshGmailToken(creds.refreshToken!)
           accessToken = refreshResult.accessToken
-
-          // Update stored credentials with new access token
-          await manager.set(credentialId, {
-            value: refreshResult.accessToken,
-            refreshToken: creds.refreshToken, // Keep existing refresh token
-            expiresAt: refreshResult.expiresAt,
-          })
           console.log(`[ConnectionService] Gmail token refreshed successfully for: ${connection.name}`)
+
+          // Try to persist the new token, but don't fail if storage fails
+          try {
+            await manager.set(credentialId, {
+              value: refreshResult.accessToken,
+              refreshToken: creds.refreshToken,
+              expiresAt: refreshResult.expiresAt,
+            })
+          } catch (storageError) {
+            // Log but continue - we still have a valid refreshed token in memory
+            console.warn(`[ConnectionService] Failed to persist refreshed token for ${connection.name}:`, storageError)
+          }
         } catch (refreshError) {
           console.error(`[ConnectionService] Failed to refresh Gmail token for ${connection.name}:`, refreshError)
-          // If token is definitely expired, don't try with stale token - it will just 401
-          if (creds.expiresAt && creds.expiresAt < now) {
+          // Only fail if token is actually expired (not just within buffer)
+          if (isActuallyExpired) {
             console.warn(`[ConnectionService] Cannot use expired Gmail token, refresh failed: ${connection.name}`)
             return null
           }
-          // If no expiresAt (legacy), try anyway - might still work
+          // Token still valid (just within buffer), continue with existing token
+          console.log(`[ConnectionService] Using existing token (still valid) for: ${connection.name}`)
         }
-      } else if (isExpired && !creds.refreshToken) {
+      } else if (isActuallyExpired && !creds.refreshToken) {
+        // Token is actually expired and we have no way to refresh
         console.warn(`[ConnectionService] Gmail token expired and no refresh token available: ${connection.name}`)
         return null
       }
