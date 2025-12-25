@@ -987,12 +987,20 @@ export function Chat({
     return onDeleteSession(sessionId, skipConfirmation)
   }, [session.selected, setSession, onDeleteSession])
 
-  // Extend context value with local overrides (textareaRef, wrapped onDeleteSession)
+  // Compute enabled connections for context
+  const enabledConnections = React.useMemo(() =>
+    connections.filter(c => c.enabled),
+    [connections]
+  )
+
+  // Extend context value with local overrides (textareaRef, wrapped onDeleteSession, connections)
   const chatContextValue = React.useMemo<ChatContextType>(() => ({
     ...contextValue,
     onDeleteSession: handleDeleteSession,
     textareaRef: chatInputRef,
-  }), [contextValue, handleDeleteSession])
+    enabledConnections,
+    onSessionConnectionsChange: handleSessionConnectionsChange,
+  }), [contextValue, handleDeleteSession, enabledConnections, handleSessionConnectionsChange])
 
   // Group agents for tree view
   const agentTree = React.useMemo(() => groupAgentsByFolder(agents), [agents])
