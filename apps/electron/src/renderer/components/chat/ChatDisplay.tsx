@@ -473,6 +473,7 @@ export function ChatDisplay({
                         <PlanCard
                           key={`plan-${turn.message.id}`}
                           message={turn.message}
+                          sessionId={session?.id}
                           onOpenFile={onOpenFile}
                           onOpenUrl={onOpenUrl}
                           hasUserResponse={hasUserResponse}
@@ -782,6 +783,7 @@ export function ChatDisplay({
                 onConnectionsChange={onConnectionsChange}
                 workingDirectory={workingDirectory}
                 onWorkingDirectoryChange={onWorkingDirectoryChange}
+                sessionId={session.id}
               />
               </>
             )}

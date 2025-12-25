@@ -30,6 +30,8 @@ const SIZE_CONFIG = {
 export interface PlanCardProps {
   /** The plan message */
   message: Message
+  /** Session ID for scoping the approve-plan event */
+  sessionId?: string
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
   /** Callback to open URL */
@@ -44,6 +46,7 @@ export interface PlanCardProps {
 
 export function PlanCard({
   message,
+  sessionId,
   onOpenFile,
   onOpenUrl,
   hasUserResponse = false,
@@ -52,9 +55,10 @@ export function PlanCard({
 
   // Accept the plan: disable safe mode and submit "Go ahead" message
   // This uses the craft:approve-plan event which is handled by FreeFormInput
+  // The sessionId ensures only the correct session processes this event
   const handleAcceptPlan = () => {
     window.dispatchEvent(new CustomEvent('craft:approve-plan', {
-      detail: { text: 'Go ahead' }
+      detail: { text: 'Go ahead', sessionId }
     }))
   }
 

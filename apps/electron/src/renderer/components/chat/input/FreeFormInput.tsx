@@ -1,5 +1,6 @@
 import * as React from 'react'
 import * as ReactDOM from 'react-dom'
+import { Command as CommandPrimitive } from 'cmdk'
 import {
   Paperclip,
   ArrowUp,
@@ -79,6 +80,8 @@ export interface FreeFormInputProps {
   workingDirectory?: string
   /** Callback when working directory changes */
   onWorkingDirectoryChange?: (path: string) => void
+  /** Session ID for scoping events like approve-plan */
+  sessionId?: string
 }
 
 /**
@@ -116,6 +119,7 @@ export function FreeFormInput({
   onConnectionsChange,
   workingDirectory,
   onWorkingDirectoryChange,
+  sessionId,
 }: FreeFormInputProps) {
   // Performance optimization: Always use internal state for typing to avoid parent re-renders
   // Sync FROM parent on mount/change (for restoring drafts)
@@ -165,6 +169,7 @@ export function FreeFormInput({
   const [slashDropdownOpen, setSlashDropdownOpen] = React.useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
   const [connectionDropdownOpen, setConnectionDropdownOpen] = React.useState(false)
+  const [connectionFilter, setConnectionFilter] = React.useState('')
   const [isFocused, setIsFocused] = React.useState(false)
 
   const dragCounterRef = React.useRef(0)
@@ -174,6 +179,7 @@ export function FreeFormInput({
   const slashButtonRef = React.useRef<HTMLButtonElement>(null)
   const [slashDropdownPosition, setSlashDropdownPosition] = React.useState<{ top: number; left: number } | null>(null)
   const connectionButtonRef = React.useRef<HTMLButtonElement>(null)
+  const connectionFilterInputRef = React.useRef<HTMLInputElement>(null)
   const [connectionDropdownPosition, setConnectionDropdownPosition] = React.useState<{ top: number; left: number } | null>(null)
 
   // Merge refs
@@ -204,8 +210,13 @@ export function FreeFormInput({
 
   // Listen for craft:approve-plan events (used by PlanCard's Accept Plan button)
   // This disables safe mode AND submits the message in one action
+  // Only process events for this session (sessionId must match)
   React.useEffect(() => {
-    const handleApprovePlan = (e: CustomEvent<{ text?: string }>) => {
+    const handleApprovePlan = (e: CustomEvent<{ text?: string; sessionId?: string }>) => {
+      // Only handle if this event is for our session
+      if (e.detail?.sessionId && e.detail.sessionId !== sessionId) {
+        return
+      }
       const text = e.detail?.text ?? 'Go ahead'
       // Disable safe mode first
       onSafeModeChange?.(false)
@@ -215,7 +226,7 @@ export function FreeFormInput({
 
     window.addEventListener('craft:approve-plan', handleApprovePlan as EventListener)
     return () => window.removeEventListener('craft:approve-plan', handleApprovePlan as EventListener)
-  }, [onSafeModeChange, onSubmit])
+  }, [sessionId, onSafeModeChange, onSubmit])
 
   // Listen for craft:paste-files events (for global paste when input not focused)
   React.useEffect(() => {
@@ -630,7 +641,10 @@ export function FreeFormInput({
                 <button
                   ref={slashButtonRef}
                   type="button"
-                  className="inline-flex items-center justify-center h-7 w-7 shrink-0 rounded-[4px] hover:bg-foreground/5 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                  className={cn(
+                    "inline-flex items-center justify-center h-7 w-7 shrink-0 rounded-[4px] hover:bg-foreground/5 transition-colors disabled:opacity-50 disabled:pointer-events-none",
+                    slashDropdownOpen && "bg-foreground/5"
+                  )}
                   disabled={disabled}
                   onClick={() => {
                     if (!slashDropdownOpen && slashButtonRef.current) {
@@ -687,7 +701,8 @@ export function FreeFormInput({
                     type="button"
                     className={cn(
                       "inline-flex items-center justify-center h-7 w-7 shrink-0 rounded-[4px] hover:bg-foreground/5 transition-colors disabled:opacity-50 disabled:pointer-events-none",
-                      selectedConnectionIds.length > 0 && "text-primary"
+                      selectedConnectionIds.length > 0 && "text-primary",
+                      connectionDropdownOpen && "bg-foreground/5"
                     )}
                     disabled={disabled}
                     onClick={() => {
@@ -697,6 +712,11 @@ export function FreeFormInput({
                           top: rect.top,
                           left: rect.left,
                         })
+                        // Focus filter input after popover opens
+                        setTimeout(() => connectionFilterInputRef.current?.focus(), 0)
+                      } else {
+                        // Clear filter when closing
+                        setConnectionFilter('')
                       }
                       setConnectionDropdownOpen(!connectionDropdownOpen)
                     }}
@@ -715,59 +735,80 @@ export function FreeFormInput({
                 <>
                   <div
                     className="fixed inset-0 z-[9998]"
-                    onClick={() => setConnectionDropdownOpen(false)}
+                    onClick={() => {
+                      setConnectionDropdownOpen(false)
+                      setConnectionFilter('')
+                    }}
                   />
                   <div
-                    className="fixed popover-styled z-[9999] p-3 min-w-[240px]"
+                    className="fixed z-[9999] min-w-[200px] overflow-hidden rounded-[8px] bg-background text-popover-foreground shadow-modal-small"
                     style={{
                       top: connectionDropdownPosition.top - 8,
                       left: connectionDropdownPosition.left,
                       transform: 'translateY(-100%)',
                     }}
                   >
-                    <div className="text-sm font-medium mb-2">Connections</div>
                     {connections.length === 0 ? (
-                      <div className="text-xs text-muted-foreground py-2">
+                      <div className="text-xs text-muted-foreground p-3">
                         No connections configured.
                         <br />
                         Add connections in Settings.
                       </div>
                     ) : (
-                      <div className="space-y-1">
-                        {connections.map(conn => (
-                          <label
-                            key={conn.id}
-                            className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-accent/50 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedConnectionIds.includes(conn.id)}
-                              onChange={(e) => {
-                                const newIds = e.target.checked
-                                  ? [...selectedConnectionIds, conn.id]
-                                  : selectedConnectionIds.filter(id => id !== conn.id)
-                                onConnectionsChange(newIds)
-                              }}
-                              className="rounded"
-                            />
-                            <ConnectionAvatar
-                              type={conn.type as ConnectionType}
-                              name={conn.name}
-                              serviceUrl={getConnectionLogoUrl(conn)}
-                              size="sm"
-                            />
-                            <div className="flex-1">
-                              <div className="text-sm">{conn.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {getConnectionLabel(conn.type)}
-                              </div>
-                            </div>
-                            {selectedConnectionIds.includes(conn.id) && (
-                              <Check className="h-4 w-4 text-primary shrink-0" />
-                            )}
-                          </label>
-                        ))}
-                      </div>
+                      <CommandPrimitive
+                        className="min-w-[200px]"
+                        shouldFilter={false}
+                      >
+                        <div className="border-b border-border/50 px-3 py-2">
+                          <CommandPrimitive.Input
+                            ref={connectionFilterInputRef}
+                            value={connectionFilter}
+                            onValueChange={setConnectionFilter}
+                            placeholder="Search connections..."
+                            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                          />
+                        </div>
+                        <CommandPrimitive.List className="max-h-[240px] overflow-y-auto p-1">
+                          {connections
+                            .filter(conn => conn.name.toLowerCase().includes(connectionFilter.toLowerCase()))
+                            .map(conn => {
+                              const isSelected = selectedConnectionIds.includes(conn.id)
+                              return (
+                                <CommandPrimitive.Item
+                                  key={conn.id}
+                                  value={conn.id}
+                                  onSelect={() => {
+                                    const newIds = isSelected
+                                      ? selectedConnectionIds.filter(id => id !== conn.id)
+                                      : [...selectedConnectionIds, conn.id]
+                                    onConnectionsChange(newIds)
+                                  }}
+                                  className={cn(
+                                    "flex cursor-pointer select-none items-center gap-3 rounded-[6px] px-3 py-2 text-[13px]",
+                                    "outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground",
+                                    isSelected && "bg-accent/40"
+                                  )}
+                                >
+                                  <div className="shrink-0 text-muted-foreground">
+                                    <ConnectionAvatar
+                                      type={conn.type as ConnectionType}
+                                      name={conn.name}
+                                      serviceUrl={getConnectionLogoUrl(conn)}
+                                      size="sm"
+                                    />
+                                  </div>
+                                  <div className="flex-1 min-w-0 truncate">{conn.name}</div>
+                                  <div className={cn(
+                                    "shrink-0 h-4 w-4 rounded-full bg-current flex items-center justify-center",
+                                    !isSelected && "opacity-0"
+                                  )}>
+                                    <Check className="h-2.5 w-2.5 text-white dark:text-black" strokeWidth={3} />
+                                  </div>
+                                </CommandPrimitive.Item>
+                              )
+                            })}
+                        </CommandPrimitive.List>
+                      </CommandPrimitive>
                     )}
                   </div>
                 </>,
@@ -783,7 +824,10 @@ export function FreeFormInput({
                 <button
                   ref={modelButtonRef}
                   type="button"
-                  className="inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 transition-colors"
+                  className={cn(
+                    "inline-flex items-center h-7 px-1.5 gap-0.5 text-[13px] shrink-0 rounded-[6px] hover:bg-foreground/5 transition-colors",
+                    modelDropdownOpen && "bg-foreground/5"
+                  )}
                   onClick={() => {
                     if (!modelDropdownOpen && modelButtonRef.current) {
                       // Calculate position when opening

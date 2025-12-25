@@ -355,6 +355,7 @@ export default function App() {
       }
 
       // Handle plan submitted event - add plan message to session
+      // The main process sends a 'complete' event after this to clear isProcessing
       if (event.type === 'plan_submitted') {
         console.log('[App] plan_submitted:', event.sessionId)
         setSessions(prev => prev.map(session => {

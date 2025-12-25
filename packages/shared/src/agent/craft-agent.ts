@@ -477,6 +477,8 @@ export class CraftAgent {
   private connectionMcpServers: Record<string, { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }> = {};
   // In-process MCP servers for connection API integrations
   private connectionApiServers: Record<string, ReturnType<typeof createSdkMcpServer>> = {};
+  // Set of active connection server names (for blocking disabled connections)
+  private activeConnectionServerNames: Set<string> = new Set();
   // Temporary clarifications (not yet saved to Craft document)
   private temporaryClarifications: string | null = null;
   // Map tool_use_id → explicit intent from _intent field (for summarization and UI display)
@@ -931,6 +933,41 @@ export class CraftAgent {
 
                 this.onDebug?.(`Allowed in safe mode: ${input.tool_name}`);
                 return { continue: true };
+              }
+
+              // ============================================================
+              // CONNECTION BLOCKING: Block tools from disabled connections
+              // Connections can be disabled mid-conversation, so we check
+              // against the current active connection set on each tool call
+              // ============================================================
+              if (input.tool_name.startsWith('mcp__')) {
+                // Extract server name from tool name (mcp__<server>__<tool>)
+                const parts = input.tool_name.split('__');
+                const serverName = parts[1];
+                if (parts.length >= 3 && serverName) {
+                  // Built-in MCP servers that are always available
+                  const builtInMcpServers = new Set(['craft', 'preferences', 'session', 'docs']);
+
+                  // Check if this is a connection server (not built-in, not agent server)
+                  if (!builtInMcpServers.has(serverName)) {
+                    // Check if this is an agent server (from active agent definition)
+                    const isAgentServer = Object.keys(this.agentMcpServers).includes(serverName) ||
+                                          Object.keys(this.agentApiServers).includes(serverName);
+
+                    // If not an agent server, it must be a connection server
+                    if (!isAgentServer) {
+                      const isActive = this.activeConnectionServerNames.has(serverName);
+                      if (!isActive) {
+                        this.onDebug?.(`BLOCKED connection tool: ${input.tool_name} (connection "${serverName}" is no longer available)`);
+                        return {
+                          continue: false,
+                          decision: 'block' as const,
+                          reason: `Connection "${serverName}" is no longer available. The connection may have been disabled or its credentials expired. Please check the connection status and re-enable it if needed.`,
+                        };
+                      }
+                    }
+                  }
+                }
               }
 
               // Built-in SDK tools (don't extract _intent from these)
@@ -1498,6 +1535,21 @@ export class CraftAgent {
   }
 
   /**
+   * Format connection state as a lightweight XML block for injection into user messages.
+   * Only included when there are selected connections (active or inactive).
+   * This informs the agent about which connections are available vs unavailable.
+   */
+  private formatConnectionState(): string | null {
+    // Only show connection state if there are connections
+    if (this.activeConnectionServerNames.size === 0) {
+      return null;
+    }
+
+    const activeNames = [...this.activeConnectionServerNames].sort();
+    return `<connections>\nActive: ${activeNames.join(', ')}\n</connections>`;
+  }
+
+  /**
    * Build a simple text prompt with embedded text file contents (for text-only messages)
    * Prepends date/time context for prompt caching optimization (keeps system prompt static)
    * Injects session state (including mode state) for every message
@@ -1511,6 +1563,12 @@ export class CraftAgent {
     // Add session state (always includes all modes with true/false state)
     // This lightweight format replaces the verbose mode context
     parts.push(formatSessionState(this.modeSessionId));
+
+    // Add connection state if there are connections
+    const connectionState = this.formatConnectionState();
+    if (connectionState) {
+      parts.push(connectionState);
+    }
 
     // Add working directory context if set
     const workingDirContext = getWorkingDirectoryContext(this.config.session?.workingDirectory);
@@ -1550,6 +1608,12 @@ export class CraftAgent {
     // Add session state (always includes all modes with true/false state)
     // This lightweight format replaces the verbose mode context
     contentBlocks.push({ type: 'text', text: formatSessionState(this.modeSessionId) });
+
+    // Add connection state if there are connections
+    const connectionState = this.formatConnectionState();
+    if (connectionState) {
+      contentBlocks.push({ type: 'text', text: connectionState });
+    }
 
     // Add working directory context if set
     const workingDirContext = getWorkingDirectoryContext(this.config.session?.workingDirectory);
@@ -2161,6 +2225,29 @@ export class CraftAgent {
   ): void {
     this.connectionMcpServers = mcpServers;
     this.connectionApiServers = apiServers;
+
+    // Update the set of active connection server names for tool blocking
+    this.activeConnectionServerNames = new Set([
+      ...Object.keys(mcpServers),
+      ...Object.keys(apiServers),
+    ]);
+    this.onDebug?.(`Active connection servers: ${[...this.activeConnectionServerNames].join(', ') || 'none'}`);
+  }
+
+  /**
+   * Check if a connection server is currently active (enabled and authenticated)
+   * Used by PreToolUse hook to block tools from disabled connections
+   */
+  isConnectionServerActive(serverName: string): boolean {
+    return this.activeConnectionServerNames.has(serverName);
+  }
+
+  /**
+   * Get the set of active connection server names
+   * Used to inform the agent about available connections
+   */
+  getActiveConnectionServerNames(): Set<string> {
+    return this.activeConnectionServerNames;
   }
 
   /**

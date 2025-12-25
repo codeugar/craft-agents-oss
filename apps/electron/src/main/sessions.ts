@@ -833,6 +833,9 @@ export class SessionManager {
             managed.toolToParentMap.clear()
             managed.pendingTextParent = undefined
 
+            // Send complete event so renderer knows processing stopped
+            this.sendEvent({ type: 'complete', sessionId: managed.id }, managed.workspace.id)
+
             // Persist session state
             this.persistSession(managed)
           }
