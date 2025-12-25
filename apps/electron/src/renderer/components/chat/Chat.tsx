@@ -23,6 +23,7 @@ import {
   Plug,
   Pencil,
   Trash2,
+  Mail,
 } from "lucide-react"
 import { McpIcon } from "../icons/McpIcon"
 import {
@@ -35,6 +36,8 @@ import {
 import { Spinner } from "@/components/ui/loading-indicator"
 import { AvatarGroup } from "@/components/ui/avatar-group"
 import { ServiceLogo } from "@/components/ui/service-logo"
+import { getLogoUrl } from '@craft-agent/shared/utils/logo'
+import { getConnectionLogoUrl, getConnectionFallbackIcon } from "@/utils/connection-types"
 import { AppMenu } from "../AppMenu"
 import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
@@ -608,11 +611,41 @@ export function Chat({
   }, [])
 
   const handleToggleConnection = React.useCallback(async (id: string, enabled: boolean) => {
-    // Optimistic update
-    setConnections(prev => prev.map(c => c.id === id ? { ...c, enabled } : c))
-    // Persist to backend
     const conn = connections.find(c => c.id === id)
-    if (conn) {
+    if (!conn) return
+
+    // If enabling an MCP connection that needs OAuth, re-authenticate
+    if (enabled && conn.type === 'mcp' && conn.mcpUrl) {
+      try {
+        const result = await window.electronAPI.startConnectionMcpOAuth({
+          name: conn.name,
+          url: conn.mcpUrl,
+          clientId: conn.mcpClientId || undefined,
+          clientSecret: conn.mcpClientSecret || undefined,
+        })
+
+        if (!result.success) {
+          // OAuth failed or was cancelled - don't enable
+          return
+        }
+
+        // Update connection with new token and enable it
+        const updatedConn = {
+          ...conn,
+          enabled: true,
+          mcpAccessToken: result.accessToken,
+          mcpClientId: result.clientId || conn.mcpClientId,
+          isAuthenticated: true,
+        }
+        setConnections(prev => prev.map(c => c.id === id ? updatedConn : c))
+        await window.electronAPI.saveConnection(updatedConn)
+      } catch (error) {
+        console.error('OAuth failed:', error)
+        // Don't enable on error
+      }
+    } else {
+      // For API connections or when disabling, just toggle
+      setConnections(prev => prev.map(c => c.id === id ? { ...c, enabled } : c))
       await window.electronAPI.saveConnection({ ...conn, enabled })
     }
   }, [connections])
@@ -660,6 +693,45 @@ export function Chat({
     setEditingConnection(conn)
     setIsAddConnectionOpen(true)
   }, [])
+
+  // Handle adding Gmail connection
+  const handleAddGmail = React.useCallback(async () => {
+    try {
+      const result = await window.electronAPI.startGmailOAuth()
+      if (!result.success) {
+        console.error('[Chat] Gmail OAuth failed:', result.error)
+        return
+      }
+
+      // Check if this Gmail account is already connected
+      const existingGmail = connections.find(
+        conn => conn.type === 'gmail' && conn.gmailEmail === result.email
+      )
+      if (existingGmail) {
+        console.log('[Chat] Gmail account already connected:', result.email)
+        return
+      }
+
+      // Create Gmail connection config
+      const config: ConnectionConfig = {
+        id: crypto.randomUUID(),
+        name: result.email ? `Gmail (${result.email})` : 'Gmail',
+        type: 'gmail',
+        enabled: true,
+        gmailEmail: result.email,
+        gmailAccessToken: result.accessToken,
+        gmailRefreshToken: result.refreshToken,
+        isAuthenticated: true,
+      }
+
+      // Save connection (tokens stored in CredentialManager)
+      setConnections(prev => [...prev, config])
+      await window.electronAPI.saveConnection(config)
+      console.log('[Chat] Gmail connection added:', config.name)
+    } catch (error) {
+      console.error('[Chat] Failed to add Gmail connection:', error)
+    }
+  }, [connections])
 
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
 
@@ -1652,6 +1724,21 @@ export function Chat({
                           </button>
                         </DropdownMenuTrigger>
                         <StyledDropdownMenuContent align="end" minWidth="min-w-0">
+                          <StyledDropdownMenuItem onClick={handleAddGmail}>
+                            {(() => {
+                              const GmailIcon = getConnectionFallbackIcon('gmail')
+                              return (
+                                <ServiceLogo
+                                  logo={getLogoUrl(getConnectionLogoUrl({ type: 'gmail' } as ConnectionConfig))}
+                                  name="Gmail"
+                                  fallbackIcon={<GmailIcon className="h-3.5 w-3.5" />}
+                                  className="h-3.5 w-3.5"
+                                />
+                              )
+                            })()}
+                            Add Gmail
+                          </StyledDropdownMenuItem>
+                          <StyledDropdownMenuSeparator />
                           <StyledDropdownMenuItem onClick={() => setIsAddConnectionOpen(true)}>
                             <Plus />
                             Add connection
@@ -1662,10 +1749,17 @@ export function Chat({
                     {/* Connection List */}
                     <AnimatedCollapsibleContent isOpen={!isConnectionsCollapsed}>
                       <nav className="grid gap-0.5 px-2 pb-1">
-                        {connections.map(conn => (
+                        {connections.map(conn => {
+                          const FallbackIcon = getConnectionFallbackIcon(conn.type)
+                          return (
                           <div key={conn.id} className="flex items-center justify-between py-[7px] px-2 rounded-md hover:bg-foreground/5 group/conn">
                             <div className="flex items-center gap-2">
-                              <Plug className="h-3.5 w-3.5 text-muted-foreground" />
+                              <ServiceLogo
+                                logo={getLogoUrl(getConnectionLogoUrl(conn))}
+                                name={conn.name}
+                                fallbackIcon={<FallbackIcon className="h-3.5 w-3.5" />}
+                                className="h-3.5 w-3.5"
+                              />
                               <span className="text-[13px]">{conn.name}</span>
                               <button
                                 onClick={() => handleOpenEditConnection(conn)}
@@ -1686,7 +1780,7 @@ export function Chat({
                               className="scale-75"
                             />
                           </div>
-                        ))}
+                        )})}
                       </nav>
                     </AnimatedCollapsibleContent>
                   </Collapsible>

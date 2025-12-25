@@ -934,6 +934,28 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
+  // Start Gmail OAuth flow
+  ipcMain.handle(IPC_CHANNELS.CONNECTIONS_START_GMAIL_OAUTH, async () => {
+    try {
+      const { startGmailOAuth } = await import('@craft-agent/shared/auth')
+      const result = await startGmailOAuth('electron')
+
+      if (result.success) {
+        console.log(`[IPC] Gmail OAuth complete for: ${result.email}`)
+      } else {
+        console.error(`[IPC] Gmail OAuth failed: ${result.error}`)
+      }
+
+      return result
+    } catch (error) {
+      console.error('[IPC] Gmail OAuth failed:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Gmail OAuth authentication failed',
+      }
+    }
+  })
+
   // Get all connections
   ipcMain.handle(IPC_CHANNELS.CONNECTIONS_GET, async () => {
     return getConnections()
@@ -941,33 +963,49 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Save a connection (create or update)
   ipcMain.handle(IPC_CHANNELS.CONNECTIONS_SAVE, async (_event, connection: ConnectionConfig) => {
-    // Store OAuth access token in CredentialManager if present
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    const manager = getCredentialManager()
+
+    // Store MCP OAuth access token if present
     if (connection.mcpAccessToken) {
-      const { getCredentialManager } = await import('@craft-agent/shared/credentials')
-      const manager = getCredentialManager()
       await manager.set(
         { type: 'connection_oauth', connectionId: connection.id },
         { value: connection.mcpAccessToken }
       )
-      console.log(`[IPC] Stored OAuth token for connection: ${connection.id}`)
+      console.log(`[IPC] Stored MCP OAuth token for connection: ${connection.id}`)
     }
-    // Strip the access token before persisting to disk (it's now in CredentialManager)
+
+    // Store Gmail OAuth tokens if present
+    if (connection.gmailAccessToken) {
+      await manager.set(
+        { type: 'gmail_oauth', connectionId: connection.id },
+        {
+          value: connection.gmailAccessToken,
+          refreshToken: connection.gmailRefreshToken,
+        }
+      )
+      console.log(`[IPC] Stored Gmail OAuth tokens for connection: ${connection.id}`)
+    }
+
+    // Strip tokens before persisting to disk (they're now in CredentialManager)
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { mcpAccessToken, ...connectionToSave } = connection
+    const { mcpAccessToken, gmailAccessToken, gmailRefreshToken, ...connectionToSave } = connection
     saveConnection(connectionToSave as ConnectionConfig)
   })
 
   // Delete a connection
   ipcMain.handle(IPC_CHANNELS.CONNECTIONS_DELETE, async (_event, connectionId: string) => {
-    // Delete the stored OAuth token from CredentialManager
+    // Delete stored tokens from CredentialManager
     try {
       const { getCredentialManager } = await import('@craft-agent/shared/credentials')
       const manager = getCredentialManager()
-      await manager.delete({ type: 'connection_oauth', connectionId })
-      console.log(`[IPC] Deleted OAuth token for connection: ${connectionId}`)
+      // Try to delete both MCP and Gmail OAuth tokens
+      await manager.delete({ type: 'connection_oauth', connectionId }).catch(() => {})
+      await manager.delete({ type: 'gmail_oauth', connectionId }).catch(() => {})
+      console.log(`[IPC] Deleted tokens for connection: ${connectionId}`)
     } catch (error) {
-      // Ignore errors - token may not exist
-      console.log(`[IPC] No OAuth token to delete for connection: ${connectionId}`)
+      // Ignore errors - tokens may not exist
+      console.log(`[IPC] No tokens to delete for connection: ${connectionId}`)
     }
     // Delete the connection config
     deleteConnection(connectionId)

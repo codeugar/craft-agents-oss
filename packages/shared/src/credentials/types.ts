@@ -25,7 +25,8 @@ export type CredentialType =
   | 'workspace_bearer'
   | 'mcp_oauth'
   | 'api_key'
-  | 'connection_oauth';  // User-defined connection OAuth tokens
+  | 'connection_oauth'  // User-defined connection OAuth tokens
+  | 'gmail_oauth';      // Gmail OAuth tokens
 
 /** Valid credential types for validation */
 const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
@@ -37,6 +38,7 @@ const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'mcp_oauth',
   'api_key',
   'connection_oauth',
+  'gmail_oauth',
 ] as const;
 
 /** Check if a string is a valid CredentialType */

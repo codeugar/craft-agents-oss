@@ -1636,12 +1636,17 @@ export function cleanupOrphanedDrafts(): void {
 const CONNECTIONS_FILE = join(CONFIG_DIR, 'connections.json');
 
 /**
+ * Connection type - either MCP server, REST API, or Gmail
+ */
+export type ConnectionType = 'mcp' | 'api' | 'gmail';
+
+/**
  * Connection configuration type
  */
 export interface ConnectionConfig {
   id: string;
   name: string;
-  type: 'mcp' | 'api';
+  type: ConnectionType;
   enabled: boolean;
   // MCP-specific
   mcpUrl?: string;
@@ -1651,6 +1656,10 @@ export interface ConnectionConfig {
   // API-specific
   apiUrl?: string;
   apiBearerToken?: string;
+  // Gmail-specific
+  gmailEmail?: string;  // User's email address
+  gmailAccessToken?: string;  // OAuth access token (transient - stored in CredentialManager on save)
+  gmailRefreshToken?: string;  // OAuth refresh token (transient - stored in CredentialManager on save)
   // Auth state
   isAuthenticated?: boolean;
 }

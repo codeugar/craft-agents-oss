@@ -234,6 +234,7 @@ const api: ElectronAPI = {
   // Connections
   startConnectionMcpOAuth: (config: { name: string; url: string; clientId?: string; clientSecret?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CONNECTIONS_START_MCP_OAUTH, config),
+  startGmailOAuth: () => ipcRenderer.invoke(IPC_CHANNELS.CONNECTIONS_START_GMAIL_OAUTH),
   getConnections: () => ipcRenderer.invoke(IPC_CHANNELS.CONNECTIONS_GET),
   saveConnection: (connection: import('../shared/types').ConnectionConfig) =>
     ipcRenderer.invoke(IPC_CHANNELS.CONNECTIONS_SAVE, connection),

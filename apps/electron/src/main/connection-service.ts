@@ -6,6 +6,7 @@
  */
 
 import { createApiServer } from '@craft-agent/shared/agents/api-tools'
+import { createGmailServer } from '@craft-agent/shared/agents/gmail-tools'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { ApiConfig } from '@craft-agent/shared/agents/types'
 import type { ConnectionConfig } from '../shared/types'
@@ -19,6 +20,9 @@ export type McpServerConfig = {
 
 // Type for API server (in-process MCP server)
 export type ApiServer = ReturnType<typeof createApiServer>
+
+// Type for Gmail server (in-process MCP server)
+export type GmailServer = ReturnType<typeof createGmailServer>
 
 export class ConnectionService {
   /**
@@ -85,14 +89,39 @@ export class ConnectionService {
   }
 
   /**
+   * Build Gmail server from connection
+   */
+  async buildGmailServer(connection: ConnectionConfig): Promise<GmailServer | null> {
+    if (connection.type !== 'gmail') {
+      throw new Error(`Not a Gmail connection: ${connection.name}`)
+    }
+
+    // Retrieve OAuth token from CredentialManager
+    try {
+      const manager = getCredentialManager()
+      const creds = await manager.get({ type: 'gmail_oauth', connectionId: connection.id })
+      if (creds?.value) {
+        console.log(`[ConnectionService] Creating Gmail server for connection: ${connection.name}`)
+        return createGmailServer(creds.value)
+      } else {
+        console.warn(`[ConnectionService] No stored token for Gmail connection: ${connection.name}`)
+        return null
+      }
+    } catch (error) {
+      console.error(`[ConnectionService] Failed to get Gmail credentials for ${connection.name}:`, error)
+      return null
+    }
+  }
+
+  /**
    * Build all server configs for selected connections
    */
   async buildServerConfigs(connections: ConnectionConfig[]): Promise<{
     mcpServers: Record<string, McpServerConfig>
-    apiServers: Record<string, ApiServer>
+    apiServers: Record<string, ApiServer | GmailServer>
   }> {
     const mcpServers: Record<string, McpServerConfig> = {}
-    const apiServers: Record<string, ApiServer> = {}
+    const apiServers: Record<string, ApiServer | GmailServer> = {}
 
     for (const conn of connections) {
       if (!conn.enabled) continue
@@ -102,6 +131,11 @@ export class ConnectionService {
           mcpServers[conn.name] = await this.buildMcpServerConfig(conn)
         } else if (conn.type === 'api') {
           apiServers[`api_${conn.name}`] = this.buildApiServer(conn)
+        } else if (conn.type === 'gmail') {
+          const gmailServer = await this.buildGmailServer(conn)
+          if (gmailServer) {
+            apiServers[`gmail_${conn.id}`] = gmailServer
+          }
         }
       } catch (error) {
         console.error(`[ConnectionService] Failed to build config for ${conn.name}:`, error)

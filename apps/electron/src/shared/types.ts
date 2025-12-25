@@ -456,6 +456,7 @@ export const IPC_CHANNELS = {
 
   // Connections
   CONNECTIONS_START_MCP_OAUTH: 'connections:startMcpOAuth',
+  CONNECTIONS_START_GMAIL_OAUTH: 'connections:startGmailOAuth',
   CONNECTIONS_GET: 'connections:get',
   CONNECTIONS_SAVE: 'connections:save',
   CONNECTIONS_DELETE: 'connections:delete',
@@ -721,6 +722,7 @@ export interface ElectronAPI {
     clientId?: string
     clientSecret?: string
   }): Promise<{ success: boolean; error?: string; accessToken?: string; clientId?: string }>
+  startGmailOAuth(): Promise<{ success: boolean; error?: string; accessToken?: string; refreshToken?: string; expiresAt?: number; email?: string }>
   getConnections(): Promise<ConnectionConfig[]>
   saveConnection(connection: ConnectionConfig): Promise<void>
   deleteConnection(connectionId: string): Promise<void>
@@ -762,9 +764,9 @@ export interface DeepLinkNavigation {
 // ============================================
 
 /**
- * Connection type - either MCP server or REST API
+ * Connection type - either MCP server, REST API, or Gmail
  */
-export type ConnectionType = 'mcp' | 'api'
+export type ConnectionType = 'mcp' | 'api' | 'gmail'
 
 /**
  * Connection configuration for external MCP servers and APIs
@@ -782,6 +784,10 @@ export interface ConnectionConfig {
   // API-specific
   apiUrl?: string
   apiBearerToken?: string
+  // Gmail-specific
+  gmailEmail?: string       // User's email address
+  gmailAccessToken?: string  // OAuth access token (transient - stored in CredentialManager on save)
+  gmailRefreshToken?: string // OAuth refresh token (transient - stored in CredentialManager on save)
   // Auth state
   isAuthenticated?: boolean
 }

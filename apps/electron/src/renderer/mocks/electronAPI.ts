@@ -1032,6 +1032,18 @@ console.log(example);
     }
   },
 
+  async startGmailOAuth(): Promise<{ success: boolean; error?: string; accessToken?: string; refreshToken?: string; expiresAt?: number; email?: string }> {
+    await sleep(500)
+    // Mock: return fake Gmail OAuth tokens
+    return {
+      success: true,
+      accessToken: 'mock-gmail-access-token',
+      refreshToken: 'mock-gmail-refresh-token',
+      expiresAt: Date.now() + 3600000,
+      email: 'user@gmail.com',
+    }
+  },
+
   async getConnections(): Promise<import('../../shared/types').ConnectionConfig[]> {
     // Mock: get from localStorage
     const stored = localStorage.getItem('connections')

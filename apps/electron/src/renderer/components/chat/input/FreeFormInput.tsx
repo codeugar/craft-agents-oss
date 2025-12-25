@@ -8,6 +8,7 @@ import {
   SquareSlash,
   Check,
   Plus,
+  Plug,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,9 @@ import {
 import { cn } from '@/lib/utils'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { MODELS, getModelDisplayName } from '@config/models'
+import { ServiceLogo } from '@/components/ui/service-logo'
+import { getLogoUrl } from '@craft-agent/shared/utils/logo'
+import { getConnectionLogoUrl, getConnectionLabel, getConnectionFallbackIcon } from '@/utils/connection-types'
 import type { FileAttachment, ConnectionConfig } from '../../../../shared/types'
 
 export interface FreeFormInputProps {
@@ -604,7 +608,9 @@ export function FreeFormInput({
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        {connections.map(conn => (
+                        {connections.map(conn => {
+                          const FallbackIcon = getConnectionFallbackIcon(conn.type)
+                          return (
                           <label
                             key={conn.id}
                             className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-accent/50 cursor-pointer"
@@ -620,17 +626,23 @@ export function FreeFormInput({
                               }}
                               className="rounded"
                             />
+                            <ServiceLogo
+                              logo={getLogoUrl(getConnectionLogoUrl(conn))}
+                              name={conn.name}
+                              fallbackIcon={<FallbackIcon className="h-4 w-4" />}
+                              className="h-4 w-4 shrink-0"
+                            />
                             <div className="flex-1">
                               <div className="text-sm">{conn.name}</div>
                               <div className="text-xs text-muted-foreground">
-                                {conn.type === 'mcp' ? 'MCP Server' : 'API'}
+                                {getConnectionLabel(conn.type)}
                               </div>
                             </div>
                             {selectedConnectionIds.includes(conn.id) && (
                               <Check className="h-4 w-4 text-primary shrink-0" />
                             )}
                           </label>
-                        ))}
+                        )})}
                       </div>
                     )}
                   </div>
