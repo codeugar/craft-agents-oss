@@ -101,9 +101,15 @@ export class ConnectionService {
             // Token still valid (just within buffer), continue with existing token
             console.log(`[ConnectionService] Using existing MCP token (still valid) for: ${connection.name}`)
           }
-        } else if (isActuallyExpired && !creds.refreshToken) {
-          // Token is actually expired and we have no way to refresh
-          console.warn(`[ConnectionService] MCP token expired and no refresh token available: ${connection.name}`)
+        } else if (isActuallyExpired && (!creds.refreshToken || !creds.clientId)) {
+          // Token is actually expired and we can't refresh (missing refresh token or clientId)
+          const reason = !creds.refreshToken ? 'no refresh token' : 'no clientId'
+          console.warn(`[ConnectionService] MCP token expired and cannot refresh (${reason}): ${connection.name}`)
+          return null
+        } else if (isActuallyExpired) {
+          // Token is expired but we have refresh credentials - this shouldn't happen
+          // (shouldAttemptRefresh should have been true), but guard against it
+          console.warn(`[ConnectionService] MCP token expired, refresh not attempted: ${connection.name}`)
           return null
         }
 
@@ -254,6 +260,9 @@ export class ConnectionService {
           const mcpConfig = await this.buildMcpServerConfig(conn)
           if (mcpConfig) {
             mcpServers[conn.name] = mcpConfig
+          } else {
+            // Connection is enabled in UI but couldn't be configured (expired/missing creds)
+            console.warn(`[ConnectionService] Skipping MCP connection '${conn.name}' - credentials unavailable or expired (needs re-auth)`)
           }
         } else if (conn.type === 'api') {
           apiServers[`api_${conn.name}`] = this.buildApiServer(conn)
@@ -261,6 +270,9 @@ export class ConnectionService {
           const gmailServer = await this.buildGmailServer(conn)
           if (gmailServer) {
             apiServers[`gmail_${conn.id}`] = gmailServer
+          } else {
+            // Connection is enabled in UI but couldn't be configured (expired/missing creds)
+            console.warn(`[ConnectionService] Skipping Gmail connection '${conn.name}' - credentials unavailable or expired (needs re-auth)`)
           }
         }
       } catch (error) {
