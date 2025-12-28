@@ -209,13 +209,20 @@ export function groupMessagesByTurn(messages: Message[]): Turn[] {
       // Extract todos from TodoWrite tool results
       currentTurn.todos = extractTodosFromActivities(currentTurn.activities)
 
-      // If interrupted, mark any running activities as error
+      // If interrupted, mark any running activities as error and todos as interrupted
       if (interrupted) {
         currentTurn.activities = currentTurn.activities.map(activity =>
           activity.status === 'running'
             ? { ...activity, status: 'error' as ActivityStatus, error: 'Interrupted' }
             : activity
         )
+        if (currentTurn.todos) {
+          currentTurn.todos = currentTurn.todos.map(todo =>
+            todo.status === 'in_progress'
+              ? { ...todo, status: 'interrupted' as const }
+              : todo
+          )
+        }
         currentTurn.isStreaming = false
         currentTurn.isComplete = true
       }

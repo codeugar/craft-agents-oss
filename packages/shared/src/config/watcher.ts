@@ -379,11 +379,13 @@ export class ConfigWatcher {
     const sourceDir = join(this.sourcesDir, slug);
 
     // Watch config.json
+    // Handle both 'change' (normal edit) and 'rename' (atomic save) events
+    // Atomic saves write to a temp file then rename, emitting 'rename' instead of 'change'
     const configPath = join(sourceDir, 'config.json');
     if (existsSync(configPath)) {
       try {
         const watcher = watch(configPath, (eventType) => {
-          if (eventType === 'change') {
+          if (eventType === 'change' || (eventType === 'rename' && existsSync(configPath))) {
             this.debounce(`source-config:${slug}`, () => this.handleSourceConfigChange(slug));
           }
         });
@@ -394,11 +396,12 @@ export class ConfigWatcher {
     }
 
     // Watch guide.md
+    // Handle both 'change' (normal edit) and 'rename' (atomic save) events
     const guidePath = join(sourceDir, 'guide.md');
     if (existsSync(guidePath)) {
       try {
         const watcher = watch(guidePath, (eventType) => {
-          if (eventType === 'change') {
+          if (eventType === 'change' || (eventType === 'rename' && existsSync(guidePath))) {
             this.debounce(`source-guide:${slug}`, () => this.handleSourceGuideChange(slug));
           }
         });
@@ -587,11 +590,13 @@ export class ConfigWatcher {
     const agentDir = join(this.agentsDir, slug);
 
     // Watch config.json
+    // Handle both 'change' (normal edit) and 'rename' (atomic save) events
+    // Atomic saves write to a temp file then rename, emitting 'rename' instead of 'change'
     const configPath = join(agentDir, 'config.json');
     if (existsSync(configPath)) {
       try {
         const watcher = watch(configPath, (eventType) => {
-          if (eventType === 'change') {
+          if (eventType === 'change' || (eventType === 'rename' && existsSync(configPath))) {
             this.debounce(`agent-config:${slug}`, () => this.handleAgentConfigChange(slug));
           }
         });
@@ -602,11 +607,12 @@ export class ConfigWatcher {
     }
 
     // Watch instructions.md
+    // Handle both 'change' (normal edit) and 'rename' (atomic save) events
     const instructionsPath = join(agentDir, 'instructions.md');
     if (existsSync(instructionsPath)) {
       try {
         const watcher = watch(instructionsPath, (eventType) => {
-          if (eventType === 'change') {
+          if (eventType === 'change' || (eventType === 'rename' && existsSync(instructionsPath))) {
             this.debounce(`agent-instructions:${slug}`, () =>
               this.handleAgentInstructionsChange(slug)
             );

@@ -184,7 +184,8 @@ packages/shared/src/
 │   ├── debug.ts              # Debug logging to /tmp/craft-debug.log
 │   ├── files.ts              # File attachment processing (shared with TUI)
 │   ├── summarize.ts          # Shared summarization for large tool results
-│   ├── logo.ts               # Craft Agent logo/branding
+│   ├── logo.ts               # Favicon URL derivation from service URLs
+│   ├── icon.ts               # Source icon URL resolution (relative, direct, domain)
 │   ├── title-generator.ts    # Session title generation
 │   └── toolNames.ts          # Tool name utilities
 ├── clients/
@@ -268,6 +269,14 @@ Core `CraftAgent` class that:
 - **Tool summarization**: `PostToolUse` hook summarizes large MCP tool results (>10k tokens)
 - **AskUserQuestion**: `canUseTool` callback for interactive questions
 - **Preferences tool**: Built-in `update_user_preferences` via in-process MCP server
+- **Source context injection**: `formatSourceState()` injects `<sources>` block into user messages
+
+**Source Context Injection:**
+The agent injects source availability info into each user message via `formatSourceState()`:
+- **Active sources**: Currently enabled and authenticated sources
+- **Inactive sources**: Sources that are disabled or need authentication (with reason)
+- **Source taglines**: Brief descriptions shown once per session when sources are first introduced
+- Use `setAllSources(sources)` to provide the full source list for context injection
 
 **AgentEvent types:** `status`, `text_delta`, `text_complete`, `tool_start`, `tool_result`, `permission_request`, `ask_user`, `error`, `complete`
 
@@ -496,9 +505,9 @@ Agents are specialized configurations that extend the base agent with custom ins
 **Source folder structure (workspace-scoped):**
 ```
 ~/.craft-agent/workspaces/{workspaceSlug}/sources/{sourceSlug}/
-├── config.json       # Source metadata (type, url, auth)
+├── config.json       # Source metadata (type, url, auth, iconUrl, tagline)
 ├── guide.md          # Usage documentation + YAML frontmatter cache
-└── icon.png          # Optional custom icon
+└── icon.png          # Optional custom icon (referenced via iconUrl: "./icon.png")
 ```
 
 **Source types:**
@@ -520,10 +529,19 @@ Agents are specialized configurations that extend the base agent with custom ins
     "authType": "header",
     "headerName": "x-api-key"
   },
+  "iconUrl": "https://exa.ai",
+  "tagline": "AI-powered semantic search for web content.",
   "createdAt": 1703001234567,
   "updatedAt": 1703001234567
 }
 ```
+
+**Source icon and tagline fields:**
+- `iconUrl` - Icon URL supporting three formats:
+  - Relative path (`./icon.png`) → resolved to `file://` URL from source folder
+  - Direct image URL (`https://cdn.example.com/logo.png`) → used as-is
+  - Domain URL (`https://obsidian.md`) → Google Favicon API lookup
+- `tagline` - Brief description (under 80 chars) shown in agent context. If not set, extracted from guide.md first paragraph via `extractTagline()`
 
 **Agent config example (`config.json`):**
 ```json

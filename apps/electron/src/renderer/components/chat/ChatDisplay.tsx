@@ -540,6 +540,7 @@ export function ChatDisplay({
                                 filePath,
                                 original: oldString,
                                 modified: newString,
+                                error: activity.error,
                               })
                             }
                             // Read tool → Code preview (read mode)

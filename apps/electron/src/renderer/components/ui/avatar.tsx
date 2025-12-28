@@ -84,14 +84,14 @@ function CrossfadeAvatar({
   return (
     <div
       className={cn(
-        "relative flex shrink-0 overflow-hidden rounded-full",
+        "relative flex shrink-0 overflow-hidden",
         className
       )}
     >
       {/* Fallback - always rendered, fades out when image loads */}
       <div
         className={cn(
-          "absolute inset-0 flex items-center justify-center rounded-full transition-opacity duration-200",
+          "absolute inset-0 flex items-center justify-center transition-opacity duration-200",
           isLoaded ? "opacity-0" : "opacity-100",
           fallbackClassName
         )}
@@ -117,7 +117,7 @@ function CrossfadeAvatar({
       {!src && (
         <div
           className={cn(
-            "flex h-full w-full items-center justify-center rounded-full",
+            "flex h-full w-full items-center justify-center",
             fallbackClassName
           )}
         >

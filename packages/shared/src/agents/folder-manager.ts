@@ -16,6 +16,8 @@ import type {
 } from './folder-types.ts';
 import type { LoadedSource, LocalSourceConfig } from '../sources/types.ts';
 import type { McpServerConfig, ApiConfig } from './types.ts';
+import { resolveSourceIconUrl } from '../utils/icon.ts';
+import { getLogoUrl } from '../utils/logo.ts';
 import {
   loadAgent,
   loadWorkspaceAgents,
@@ -180,13 +182,17 @@ export class FolderAgentManager {
    */
   private sourceToMcpConfig(source: LoadedSource): McpServerConfig {
     const mcp = source.config.mcp!;
+    // Resolve icon: explicit iconUrl → derive from MCP URL → undefined
+    const logo = resolveSourceIconUrl(source.config.iconUrl, source.folderPath)
+      ?? getLogoUrl(mcp.url)
+      ?? undefined;
     return {
       name: source.config.slug,
       url: mcp.url,
       requiresAuth: mcp.authType !== 'none',
       bearerToken: undefined, // Looked up from CredentialManager at runtime
       description: source.guide?.scope,
-      logo: source.iconPath || undefined,
+      logo,
       // Pass through for credential lookup
       agentSlug: source.agentSlug,
       workspaceSlug: source.workspaceSlug,
@@ -224,6 +230,10 @@ export class FolderAgentManager {
         authType = 'none';
     }
 
+    // Resolve icon: explicit iconUrl → derive from API URL → undefined
+    const logo = resolveSourceIconUrl(source.config.iconUrl, source.folderPath)
+      ?? getLogoUrl(api.baseUrl)
+      ?? undefined;
     return {
       name: source.config.slug,
       baseUrl: api.baseUrl,
@@ -234,7 +244,7 @@ export class FolderAgentManager {
         authScheme: api.authScheme,
       },
       documentation: this.buildApiDocumentation(source),
-      logo: source.iconPath || undefined,
+      logo,
       // Pass through for credential lookup
       agentSlug: source.agentSlug,
       workspaceSlug: source.workspaceSlug,

@@ -238,6 +238,39 @@ export function loadAgentSourceGuide(
 }
 
 /**
+ * Extract a short tagline from guide.md content
+ * Looks for the first non-empty paragraph after the title, or falls back to scope section
+ * @returns Tagline string (max 100 chars) or null if not found
+ */
+export function extractTagline(guide: SourceGuide | null): string | null {
+  if (!guide?.raw) return null;
+
+  // Remove YAML frontmatter if present
+  let content = guide.raw.replace(/^---\n[\s\S]*?\n---\n?/, '');
+
+  // Try to get first paragraph after the title (# Title)
+  // Match: # Title\n\n<first paragraph>
+  const titleMatch = content.match(/^#[^\n]+\n+([^\n#][^\n]*)/);
+  if (titleMatch?.[1]?.trim()) {
+    const tagline = titleMatch[1].trim();
+    // Skip if it looks like a section or placeholder
+    if (!tagline.startsWith('##') && !tagline.startsWith('(')) {
+      return tagline.slice(0, 100);
+    }
+  }
+
+  // Fallback to first line of scope section
+  if (guide.scope) {
+    const firstLine = guide.scope.split('\n')[0]?.trim();
+    if (firstLine && !firstLine.startsWith('(')) {
+      return firstLine.slice(0, 100);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Save guide.md
  */
 export function saveSourceGuide(
@@ -307,28 +340,31 @@ export function setNestedValue(
 // Icon Operations
 // ============================================================
 
+/** Icon file extensions we recognize */
+const ICON_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.svg', '.webp', '.ico', '.gif'];
+
 /**
- * Find icon file (checks multiple extensions)
+ * Find an icon file in a directory
+ * Looks for files named "icon" with common image extensions
  */
-export function findSourceIcon(workspaceSlug: string, sourceSlug: string): string | null {
-  const dir = getSourcePath(workspaceSlug, sourceSlug);
-  return findIconInDir(dir);
+export function findIconInDir(dir: string): string | null {
+  if (!existsSync(dir)) return null;
+
+  const entries = readdirSync(dir);
+  for (const ext of ICON_EXTENSIONS) {
+    const iconName = `icon${ext}`;
+    if (entries.includes(iconName)) {
+      return join(dir, iconName);
+    }
+  }
+  return null;
 }
 
 /**
- * Find icon in a specific directory
+ * Find icon file for a source
  */
-export function findIconInDir(dir: string): string | null {
-  const extensions = ['png', 'svg', 'jpg', 'jpeg', 'webp'];
-
-  for (const ext of extensions) {
-    const iconPath = join(dir, `icon.${ext}`);
-    if (existsSync(iconPath)) {
-      return iconPath;
-    }
-  }
-
-  return null;
+export function findSourceIcon(workspaceSlug: string, sourceSlug: string): string | null {
+  return findIconInDir(getSourcePath(workspaceSlug, sourceSlug));
 }
 
 // ============================================================
@@ -339,13 +375,14 @@ export function findIconInDir(dir: string): string | null {
  * Load complete source with all files
  */
 export function loadSource(workspaceSlug: string, sourceSlug: string): LoadedSource | null {
+  const folderPath = getSourcePath(workspaceSlug, sourceSlug);
   const config = loadSourceConfig(workspaceSlug, sourceSlug);
   if (!config) return null;
 
   return {
     config,
     guide: loadSourceGuide(workspaceSlug, sourceSlug),
-    iconPath: findSourceIcon(workspaceSlug, sourceSlug),
+    folderPath,
     workspaceSlug,
   };
 }
@@ -358,15 +395,14 @@ export function loadAgentSource(
   agentSlug: string,
   sourceSlug: string
 ): LoadedSource | null {
+  const folderPath = getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug);
   const config = loadAgentSourceConfig(workspaceSlug, agentSlug, sourceSlug);
   if (!config) return null;
-
-  const dir = getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug);
 
   return {
     config,
     guide: loadAgentSourceGuide(workspaceSlug, agentSlug, sourceSlug),
-    iconPath: findIconInDir(dir),
+    folderPath,
     workspaceSlug,
     agentSlug,
   };
@@ -523,6 +559,11 @@ export function createSource(
         config.local = input.local;
       }
       break;
+  }
+
+  // Add icon URL if provided
+  if (input.iconUrl) {
+    config.iconUrl = input.iconUrl;
   }
 
   saveSourceConfig(workspaceSlug, config);

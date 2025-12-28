@@ -499,6 +499,8 @@ export interface DiffPreviewData {
   original: string
   modified: string
   language?: string
+  /** Error message if the edit failed */
+  error?: string
 }
 
 /**

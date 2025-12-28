@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import loader from '@monaco-editor/loader'
 import * as monaco from 'monaco-editor'
-import { PencilLine } from 'lucide-react'
+import { PencilLine, XCircle } from 'lucide-react'
 import { useTheme } from '@/context/ThemeContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { WindowHeader, WindowHeaderBadge, BADGE_CONFIGS } from '@/components/ui/window-header-badge'
@@ -141,7 +141,18 @@ export function DiffPreviewApp({ sessionId, diffId }: DiffPreviewAppProps) {
           )}
         </WindowHeader>
 
-        {/* Error overlay */}
+        {/* Tool error banner - shown when the Edit tool failed */}
+        {data?.error && (
+          <div className="px-4 py-3 bg-destructive/10 border-b border-destructive/20 flex items-start gap-3">
+            <XCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-destructive/70 mb-0.5">Edit Failed</div>
+              <p className="text-sm text-destructive whitespace-pre-wrap break-words">{data.error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Fetch error overlay */}
         {error && (
           <div className="flex-1 flex items-center justify-center text-destructive">
             Error: {error}

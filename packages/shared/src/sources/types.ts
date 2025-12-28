@@ -7,8 +7,7 @@
  * File structure (workspace-scoped):
  * ~/.craft-agent/workspaces/{workspaceSlug}/sources/{sourceSlug}/
  *   ├── config.json   - Source settings
- *   ├── guide.md      - Usage guidelines + cached data (in YAML frontmatter)
- *   └── icon.png      - Optional custom icon
+ *   └── guide.md      - Usage guidelines + cached data (in YAML frontmatter)
  *
  * Agent-scoped sources:
  * ~/.craft-agent/workspaces/{workspaceSlug}/agents/{agentSlug}/sources/{sourceSlug}/
@@ -68,7 +67,6 @@ export interface ApiSourceConfig {
 export interface LocalSourceConfig {
   path: string;
   format?: string; // Optional hint: 'filesystem' | 'obsidian' | 'git' | 'sqlite' | etc.
-  websiteUrl?: string; // Website URL for favicon (e.g., "https://obsidian.md" for Obsidian vaults)
 }
 
 /**
@@ -90,6 +88,13 @@ export interface FolderSourceConfig {
   mcp?: McpSourceConfig;
   api?: ApiSourceConfig;
   local?: LocalSourceConfig;
+
+  // Icon URL: relative path (./icon.png), direct image URL, or domain for favicon lookup
+  iconUrl?: string;
+
+  // Short description for agent context (e.g., "Issue tracking, bugs, tasks, sprints")
+  // If not set, extracted from guide.md first paragraph
+  tagline?: string;
 
   // Status tracking
   isAuthenticated?: boolean;
@@ -123,7 +128,9 @@ export interface SourceGuide {
 export interface LoadedSource {
   config: FolderSourceConfig;
   guide: SourceGuide | null;
-  iconPath: string | null;
+
+  /** Absolute path to source folder (for resolving relative icon paths) */
+  folderPath: string;
 
   /**
    * Workspace this source belongs to.
@@ -149,5 +156,6 @@ export interface CreateSourceInput {
   mcp?: McpSourceConfig;
   api?: ApiSourceConfig;
   local?: LocalSourceConfig;
+  iconUrl?: string;
   enabled?: boolean;
 }

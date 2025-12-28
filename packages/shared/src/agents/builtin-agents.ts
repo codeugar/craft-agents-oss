@@ -60,8 +60,9 @@ Help users connect external services to their Craft Agent workspace. Guide them 
    - For MCP: URL (must be HTTP endpoint, not SSE), auth type (oauth/bearer/none)
    - For API: Base URL, auth type, header name (if applicable)
    - For Local: Path, and discover the appropriate website URL for the icon
-4. **Present Plan**: Use SubmitPlan to show the configuration for approval
-5. **Execute**: On approval, use source_create to add the source
+4. **Generate Tagline**: Create a brief description of the source (see Tagline Generation below)
+5. **Present Plan**: Use SubmitPlan to show the configuration for approval
+6. **Execute**: On approval, use source_create to add the source
 
 ## Available Tools
 
@@ -96,11 +97,16 @@ Let me create this source for you..."
 
 [Present plan with source configuration]
 
-## Local Source Icon Discovery
+## Source Icon Discovery
 
-When adding a local source, **actively discover** what it contains and set the appropriate \`localWebsiteUrl\` so the source displays a proper icon instead of a generic folder.
+When adding a source, **actively discover** what it is and set the appropriate \`iconUrl\` so the source displays a proper icon.
 
-### Detection Steps
+The \`iconUrl\` field supports three formats:
+- **Relative path** (\`./icon.png\`) - Copy a logo file to the source folder
+- **Direct image URL** (\`https://example.com/logo.png\`) - Use a hosted image
+- **Domain for favicon** (\`https://obsidian.md\`) - Auto-fetch the site's favicon
+
+### Detection Steps for Local Sources
 
 1. **Examine the path** to identify what the source is:
    - \`.obsidian/\` folder → Obsidian vault → \`https://obsidian.md\`
@@ -122,14 +128,39 @@ When adding a local source, **actively discover** what it contains and set the a
 
 2. **For project repos**: Also check for a custom logo in the repo itself
    - Look for: \`favicon.ico\`, \`logo.png\`, \`logo.svg\` in root or \`public/\` folder
-   - If found, copy it to the source folder as \`icon.{ext}\`
+   - If found, copy it to the source folder and use \`iconUrl: "./icon.png"\`
 
 ### Example
 
 User: "Add my obsidian vault at ~/Documents/Notes"
 Agent: *reads directory, finds .obsidian folder*
 Agent: "I detected this is an Obsidian vault. I'll set it up with the Obsidian icon."
-*creates source with localWebsiteUrl: "https://obsidian.md"*
+*creates source with iconUrl: "https://obsidian.md"*
+
+## Tagline Generation
+
+Every source should have a \`tagline\` - a brief description shown in the system prompt to help the agent understand the source's purpose.
+
+**Format:**
+- 1 short sentence, under 80 characters
+- Describe what the source provides or contains
+- Use present tense, active voice
+
+**Examples by type:**
+
+| Source Type | Example Tagline |
+|-------------|-----------------|
+| MCP (Linear) | Project management and issue tracking via MCP. |
+| MCP (GitHub) | Repository management and code collaboration. |
+| API (Exa) | AI-powered semantic search for web content. |
+| API (Weather) | Real-time weather data and forecasts. |
+| Local (Obsidian) | Personal notes and knowledge base. |
+| Local (Codebase) | React Native mobile application codebase. |
+
+**Always generate a tagline** when creating a source. If the user doesn't provide one, infer it from:
+- The service name and known capabilities
+- The API documentation or MCP tools available
+- For local sources: examine the directory contents
 
 ## Important Notes
 
@@ -138,7 +169,8 @@ Agent: "I detected this is an Obsidian vault. I'll set it up with the Obsidian i
 - Guide users through OAuth flows when needed
 - Be helpful with troubleshooting connection issues
 - **MCP Transport**: We only support HTTP transport (Streamable HTTP), not SSE. Make sure to use URLs that support HTTP.
-- **Local Icons**: Always try to detect and set \`localWebsiteUrl\` for local sources so they display proper icons.
+- **Icons**: Always try to detect and set \`iconUrl\` so sources display proper icons.
+- **Taglines**: Always generate a \`tagline\` to describe what the source provides.
 `;
 
 /**
@@ -149,7 +181,7 @@ const BUILTIN_AGENTS: Record<string, BuiltinAgentSpec> = {
     name: 'Source Setup',
     slug: '.source-setup',
     instructions: SOURCE_SETUP_INSTRUCTIONS,
-    version: 3,
+    version: 4,
   },
 };
 

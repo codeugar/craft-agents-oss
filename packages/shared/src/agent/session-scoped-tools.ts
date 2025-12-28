@@ -1515,7 +1515,7 @@ export function createSourceCreateTool(sessionId: string, workspaceSlug: string)
       apiAuthType: z.enum(['bearer', 'header', 'query', 'basic', 'oauth', 'none']).optional().describe('API auth type (default: none)'),
       apiHeaderName: z.string().optional().describe('Header name for header auth (e.g., "X-API-Key")'),
       localPath: z.string().optional().describe('Local path (required for type=local)'),
-      localWebsiteUrl: z.string().optional().describe('Website URL for local source favicon (e.g., "https://obsidian.md" for Obsidian vaults)'),
+      iconUrl: z.string().optional().describe('Icon URL: relative path (./icon.png), direct image URL, or domain for favicon lookup'),
       enabled: z.boolean().optional().describe('Whether source is enabled (default: true)'),
     },
     async (args) => {
@@ -1531,7 +1531,8 @@ export function createSourceCreateTool(sessionId: string, workspaceSlug: string)
           type: 'mcp' | 'api' | 'local';
           mcp?: { url: string; authType: 'oauth' | 'bearer' | 'none' };
           api?: { baseUrl: string; authType: 'bearer' | 'header' | 'query' | 'basic' | 'oauth' | 'none'; headerName?: string };
-          local?: { path: string; websiteUrl?: string };
+          local?: { path: string };
+          iconUrl?: string;
           enabled?: boolean;
         } = {
           name: args.name,
@@ -1539,6 +1540,11 @@ export function createSourceCreateTool(sessionId: string, workspaceSlug: string)
           type: args.type,
           enabled: args.enabled ?? true,
         };
+
+        // Add iconUrl if provided
+        if (args.iconUrl) {
+          input.iconUrl = args.iconUrl;
+        }
 
         // Add type-specific config
         if (args.type === 'mcp') {
@@ -1582,7 +1588,6 @@ export function createSourceCreateTool(sessionId: string, workspaceSlug: string)
           }
           input.local = {
             path: args.localPath,
-            websiteUrl: args.localWebsiteUrl,
           };
         }
 
@@ -1632,7 +1637,7 @@ Only the provided fields will be updated; others remain unchanged.`,
       mcpAuthType: z.enum(['oauth', 'bearer', 'none']).optional().describe('New MCP auth type'),
       apiBaseUrl: z.string().optional().describe('New API base URL'),
       apiAuthType: z.enum(['bearer', 'header', 'query', 'basic', 'oauth', 'none']).optional().describe('New API auth type'),
-      localWebsiteUrl: z.string().optional().describe('Website URL for local source favicon (e.g., "https://obsidian.md")'),
+      iconUrl: z.string().optional().describe('Icon URL: relative path (./icon.png), direct image URL, or domain for favicon lookup'),
     },
     async (args) => {
       debug('[source_update] Updating source:', args.sourceSlug);
@@ -1663,9 +1668,7 @@ Only the provided fields will be updated; others remain unchanged.`,
           if (args.apiAuthType !== undefined) config.api.authType = args.apiAuthType;
         }
 
-        if (config.local) {
-          if (args.localWebsiteUrl !== undefined) config.local.websiteUrl = args.localWebsiteUrl;
-        }
+        if (args.iconUrl !== undefined) config.iconUrl = args.iconUrl;
 
         saveSourceConfig(workspaceSlug, config);
 

@@ -612,9 +612,19 @@ export function Chat({
       { key: '1', cmd: true, action: () => focusZone('sidebar') },
       { key: '2', cmd: true, action: () => focusZone('session-list') },
       { key: '3', cmd: true, action: () => focusZone('chat') },
-      // Tab navigation between zones (disabled when in textarea - Shift+Tab toggles safe mode there)
+      // Tab navigation between zones
       { key: 'Tab', action: focusNextZone, when: () => !document.querySelector('[role="dialog"]') },
-      { key: 'Tab', shift: true, action: focusPreviousZone, when: () => !document.querySelector('[role="dialog"]') && document.activeElement?.tagName !== 'TEXTAREA' },
+      // Shift+Tab toggles safe mode (textarea handles its own, this handles when focus is elsewhere)
+      { key: 'Tab', shift: true, action: () => {
+        if (activeTab?.type === 'chat') {
+          const sessionId = (activeTab as ChatTab).sessionId
+          const currentOptions = contextValue.sessionOptions.get(sessionId)
+          const isCurrentlySafe = currentOptions?.activeModes?.includes('safe') ?? false
+          // Toggle safe mode: set to ['safe'] or empty array
+          const newModes: ('safe')[] = isCurrentlySafe ? [] : ['safe']
+          contextValue.onSessionOptionsChange(sessionId, { activeModes: newModes })
+        }
+      }, when: () => !document.querySelector('[role="dialog"]') && document.activeElement?.tagName !== 'TEXTAREA' },
       // Panel tab navigation
       { key: '[', cmd: true, action: previousTab },
       { key: ']', cmd: true, action: nextTab },
@@ -850,23 +860,8 @@ export function Chat({
       }
 
       // Tab bar click - update session selection
+      // Don't change the sidebar view - user controls that
       setSession({ selected: chatTab.sessionId })
-
-      // Check if session is visible in current view
-      const isVisibleInCurrentView = filteredSessionsRef.current.some(
-        s => s.id === chatTab.sessionId
-      )
-
-      // Only change view if session isn't visible in current list
-      if (!isVisibleInCurrentView) {
-        if (chatTab.agentId) {
-          setViewMode('agent')
-          setSelectedAgentId(chatTab.agentId)
-        } else {
-          setViewMode('inbox')
-          setSelectedAgentId(null)
-        }
-      }
     }
   }, [activeTab, setSession])
 

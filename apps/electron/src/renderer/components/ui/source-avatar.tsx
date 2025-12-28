@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { Mail, Plug, Globe, HardDrive } from 'lucide-react'
 import { McpIcon } from '@/components/icons/McpIcon'
 import { getLogoUrl } from '@craft-agent/shared/utils/logo'
+import { resolveSourceIconUrl } from '@craft-agent/shared/utils/icon'
 import type { LoadedSource } from '../../../../shared/types'
 
 export type SourceType = 'mcp' | 'api' | 'gmail' | 'local'
@@ -61,12 +62,12 @@ interface LoadedSourceAvatarProps {
 
 type SourceAvatarProps = DirectSourceAvatarProps | LoadedSourceAvatarProps
 
-// Size configurations
-const SIZE_CONFIG: Record<SourceAvatarSize, { container: string; icon: string }> = {
-  xs: { container: 'h-3.5 w-3.5', icon: 'h-2 w-2' },
-  sm: { container: 'h-4 w-4', icon: 'h-2 w-2' },
-  md: { container: 'h-5 w-5', icon: 'h-2.5 w-2.5' },
-  lg: { container: 'h-6 w-6', icon: 'h-3.5 w-3.5' },
+// Size configurations (container only - icons fill parent with padding)
+const SIZE_CONFIG: Record<SourceAvatarSize, string> = {
+  xs: 'h-3.5 w-3.5',
+  sm: 'h-4 w-4',
+  md: 'h-5 w-5',
+  lg: 'h-6 w-6',
 }
 
 // Fallback icons by source type
@@ -85,14 +86,12 @@ export function getSourceFallbackIcon(type: SourceType): React.ComponentType<{ c
 }
 
 /**
- * Helper to extract service URL from a LoadedSource for logo derivation
+ * Derive favicon URL from service URL (for sources without explicit iconUrl)
  */
-function getSourceServiceUrl(source: LoadedSource): string | undefined {
+function deriveServiceFavicon(source: LoadedSource): string | null {
   const config = source.config
-  if (config.mcp?.url) return config.mcp.url
-  if (config.api?.baseUrl) return config.api.baseUrl
-  if (config.local?.websiteUrl) return config.local.websiteUrl
-  return undefined
+  const url = config.mcp?.url ?? config.api?.baseUrl
+  return url ? getLogoUrl(url) : null
 }
 
 export function SourceAvatar(props: SourceAvatarProps) {
@@ -108,8 +107,9 @@ export function SourceAvatar(props: SourceAvatarProps) {
     const source = props.source
     type = source.config.type as SourceType
     name = source.config.name
-    const serviceUrl = getSourceServiceUrl(source)
-    resolvedLogoUrl = serviceUrl ? getLogoUrl(serviceUrl) : null
+    // Priority: explicit iconUrl → derive from service URL → null
+    resolvedLogoUrl = resolveSourceIconUrl(source.config.iconUrl, source.folderPath)
+      ?? deriveServiceFavicon(source)
   } else {
     // Direct props mode
     const directProps = props as DirectSourceAvatarProps
@@ -118,7 +118,7 @@ export function SourceAvatar(props: SourceAvatarProps) {
     resolvedLogoUrl = directProps.logoUrl ?? (directProps.serviceUrl ? getLogoUrl(directProps.serviceUrl) : null)
   }
 
-  const sizeConfig = SIZE_CONFIG[size]
+  const containerSize = SIZE_CONFIG[size]
   const FallbackIcon = FALLBACK_ICONS[type] ?? Plug
 
   return (
@@ -126,12 +126,12 @@ export function SourceAvatar(props: SourceAvatarProps) {
       src={resolvedLogoUrl}
       alt={name}
       className={cn(
-        sizeConfig.container,
+        containerSize,
         'rounded-[4px] ring-1 ring-border/30 shrink-0',
         className
       )}
-      fallbackClassName="bg-muted"
-      fallback={<FallbackIcon className={cn(sizeConfig.icon, 'text-muted-foreground')} />}
+      fallbackClassName="bg-muted rounded-[4px]"
+      fallback={<FallbackIcon className="w-full h-full text-muted-foreground" />}
     />
   )
 }

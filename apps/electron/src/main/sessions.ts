@@ -652,6 +652,7 @@ export class SessionManager {
         todoState: m.todoState,
         lastReadMessageId: m.lastReadMessageId,
         workingDirectory: m.workingDirectory,
+        enabledSourceSlugs: m.enabledSourceSlugs,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -914,8 +915,12 @@ export class SessionManager {
     // IMMEDIATELY update the agent's source servers if agent exists
     // This ensures tool availability is updated mid-conversation
     if (managed.agent) {
+      // Set all sources for context (agent sees full list with descriptions)
+      const allSources = loadWorkspaceSources(workspaceSlug)
+      managed.agent.setAllSources(allSources)
+      // Set active source servers (tools are only available from these)
       managed.agent.setSourceServers(mcpServers, {})
-      console.log(`[SessionManager] Applied ${Object.keys(mcpServers).length} MCP sources to active agent`)
+      console.log(`[SessionManager] Applied ${Object.keys(mcpServers).length} MCP sources to active agent (${allSources.length} total)`)
     }
 
     // Persist the session with updated sources
@@ -1177,10 +1182,13 @@ export class SessionManager {
       }
     }
 
+    // Always set all sources for context (even if none are enabled)
+    const workspaceSlug = getWorkspaceSlug(managed.workspace)
+    const allSources = loadWorkspaceSources(workspaceSlug)
+    agent.setAllSources(allSources)
+
     // Apply source servers if any are enabled
     if (managed.enabledSourceSlugs?.length) {
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-
       // Build server configs if not already built
       if (!managed.sourceMcpServers) {
         const sources = getSourcesBySlugs(workspaceSlug, managed.enabledSourceSlugs)
@@ -1195,7 +1203,7 @@ export class SessionManager {
       // Apply source servers to the agent
       if (managed.sourceMcpServers && Object.keys(managed.sourceMcpServers).length > 0) {
         agent.setSourceServers(managed.sourceMcpServers, {})
-        console.log(`[SessionManager] Applied ${Object.keys(managed.sourceMcpServers).length} MCP sources to session ${sessionId}`)
+        console.log(`[SessionManager] Applied ${Object.keys(managed.sourceMcpServers).length} MCP sources to session ${sessionId} (${allSources.length} total)`)
       }
     }
 

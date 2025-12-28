@@ -491,6 +491,10 @@ export class CraftAgent {
   private sourceApiServers: Record<string, ReturnType<typeof createSdkMcpServer>> = {};
   // Set of active source server names (for blocking disabled sources)
   private activeSourceServerNames: Set<string> = new Set();
+  // Full list of all sources in workspace (for context injection)
+  private allSources: LoadedSource[] = [];
+  // Sources already introduced to agent this session (for incremental context)
+  private knownSourceSlugs: Set<string> = new Set();
   // Temporary clarifications (not yet saved to Craft document)
   private temporaryClarifications: string | null = null;
   // Map tool_use_id → explicit intent from _intent field (for summarization and UI display)
@@ -1594,23 +1598,61 @@ export class CraftAgent {
 
   /**
    * Format source state as a lightweight XML block for injection into user messages.
-   * Only included when there are selected sources (active or inactive).
-   * This informs the agent about which sources are available vs unavailable.
+   * Shows active sources, inactive sources, and introduces new sources with taglines.
+   * New sources (not seen before this session) include descriptions to help agent understand usage.
    */
   private formatSourceState(): string {
-    const activeNames = [...this.activeSourceServerNames].sort();
+    const activeSlugs = [...this.activeSourceServerNames].sort();
 
-    if (activeNames.length === 0) {
-      return `<sources>
-Available: none
-Only use tools from sources listed above. If a source was available earlier but is not listed here, it has been disabled.
-</sources>`;
+    // Find inactive sources (in allSources but not active)
+    const inactiveSources = this.allSources.filter(
+      (s) => !this.activeSourceServerNames.has(s.config.slug)
+    );
+
+    // Find sources not yet seen this session
+    const unseenSources = this.allSources.filter(
+      (s) => !this.knownSourceSlugs.has(s.config.slug)
+    );
+
+    // Check if this is the first message (no sources known yet)
+    const isFirstMessage = this.knownSourceSlugs.size === 0;
+
+    // Mark all current sources as known for next message
+    this.allSources.forEach((s) => this.knownSourceSlugs.add(s.config.slug));
+
+    // Build output parts
+    const parts: string[] = [];
+
+    // Active sources line
+    parts.push(`Active: ${activeSlugs.join(', ') || 'none'}`);
+
+    // Inactive sources with reason
+    if (inactiveSources.length > 0) {
+      const inactiveList = inactiveSources.map((s) => {
+        const reason = !s.config.enabled
+          ? 'disabled'
+          : !s.config.isAuthenticated
+            ? 'needs auth'
+            : 'inactive';
+        return `${s.config.slug} (${reason})`;
+      });
+      parts.push(`Inactive: ${inactiveList.join(', ')}`);
     }
 
-    return `<sources>
-Available: ${activeNames.join(', ')}
-Only use tools from sources listed above. If a source was available earlier but is not listed here, it has been disabled.
-</sources>`;
+    // Source descriptions (shown once per session when first introduced)
+    if (unseenSources.length > 0) {
+      parts.push('');
+      // Only show "New:" header for mid-conversation additions, not first message
+      if (!isFirstMessage) {
+        parts.push('New:');
+      }
+      for (const s of unseenSources) {
+        const tagline = s.config.tagline || s.config.provider;
+        parts.push(`- ${s.config.slug}: ${tagline}`);
+      }
+    }
+
+    return `<sources>\n${parts.join('\n')}\n</sources>`;
   }
 
   /**
@@ -2346,6 +2388,21 @@ Only use tools from sources listed above. If a source was available earlier but 
    */
   getActiveSourceServerNames(): Set<string> {
     return this.activeSourceServerNames;
+  }
+
+  /**
+   * Set all sources in the workspace (for context injection)
+   * Called by Electron/TUI to provide full source list including disabled sources
+   */
+  setAllSources(sources: LoadedSource[]): void {
+    this.allSources = sources;
+  }
+
+  /**
+   * Get all sources in the workspace
+   */
+  getAllSources(): LoadedSource[] {
+    return this.allSources;
   }
 
   /**

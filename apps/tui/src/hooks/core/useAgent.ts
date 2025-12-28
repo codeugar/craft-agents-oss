@@ -43,6 +43,7 @@ import { FolderAgentManager } from '@craft-agent/shared/agents';
 import type { SubAgentDefinition, McpServerConfig, ApiConfig } from '@craft-agent/shared/agents';
 import type { Plan } from '@craft-agent/shared/agents';
 import { debug } from '@craft-agent/shared/utils';
+import { loadWorkspaceSources } from '@craft-agent/shared/sources';
 import { containsUltrathink, stripUltrathink } from '../../utils/gradient.ts';
 import { useAgentState } from './useAgentState.ts';
 import { useSafeMode } from './useModeState.ts';
@@ -510,6 +511,12 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       // Restore SDK session ID from session if available (for conversation continuity)
       if (session?.sdkSessionId) {
         agentRef.current.setSessionId(session.sdkSessionId);
+      }
+      // Set all sources for context (agent sees full list with descriptions)
+      if (config.workspace) {
+        const workspaceSlug = getWorkspaceSlug(config.workspace);
+        const allSources = loadWorkspaceSources(workspaceSlug);
+        agentRef.current.setAllSources(allSources);
       }
     }
 

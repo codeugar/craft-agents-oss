@@ -10,6 +10,7 @@ import {
   MessageCircleDashed,
   ExternalLink,
   ArrowUpRight,
+  Ban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/markdown'
@@ -55,7 +56,7 @@ export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status'
 // Todo Types (for TodoWrite tool visualization)
 // ============================================================================
 
-export type TodoStatus = 'pending' | 'in_progress' | 'completed'
+export type TodoStatus = 'pending' | 'in_progress' | 'completed' | 'interrupted'
 
 export interface TodoItem {
   /** Task content/description */
@@ -752,6 +753,8 @@ function TodoStatusIcon({ status }: { status: TodoStatus }) {
       )
     case 'completed':
       return <CircleCheckFilled className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-[#9570BE]")} />
+    case 'interrupted':
+      return <Ban className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
   }
 }
 
