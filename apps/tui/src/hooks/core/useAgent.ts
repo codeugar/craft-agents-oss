@@ -43,7 +43,7 @@ import { FolderAgentManager } from '@craft-agent/shared/agents';
 import type { SubAgentDefinition, McpServerConfig, ApiConfig } from '@craft-agent/shared/agents';
 import type { Plan } from '@craft-agent/shared/agents';
 import { debug } from '@craft-agent/shared/utils';
-import { loadWorkspaceSources } from '@craft-agent/shared/sources';
+import { loadWorkspaceSources, createSourceService } from '@craft-agent/shared/sources';
 import { containsUltrathink, stripUltrathink } from '../../utils/gradient.ts';
 import { useAgentState } from './useAgentState.ts';
 import { useSafeMode } from './useModeState.ts';
@@ -505,6 +505,30 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
             timestamp: Date.now(),
           },
         ]);
+      };
+      // Set up sources changed callback - reloads sources when created/authenticated/deleted
+      agentRef.current.onSourcesChanged = async () => {
+        if (!config.workspace) return;
+        const workspaceSlug = getWorkspaceSlug(config.workspace);
+        debug('[useAgent] onSourcesChanged - reloading sources for workspace:', workspaceSlug);
+
+        // Reload all sources from disk
+        const allSources = loadWorkspaceSources(workspaceSlug);
+        agentRef.current?.setAllSources(allSources);
+
+        // Rebuild MCP and API servers for enabled+authenticated sources
+        const enabledSources = allSources.filter(s => s.config.enabled && s.config.isAuthenticated);
+        const sourceService = createSourceService(workspaceSlug);
+        const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources);
+        agentRef.current?.setSourceServers(mcpServers, apiServers);
+
+        debug('[useAgent] Sources reloaded:', Object.keys(mcpServers).length, 'MCP servers,', Object.keys(apiServers).length, 'API servers');
+      };
+      // Set up source activated callback - triggers reload when a source is activated
+      agentRef.current.onSourceActivated = async (sourceSlug: string) => {
+        debug('[useAgent] onSourceActivated:', sourceSlug);
+        // TUI uses all authenticated sources, so just trigger a reload
+        await agentRef.current?.onSourcesChanged?.();
       };
       // Sync current model to the newly created agent
       agentRef.current.setModel(config.model || DEFAULT_MODEL);

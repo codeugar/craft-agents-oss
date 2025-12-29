@@ -607,6 +607,12 @@ export class CraftAgent {
   // Callback when config file validation fails
   public onConfigValidationError: ((file: string, errors: ValidationIssue[]) => void) | null = null;
 
+  // Callback when sources are created/authenticated/deleted via session tools - triggers reload
+  public onSourcesChanged: (() => Promise<void>) | null = null;
+
+  // Callback when a source is activated for the current session (added to enabled sources)
+  public onSourceActivated: ((sourceSlug: string) => Promise<void>) | null = null;
+
   constructor(config: CraftAgentConfig) {
     this.config = config;
     this.isHeadless = config.isHeadless ?? false;
@@ -650,6 +656,18 @@ export class CraftAgent {
         }
         // No handler registered - return cancelled
         return { type: 'credential', cancelled: true };
+      },
+      onSourcesChanged: async () => {
+        this.onDebug?.('[CraftAgent] onSourcesChanged received - reloading sources');
+        if (this.onSourcesChanged) {
+          await this.onSourcesChanged();
+        }
+      },
+      onSourceActivated: async (sourceSlug: string) => {
+        this.onDebug?.(`[CraftAgent] onSourceActivated received: ${sourceSlug}`);
+        if (this.onSourceActivated) {
+          await this.onSourceActivated(sourceSlug);
+        }
       },
     });
 

@@ -20,6 +20,7 @@ import {
   Check,
   Search,
   Plus,
+  Trash2,
 } from "lucide-react"
 import { McpIcon } from "../icons/McpIcon"
 import {
@@ -1133,6 +1134,33 @@ export function Chat({
     }
   }, [activeWorkspace, onCreateSession, openChatTab])
 
+  const handleDeleteSource = useCallback(async (sourceName: string) => {
+    if (!activeWorkspace) return
+
+    try {
+      // Ensure the builtin agent exists
+      const agentId = await window.electronAPI.ensureBuiltinAgent(activeWorkspace.id, '.source-setup')
+      if (!agentId) {
+        toast.error('Failed to create source setup agent')
+        return
+      }
+
+      // Create a new session with this agent and set the name
+      const sessionName = `Delete ${sourceName} from sources`
+      const newSession = await onCreateSession(activeWorkspace.id, agentId)
+      await window.electronAPI.renameSession(newSession.id, sessionName)
+      openChatTab(newSession.id, activeWorkspace.id, sessionName, agentId, { forceNew: true })
+
+      // Send the delete prompt after a short delay to ensure the chat is mounted
+      setTimeout(async () => {
+        await window.electronAPI.sendMessage(newSession.id, `Delete ${sourceName} source.`, [], [], {})
+      }, 100)
+    } catch (error) {
+      console.error('[Chat] Failed to delete source:', error)
+      toast.error('Failed to start source deletion')
+    }
+  }, [activeWorkspace, onCreateSession, openChatTab])
+
   // Respond to menu bar "New Chat" trigger
   const menuTriggerRef = useRef(menuNewChatTrigger)
   useEffect(() => {
@@ -1620,12 +1648,22 @@ export function Chat({
                           {sources.map((source) => (
                             <div
                               key={source.config.slug}
-                              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-foreground/5 cursor-pointer"
+                              className="group/source flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-foreground/5 cursor-pointer"
                             >
                               <SourceAvatar source={source} size="sm" />
                               <span className="text-[13px] text-foreground truncate flex-1">
                                 {source.config.name}
                               </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteSource(source.config.name)
+                                }}
+                                className="p-0.5 rounded hover:bg-foreground/10 text-muted-foreground hover:text-foreground opacity-0 group-hover/source:opacity-100 transition-opacity"
+                                title="Delete source"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
                             </div>
                           ))}
                         </div>

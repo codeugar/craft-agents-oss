@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { rm, readFile } from 'fs/promises'
 import { CraftAgent, type AgentEvent, enterMode, exitMode, type Mode, isModeActive } from '@craft-agent/shared/agent'
+import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
 import {
   loadStoredConfig,
@@ -105,6 +106,8 @@ interface ManagedSession {
   enabledSourceSlugs?: string[]
   // Built source server configs (applied to CraftAgent)
   sourceMcpServers?: Record<string, McpServerConfig>
+  // Built API servers (Gmail, etc.) - in-process MCP servers
+  sourceApiServers?: Record<string, ReturnType<typeof createSdkMcpServer>>
   // Working directory for this session (used by agent for bash commands)
   workingDirectory?: string
 }
@@ -861,6 +864,61 @@ export class SessionManager {
         }, managed.workspace.id)
       }
 
+      // Wire up onSourcesChanged to reload sources when created/authenticated/deleted
+      managed.agent.onSourcesChanged = async () => {
+        console.log(`[SessionManager] Sources changed for session ${managed.id} - reloading`)
+        const workspaceSlug = getWorkspaceSlug(managed.workspace)
+
+        // Reload all sources from disk
+        const allSources = loadWorkspaceSources(workspaceSlug)
+        managed.agent?.setAllSources(allSources)
+
+        // Rebuild MCP and API servers for session's enabled sources
+        const enabledSlugs = managed.enabledSourceSlugs || []
+        const enabledSources = allSources.filter(s =>
+          enabledSlugs.includes(s.config.slug) && s.config.enabled && s.config.isAuthenticated
+        )
+        const sourceService = createSourceService(workspaceSlug)
+        const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources)
+        managed.sourceMcpServers = mcpServers
+        managed.sourceApiServers = apiServers
+        managed.agent?.setSourceServers(mcpServers, apiServers)
+
+        console.log(`[SessionManager] Sources reloaded: ${Object.keys(mcpServers).length} MCP servers, ${Object.keys(apiServers).length} API servers`)
+      }
+
+      // Wire up onSourceActivated to enable a source for this session
+      managed.agent.onSourceActivated = async (sourceSlug: string) => {
+        console.log(`[SessionManager] Activating source '${sourceSlug}' for session ${managed.id}`)
+        const workspaceSlug = getWorkspaceSlug(managed.workspace)
+
+        // Add to enabled sources if not already there
+        if (!managed.enabledSourceSlugs) {
+          managed.enabledSourceSlugs = []
+        }
+        if (!managed.enabledSourceSlugs.includes(sourceSlug)) {
+          managed.enabledSourceSlugs.push(sourceSlug)
+        }
+
+        // Rebuild servers with the newly enabled source
+        const allSources = loadWorkspaceSources(workspaceSlug)
+        managed.agent?.setAllSources(allSources)
+
+        const enabledSources = allSources.filter(s =>
+          managed.enabledSourceSlugs!.includes(s.config.slug) && s.config.enabled && s.config.isAuthenticated
+        )
+        const sourceService = createSourceService(workspaceSlug)
+        const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources)
+        managed.sourceMcpServers = mcpServers
+        managed.sourceApiServers = apiServers
+        managed.agent?.setSourceServers(mcpServers, apiServers)
+
+        // Persist the session with updated enabled sources
+        this.persistSession(managed)
+
+        console.log(`[SessionManager] Source '${sourceSlug}' activated. Now ${managed.enabledSourceSlugs.length} sources enabled.`)
+      }
+
       // NOTE: Agent definition is now applied in sendMessage() via AgentStateManager.activate()
       // This ensures proper state machine flow: extraction → auth checks → activation
 
@@ -924,7 +982,7 @@ export class SessionManager {
     // Build server configs from selected sources
     const sources = getSourcesBySlugs(workspaceSlug, sourceSlugs)
     const sourceService = createSourceService(workspaceSlug)
-    const { mcpServers, errors } = await sourceService.buildAllServers(sources)
+    const { mcpServers, apiServers, errors } = await sourceService.buildAllServers(sources)
 
     if (errors.length > 0) {
       console.warn(`[SessionManager] Source build errors:`, errors)
@@ -932,6 +990,7 @@ export class SessionManager {
 
     // Store the built configs
     managed.sourceMcpServers = mcpServers
+    managed.sourceApiServers = apiServers
 
     // IMMEDIATELY update the agent's source servers if agent exists
     // This ensures tool availability is updated mid-conversation
@@ -940,8 +999,8 @@ export class SessionManager {
       const allSources = loadWorkspaceSources(workspaceSlug)
       managed.agent.setAllSources(allSources)
       // Set active source servers (tools are only available from these)
-      managed.agent.setSourceServers(mcpServers, {})
-      console.log(`[SessionManager] Applied ${Object.keys(mcpServers).length} MCP sources to active agent (${allSources.length} total)`)
+      managed.agent.setSourceServers(mcpServers, apiServers)
+      console.log(`[SessionManager] Applied ${Object.keys(mcpServers).length} MCP + ${Object.keys(apiServers).length} API sources to active agent (${allSources.length} total)`)
     }
 
     // Persist the session with updated sources
@@ -1214,17 +1273,20 @@ export class SessionManager {
       if (!managed.sourceMcpServers) {
         const sources = getSourcesBySlugs(workspaceSlug, managed.enabledSourceSlugs)
         const sourceService = createSourceService(workspaceSlug)
-        const { mcpServers, errors } = await sourceService.buildAllServers(sources)
+        const { mcpServers, apiServers, errors } = await sourceService.buildAllServers(sources)
         if (errors.length > 0) {
           console.warn(`[SessionManager] Source build errors:`, errors)
         }
         managed.sourceMcpServers = mcpServers
+        managed.sourceApiServers = apiServers
       }
 
       // Apply source servers to the agent
-      if (managed.sourceMcpServers && Object.keys(managed.sourceMcpServers).length > 0) {
-        agent.setSourceServers(managed.sourceMcpServers, {})
-        console.log(`[SessionManager] Applied ${Object.keys(managed.sourceMcpServers).length} MCP sources to session ${sessionId} (${allSources.length} total)`)
+      const mcpCount = Object.keys(managed.sourceMcpServers || {}).length
+      const apiCount = Object.keys(managed.sourceApiServers || {}).length
+      if (mcpCount > 0 || apiCount > 0) {
+        agent.setSourceServers(managed.sourceMcpServers || {}, managed.sourceApiServers || {})
+        console.log(`[SessionManager] Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
       }
     }
 

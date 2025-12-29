@@ -50,7 +50,8 @@ import {
   sourceExists,
 } from '../sources/storage.ts';
 import type { FolderSourceConfig, SourceGuide } from '../sources/types.ts';
-import { CraftOAuth, type OAuthConfig, type OAuthCallbacks } from '../auth/oauth.ts';
+import { CraftOAuth, getMcpBaseUrl, type OAuthConfig, type OAuthCallbacks } from '../auth/oauth.ts';
+import { startGmailOAuth } from '../auth/gmail-oauth.ts';
 
 // ============================================================
 // Session-Scoped Tool Callbacks
@@ -108,6 +109,10 @@ export interface SessionScopedToolCallbacks {
   onOAuthError?: (sourceSlug: string, error: string) => void;
   /** Called when credential input is needed - returns promise that resolves with user response */
   onCredentialRequest?: (request: CredentialRequest) => Promise<CredentialResponse>;
+  /** Called when sources change (created/authenticated/deleted) - triggers reload of MCP servers */
+  onSourcesChanged?: () => Promise<void>;
+  /** Called to activate a source for the current session (adds to enabled sources) */
+  onSourceActivated?: (sourceSlug: string) => Promise<void>;
 }
 
 /**
@@ -1098,9 +1103,9 @@ A browser window will open for the user to complete authentication.
         // Get session callbacks for browser open
         const callbacks = getSessionScopedToolCallbacks(sessionId);
 
-        // Create OAuth config
+        // Create OAuth config - strip /mcp or /sse suffix for OAuth discovery
         const oauthConfig: OAuthConfig = {
-          mcpBaseUrl: source.mcp.url,
+          mcpBaseUrl: getMcpBaseUrl(source.mcp.url),
         };
 
         // Create OAuth callbacks
@@ -1157,6 +1162,21 @@ A browser window will open for the user to complete authentication.
         // Notify success callback
         callbacks?.onOAuthSuccess?.(args.sourceSlug);
 
+        // Activate the source for this session
+        try {
+          await callbacks?.onSourceActivated?.(args.sourceSlug);
+          debug('[oauth_trigger] Source activated for session:', args.sourceSlug);
+        } catch (err) {
+          console.log('[oauth_trigger] onSourceActivated callback error:', err);
+        }
+
+        // Trigger source reload callback so new tools are available (don't let failures affect tool result)
+        try {
+          await callbacks?.onSourcesChanged?.();
+        } catch (err) {
+          console.log('[oauth_trigger] onSourcesChanged callback error:', err);
+        }
+
         return {
           content: [{
             type: 'text' as const,
@@ -1175,6 +1195,145 @@ A browser window will open for the user to complete authentication.
           content: [{
             type: 'text' as const,
             text: `OAuth authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
+
+/**
+ * Create a session-scoped gmail_oauth_trigger tool.
+ * Initiates Gmail OAuth authentication for a Gmail source.
+ */
+export function createGmailOAuthTriggerTool(sessionId: string, workspaceSlug: string) {
+  return tool(
+    'gmail_oauth_trigger',
+    `Trigger Gmail OAuth authentication flow.
+
+Opens a browser window for the user to sign in with their Google account and authorize Gmail access.
+After successful authentication, the tokens are stored and the source is marked as authenticated.
+
+**Prerequisites:**
+- The source must be type 'api' with provider 'gmail'
+- Gmail OAuth must be configured in the build (GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET)
+
+**Returns:**
+- Success message with the authenticated email address
+- Error message if OAuth flow fails or is not configured`,
+    {
+      sourceSlug: z.string().describe('The slug of the Gmail source to authenticate'),
+    },
+    async (args) => {
+      debug('[gmail_oauth_trigger] Starting Gmail OAuth for source:', args.sourceSlug);
+
+      try {
+        // Load the source config
+        const source = loadSourceConfig(workspaceSlug, args.sourceSlug);
+        if (!source) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceSlug}/sources/`,
+            }],
+            isError: true,
+          };
+        }
+
+        // Verify this is a Gmail source
+        if (source.provider !== 'gmail') {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Source '${args.sourceSlug}' is provider '${source.provider}'. gmail_oauth_trigger is only for Gmail sources. Use oauth_trigger for MCP sources.`,
+            }],
+            isError: true,
+          };
+        }
+
+        if (source.isAuthenticated) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Source '${args.sourceSlug}' is already authenticated.`,
+            }],
+            isError: false,
+          };
+        }
+
+        // Run the Gmail OAuth flow
+        const result = await startGmailOAuth('electron');
+
+        if (!result.success) {
+          const callbacks = getSessionScopedToolCallbacks(sessionId);
+          callbacks?.onOAuthError?.(args.sourceSlug, result.error || 'Unknown error');
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Gmail OAuth failed: ${result.error || 'Unknown error'}`,
+            }],
+            isError: true,
+          };
+        }
+
+        // Store the tokens
+        const credentialManager = getCredentialManager();
+        await credentialManager.set(
+          {
+            type: 'source_oauth',
+            workspaceSlug,
+            sourceSlug: args.sourceSlug,
+          },
+          {
+            value: result.accessToken!,
+            refreshToken: result.refreshToken,
+            expiresAt: result.expiresAt,
+          }
+        );
+
+        // Update source status with email info
+        source.isAuthenticated = true;
+        source.updatedAt = Date.now();
+        saveSourceConfig(workspaceSlug, source);
+
+        // Notify success callback
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        callbacks?.onOAuthSuccess?.(args.sourceSlug);
+
+        // Activate the source for this session
+        try {
+          await callbacks?.onSourceActivated?.(args.sourceSlug);
+          debug('[gmail_oauth_trigger] Source activated for session:', args.sourceSlug);
+        } catch (err) {
+          console.log('[gmail_oauth_trigger] onSourceActivated callback error:', err);
+        }
+
+        // Trigger source reload callback so new tools are available (don't let failures affect tool result)
+        try {
+          await callbacks?.onSourcesChanged?.();
+        } catch (err) {
+          console.log('[gmail_oauth_trigger] onSourcesChanged callback error:', err);
+        }
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `**Gmail source '${args.sourceSlug}' authenticated successfully**\n\nConnected as: ${result.email}\n\nYou can now access Gmail tools for this source.`,
+          }],
+          isError: false,
+        };
+      } catch (error) {
+        debug('[gmail_oauth_trigger] Error:', error);
+
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        callbacks?.onOAuthError?.(args.sourceSlug, error instanceof Error ? error.message : 'Unknown error');
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Gmail OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
           isError: true,
         };
@@ -1630,6 +1789,31 @@ export function createSourceCreateTool(sessionId: string, workspaceSlug: string)
 
         const config = createSource(workspaceSlug, input);
 
+        // Get callbacks
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+
+        // Determine if source needs authentication
+        const needsAuth = (args.type === 'mcp' && args.mcpAuthType && args.mcpAuthType !== 'none') ||
+                          (args.type === 'api' && args.apiAuthType && args.apiAuthType !== 'none');
+
+        // Activate source for this session if it doesn't need auth
+        // (sources needing auth will be activated after authentication completes)
+        if (!needsAuth) {
+          try {
+            await callbacks?.onSourceActivated?.(config.slug);
+            debug('[source_create] Source activated for session:', config.slug);
+          } catch (err) {
+            console.log('[source_create] onSourceActivated callback error:', err);
+          }
+        }
+
+        // Trigger source reload callback (don't let failures affect tool result)
+        try {
+          await callbacks?.onSourcesChanged?.();
+        } catch (err) {
+          console.log('[source_create] onSourcesChanged callback error:', err);
+        }
+
         const authNote = args.type === 'mcp' && args.mcpAuthType === 'oauth'
           ? '\n\nUse `oauth_trigger` to authenticate this source.'
           : args.type === 'mcp' && args.mcpAuthType === 'bearer'
@@ -1759,6 +1943,14 @@ export function createSourceDeleteTool(sessionId: string, workspaceSlug: string)
         }
 
         deleteSource(workspaceSlug, args.sourceSlug);
+
+        // Trigger source reload callback (don't let failures affect tool result)
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        try {
+          await callbacks?.onSourcesChanged?.();
+        } catch (err) {
+          console.log('[source_delete] onSourcesChanged callback error:', err);
+        }
 
         return {
           content: [{
@@ -1911,6 +2103,21 @@ credential_prompt({
         source.updatedAt = Date.now();
         saveSourceConfig(workspaceSlug, source);
 
+        // Activate the source for this session
+        try {
+          await callbacks?.onSourceActivated?.(args.sourceSlug);
+          debug('[credential_prompt] Source activated for session:', args.sourceSlug);
+        } catch (err) {
+          console.log('[credential_prompt] onSourceActivated callback error:', err);
+        }
+
+        // Trigger source reload callback so new tools are available (don't let failures affect tool result)
+        try {
+          await callbacks?.onSourcesChanged?.();
+        } catch (err) {
+          console.log('[credential_prompt] onSourcesChanged callback error:', err);
+        }
+
         return {
           content: [{
             type: 'text' as const,
@@ -1970,6 +2177,7 @@ export function getSessionScopedTools(sessionId: string, workspaceSlug: string):
         // Source tools (workspace-scoped)
         createSourceTestTool(sessionId, workspaceSlug),
         createOAuthTriggerTool(sessionId, workspaceSlug),
+        createGmailOAuthTriggerTool(sessionId, workspaceSlug),
         createCredentialPromptTool(sessionId, workspaceSlug),
         createSourceCacheUpdateTool(sessionId, workspaceSlug),
         createSourceCacheReadTool(sessionId, workspaceSlug),

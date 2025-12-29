@@ -11,6 +11,8 @@ import {
   ExternalLink,
   ArrowUpRight,
   Ban,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/components/markdown'
@@ -624,6 +626,18 @@ function StreamingResponsePreview({
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(text)
   const lastUpdateRef = useRef(Date.now())
+  // Copy to clipboard state
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }, [text])
 
   // Throttle content updates during streaming for performance
   // Updates immediately when streaming ends to show final content
@@ -669,9 +683,28 @@ function StreamingResponsePreview({
   // Completed response - show with max height and footer
   if (isCompleted) {
     return (
-      <div className="bg-white shadow-minimal rounded-[8px] overflow-hidden">
+      <div className="bg-white shadow-minimal rounded-[8px] overflow-hidden relative">
+        {/* Copy button - top right corner */}
+        <button
+          onClick={handleCopy}
+          className={cn(
+            "absolute top-2 right-2 p-1.5 rounded-md transition-colors z-10",
+            copied
+              ? "text-green-600 bg-green-50"
+              : "text-muted-foreground/50 hover:text-foreground hover:bg-foreground/5",
+            "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          )}
+          title={copied ? "Copied!" : "Copy to clipboard"}
+        >
+          {copied ? (
+            <Check className="w-4 h-4" />
+          ) : (
+            <Copy className="w-4 h-4" />
+          )}
+        </button>
+
         <div
-          className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto"
+          className="pl-[22px] pr-10 py-3 text-sm overflow-y-auto"
           style={{ maxHeight: MAX_HEIGHT }}
         >
           <Markdown
@@ -690,19 +723,21 @@ function StreamingResponsePreview({
             <span>Completed</span>
           </div>
 
-          {onPopOut && (
-            <button
-              onClick={onPopOut}
-              className={cn(
-                "flex items-center gap-1.5 transition-colors",
-                "text-muted-foreground hover:text-foreground",
-                "focus:outline-none focus-visible:underline"
-              )}
-            >
-              <ExternalLink className={SIZE_CONFIG.iconSize} />
-              <span>View as Markdown</span>
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {onPopOut && (
+              <button
+                onClick={onPopOut}
+                className={cn(
+                  "flex items-center gap-1.5 transition-colors",
+                  "text-muted-foreground hover:text-foreground",
+                  "focus:outline-none focus-visible:underline"
+                )}
+              >
+                <ExternalLink className={SIZE_CONFIG.iconSize} />
+                <span>View as Markdown</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     )

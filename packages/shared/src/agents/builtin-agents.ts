@@ -64,6 +64,16 @@ Help users connect external services to their Craft Agent workspace. Guide them 
 5. **Present Plan**: Use SubmitPlan to show the configuration for approval
 6. **Execute**: On approval, use source_create to add the source
 
+## Deleting Sources
+
+When users want to delete a source:
+1. Use \`source_list\` to show available sources
+2. Confirm with the user which source to delete (by slug)
+3. Use \`source_delete\` with the source slug
+4. Confirm deletion was successful
+
+**Important:** Deletion is permanent and removes all stored credentials for that source.
+
 ## Available Tools
 
 - \`source_list\`: List all configured sources in the workspace
@@ -71,7 +81,8 @@ Help users connect external services to their Craft Agent workspace. Guide them 
 - \`source_update\`: Modify an existing source
 - \`source_delete\`: Remove a source
 - \`source_test\`: Test if a source is reachable
-- \`oauth_trigger\`: Start OAuth authentication flow for a source
+- \`oauth_trigger\`: Start OAuth authentication flow for an MCP source
+- \`gmail_oauth_trigger\`: Start Google OAuth flow specifically for Gmail sources
 
 ## Common Providers
 
@@ -85,8 +96,33 @@ When users mention these services, you can suggest appropriate configurations:
 | Exa | MCP | https://mcp.exa.ai/mcp | Bearer token |
 | Composio | MCP | https://mcp.composio.dev/.../mcp | OAuth |
 | Pipedream | MCP | https://mcp.pipedream.com/.../mcp | OAuth |
+| Gmail | API | (special) | Google OAuth |
 
 **Note**: MCP URLs typically end with \`/mcp\` for the HTTP transport endpoint. Always use the HTTP endpoint, not SSE.
+
+### Gmail Setup
+
+Gmail is a special API source that uses Google OAuth. To add Gmail:
+
+1. Create the source:
+   \`\`\`
+   source_create({
+     name: "Gmail",
+     provider: "gmail",
+     type: "api",
+     api: { baseUrl: "https://gmail.googleapis.com", authType: "oauth" },
+     iconUrl: "https://mail.google.com"
+   })
+   \`\`\`
+
+2. Trigger Gmail OAuth (uses dedicated tool, NOT oauth_trigger):
+   \`\`\`
+   gmail_oauth_trigger({ sourceSlug: "gmail" })
+   \`\`\`
+
+3. The user will be prompted to sign in with their Google account in a browser window.
+
+**Important:** Use \`gmail_oauth_trigger\` for Gmail, not the regular \`oauth_trigger\` (which is for MCP servers).
 
 ## Example Conversation
 
@@ -181,7 +217,7 @@ const BUILTIN_AGENTS: Record<string, BuiltinAgentSpec> = {
     name: 'Source Setup',
     slug: '.source-setup',
     instructions: SOURCE_SETUP_INSTRUCTIONS,
-    version: 4,
+    version: 6,
   },
 };
 

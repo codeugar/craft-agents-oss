@@ -9,6 +9,10 @@ import type { LoadedSource } from './types.ts';
 import type { CredentialId, StoredCredential } from '../credentials/types.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { debug } from '../utils/debug.ts';
+import { createGmailServer } from '../agents/gmail-tools.ts';
+import { createApiServer, type ApiCredential, type BasicAuthCredential } from '../agents/api-tools.ts';
+import type { ApiConfig } from '../agents/types.ts';
+import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 
 /**
  * MCP server configuration compatible with Claude Agent SDK
@@ -25,6 +29,8 @@ export interface McpServerConfig {
 export interface BuiltServers {
   /** MCP server configs keyed by source slug */
   mcpServers: Record<string, McpServerConfig>;
+  /** In-process API servers (Gmail, etc.) keyed by source slug */
+  apiServers: Record<string, ReturnType<typeof createSdkMcpServer>>;
   /** Sources that failed to build (missing auth, etc.) */
   errors: Array<{ sourceSlug: string; error: string }>;
 }
@@ -67,10 +73,11 @@ export class SourceService {
   }
 
   /**
-   * Build all MCP servers for enabled sources
+   * Build all MCP and API servers for enabled sources
    */
   async buildAllServers(sources: LoadedSource[]): Promise<BuiltServers> {
     const mcpServers: Record<string, McpServerConfig> = {};
+    const apiServers: Record<string, ReturnType<typeof createSdkMcpServer>> = {};
     const errors: BuiltServers['errors'] = [];
 
     for (const source of sources) {
@@ -88,9 +95,11 @@ export class SourceService {
             });
           }
         } else if (source.config.type === 'api') {
-          // API sources are handled separately via gmail-tools or api-tools
-          // They're not direct MCP servers
-          debug(`[SourceService] API source ${source.config.slug} - use specific API tools`);
+          // Build API servers for authenticated sources
+          const server = await this.buildApiServer(source);
+          if (server) {
+            apiServers[source.config.slug] = server;
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -99,7 +108,140 @@ export class SourceService {
       }
     }
 
-    return { mcpServers, errors };
+    return { mcpServers, apiServers, errors };
+  }
+
+  /**
+   * Build an in-process API server for a source (Gmail, generic APIs, etc.)
+   */
+  async buildApiServer(source: LoadedSource): Promise<ReturnType<typeof createSdkMcpServer> | null> {
+    if (source.config.type !== 'api') return null;
+    if (!source.config.api) {
+      debug(`[SourceService] API source ${source.config.slug} missing api config`);
+      return null;
+    }
+
+    // Gmail special handling - uses OAuth tokens with dedicated Gmail tools
+    if (source.config.provider === 'gmail') {
+      if (!source.config.isAuthenticated) {
+        debug(`[SourceService] Gmail source ${source.config.slug} not authenticated`);
+        return null;
+      }
+      debug(`[SourceService] Building Gmail server for ${source.config.slug}`);
+      const getToken = async () => {
+        const token = await this.getSourceToken(source);
+        if (!token) throw new Error('Gmail token not found or expired');
+        return token;
+      };
+      return createGmailServer(getToken);
+    }
+
+    // Generic API sources - use createApiServer with credentials
+    const apiConfig = source.config.api;
+    const authType = apiConfig.authType;
+
+    // Public APIs (no auth) can be used immediately
+    if (authType === 'none') {
+      debug(`[SourceService] Building public API server for ${source.config.slug}`);
+      const config: ApiConfig = {
+        name: source.config.slug,
+        baseUrl: apiConfig.baseUrl,
+        auth: { type: 'none' },
+        documentation: source.guide?.raw || '',
+      };
+      return createApiServer(config, '');
+    }
+
+    // OAuth APIs need to be authenticated
+    if (authType === 'oauth') {
+      if (!source.config.isAuthenticated) {
+        debug(`[SourceService] OAuth API source ${source.config.slug} not authenticated`);
+        return null;
+      }
+      const token = await this.getSourceToken(source);
+      if (!token) {
+        debug(`[SourceService] OAuth API source ${source.config.slug} token not found`);
+        return null;
+      }
+      debug(`[SourceService] Building OAuth API server for ${source.config.slug}`);
+      const config: ApiConfig = {
+        name: source.config.slug,
+        baseUrl: apiConfig.baseUrl,
+        auth: { type: 'bearer', authScheme: apiConfig.authScheme || 'Bearer' },
+        documentation: source.guide?.raw || '',
+      };
+      return createApiServer(config, token);
+    }
+
+    // API key/bearer/header/query/basic auth - get credential
+    const credential = await this.getApiCredential(source);
+    if (!credential) {
+      debug(`[SourceService] API source ${source.config.slug} needs credentials`);
+      return null;
+    }
+
+    debug(`[SourceService] Building API server for ${source.config.slug} (auth: ${authType})`);
+    const config: ApiConfig = this.buildApiConfig(source);
+    return createApiServer(config, credential);
+  }
+
+  /**
+   * Get API credential for a source (API key, bearer token, or basic auth)
+   */
+  async getApiCredential(source: LoadedSource): Promise<ApiCredential | null> {
+    const credentialId = this.getCredentialId(source);
+    const manager = getCredentialManager();
+    const creds = await manager.get(credentialId);
+
+    if (!creds?.value) return null;
+
+    // Check for basic auth (JSON with username/password)
+    if (source.config.api?.authType === 'basic') {
+      try {
+        const parsed = JSON.parse(creds.value);
+        if (parsed.username && parsed.password) {
+          return parsed as BasicAuthCredential;
+        }
+      } catch {
+        // Not JSON, treat as regular credential
+      }
+    }
+
+    return creds.value;
+  }
+
+  /**
+   * Build ApiConfig from a LoadedSource
+   */
+  buildApiConfig(source: LoadedSource): ApiConfig {
+    const api = source.config.api!;
+
+    const config: ApiConfig = {
+      name: source.config.slug,
+      baseUrl: api.baseUrl,
+      documentation: source.guide?.raw || '',
+    };
+
+    // Map auth type
+    switch (api.authType) {
+      case 'bearer':
+        config.auth = { type: 'bearer', authScheme: api.authScheme || 'Bearer' };
+        break;
+      case 'header':
+        config.auth = { type: 'header', headerName: api.headerName || 'x-api-key' };
+        break;
+      case 'query':
+        config.auth = { type: 'query', queryParam: api.queryParam || 'api_key' };
+        break;
+      case 'basic':
+        config.auth = { type: 'basic' };
+        break;
+      case 'none':
+      default:
+        config.auth = { type: 'none' };
+    }
+
+    return config;
   }
 
   /**
