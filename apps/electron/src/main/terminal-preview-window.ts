@@ -93,12 +93,6 @@ export class TerminalPreviewWindowManager {
       window.loadFile(join(__dirname, 'renderer/terminal-preview.html'), { query })
     }
 
-    // Clean up when window is closed
-    window.on('closed', () => {
-      this.windows.delete(key)
-      console.log(`[TerminalPreviewWindowManager] Terminal preview window closed for ${key}`)
-    })
-
     // Listen for system theme changes (terminal stays dark but may need updates)
     const themeHandler = () => {
       if (!window.isDestroyed()) {
@@ -107,8 +101,11 @@ export class TerminalPreviewWindowManager {
     }
     nativeTheme.on('updated', themeHandler)
 
+    // Clean up when window is closed - theme listener first, then internal state
     window.on('closed', () => {
       nativeTheme.removeListener('updated', themeHandler)
+      this.windows.delete(key)
+      console.log(`[TerminalPreviewWindowManager] Terminal preview window closed for ${key}`)
     })
 
     console.log(`[TerminalPreviewWindowManager] Created terminal preview window for ${key}`)

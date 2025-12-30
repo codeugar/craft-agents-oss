@@ -33,8 +33,29 @@ import type { BannerState } from '../components/chat/SetupAuthBanner'
 // Renderer-side cache for agent status to prevent banner flash on session switch
 // When switching to a previously-active agent, we use cached status immediately
 // while the IPC call validates/refreshes the actual state
+const AGENT_STATUS_CACHE_MAX_SIZE = 100
 const agentStatusCache = new Map<string, AgentStatus>()
 const getCacheKey = (ws: string, agent: string) => `${ws}:${agent}`
+
+/**
+ * Set a value in the cache with LRU eviction.
+ * Removes oldest entries when cache exceeds max size.
+ */
+function setCacheWithLRU(key: string, value: AgentStatus): void {
+  // Delete and re-add to move to end (most recently used)
+  agentStatusCache.delete(key)
+  agentStatusCache.set(key, value)
+
+  // Evict oldest entries if over limit
+  while (agentStatusCache.size > AGENT_STATUS_CACHE_MAX_SIZE) {
+    const oldestKey = agentStatusCache.keys().next().value
+    if (oldestKey !== undefined) {
+      agentStatusCache.delete(oldestKey)
+    } else {
+      break
+    }
+  }
+}
 
 export interface UseAgentStateResult {
   // Current status (discriminated union)
@@ -118,7 +139,7 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
           setStatus(status)
           // Only cache good statuses, clear for everything else
           if (status.status === 'active' || status.status === 'ready') {
-            agentStatusCache.set(cacheKey, status)
+            setCacheWithLRU(cacheKey, status)
           } else {
             agentStatusCache.delete(cacheKey)
           }
@@ -132,7 +153,7 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
         setStatus(newStatus)
         // Only cache good statuses, clear for everything else
         if (newStatus.status === 'active' || newStatus.status === 'ready') {
-          agentStatusCache.set(cacheKey, newStatus)
+          setCacheWithLRU(cacheKey, newStatus)
         } else {
           // Clear cache for idle, error, extracting, needs_mcp_auth, needs_api_auth
           agentStatusCache.delete(cacheKey)
@@ -219,7 +240,7 @@ export function useAgentState(workspaceId: string | null, agentId: string | null
     if (!workspaceId || !agentId) return
     const cacheKey = getCacheKey(workspaceId, agentId)
     if (result.status === 'active' || result.status === 'ready') {
-      agentStatusCache.set(cacheKey, result)
+      setCacheWithLRU(cacheKey, result)
     } else {
       agentStatusCache.delete(cacheKey)
     }

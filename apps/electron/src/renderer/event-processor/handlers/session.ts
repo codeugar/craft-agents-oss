@@ -12,7 +12,6 @@ import type {
   ErrorEvent,
   TypedErrorEvent,
   SourcesChangedEvent,
-  TodoStateChangedEvent,
   PermissionRequestEvent,
   CredentialRequestEvent,
   PlanSubmittedEvent,
@@ -395,24 +394,6 @@ export function handlePlanSubmitted(
   return {
     state: {
       session: appendMessage(session, event.message),
-      streaming,
-    },
-    effects: [],
-  }
-}
-
-/**
- * Handle todo_state_changed - update session's todo state (from session_status tool)
- */
-export function handleTodoStateChanged(
-  state: SessionState,
-  event: TodoStateChangedEvent
-): ProcessResult {
-  const { session, streaming } = state
-
-  return {
-    state: {
-      session: { ...session, todoState: event.todoState },
       streaming,
     },
     effects: [],

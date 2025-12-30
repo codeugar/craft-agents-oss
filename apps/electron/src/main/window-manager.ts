@@ -107,12 +107,6 @@ export class WindowManager {
     const webContentsId = window.webContents.id
     this.windows.set(webContentsId, { window, workspaceId, mode })
 
-    // Handle window close
-    window.on('closed', () => {
-      this.windows.delete(webContentsId)
-      console.log(`[WindowManager] Window closed for workspace ${workspaceId}`)
-    })
-
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
       if (!window.isDestroyed()) {
@@ -121,9 +115,11 @@ export class WindowManager {
     }
     nativeTheme.on('updated', themeHandler)
 
-    // Clean up theme listener when window is destroyed
+    // Handle window close - clean up theme listener first, then internal state
     window.on('closed', () => {
       nativeTheme.removeListener('updated', themeHandler)
+      this.windows.delete(webContentsId)
+      console.log(`[WindowManager] Window closed for workspace ${workspaceId}`)
     })
 
     console.log(`[WindowManager] Created window for workspace ${workspaceId}`)

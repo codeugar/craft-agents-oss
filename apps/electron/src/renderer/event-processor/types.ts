@@ -129,15 +129,6 @@ export interface SourcesChangedEvent {
 }
 
 /**
- * Todo state changed event (from session_status tool)
- */
-export interface TodoStateChangedEvent {
-  type: 'todo_state_changed'
-  sessionId: string
-  todoState: TodoState
-}
-
-/**
  * Plan submitted event
  */
 export interface PlanSubmittedEvent {
@@ -247,7 +238,6 @@ export type AgentEvent =
   | PermissionRequestEvent
   | CredentialRequestEvent
   | SourcesChangedEvent
-  | TodoStateChangedEvent
   | PlanSubmittedEvent
   | StatusEvent
   | InfoEvent

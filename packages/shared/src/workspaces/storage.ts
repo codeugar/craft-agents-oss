@@ -49,6 +49,15 @@ export function ensureDefaultWorkspacesDir(): void {
 }
 
 /**
+ * Get workspace root path from slug
+ * @param workspaceSlug - Workspace slug/ID
+ * @returns Absolute path to workspace root in default location
+ */
+export function getWorkspacePath(workspaceSlug: string): string {
+  return join(DEFAULT_WORKSPACES_DIR, workspaceSlug);
+}
+
+/**
  * Get path to workspace sources directory
  * @param rootPath - Absolute path to workspace root folder
  */

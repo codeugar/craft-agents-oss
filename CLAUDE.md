@@ -230,3 +230,19 @@ bun run sync-secrets   # Syncs op:// refs from .env.1password → .env
 | Credentials | AES-256-GCM encrypted file |
 | TUI | Ink 5.x, marked + shiki, meow |
 | Electron | Electron + React, shadcn/ui + Tailwind v4, esbuild + Vite |
+
+## Dependency Notes
+
+**markitdown-js** (`^0.0.14`) - Used for file attachment processing in Electron (`apps/electron/src/main/ipc.ts`). Pre-release package with native binary dependencies:
+- `exiftool-vendored` (native binary execution)
+- `fluent-ffmpeg` (requires FFmpeg binary)
+- `node-tesseract-ocr` (requires Tesseract binary)
+
+Consider whether full file conversion is needed or if simpler parsing suffices for your use case.
+
+**Duplicate markdown systems** - The codebase uses three markdown libraries:
+- `marked` (TUI rendering)
+- `react-markdown` (Electron message display)
+- `remark` + `strip-markdown` (Electron text processing)
+
+Future consolidation opportunity: unify on a single markdown approach.

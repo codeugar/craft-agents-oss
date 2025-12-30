@@ -89,12 +89,6 @@ export class CodePreviewWindowManager {
       window.loadFile(join(__dirname, 'renderer/code-preview.html'), { query })
     }
 
-    // Clean up when window is closed
-    window.on('closed', () => {
-      this.windows.delete(key)
-      console.log(`[CodePreviewWindowManager] Code preview window closed for ${key}`)
-    })
-
     // Listen for system theme changes
     const themeHandler = () => {
       if (!window.isDestroyed()) {
@@ -103,8 +97,11 @@ export class CodePreviewWindowManager {
     }
     nativeTheme.on('updated', themeHandler)
 
+    // Clean up when window is closed - theme listener first, then internal state
     window.on('closed', () => {
       nativeTheme.removeListener('updated', themeHandler)
+      this.windows.delete(key)
+      console.log(`[CodePreviewWindowManager] Code preview window closed for ${key}`)
     })
 
     console.log(`[CodePreviewWindowManager] Created code preview window for ${key}`)

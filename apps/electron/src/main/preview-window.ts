@@ -110,12 +110,6 @@ export class PreviewWindowManager {
       window.loadFile(join(__dirname, 'renderer/preview.html'), { query })
     }
 
-    // Clean up when window is closed
-    window.on('closed', () => {
-      this.windows.delete(previewId)
-      console.log(`[PreviewWindowManager] Preview window closed for ${previewId}`)
-    })
-
     // Listen for system theme changes
     const themeHandler = () => {
       if (!window.isDestroyed()) {
@@ -124,8 +118,11 @@ export class PreviewWindowManager {
     }
     nativeTheme.on('updated', themeHandler)
 
+    // Clean up when window is closed - theme listener first, then internal state
     window.on('closed', () => {
       nativeTheme.removeListener('updated', themeHandler)
+      this.windows.delete(previewId)
+      console.log(`[PreviewWindowManager] Preview window closed for ${previewId}`)
     })
 
     console.log(`[PreviewWindowManager] Created preview window for ${previewId}`)

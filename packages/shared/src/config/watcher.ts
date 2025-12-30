@@ -151,8 +151,8 @@ export class ConfigWatcher {
     this.workspaceSlug = workspaceSlug;
     this.callbacks = callbacks;
     this.workspaceDir = getWorkspacePath(workspaceSlug);
-    this.sourcesDir = getWorkspaceSourcesPath(workspaceSlug);
-    this.agentsDir = getWorkspaceAgentsPath(workspaceSlug);
+    this.sourcesDir = getWorkspaceSourcesPath(this.workspaceDir);
+    this.agentsDir = getWorkspaceAgentsPath(this.workspaceDir);
   }
 
   /**
@@ -281,7 +281,7 @@ export class ConfigWatcher {
 
     // Sources changes: sources/{slug}/...
     if (parts[0] === 'sources' && parts.length >= 2) {
-      const slug = parts[1];
+      const slug = parts[1]!;  // Safe: checked parts.length >= 2
       const file = parts[2];
 
       // Directory-level changes (new/removed source folders)
@@ -303,7 +303,7 @@ export class ConfigWatcher {
 
     // Agents changes: agents/{slug}/...
     if (parts[0] === 'agents' && parts.length >= 2) {
-      const slug = parts[1];
+      const slug = parts[1]!;  // Safe: checked parts.length >= 2
       const file = parts[2];
 
       // Directory-level changes (new/removed agent folders)

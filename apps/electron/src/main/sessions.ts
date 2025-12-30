@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { rm, readFile } from 'fs/promises'
-import { CraftAgent, type AgentEvent, enterMode, exitMode, type Mode, isModeActive } from '@craft-agent/shared/agent'
+import { CraftAgent, type AgentEvent, enterMode, exitMode, type Mode, isModeActive, unregisterSessionScopedToolCallbacks } from '@craft-agent/shared/agent'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
 import {
@@ -43,22 +43,6 @@ import { AgentStateManager } from '@craft-agent/shared/agents'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
 import { generateSessionTitle, formatPathsToRelative, formatToolInputPaths } from '@craft-agent/shared/utils'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
-import type { SessionStatus } from '@craft-agent/core/types'
-
-/**
- * Map SessionStatus (from session_status tool) to TodoState (for storage/UI)
- * SessionStatus uses underscores, TodoState uses hyphens
- */
-function sessionStatusToTodoState(status: SessionStatus): TodoState {
-  switch (status) {
-    case 'todo': return 'todo'
-    case 'in_progress': return 'in-progress'
-    case 'needs_review': return 'needs-review'
-    case 'done': return 'done'
-    case 'cancelled': return 'cancelled'
-    default: return 'todo'
-  }
-}
 
 /**
  * Feature flags for agent behavior
@@ -986,22 +970,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         this.broadcastAgentsChanged()
       }
 
-      // Wire up onStatusChange to update session todo state from session_status tool
-      managed.agent.onStatusChange = async (status: SessionStatus) => {
-        console.log(`[SessionManager] Status changed for session ${managed.id}: ${status}`)
-        const todoState = sessionStatusToTodoState(status)
-        managed.todoState = todoState
-        // Persist to disk
-        const workspaceSlug = getWorkspaceSlug(managed.workspace)
-        setStoredSessionTodoState(workspaceSlug, managed.id, todoState)
-        // Notify renderer
-        this.sendEvent({
-          type: 'todo_state_changed',
-          sessionId: managed.id,
-          todoState,
-        }, managed.workspace.id)
-      }
-
       // NOTE: Agent definition is now applied in sendMessage() via AgentStateManager.activate()
       // This ensures proper state machine flow: extraction → auth checks → activation
 
@@ -1234,6 +1202,18 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // Brief wait for abort to propagate and in-flight operations to settle
       await new Promise(resolve => setTimeout(resolve, 100))
     }
+
+    // Clean up delta flush timers to prevent orphaned timers
+    const timer = this.deltaFlushTimers.get(sessionId)
+    if (timer) {
+      clearTimeout(timer)
+      this.deltaFlushTimers.delete(sessionId)
+    }
+    this.pendingDeltas.delete(sessionId)
+
+    // Clean up session-scoped tool callbacks to prevent memory accumulation
+    unregisterSessionScopedToolCallbacks(sessionId)
+
     this.sessions.delete(sessionId)
 
     // Note: We don't clean up AgentStateManager here because it's agent-scoped,
@@ -1269,19 +1249,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     managed.isProcessing = true
     managed.streamingText = ''
     managed.abortController = new AbortController()
-
-    // Auto-transition to in_progress when user sends a message
-    // This overrides done/needs_review states since we're actively working
-    if (managed.todoState !== 'in-progress') {
-      managed.todoState = 'in-progress'
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-      setStoredSessionTodoState(workspaceSlug, sessionId, 'in-progress')
-      this.sendEvent({
-        type: 'todo_state_changed',
-        sessionId,
-        todoState: 'in-progress',
-      }, managed.workspace.id)
-    }
 
     // Capture the abort controller reference to detect if a new request supersedes this one
     // This prevents the finally block from clobbering state when a follow-up message arrives
@@ -2008,5 +1975,37 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)
     }
+  }
+
+  /**
+   * Clean up all resources held by the SessionManager.
+   * Should be called on app shutdown to prevent resource leaks.
+   */
+  cleanup(): void {
+    console.log('[SessionManager] Cleaning up resources...')
+
+    // Stop all ConfigWatchers (file system watchers)
+    for (const [path, watcher] of this.configWatchers) {
+      watcher.stop()
+      console.log(`[SessionManager] Stopped config watcher for ${path}`)
+    }
+    this.configWatchers.clear()
+
+    // Clear all pending delta flush timers
+    for (const [sessionId, timer] of this.deltaFlushTimers) {
+      clearTimeout(timer)
+    }
+    this.deltaFlushTimers.clear()
+    this.pendingDeltas.clear()
+
+    // Clear pending credential resolvers (they won't be resolved, but prevents memory leak)
+    this.pendingCredentialResolvers.clear()
+
+    // Clean up session-scoped tool callbacks for all sessions
+    for (const sessionId of this.sessions.keys()) {
+      unregisterSessionScopedToolCallbacks(sessionId)
+    }
+
+    console.log('[SessionManager] Cleanup complete')
   }
 }

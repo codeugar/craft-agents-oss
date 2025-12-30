@@ -27,6 +27,8 @@ import { McpIcon } from '@/components/icons/McpIcon'
 import { getLogoUrl } from '@craft-agent/shared/utils/logo'
 import { resolveSourceIconUrl } from '@craft-agent/shared/utils/icon'
 import type { LoadedSource } from '@craft-agent/shared/sources'
+import type { SourceConnectionStatus } from '../../../shared/types'
+import { SourceStatusIndicator, deriveConnectionStatus } from './source-status-indicator'
 
 export type SourceType = 'mcp' | 'api' | 'gmail' | 'local'
 export type SourceAvatarSize = 'xs' | 'sm' | 'md' | 'lg'

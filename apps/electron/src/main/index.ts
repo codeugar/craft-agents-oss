@@ -196,7 +196,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-// Save window state before quitting
+// Save window state and clean up resources before quitting
 app.on('before-quit', () => {
   if (windowManager) {
     const openWorkspaceIds = windowManager.getOpenWorkspaceIds()
@@ -212,6 +212,11 @@ app.on('before-quit', () => {
       lastFocusedWorkspaceId,
     })
     console.log('[Main] Saved window state:', openWorkspaceIds.length, 'workspaces')
+  }
+
+  // Clean up SessionManager resources (file watchers, timers, etc.)
+  if (sessionManager) {
+    sessionManager.cleanup()
   }
 })
 

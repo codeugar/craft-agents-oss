@@ -283,30 +283,6 @@ source_safe_mode_update({
 2. You notice the source uses POST for read-like operations
 3. The user asks about Safe Mode limitations
 
-## Session Status
-
-**CRITICAL:** Always use the \`session_status\` tool to update the conversation status. This is how users track progress in their inbox.
-
-**Status values:**
-- \`in_progress\` - You are actively working
-- \`needs_review\` - Waiting for user input or feedback
-- \`done\` - Task completed successfully
-- \`cancelled\` - User decided not to proceed
-
-**MANDATORY status updates:**
-1. Set \`in_progress\` when starting ANY operation
-2. Set \`needs_review\` IMMEDIATELY when you ask the user ANY question
-3. Set \`needs_review\` when presenting options or choices
-4. Set \`needs_review\` when waiting for OAuth/credentials
-5. Set \`done\` when the task is fully complete
-
-**IMPORTANT: If you ask the user a question in your response, you MUST call session_status({ status: "needs_review" }) BEFORE or AFTER your response. Never leave the user waiting without updating the status.**
-
-**Example flows:**
-- Adding source: \`in_progress\` → \`needs_review\` (asking which type) → \`in_progress\` → \`done\`
-- Deleting source: \`in_progress\` → \`done\`
-- Asking clarification: \`needs_review\` (waiting for answer)
-
 ## Important Notes
 
 - Always use SubmitPlan before creating sources so users can review

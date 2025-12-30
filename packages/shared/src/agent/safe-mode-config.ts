@@ -203,7 +203,7 @@ export function validateSafeModeConfig(config: SafeModeConfigFile): string[] {
   if (config.allowedApiEndpoints) {
     for (let i = 0; i < config.allowedApiEndpoints.length; i++) {
       const rule = config.allowedApiEndpoints[i];
-      if (!validateRegex(rule.path)) {
+      if (rule && !validateRegex(rule.path)) {
         errors.push(`allowedApiEndpoints[${i}].path: Invalid regex pattern: ${rule.path}`);
       }
     }

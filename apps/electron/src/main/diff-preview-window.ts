@@ -88,12 +88,6 @@ export class DiffPreviewWindowManager {
       window.loadFile(join(__dirname, 'renderer/diff-preview.html'), { query })
     }
 
-    // Clean up when window is closed
-    window.on('closed', () => {
-      this.windows.delete(key)
-      console.log(`[DiffPreviewWindowManager] Diff preview window closed for ${key}`)
-    })
-
     // Listen for system theme changes
     const themeHandler = () => {
       if (!window.isDestroyed()) {
@@ -102,8 +96,11 @@ export class DiffPreviewWindowManager {
     }
     nativeTheme.on('updated', themeHandler)
 
+    // Clean up when window is closed - theme listener first, then internal state
     window.on('closed', () => {
       nativeTheme.removeListener('updated', themeHandler)
+      this.windows.delete(key)
+      console.log(`[DiffPreviewWindowManager] Diff preview window closed for ${key}`)
     })
 
     console.log(`[DiffPreviewWindowManager] Created diff preview window for ${key}`)

@@ -8,7 +8,7 @@ import type { SubAgentDefinition } from '../agents/types.ts';
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
-import { shouldUseExtendedCacheTtl, loadStoredConfig, type Workspace } from '../config/storage.ts';
+import { shouldUseExtendedCacheTtl, loadStoredConfig, getSafeModeBehavior, type Workspace } from '../config/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
@@ -48,7 +48,6 @@ import {
 } from '../config/watcher.ts';
 import type { ValidationIssue } from '../config/validators.ts';
 import type { LoadedSource } from '../sources/types.ts';
-import type { SessionStatus } from '@craft-agent/core/types';
 import type { LoadedAgent } from '../agents/folder-types.ts';
 
 // Re-export mode functions for TUI/Electron usage
@@ -617,9 +616,6 @@ export class CraftAgent {
   // Callback when agents are created/synced/deleted via session tools - triggers reload
   public onAgentsChanged: (() => Promise<void>) | null = null;
 
-  // Callback when session status changes via session_status tool
-  public onStatusChange: ((status: SessionStatus) => Promise<void>) | null = null;
-
   constructor(config: CraftAgentConfig) {
     this.config = config;
     this.isHeadless = config.isHeadless ?? false;
@@ -680,12 +676,6 @@ export class CraftAgent {
         this.onDebug?.('[CraftAgent] onAgentsChanged received - notifying listener');
         if (this.onAgentsChanged) {
           await this.onAgentsChanged();
-        }
-      },
-      onStatusChange: async (status: SessionStatus) => {
-        this.onDebug?.(`[CraftAgent] onStatusChange received: ${status}`);
-        if (this.onStatusChange) {
-          await this.onStatusChange(status);
         }
       },
     });
@@ -935,8 +925,6 @@ export class CraftAgent {
           command,
           description: `Execute bash command: ${command}`,
         });
-        // Automatically set status to needs_review when asking for permission
-        await this.onStatusChange?.('needs_review');
       } else {
         // No permission handler - deny by default for safety
         this.pendingPermissions.delete(requestId);
@@ -1087,7 +1075,7 @@ export class CraftAgent {
                   input.tool_name,
                   input.tool_input,
                   'safe',
-                  { plansFolderPath, safeModeContext }
+                  { plansFolderPath }
                 );
 
                 if (!result.allowed) {
@@ -1141,8 +1129,6 @@ export class CraftAgent {
                       description: result.reason,
                       type: 'safe_mode',
                     });
-                    // Automatically set status to needs_review when asking for permission
-                    await this.onStatusChange?.('needs_review');
                   } else {
                     // No permission handler - deny by default for safety
                     this.pendingPermissions.delete(requestId);
@@ -1284,8 +1270,6 @@ export class CraftAgent {
                     command: commandStr,
                     description: `Execute: ${commandStr}`,
                   });
-                  // Automatically set status to needs_review when asking for permission
-                  await this.onStatusChange?.('needs_review');
                 } else {
                   this.pendingPermissions.delete(requestId);
                   return {
@@ -1479,11 +1463,6 @@ export class CraftAgent {
                 // No handler - return empty answers
                 this.pendingQuestions.delete(requestId);
                 return { behavior: 'allow' as const, updatedInput: { ...input, answers: {} } };
-              }
-
-              // Automatically set status to needs_review when asking user a question
-              if (this.onStatusChange) {
-                await this.onStatusChange('needs_review');
               }
 
               // Wait for user to answer
