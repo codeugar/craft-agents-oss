@@ -13,11 +13,11 @@ import {
   setActiveWorkspace,
   getAnthropicApiKey,
   getClaudeOAuthToken,
-  getWorkspaceSlug,
   type StoredConfig,
   type Workspace,
   type AuthType,
 } from '@craft-agent/shared/config';
+import { getDefaultWorkspacesDir } from '@craft-agent/shared/workspaces';
 import {
   listSessions,
   type SessionConfig,
@@ -53,9 +53,11 @@ function isUrl(value: string): boolean {
  * This creates a minimal workspace - sources must be configured separately.
  */
 function createUrlWorkspace(url: string): Workspace {
+  const id = generateUrlWorkspaceId(url);
   return {
-    id: generateUrlWorkspaceId(url),
+    id,
     name: url, // Show URL as name in header
+    rootPath: `${getDefaultWorkspacesDir()}/${id}`, // Use default location for URL workspaces
     createdAt: Date.now(),
   };
 }
@@ -377,8 +379,7 @@ async function main() {
       process.exit(1);
     }
 
-    const workspaceSlug = getWorkspaceSlug(workspace);
-    const sessions = listSessions(workspaceSlug);
+    const sessions = listSessions(workspace.rootPath);
 
     if (sessions.length === 0) {
       console.log('No sessions found.');

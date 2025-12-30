@@ -2,7 +2,8 @@
  * Workspace Storage
  *
  * CRUD operations for workspaces.
- * Workspaces are stored at ~/.craft-agent/workspaces/{slug}/
+ * Workspaces can be stored anywhere on disk via rootPath.
+ * Default location: ~/.craft-agent/workspaces/
  */
 
 import {
@@ -25,54 +26,50 @@ import type {
 } from './types.ts';
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
-const WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
+const DEFAULT_WORKSPACES_DIR = join(CONFIG_DIR, 'workspaces');
 
 // ============================================================
-// Directory Utilities
+// Path Utilities
 // ============================================================
 
 /**
- * Ensure workspaces directory exists
+ * Get the default workspaces directory (~/.craft-agent/workspaces/)
  */
-export function ensureWorkspacesDir(): void {
-  if (!existsSync(WORKSPACES_DIR)) {
-    mkdirSync(WORKSPACES_DIR, { recursive: true });
+export function getDefaultWorkspacesDir(): string {
+  return DEFAULT_WORKSPACES_DIR;
+}
+
+/**
+ * Ensure default workspaces directory exists
+ */
+export function ensureDefaultWorkspacesDir(): void {
+  if (!existsSync(DEFAULT_WORKSPACES_DIR)) {
+    mkdirSync(DEFAULT_WORKSPACES_DIR, { recursive: true });
   }
 }
 
 /**
- * Get path to a workspace folder
- */
-export function getWorkspacePath(slug: string): string {
-  return join(WORKSPACES_DIR, slug);
-}
-
-/**
  * Get path to workspace sources directory
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function getWorkspaceSourcesPath(slug: string): string {
-  return join(WORKSPACES_DIR, slug, 'sources');
+export function getWorkspaceSourcesPath(rootPath: string): string {
+  return join(rootPath, 'sources');
 }
 
 /**
  * Get path to workspace agents directory
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function getWorkspaceAgentsPath(slug: string): string {
-  return join(WORKSPACES_DIR, slug, 'agents');
+export function getWorkspaceAgentsPath(rootPath: string): string {
+  return join(rootPath, 'agents');
 }
 
 /**
  * Get path to workspace sessions directory
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function getWorkspaceSessionsPath(slug: string): string {
-  return join(WORKSPACES_DIR, slug, 'sessions');
-}
-
-/**
- * Get workspaces directory path
- */
-export function getWorkspacesDir(): string {
-  return WORKSPACES_DIR;
+export function getWorkspaceSessionsPath(rootPath: string): string {
+  return join(rootPath, 'sessions');
 }
 
 // ============================================================
@@ -80,10 +77,11 @@ export function getWorkspacesDir(): string {
 // ============================================================
 
 /**
- * Load workspace config.json
+ * Load workspace config.json from a workspace folder
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function loadWorkspaceConfig(slug: string): WorkspaceConfig | null {
-  const configPath = join(WORKSPACES_DIR, slug, 'config.json');
+export function loadWorkspaceConfig(rootPath: string): WorkspaceConfig | null {
+  const configPath = join(rootPath, 'config.json');
   if (!existsSync(configPath)) return null;
 
   try {
@@ -94,16 +92,16 @@ export function loadWorkspaceConfig(slug: string): WorkspaceConfig | null {
 }
 
 /**
- * Save workspace config.json
+ * Save workspace config.json to a workspace folder
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function saveWorkspaceConfig(config: WorkspaceConfig): void {
-  const dir = join(WORKSPACES_DIR, config.slug);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+export function saveWorkspaceConfig(rootPath: string, config: WorkspaceConfig): void {
+  if (!existsSync(rootPath)) {
+    mkdirSync(rootPath, { recursive: true });
   }
 
   config.updatedAt = Date.now();
-  writeFileSync(join(dir, 'config.json'), JSON.stringify(config, null, 2));
+  writeFileSync(join(rootPath, 'config.json'), JSON.stringify(config, null, 2));
 }
 
 // ============================================================
@@ -113,10 +111,10 @@ export function saveWorkspaceConfig(config: WorkspaceConfig): void {
 /**
  * Count subdirectories in a path
  */
-function countSubdirs(path: string): number {
-  if (!existsSync(path)) return 0;
+function countSubdirs(dirPath: string): number {
+  if (!existsSync(dirPath)) return 0;
   try {
-    return readdirSync(path, { withFileTypes: true }).filter((d) => d.isDirectory()).length;
+    return readdirSync(dirPath, { withFileTypes: true }).filter((d) => d.isDirectory()).length;
   } catch {
     return 0;
   }
@@ -125,10 +123,10 @@ function countSubdirs(path: string): number {
 /**
  * List subdirectory names in a path
  */
-function listSubdirNames(path: string): string[] {
-  if (!existsSync(path)) return [];
+function listSubdirNames(dirPath: string): string[] {
+  if (!existsSync(dirPath)) return [];
   try {
-    return readdirSync(path, { withFileTypes: true })
+    return readdirSync(dirPath, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
   } catch {
@@ -137,69 +135,38 @@ function listSubdirNames(path: string): string[] {
 }
 
 /**
- * Load workspace with summary info (not full sources/agents)
+ * Load workspace with summary info from a rootPath
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function loadWorkspace(slug: string): LoadedWorkspace | null {
-  const config = loadWorkspaceConfig(slug);
+export function loadWorkspace(rootPath: string): LoadedWorkspace | null {
+  const config = loadWorkspaceConfig(rootPath);
   if (!config) return null;
 
   return {
     config,
-    sourceSlugs: listSubdirNames(getWorkspaceSourcesPath(slug)),
-    agentSlugs: listSubdirNames(getWorkspaceAgentsPath(slug)),
-    sessionCount: countSubdirs(getWorkspaceSessionsPath(slug)),
+    sourceSlugs: listSubdirNames(getWorkspaceSourcesPath(rootPath)),
+    agentSlugs: listSubdirNames(getWorkspaceAgentsPath(rootPath)),
+    sessionCount: countSubdirs(getWorkspaceSessionsPath(rootPath)),
   };
 }
 
 /**
- * List all workspaces (lightweight summary)
+ * Get workspace summary from a rootPath
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function listWorkspaces(): WorkspaceSummary[] {
-  ensureWorkspacesDir();
+export function getWorkspaceSummary(rootPath: string): WorkspaceSummary | null {
+  const config = loadWorkspaceConfig(rootPath);
+  if (!config) return null;
 
-  const summaries: WorkspaceSummary[] = [];
-  const entries = readdirSync(WORKSPACES_DIR, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const config = loadWorkspaceConfig(entry.name);
-    if (!config) continue;
-
-    summaries.push({
-      slug: config.slug,
-      name: config.name,
-      sourceCount: countSubdirs(getWorkspaceSourcesPath(config.slug)),
-      agentCount: countSubdirs(getWorkspaceAgentsPath(config.slug)),
-      sessionCount: countSubdirs(getWorkspaceSessionsPath(config.slug)),
-      createdAt: config.createdAt,
-      updatedAt: config.updatedAt,
-    });
-  }
-
-  // Sort by updatedAt descending (most recent first)
-  return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-/**
- * Load all workspaces (full LoadedWorkspace objects)
- */
-export function loadAllWorkspaces(): LoadedWorkspace[] {
-  ensureWorkspacesDir();
-
-  const workspaces: LoadedWorkspace[] = [];
-  const entries = readdirSync(WORKSPACES_DIR, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const workspace = loadWorkspace(entry.name);
-      if (workspace) {
-        workspaces.push(workspace);
-      }
-    }
-  }
-
-  return workspaces;
+  return {
+    slug: config.slug,
+    name: config.name,
+    sourceCount: countSubdirs(getWorkspaceSourcesPath(rootPath)),
+    agentCount: countSubdirs(getWorkspaceAgentsPath(rootPath)),
+    sessionCount: countSubdirs(getWorkspaceSessionsPath(rootPath)),
+    createdAt: config.createdAt,
+    updatedAt: config.updatedAt,
+  };
 }
 
 // ============================================================
@@ -209,80 +176,59 @@ export function loadAllWorkspaces(): LoadedWorkspace[] {
 /**
  * Generate URL-safe slug from name
  */
-export function generateWorkspaceSlug(name: string): string {
+export function generateSlug(name: string): string {
   let slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .substring(0, 50);
 
-  // Ensure slug is not empty
   if (!slug) {
     slug = 'workspace';
   }
 
-  // Check for existing slugs and append number if needed
-  const existingSlugs = new Set<string>();
-  if (existsSync(WORKSPACES_DIR)) {
-    const entries = readdirSync(WORKSPACES_DIR, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        existingSlugs.add(entry.name);
-      }
-    }
-  }
-
-  if (!existingSlugs.has(slug)) {
-    return slug;
-  }
-
-  // Find next available number
-  let counter = 2;
-  while (existingSlugs.has(`${slug}-${counter}`)) {
-    counter++;
-  }
-
-  return `${slug}-${counter}`;
+  return slug;
 }
 
 /**
- * Create a new workspace
+ * Create workspace folder structure at a given path
+ * @param rootPath - Absolute path where workspace folder will be created
+ * @param name - Display name for the workspace
+ * @returns The created WorkspaceConfig
  */
-export function createWorkspace(input: CreateWorkspaceInput): WorkspaceConfig {
-  const slug = generateWorkspaceSlug(input.name);
+export function createWorkspaceAtPath(rootPath: string, name: string): WorkspaceConfig {
   const now = Date.now();
+  const slug = generateSlug(name);
 
   const config: WorkspaceConfig = {
     id: `ws_${randomUUID().slice(0, 8)}`,
-    name: input.name,
+    name,
     slug,
-    defaults: input.defaults,
     createdAt: now,
     updatedAt: now,
   };
 
   // Create workspace directory structure
-  const workspacePath = getWorkspacePath(slug);
-  mkdirSync(workspacePath, { recursive: true });
-  mkdirSync(getWorkspaceSourcesPath(slug), { recursive: true });
-  mkdirSync(getWorkspaceAgentsPath(slug), { recursive: true });
-  mkdirSync(getWorkspaceSessionsPath(slug), { recursive: true });
+  mkdirSync(rootPath, { recursive: true });
+  mkdirSync(getWorkspaceSourcesPath(rootPath), { recursive: true });
+  mkdirSync(getWorkspaceAgentsPath(rootPath), { recursive: true });
+  mkdirSync(getWorkspaceSessionsPath(rootPath), { recursive: true });
 
   // Save config
-  saveWorkspaceConfig(config);
+  saveWorkspaceConfig(rootPath, config);
 
   return config;
 }
 
 /**
- * Delete a workspace and all its contents
+ * Delete a workspace folder and all its contents
+ * @param rootPath - Absolute path to workspace root folder
  */
-export function deleteWorkspace(slug: string): boolean {
-  const dir = getWorkspacePath(slug);
-  if (!existsSync(dir)) return false;
+export function deleteWorkspaceFolder(rootPath: string): boolean {
+  if (!existsSync(rootPath)) return false;
 
   try {
-    rmSync(dir, { recursive: true });
+    rmSync(rootPath, { recursive: true });
     return true;
   } catch {
     return false;
@@ -290,104 +236,61 @@ export function deleteWorkspace(slug: string): boolean {
 }
 
 /**
- * Check if a workspace exists
+ * Check if a valid workspace exists at a path
+ * @param rootPath - Absolute path to check
  */
-export function workspaceExists(slug: string): boolean {
-  return existsSync(join(WORKSPACES_DIR, slug, 'config.json'));
+export function isValidWorkspace(rootPath: string): boolean {
+  return existsSync(join(rootPath, 'config.json'));
 }
 
 /**
- * Get workspace by name (case-insensitive) or slug
+ * Rename a workspace (updates config.json in the workspace folder)
+ * @param rootPath - Absolute path to workspace root folder
+ * @param newName - New display name
  */
-export function getWorkspaceByNameOrSlug(nameOrSlug: string): WorkspaceConfig | null {
-  const workspaces = listWorkspaces();
-  const match = workspaces.find(
-    (w) => w.slug === nameOrSlug || w.name.toLowerCase() === nameOrSlug.toLowerCase()
-  );
-  if (!match) return null;
-  return loadWorkspaceConfig(match.slug);
-}
-
-/**
- * Rename a workspace
- */
-export function renameWorkspace(slug: string, newName: string): boolean {
-  const config = loadWorkspaceConfig(slug);
+export function renameWorkspaceFolder(rootPath: string, newName: string): boolean {
+  const config = loadWorkspaceConfig(rootPath);
   if (!config) return false;
 
   config.name = newName.trim();
-  saveWorkspaceConfig(config);
+  saveWorkspaceConfig(rootPath, config);
   return true;
 }
 
 // ============================================================
-// Workspace Selection (Current Workspace)
+// Auto-Discovery (for default workspace location)
 // ============================================================
 
 /**
- * Get the current workspace slug from global config
+ * Discover workspace folders in the default location that have valid config.json
+ * Returns paths to valid workspaces found in ~/.craft-agent/workspaces/
  */
-export function getCurrentWorkspaceSlug(): string | null {
-  const globalConfigPath = join(CONFIG_DIR, 'config.json');
-  if (!existsSync(globalConfigPath)) return null;
+export function discoverWorkspacesInDefaultLocation(): string[] {
+  const discovered: string[] = [];
+
+  if (!existsSync(DEFAULT_WORKSPACES_DIR)) {
+    return discovered;
+  }
 
   try {
-    const content = readFileSync(globalConfigPath, 'utf-8');
-    const globalConfig = JSON.parse(content);
-    return globalConfig.currentWorkspaceSlug ?? null;
-  } catch {
-    return null;
-  }
-}
+    const entries = readdirSync(DEFAULT_WORKSPACES_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
 
-/**
- * Set the current workspace slug in global config
- */
-export function setCurrentWorkspaceSlug(slug: string | null): void {
-  const globalConfigPath = join(CONFIG_DIR, 'config.json');
-
-  let globalConfig: Record<string, unknown> = {};
-  if (existsSync(globalConfigPath)) {
-    try {
-      globalConfig = JSON.parse(readFileSync(globalConfigPath, 'utf-8'));
-    } catch {
-      // Start fresh if corrupt
+      const rootPath = join(DEFAULT_WORKSPACES_DIR, entry.name);
+      if (isValidWorkspace(rootPath)) {
+        discovered.push(rootPath);
+      }
     }
+  } catch {
+    // Ignore errors scanning directory
   }
 
-  if (slug) {
-    globalConfig.currentWorkspaceSlug = slug;
-  } else {
-    delete globalConfig.currentWorkspaceSlug;
-  }
-
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-  writeFileSync(globalConfigPath, JSON.stringify(globalConfig, null, 2));
-}
-
-/**
- * Get the current workspace (or first available if none selected)
- */
-export function getCurrentWorkspace(): WorkspaceConfig | null {
-  const currentSlug = getCurrentWorkspaceSlug();
-  if (currentSlug) {
-    const config = loadWorkspaceConfig(currentSlug);
-    if (config) return config;
-  }
-
-  // Fall back to first workspace
-  const workspaces = listWorkspaces();
-  if (workspaces.length === 0) return null;
-
-  const first = workspaces[0];
-  if (!first) return null;
-  return loadWorkspaceConfig(first.slug);
+  return discovered;
 }
 
 // ============================================================
 // Exports
 // ============================================================
 
-export { CONFIG_DIR };
+export { CONFIG_DIR, DEFAULT_WORKSPACES_DIR };

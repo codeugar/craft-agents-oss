@@ -146,3 +146,80 @@ Use `debug()` from `@craft-agent/shared/utils` to add log entries.
 |                           | Sub-agents (`agents/`) |
 |                           | Debug utilities (`utils/`) |
 |                           | Headless mode (`headless/`) |
+
+## Keyboard Input Layer (`keyboard/mappings.ts`)
+
+Centralized detection helpers for keyboard shortcuts. Works WITH Ink's `useInput` (not as a wrapper).
+
+**Important**: Ink transforms escape sequences before we see them (strips `\x1b` prefix, sets `key.return`, `key.escape`, etc.).
+
+| Key Combo | Ink Delivers | Action |
+|-----------|--------------|--------|
+| Shift+Enter | `input='[27;2;13~'` | Insert newline |
+| Alt+Enter | `input='\r'` + `key.meta=true` | Insert newline |
+| Cmd+Left | `input='\x01'` | Line start |
+| Cmd+Right | `input='\x05'` | Line end |
+| Option+Left | `input='b'` + `key.meta=true` | Word left |
+| Option+Right | `input='f'` + `key.meta=true` | Word right |
+| Ctrl+U | `input='\x15'` | Clear line |
+| Ctrl+W | `input='\x17'` | Delete word backward |
+| Ctrl+K | `input='\x0b'` | Kill to end of line |
+| Option+Delete | `key.meta=true` + `key.delete=true` | Delete word backward |
+
+**Usage:**
+```typescript
+import { useInput } from 'ink';
+import { isShiftOrAltEnter, isLineStart, isLineEnd } from '../keyboard';
+
+useInput((input, key) => {
+  if (isShiftOrAltEnter(input, key)) { /* newline */ }
+  if (isLineStart(input, key)) { /* jump to start */ }
+});
+```
+
+**Ctrl+Key Raw Character Pattern:** Always check both forms:
+```typescript
+const isCtrlC = input === '\x03' || (key.ctrl && input === 'c');
+// Ctrl+C → '\x03' | Ctrl+U → '\x15' | Ctrl+W → '\x17' | Ctrl+K → '\x0b'
+```
+
+## Terminal Resize Handling (`hooks/core/useResize.ts`)
+
+**Problem:** Ink's `log-update` caches `previousLineCount`. When terminal width changes, text wrapping changes, causing visual artifacts.
+
+**Solution:**
+1. Debounce resize events (50ms)
+2. Clear screen synchronously (`\x1b[2J\x1b[3J\x1b[H`)
+3. Increment `staticResetKey` via callback in same setTimeout
+4. Static items re-render on clean screen
+
+```typescript
+const handleTerminalResize = useCallback(() => {
+  setStaticResetKey(k => k + 1);
+}, []);
+useResize(handleTerminalResize);
+```
+
+## TextInput Component (`components/TextInput.tsx`)
+
+Shared text input for all dialogs (API keys, bearer tokens, workspace names).
+
+**Features:**
+- Arrow navigation with Cmd+arrows for line start/end
+- Option+arrows for word boundary navigation
+- Shift+arrows for text selection (anchor/active positions)
+- Ctrl+A select all, Ctrl+U clear line
+- Password masking: `mask="•" maskReveal={{ last: 4 }}`
+
+**Key props:** `mask`, `maskReveal`, `detectFilePaths` (for drag-drop), `onCancel` (Escape/Ctrl+C)
+
+## Ultrathink Mode
+
+Keyword "ultrathink" in messages triggers extended thinking (64k tokens Opus/Sonnet, 8k Haiku).
+
+**Files:** `utils/gradient.ts` (detection, gradient rendering), `components/Spinner.tsx` (indicator), `hooks/core/useAgent.ts` (state)
+
+**Gradient (cyan→magenta→cyan):**
+```
+ANSI 256: [51, 45, 39, 129, 201, 201, 129, 39, 45, 51]
+```

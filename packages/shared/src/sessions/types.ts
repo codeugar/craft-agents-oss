@@ -2,7 +2,7 @@
  * Session Types
  *
  * Types for workspace-scoped sessions.
- * Sessions are stored at ~/.craft-agent/workspaces/{slug}/sessions/{id}.json
+ * Sessions are stored at {workspaceRootPath}/sessions/{id}/session.json
  */
 
 import type { Mode } from '../agent/mode-manager.ts';
@@ -70,8 +70,8 @@ export interface SessionConfig {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
-  /** Workspace slug this session belongs to */
-  workspaceSlug: string;
+  /** Workspace root path this session belongs to */
+  workspaceRootPath: string;
   /** Optional user-defined name */
   name?: string;
   createdAt: number;
@@ -109,7 +109,7 @@ export interface StoredSession extends SessionConfig {
  */
 export interface SessionMetadata {
   id: string;
-  workspaceSlug: string;
+  workspaceRootPath: string;
   name?: string;
   createdAt: number;
   lastUsedAt: number;

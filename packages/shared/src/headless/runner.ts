@@ -3,7 +3,6 @@ import { FolderAgentManager } from '../agents/folder-manager.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import type { AgentDefinition } from '../agents/folder-types.ts';
 import { createApiServer } from '../agents/api-tools.ts';
-import { getWorkspaceSlug } from '../config/storage.ts';
 import { listSessions, getOrCreateSessionById, updateSessionSdkId } from '../sessions/storage.ts';
 import { debug } from '../utils/debug.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
@@ -46,7 +45,7 @@ export class HeadlessRunner {
   private apiServers: Record<string, unknown> = {};
 
   // Session management
-  private workspaceSlug: string | null = null;
+  private workspaceRootPath: string | null = null;
   private sessionIdToUpdate: string | null = null;
 
   constructor(config: HeadlessConfig) {
@@ -197,10 +196,10 @@ ${this.config.prompt}
   private async initializeAgentManager(): Promise<{ success: true } | { success: false; error: HeadlessResult['error'] }> {
     try {
       // Create agent manager (sources handle MCP connections)
-      this.workspaceSlug = getWorkspaceSlug(this.config.workspace);
-      this.agentManager = new FolderAgentManager(this.workspaceSlug);
+      this.workspaceRootPath = this.config.workspace.rootPath;
+      this.agentManager = new FolderAgentManager(this.workspaceRootPath);
 
-      debug('[HeadlessRunner] Initialized agent manager for workspace:', this.workspaceSlug);
+      debug('[HeadlessRunner] Initialized agent manager for workspace:', this.workspaceRootPath);
 
       return { success: true };
     } catch (err) {
@@ -333,9 +332,9 @@ ${this.config.prompt}
 
     // Set session ID based on flags
     // Default: fresh session (don't set any - SDK will create new)
-    if (this.config.sessionId && this.workspaceSlug) {
+    if (this.config.sessionId && this.workspaceRootPath) {
       // --session: get or create session with this ID
-      const session = getOrCreateSessionById(this.workspaceSlug, this.config.sessionId);
+      const session = getOrCreateSessionById(this.workspaceRootPath, this.config.sessionId);
       this.sessionIdToUpdate = session.id;  // Save to update SDK session ID after run
       if (session.sdkSessionId) {
         debug('[HeadlessRunner] Resuming session (--session) - craft:', session.id, 'sdk:', session.sdkSessionId);
@@ -344,9 +343,9 @@ ${this.config.prompt}
         debug('[HeadlessRunner] New session created (--session) - craft:', session.id, 'sdk: none (will be saved after run)');
         // Fresh SDK session - will be saved after run
       }
-    } else if (this.config.sessionResume && this.workspaceSlug) {
+    } else if (this.config.sessionResume && this.workspaceRootPath) {
       // --session-resume: continue the last session for this workspace
-      const sessions = listSessions(this.workspaceSlug);
+      const sessions = listSessions(this.workspaceRootPath);
       if (sessions.length > 0 && sessions[0]) {
         this.sessionIdToUpdate = sessions[0].id;  // Save to update SDK session ID after run
         if (sessions[0].sdkSessionId) {
@@ -369,11 +368,11 @@ ${this.config.prompt}
    */
   private async cleanup(): Promise<void> {
     // Save SDK session ID to our session storage (if using --session or --session-resume)
-    if (this.sessionIdToUpdate && this.agent && this.workspaceSlug) {
+    if (this.sessionIdToUpdate && this.agent && this.workspaceRootPath) {
       const sdkSessionId = this.agent.getSessionId();
       if (sdkSessionId) {
         debug('[HeadlessRunner] Saving session - craft:', this.sessionIdToUpdate, 'sdk:', sdkSessionId);
-        updateSessionSdkId(this.workspaceSlug, this.sessionIdToUpdate, sdkSessionId);
+        updateSessionSdkId(this.workspaceRootPath, this.sessionIdToUpdate, sdkSessionId);
       }
     }
 
@@ -382,7 +381,7 @@ ${this.config.prompt}
     this.activeDefinition = null;
     this.mcpServers = {};
     this.apiServers = {};
-    this.workspaceSlug = null;
+    this.workspaceRootPath = null;
     this.sessionIdToUpdate = null;
   }
 

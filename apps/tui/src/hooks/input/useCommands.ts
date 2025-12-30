@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { homedir } from 'os';
-import { MODELS, getWorkspaces, removeWorkspace, type Workspace } from '@craft-agent/shared/config';
+import { basename, resolve } from 'path';
+import { MODELS, getWorkspaces, removeWorkspace, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config';
 import { formatPreferencesDisplay } from '@craft-agent/shared/config';
 import { listPlanFiles, type SessionConfig } from '@craft-agent/shared/sessions';
 import { resolveCommand } from '../../utils/filtering.ts';
@@ -380,14 +381,40 @@ export function useCommands(props: UseCommandsProps) {
         const subCommand = parts[1];
         const workspaces = getWorkspaces();
 
-        if (subCommand === 'add') {
-          openModal('workspaceAdd');
-          return { handled: true };
-        }
-
         if (subCommand === 'rename') {
           openModal('workspaceRename');
           return { handled: true };
+        }
+
+        if (subCommand === 'add' || subCommand === 'new' || subCommand === 'create') {
+          // Get folder path from args, or use current directory
+          const folderPathArg = parts.slice(2).join(' ');
+          const folderPath = folderPathArg ? resolve(folderPathArg) : process.cwd();
+          const name = basename(folderPath);
+
+          try {
+            // Create workspace at {folderPath}/.craft-agent/
+            const rootPath = `${folderPath}/.craft-agent`;
+            const newWorkspace = addWorkspace({ name, rootPath });
+            setActiveWorkspace(newWorkspace.id);
+            setWorkspace(newWorkspace);
+
+            return {
+              handled: true,
+              message: {
+                content: `Created workspace "${name}" at ${rootPath}`,
+                type: 'system',
+              },
+            };
+          } catch (error) {
+            return {
+              handled: true,
+              message: {
+                content: `Failed to create workspace: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                type: 'error',
+              },
+            };
+          }
         }
 
         if (subCommand === 'remove') {
@@ -505,7 +532,7 @@ export function useCommands(props: UseCommandsProps) {
             return { handled: true };
           }
 
-          const planFiles = listPlanFiles(session.workspaceSlug, session.id);
+          const planFiles = listPlanFiles(session.workspaceRootPath, session.id);
           if (planFiles.length === 0) {
             return {
               handled: true,

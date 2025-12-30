@@ -28,12 +28,13 @@ const api: ElectronAPI = {
 
   // Workspace management
   getWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WORKSPACES),
+  createWorkspace: (folderPath: string, name: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CREATE_WORKSPACE, folderPath, name),
 
   // Window management
   getWindowWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_WORKSPACE),
   getWindowMode: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_MODE),
   openWorkspace: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_WORKSPACE, workspaceId),
-  openAddWorkspaceWindow: () => ipcRenderer.invoke(IPC_CHANNELS.OPEN_ADD_WORKSPACE),
   closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.CLOSE_WINDOW),
 
   // Agent management
@@ -53,11 +54,6 @@ const api: ElectronAPI = {
   saveMcpBearer: (workspaceId: string, agentId: string, serverName: string, token: string) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_MCP_BEARER, workspaceId, agentId, serverName, token),
   saveApiCredentials: (workspaceId: string, agentId: string, apiName: string, credential: string) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_API_CREDENTIALS, workspaceId, agentId, apiName, credential),
   validateMcpConnection: (serverUrl: string, accessToken?: string) => ipcRenderer.invoke(IPC_CHANNELS.VALIDATE_MCP_CONNECTION, serverUrl, accessToken),
-
-  // Agent sync (Craft discovery)
-  syncAgentsFromCraft: (workspaceId: string, options?: { documentIds?: string[]; forceUpdate?: boolean }) => ipcRenderer.invoke(IPC_CHANNELS.SYNC_AGENTS_FROM_CRAFT, workspaceId, options),
-  discoverAllAgents: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.DISCOVER_ALL_AGENTS, workspaceId),
-  getAgentsSyncStatus: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_AGENTS_SYNC_STATUS, workspaceId),
 
   // Agent state management (unified state machine, agent-scoped)
   getAgentStatus: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_GET_STATUS, workspaceId, agentId),
@@ -168,8 +164,6 @@ const api: ElectronAPI = {
   getSetupNeeds: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_GET_AUTH_STATE).then(r => r.setupNeeds),
   startCraftOAuth: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_START_CRAFT_OAUTH),
   getCraftProfile: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_GET_CRAFT_PROFILE),
-  getMcpLinks: (spaceId: string, authToken: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_GET_MCP_LINKS, spaceId, authToken),
-  createMcpLink: (spaceId: string, authToken: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_CREATE_MCP_LINK, spaceId, authToken),
   startWorkspaceMcpOAuth: (mcpUrl: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_START_MCP_OAUTH, mcpUrl),
   saveOnboardingConfig: (config: {
     authType?: AuthType
@@ -240,20 +234,20 @@ const api: ElectronAPI = {
   getAllDrafts: () => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET_ALL),
 
   // Sources
-  getSources: (workspaceSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET, workspaceSlug),
-  createSource: (workspaceSlug: string, config: Partial<import('@craft-agent/shared/sources').FolderSourceConfig>) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_CREATE, workspaceSlug, config),
-  deleteSource: (workspaceSlug: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_DELETE, workspaceSlug, sourceSlug),
-  startSourceOAuth: (workspaceSlug: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_START_OAUTH, workspaceSlug, sourceSlug),
-  saveSourceCredentials: (workspaceSlug: string, sourceSlug: string, credential: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, workspaceSlug, sourceSlug, credential),
+  getSources: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET, workspaceId),
+  createSource: (workspaceId: string, config: Partial<import('@craft-agent/shared/sources').FolderSourceConfig>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_CREATE, workspaceId, config),
+  deleteSource: (workspaceId: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_DELETE, workspaceId, sourceSlug),
+  startSourceOAuth: (workspaceId: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_START_OAUTH, workspaceId, sourceSlug),
+  saveSourceCredentials: (workspaceId: string, sourceSlug: string, credential: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, workspaceId, sourceSlug, credential),
   // Agent-scoped sources
-  getAgentSources: (workspaceSlug: string, agentSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_AGENT, workspaceSlug, agentSlug),
-  promoteSource: (workspaceSlug: string, agentSlug: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_PROMOTE, workspaceSlug, agentSlug, sourceSlug),
+  getAgentSources: (workspaceId: string, agentSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_AGENT, workspaceId, agentSlug),
+  promoteSource: (workspaceId: string, agentSlug: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_PROMOTE, workspaceId, agentSlug, sourceSlug),
 
   // Session sources
   setSessionSources: (sessionId: string, sourceSlugs: string[]) =>

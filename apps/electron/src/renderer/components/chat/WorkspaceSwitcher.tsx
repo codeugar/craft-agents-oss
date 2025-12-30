@@ -1,5 +1,7 @@
 import * as React from "react"
-import { Check, Plus } from "lucide-react"
+import { useState } from "react"
+import { Check, FolderPlus } from "lucide-react"
+import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import {
@@ -18,7 +20,7 @@ interface WorkspaceSwitcherProps {
   workspaces: Workspace[]
   activeWorkspaceId: string | null
   onSelect: (workspaceId: string) => void
-  onAddWorkspace?: () => void
+  onWorkspaceCreated?: (workspace: Workspace) => void
 }
 
 /**
@@ -37,9 +39,40 @@ export function WorkspaceSwitcher({
   workspaces,
   activeWorkspaceId,
   onSelect,
-  onAddWorkspace,
+  onWorkspaceCreated,
 }: WorkspaceSwitcherProps) {
+  const [isCreating, setIsCreating] = useState(false)
   const selectedWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
+
+  const handleNewWorkspace = async () => {
+    if (isCreating) return
+    setIsCreating(true)
+
+    try {
+      // Open folder picker
+      const folderPath = await window.electronAPI.openFolderDialog()
+      if (!folderPath) {
+        setIsCreating(false)
+        return
+      }
+
+      // Use folder name as workspace name (browser-compatible basename)
+      const name = folderPath.split(/[\\/]/).pop() || folderPath
+
+      // Create workspace
+      const workspace = await window.electronAPI.createWorkspace(folderPath, name)
+      toast.success(`Created workspace "${name}"`)
+
+      // Notify parent
+      onWorkspaceCreated?.(workspace)
+      onSelect(workspace.id)
+    } catch (error) {
+      console.error('Failed to create workspace:', error)
+      toast.error('Failed to create workspace')
+    } finally {
+      setIsCreating(false)
+    }
+  }
 
   return (
     <DropdownMenu>
@@ -97,15 +130,17 @@ export function WorkspaceSwitcher({
             )}
           </StyledDropdownMenuItem>
         ))}
-        {onAddWorkspace && (
-          <>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={onAddWorkspace}>
-              <Plus className="h-3.5 w-3.5 text-muted-foreground" />
-              Add Workspace
-            </StyledDropdownMenuItem>
-          </>
-        )}
+
+        {/* Separator and New Workspace option */}
+        <StyledDropdownMenuSeparator />
+        <StyledDropdownMenuItem
+          onClick={handleNewWorkspace}
+          disabled={isCreating}
+          className="font-sans"
+        >
+          <FolderPlus className="h-4 w-4 mr-3" />
+          {isCreating ? 'Creating...' : 'New Workspace...'}
+        </StyledDropdownMenuItem>
       </StyledDropdownMenuContent>
     </DropdownMenu>
   )

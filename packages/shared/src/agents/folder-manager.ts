@@ -29,48 +29,47 @@ import {
   deleteAgent,
   resolveAgentSources,
 } from './folder-storage.ts';
-import { createAgentSyncService, type SyncResult, type SyncOptions } from './sync-service.ts';
 
 /**
  * FolderAgentManager - manages agents from filesystem
  *
- * Requires a workspaceSlug for all operations since agents
- * are stored under workspaces/{slug}/agents/
+ * Requires a workspaceRootPath for all operations since agents
+ * are stored at {rootPath}/agents/
  */
 export class FolderAgentManager {
-  private workspaceSlug: string;
+  private workspaceRootPath: string;
   private activeAgentSlug: string | null = null;
 
-  constructor(workspaceSlug: string) {
-    this.workspaceSlug = workspaceSlug;
+  constructor(workspaceRootPath: string) {
+    this.workspaceRootPath = workspaceRootPath;
   }
 
   /**
-   * Get the workspace slug this manager is scoped to
+   * Get the workspace root path this manager is scoped to
    */
-  getWorkspaceSlug(): string {
-    return this.workspaceSlug;
+  getWorkspaceRootPath(): string {
+    return this.workspaceRootPath;
   }
 
   /**
    * Get all available agents
    */
   getAvailableAgents(): LoadedAgent[] {
-    return loadWorkspaceAgents(this.workspaceSlug);
+    return loadWorkspaceAgents(this.workspaceRootPath);
   }
 
   /**
    * Get enabled agents only
    */
   getEnabledAgents(): LoadedAgent[] {
-    return getEnabledAgents(this.workspaceSlug);
+    return getEnabledAgents(this.workspaceRootPath);
   }
 
   /**
    * Find agent by slug
    */
   getAgentBySlug(slug: string): LoadedAgent | null {
-    return loadAgent(this.workspaceSlug, slug);
+    return loadAgent(this.workspaceRootPath, slug);
   }
 
   /**
@@ -86,7 +85,7 @@ export class FolderAgentManager {
    * Activate an agent by slug
    */
   activateAgent(slug: string): AgentDefinition | null {
-    const agent = loadAgent(this.workspaceSlug, slug);
+    const agent = loadAgent(this.workspaceRootPath, slug);
     if (!agent || !agent.config.enabled) {
       return null;
     }
@@ -106,7 +105,7 @@ export class FolderAgentManager {
    * Get agent definition by slug (used by AgentStateManager)
    */
   getAgentDefinition(slug: string): AgentDefinition | null {
-    const agent = loadAgent(this.workspaceSlug, slug);
+    const agent = loadAgent(this.workspaceRootPath, slug);
     if (!agent || !agent.config.enabled) {
       return null;
     }
@@ -133,7 +132,7 @@ export class FolderAgentManager {
    */
   getActiveAgent(): LoadedAgent | null {
     if (!this.activeAgentSlug) return null;
-    return loadAgent(this.workspaceSlug, this.activeAgentSlug);
+    return loadAgent(this.workspaceRootPath, this.activeAgentSlug);
   }
 
   /**
@@ -280,20 +279,20 @@ export class FolderAgentManager {
    * Create a new agent
    */
   createAgent(input: CreateAgentInput): FolderAgentConfig {
-    return createAgent(this.workspaceSlug, input);
+    return createAgent(this.workspaceRootPath, input);
   }
 
   /**
    * Update agent instructions
    */
   updateInstructions(slug: string, instructions: string): void {
-    saveAgentInstructions(this.workspaceSlug, slug, instructions);
+    saveAgentInstructions(this.workspaceRootPath, slug, instructions);
 
     // Update timestamp
-    const config = loadAgentConfig(this.workspaceSlug, slug);
+    const config = loadAgentConfig(this.workspaceRootPath, slug);
     if (config) {
       config.updatedAt = Date.now();
-      saveAgentConfig(this.workspaceSlug, config);
+      saveAgentConfig(this.workspaceRootPath, config);
     }
   }
 
@@ -301,11 +300,11 @@ export class FolderAgentManager {
    * Update agent config
    */
   updateConfig(slug: string, updates: Partial<FolderAgentConfig>): void {
-    const config = loadAgentConfig(this.workspaceSlug, slug);
+    const config = loadAgentConfig(this.workspaceRootPath, slug);
     if (config) {
       Object.assign(config, updates);
       config.updatedAt = Date.now();
-      saveAgentConfig(this.workspaceSlug, config);
+      saveAgentConfig(this.workspaceRootPath, config);
     }
   }
 
@@ -333,23 +332,23 @@ export class FolderAgentManager {
     if (this.activeAgentSlug === slug) {
       this.deactivateAgent();
     }
-    deleteAgent(this.workspaceSlug, slug);
+    deleteAgent(this.workspaceRootPath, slug);
   }
 
   /**
    * Get sources for an agent
    */
   getAgentSources(slug: string): LoadedSource[] {
-    const config = loadAgentConfig(this.workspaceSlug, slug);
+    const config = loadAgentConfig(this.workspaceRootPath, slug);
     if (!config) return [];
-    return resolveAgentSources(this.workspaceSlug, config);
+    return resolveAgentSources(this.workspaceRootPath, config);
   }
 
   /**
    * Add a global source reference to an agent
    */
   addSourceToAgent(agentSlug: string, sourceSlug: string): void {
-    const config = loadAgentConfig(this.workspaceSlug, agentSlug);
+    const config = loadAgentConfig(this.workspaceRootPath, agentSlug);
     if (!config) return;
 
     const useSources = config.useSources || [];
@@ -357,7 +356,7 @@ export class FolderAgentManager {
       useSources.push(sourceSlug);
       config.useSources = useSources;
       config.updatedAt = Date.now();
-      saveAgentConfig(this.workspaceSlug, config);
+      saveAgentConfig(this.workspaceRootPath, config);
     }
   }
 
@@ -365,104 +364,21 @@ export class FolderAgentManager {
    * Remove a global source reference from an agent
    */
   removeSourceFromAgent(agentSlug: string, sourceSlug: string): void {
-    const config = loadAgentConfig(this.workspaceSlug, agentSlug);
+    const config = loadAgentConfig(this.workspaceRootPath, agentSlug);
     if (!config || !config.useSources) return;
 
     const index = config.useSources.indexOf(sourceSlug);
     if (index > -1) {
       config.useSources.splice(index, 1);
       config.updatedAt = Date.now();
-      saveAgentConfig(this.workspaceSlug, config);
+      saveAgentConfig(this.workspaceRootPath, config);
     }
-  }
-
-  // ============================================================
-  // Craft Sync Methods
-  // ============================================================
-
-  /**
-   * Sync agents from connected Craft Space
-   *
-   * Discovers agents from the "Agents" folder in the connected Craft Space
-   * and creates/updates local agent definitions.
-   */
-  async syncFromCraft(options?: SyncOptions): Promise<SyncResult> {
-    const syncService = createAgentSyncService(this.workspaceSlug);
-    return syncService.syncFromCraft(options);
-  }
-
-  /**
-   * Discover all agents (local + Craft)
-   *
-   * Returns local agents and discovers agents from Craft Space.
-   * Does not sync - just returns what's available.
-   */
-  async discoverAllAgents(): Promise<{
-    local: LoadedAgent[];
-    craft: Array<{ name: string; documentId: string; synced: boolean }>;
-    errors: string[];
-  }> {
-    const result: {
-      local: LoadedAgent[];
-      craft: Array<{ name: string; documentId: string; synced: boolean }>;
-      errors: string[];
-    } = {
-      local: this.getAvailableAgents(),
-      craft: [],
-      errors: [],
-    };
-
-    try {
-      // Build set of synced document IDs
-      const syncedDocIds = new Set<string>();
-      for (const agent of result.local) {
-        if (agent.config.source?.type === 'craft' && agent.config.source.documentId) {
-          syncedDocIds.add(agent.config.source.documentId);
-        }
-      }
-
-      // Discover from Craft
-      const { createCraftDiscoveryForWorkspace } = await import('./craft-discovery.ts');
-      const discovery = await createCraftDiscoveryForWorkspace(this.workspaceSlug);
-
-      if (discovery) {
-        const discoveryResult = await discovery.discoverAgents();
-
-        for (const agent of discoveryResult.agents) {
-          result.craft.push({
-            name: agent.name,
-            documentId: agent.craftDocumentId,
-            synced: syncedDocIds.has(agent.craftDocumentId),
-          });
-        }
-
-        for (const error of discoveryResult.errors) {
-          result.errors.push(error.error);
-        }
-      }
-    } catch (error) {
-      result.errors.push(error instanceof Error ? error.message : String(error));
-    }
-
-    return result;
-  }
-
-  /**
-   * Get sync status for all agents
-   */
-  getAgentsSyncStatus(): Array<{
-    slug: string;
-    name: string;
-    status: 'synced' | 'modified' | 'local-only' | 'not-found';
-  }> {
-    const syncService = createAgentSyncService(this.workspaceSlug);
-    return syncService.getAgentsSyncStatus();
   }
 }
 
 /**
  * Create a FolderAgentManager for a specific workspace
  */
-export function createFolderAgentManager(workspaceSlug: string): FolderAgentManager {
-  return new FolderAgentManager(workspaceSlug);
+export function createFolderAgentManager(workspaceRootPath: string): FolderAgentManager {
+  return new FolderAgentManager(workspaceRootPath);
 }

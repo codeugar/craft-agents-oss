@@ -529,7 +529,6 @@ export function Chat({
     onOpenSettings,
     onOpenKeyboardShortcuts,
     onOpenStoredUserPreferences,
-    onAddWorkspace,
     onLogout,
     onSendMessage,
   } = contextValue
@@ -1946,7 +1945,6 @@ export function Chat({
                       workspaces={workspaces}
                       activeWorkspaceId={activeWorkspaceId}
                       onSelect={onSelectWorkspace}
-                      onAddWorkspace={onAddWorkspace}
                     />
                   </div>
                   <Button

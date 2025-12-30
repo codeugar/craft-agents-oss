@@ -37,9 +37,12 @@ export interface BuiltServers {
 
 /**
  * SourceService - builds MCP/API servers from workspace sources
+ *
+ * Note: This class is stateless - all credential lookups use `source.workspaceSlug`
+ * from the LoadedSource objects passed to methods, not constructor parameters.
  */
 export class SourceService {
-  constructor(private workspaceSlug: string) {}
+  constructor() {}
 
   /**
    * Build MCP server config from a source
@@ -359,10 +362,10 @@ export class SourceService {
 }
 
 /**
- * Create a SourceService for a workspace
+ * Create a SourceService instance
  */
-export function createSourceService(workspaceSlug: string): SourceService {
-  return new SourceService(workspaceSlug);
+export function createSourceService(): SourceService {
+  return new SourceService();
 }
 
 /**

@@ -27,16 +27,10 @@ export interface UseWorkspaceHandlersResult {
   handleWorkspaceSelect: (workspaceId: string) => void;
   /** Cancel workspace selector */
   handleWorkspaceCancel: () => void;
-  /** Open workspace add wizard */
-  handleWorkspaceAddOpen: () => void;
   /** Open workspace rename dialog */
   handleWorkspaceRenameOpen: (workspaceId: string) => void;
   /** Remove a workspace */
   handleWorkspaceRemove: (workspaceId: string) => Promise<void>;
-  /** Handle workspace add completion */
-  handleWorkspaceAddComplete: (newWorkspace: Workspace) => void;
-  /** Cancel workspace add */
-  handleWorkspaceAddCancel: () => void;
   /** Handle workspace rename submission */
   handleWorkspaceRenameSubmit: (newName: string) => void;
   /** Cancel workspace rename */
@@ -45,8 +39,6 @@ export interface UseWorkspaceHandlersResult {
 
 /**
  * Hook that handles all workspace-related operations.
- *
- * Extracts ~80 lines of workspace handling logic from SessionContainer.
  *
  * Usage:
  * ```tsx
@@ -62,7 +54,6 @@ export interface UseWorkspaceHandlersResult {
  * <WorkspaceSelector
  *   onSelect={workspaceHandlers.handleWorkspaceSelect}
  *   onCancel={workspaceHandlers.handleWorkspaceCancel}
- *   onAdd={workspaceHandlers.handleWorkspaceAddOpen}
  *   onRename={workspaceHandlers.handleWorkspaceRenameOpen}
  *   onRemove={workspaceHandlers.handleWorkspaceRemove}
  * />
@@ -83,11 +74,6 @@ export function useWorkspaceHandlers(props: UseWorkspaceHandlersProps): UseWorks
   const handleWorkspaceCancel = useCallback(() => {
     closeModal();
   }, [closeModal]);
-
-  const handleWorkspaceAddOpen = useCallback(() => {
-    closeModal();
-    openModal('workspaceAdd');
-  }, [openModal, closeModal]);
 
   const handleWorkspaceRenameOpen = useCallback((workspaceId: string) => {
     closeModal();
@@ -132,15 +118,6 @@ export function useWorkspaceHandlers(props: UseWorkspaceHandlersProps): UseWorks
     }
   }, [workspace.id, setWorkspace, addMessage, closeModal]);
 
-  const handleWorkspaceAddComplete = useCallback((newWorkspace: Workspace) => {
-    closeModal();
-    setWorkspace(newWorkspace);
-  }, [setWorkspace, closeModal]);
-
-  const handleWorkspaceAddCancel = useCallback(() => {
-    closeModal();
-  }, [closeModal]);
-
   const handleWorkspaceRenameSubmit = useCallback((newName: string) => {
     closeModal();
     const success = renameWorkspace(workspace.id, newName);
@@ -156,11 +133,8 @@ export function useWorkspaceHandlers(props: UseWorkspaceHandlersProps): UseWorks
   return {
     handleWorkspaceSelect,
     handleWorkspaceCancel,
-    handleWorkspaceAddOpen,
     handleWorkspaceRenameOpen,
     handleWorkspaceRemove,
-    handleWorkspaceAddComplete,
-    handleWorkspaceAddCancel,
     handleWorkspaceRenameSubmit,
     handleWorkspaceRenameCancel,
   };

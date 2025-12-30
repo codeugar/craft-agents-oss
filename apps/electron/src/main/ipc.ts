@@ -15,7 +15,7 @@ import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type DiffPreviewData, type CodePreviewData, type TerminalPreviewData } from '../shared/types'
 import { readFileAttachment } from '@craft-agent/shared/utils'
 import { getAiCreditTopUpUrl } from '@craft-agent/shared/auth'
-import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultModes, setDefaultModes, getDefaultSkipPermissions, setDefaultSkipPermissions, getDefaultWorkingDirectory, setDefaultWorkingDirectory, getWorkspaceSlug, getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
+import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultModes, setDefaultModes, getDefaultSkipPermissions, setDefaultSkipPermissions, getDefaultWorkingDirectory, setDefaultWorkingDirectory, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config'
 import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
@@ -115,6 +115,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return sessionManager.getWorkspaces()
   })
 
+  // Create a new workspace at a folder path
+  ipcMain.handle(IPC_CHANNELS.CREATE_WORKSPACE, async (_event, folderPath: string, name: string) => {
+    // Create workspace at {folderPath}/.craft-agent/
+    const rootPath = join(folderPath, '.craft-agent')
+    const workspace = addWorkspace({ name, rootPath })
+    // Make it active
+    setActiveWorkspace(workspace.id)
+    console.log(`[IPC] Created workspace "${name}" at ${rootPath}`)
+    return workspace
+  })
+
   // ============================================================
   // Window Management
   // ============================================================
@@ -132,11 +143,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Get mode for the calling window
   ipcMain.handle(IPC_CHANNELS.GET_WINDOW_MODE, (event) => {
     return windowManager.getModeForWindow(event.sender.id)
-  })
-
-  // Open add workspace wizard in new window
-  ipcMain.handle(IPC_CHANNELS.OPEN_ADD_WORKSPACE, async () => {
-    windowManager.createWindow('', 'add-workspace')
   })
 
   // Close the calling window
@@ -355,10 +361,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       if (!workspace) {
         throw new Error(`Workspace not found: ${workspaceId}`)
       }
-      const workspaceSlug = getWorkspaceSlug(workspace)
+      const workspaceRootPath = workspace.rootPath
 
       // Create attachments directory if it doesn't exist
-      const attachmentsDir = getSessionAttachmentsPath(workspaceSlug, sessionId)
+      const attachmentsDir = getSessionAttachmentsPath(workspaceRootPath, sessionId)
       await mkdir(attachmentsDir, { recursive: true })
 
       // Generate unique ID for this attachment
@@ -539,25 +545,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Agent authentication - validate MCP connection
   ipcMain.handle(IPC_CHANNELS.VALIDATE_MCP_CONNECTION, async (_event, serverUrl: string, accessToken?: string) => {
     return agentService.validateMcpConnectionStatus(serverUrl, accessToken)
-  })
-
-  // ============================================================
-  // Agent Sync (Craft Discovery)
-  // ============================================================
-
-  // Sync agents from connected Craft Space
-  ipcMain.handle(IPC_CHANNELS.SYNC_AGENTS_FROM_CRAFT, async (_event, workspaceId: string, options?: { documentIds?: string[]; forceUpdate?: boolean }) => {
-    return agentService.syncAgentsFromCraft(workspaceId, options)
-  })
-
-  // Discover all agents (local + Craft)
-  ipcMain.handle(IPC_CHANNELS.DISCOVER_ALL_AGENTS, async (_event, workspaceId: string) => {
-    return agentService.discoverAllAgents(workspaceId)
-  })
-
-  // Get sync status for all agents
-  ipcMain.handle(IPC_CHANNELS.GET_AGENTS_SYNC_STATUS, async (_event, workspaceId: string) => {
-    return agentService.getAgentsSyncStatus(workspaceId)
   })
 
   // ============================================================
@@ -962,16 +949,24 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // ============================================================
 
   // Get all sources for a workspace
-  ipcMain.handle(IPC_CHANNELS.SOURCES_GET, async (_event, workspaceSlug: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_GET, async (_event, workspaceId: string) => {
+    // Look up workspace to get rootPath
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      console.error(`[IPC] SOURCES_GET: Workspace not found: ${workspaceId}`)
+      return []
+    }
     // Set up ConfigWatcher for this workspace to broadcast live updates
-    sessionManager.setupConfigWatcher(workspaceSlug)
-    return loadWorkspaceSources(workspaceSlug)
+    sessionManager.setupConfigWatcher(workspace.rootPath)
+    return loadWorkspaceSources(workspace.rootPath)
   })
 
   // Create a new source
-  ipcMain.handle(IPC_CHANNELS.SOURCES_CREATE, async (_event, workspaceSlug: string, config: Partial<import('@craft-agent/shared/sources').CreateSourceInput>) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_CREATE, async (_event, workspaceId: string, config: Partial<import('@craft-agent/shared/sources').CreateSourceInput>) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { createSource } = await import('@craft-agent/shared/sources')
-    return createSource(workspaceSlug, {
+    return createSource(workspace.rootPath, {
       name: config.name || 'New Source',
       provider: config.provider || 'custom',
       type: config.type || 'mcp',
@@ -983,19 +978,26 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // Delete a source
-  ipcMain.handle(IPC_CHANNELS.SOURCES_DELETE, async (_event, workspaceSlug: string, sourceSlug: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_DELETE, async (_event, workspaceId: string, sourceSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { deleteSource } = await import('@craft-agent/shared/sources')
-    deleteSource(workspaceSlug, sourceSlug)
+    deleteSource(workspace.rootPath, sourceSlug)
   })
 
   // Start OAuth flow for a source
-  ipcMain.handle(IPC_CHANNELS.SOURCES_START_OAUTH, async (_event, workspaceSlug: string, sourceSlug: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_START_OAUTH, async (_event, workspaceId: string, sourceSlug: string) => {
     try {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) {
+        return { success: false, error: `Workspace not found: ${workspaceId}` }
+      }
       const { loadSourceConfig } = await import('@craft-agent/shared/sources')
       const { CraftOAuth, getMcpBaseUrl } = await import('@craft-agent/shared/auth/oauth')
       const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+      const { basename } = await import('path')
 
-      const config = loadSourceConfig(workspaceSlug, sourceSlug)
+      const config = loadSourceConfig(workspace.rootPath, sourceSlug)
       if (!config || config.type !== 'mcp' || !config.mcp?.url) {
         return { success: false, error: 'Source not found or not an MCP source' }
       }
@@ -1010,7 +1012,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
       const { tokens, clientId } = await oauth.authenticate()
 
-      // Store credentials
+      // Store credentials using folder name as workspaceSlug (for credential key consistency)
+      const workspaceSlug = basename(workspace.rootPath)
       const manager = getCredentialManager()
       await manager.set(
         { type: 'source_oauth', workspaceSlug, sourceSlug },
@@ -1037,15 +1040,20 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // Save credentials for a source (bearer token or API key)
-  ipcMain.handle(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, async (_event, workspaceSlug: string, sourceSlug: string, credential: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, async (_event, workspaceId: string, sourceSlug: string, credential: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { loadSourceConfig } = await import('@craft-agent/shared/sources')
     const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    const { basename } = await import('path')
 
-    const config = loadSourceConfig(workspaceSlug, sourceSlug)
+    const config = loadSourceConfig(workspace.rootPath, sourceSlug)
     if (!config) {
       throw new Error(`Source not found: ${sourceSlug}`)
     }
 
+    // Use folder name as workspaceSlug for credential key consistency
+    const workspaceSlug = basename(workspace.rootPath)
     const manager = getCredentialManager()
 
     // Determine credential type based on source config
@@ -1065,29 +1073,33 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // Get agent-scoped sources
-  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_AGENT, async (_event, workspaceSlug: string, agentSlug: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_AGENT, async (_event, workspaceId: string, agentSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return []
     const { loadAgentSources } = await import('@craft-agent/shared/sources')
-    return loadAgentSources(workspaceSlug, agentSlug)
+    return loadAgentSources(workspace.rootPath, agentSlug)
   })
 
   // Promote agent source to workspace (copy)
-  ipcMain.handle(IPC_CHANNELS.SOURCES_PROMOTE, async (_event, workspaceSlug: string, agentSlug: string, sourceSlug: string) => {
+  ipcMain.handle(IPC_CHANNELS.SOURCES_PROMOTE, async (_event, workspaceId: string, agentSlug: string, sourceSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { loadAgentSource, createSource, loadSource } = await import('@craft-agent/shared/sources')
 
     // Load the agent-scoped source
-    const agentSource = loadAgentSource(workspaceSlug, agentSlug, sourceSlug)
+    const agentSource = loadAgentSource(workspace.rootPath, agentSlug, sourceSlug)
     if (!agentSource) {
       throw new Error(`Agent source not found: ${sourceSlug}`)
     }
 
     // Check if source already exists at workspace level
-    const existingWorkspaceSource = loadSource(workspaceSlug, sourceSlug)
+    const existingWorkspaceSource = loadSource(workspace.rootPath, sourceSlug)
     if (existingWorkspaceSource) {
       throw new Error(`Source already exists at workspace level: ${sourceSlug}`)
     }
 
     // Copy to workspace sources
-    const newConfig = createSource(workspaceSlug, {
+    const newConfig = createSource(workspace.rootPath, {
       name: agentSource.config.name,
       provider: agentSource.config.provider,
       type: agentSource.config.type,

@@ -283,3 +283,13 @@ export const expandedTurnsAtomFamily = atomFamily(
   (_sessionId: string) => atom<Set<string>>(new Set<string>()),
   (a, b) => a === b
 )
+
+/**
+ * Atom family for tracking expanded activity group IDs per session
+ * Persists expanded/collapsed state for Task subagents
+ * Default is collapsed (ID not in set = collapsed)
+ */
+export const expandedActivityGroupsAtomFamily = atomFamily(
+  (_sessionId: string) => atom<Set<string>>(new Set<string>()),
+  (a, b) => a === b
+)

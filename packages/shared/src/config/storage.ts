@@ -4,6 +4,12 @@ import { join } from 'path';
 import { getCredentialManager } from '../credentials/index.ts';
 import { isOpusModel } from './models.ts';
 import { getOrCreateLatestSession, type SessionConfig } from '../sessions/index.ts';
+import {
+  discoverWorkspacesInDefaultLocation,
+  loadWorkspaceConfig,
+  createWorkspaceAtPath,
+  isValidWorkspace,
+} from '../workspaces/storage.ts';
 import type { StoredAttachment } from '@craft-agent/core/types';
 import type { Plan } from '../agents/plan-types.ts';
 import type { Mode } from '../agent/mode-manager.ts';
@@ -30,20 +36,12 @@ export type McpAuthType = 'workspace_oauth' | 'workspace_bearer' | 'public';
 export interface Workspace {
   id: string;
   name: string;
-  slug?: string;           // URL-safe folder name for workspace-scoped storage (defaults to id if not set)
+  rootPath: string;        // Absolute path to workspace folder (e.g., ~/Projects/my-app/craft-agent)
   createdAt: number;
-  sessionId?: string;      // SDK session ID for conversation continuity
-  iconUrl?: string;        // Space icon URL from Craft profile
-  mcpUrl?: string;         // MCP server URL for this workspace
-  mcpAuthType?: McpAuthType;  // How the MCP server authenticates (defaults to workspace_oauth)
-}
-
-/**
- * Get the workspace slug (folder name) from a workspace.
- * Falls back to the workspace id if no slug is set.
- */
-export function getWorkspaceSlug(workspace: Workspace): string {
-  return workspace.slug || workspace.id;
+  lastAccessedAt?: number; // For sorting recent workspaces
+  iconUrl?: string;
+  mcpUrl?: string;
+  mcpAuthType?: McpAuthType;
 }
 
 export type AuthType = 'api_key' | 'oauth_token' | 'craft_credits';
@@ -103,6 +101,25 @@ export function loadStoredConfig(): StoredConfig | null {
     if (!activeWorkspace) {
       // Default to first workspace
       config.activeWorkspaceId = config.workspaces[0]?.id || null;
+    }
+
+    // Auto-populate missing rootPath for legacy workspaces
+    let needsSave = false;
+    for (const workspace of config.workspaces) {
+      if (!workspace.rootPath) {
+        workspace.rootPath = join(CONFIG_DIR, 'workspaces', workspace.id);
+        needsSave = true;
+      }
+    }
+    if (needsSave) {
+      saveConfig(config);
+    }
+
+    // Ensure workspace folder structure exists for all workspaces
+    for (const workspace of config.workspaces) {
+      if (!isValidWorkspace(workspace.rootPath)) {
+        createWorkspaceAtPath(workspace.rootPath, workspace.name);
+      }
     }
 
     return config;
@@ -399,36 +416,36 @@ export function switchWorkspaceAtomic(workspaceId: string): { workspace: Workspa
   const workspace = config.workspaces.find(w => w.id === workspaceId);
   if (!workspace) return null;
 
-  // Get the workspace slug for session storage
-  const workspaceSlug = getWorkspaceSlug(workspace);
-
   // Get or create the latest session for this workspace
-  const session = getOrCreateLatestSession(workspaceSlug);
+  const session = getOrCreateLatestSession(workspace.rootPath);
 
   // Update active workspace in config
   config.activeWorkspaceId = workspaceId;
+  workspace.lastAccessedAt = Date.now();
   saveConfig(config);
 
   return { workspace, session };
 }
 
+/**
+ * Add a workspace to the global config.
+ * @param workspace - Workspace data (must include rootPath)
+ */
 export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt'>): Workspace {
   const config = loadStoredConfig();
   if (!config) {
     throw new Error('No config found');
   }
 
-  // Check if workspace with same name already exists
-  const existing = config.workspaces.find(w =>
-    w.name.toLowerCase() === workspace.name.toLowerCase()
-  );
+  // Check if workspace with same rootPath already exists
+  const existing = config.workspaces.find(w => w.rootPath === workspace.rootPath);
   if (existing) {
     // Update existing workspace with new settings
     const updated: Workspace = {
       ...existing,
       ...workspace,
       id: existing.id,
-      createdAt: existing.createdAt, // Preserve original creation time
+      createdAt: existing.createdAt,
     };
     const existingIndex = config.workspaces.indexOf(existing);
     config.workspaces[existingIndex] = updated;
@@ -442,6 +459,11 @@ export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt'>): Wo
     createdAt: Date.now(),
   };
 
+  // Create workspace folder structure if it doesn't exist
+  if (!isValidWorkspace(newWorkspace.rootPath)) {
+    createWorkspaceAtPath(newWorkspace.rootPath, newWorkspace.name);
+  }
+
   config.workspaces.push(newWorkspace);
 
   // If this is the only workspace, make it active
@@ -451,6 +473,46 @@ export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt'>): Wo
 
   saveConfig(config);
   return newWorkspace;
+}
+
+/**
+ * Sync workspaces by discovering workspaces in the default location
+ * that aren't already tracked in the global config.
+ * Call this on app startup.
+ */
+export function syncWorkspaces(): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+
+  const discoveredPaths = discoverWorkspacesInDefaultLocation();
+  const trackedPaths = new Set(config.workspaces.map(w => w.rootPath));
+
+  let added = false;
+  for (const rootPath of discoveredPaths) {
+    if (trackedPaths.has(rootPath)) continue;
+
+    // Load the workspace config to get name
+    const wsConfig = loadWorkspaceConfig(rootPath);
+    if (!wsConfig) continue;
+
+    const newWorkspace: Workspace = {
+      id: wsConfig.id || generateWorkspaceId(),
+      name: wsConfig.name,
+      rootPath,
+      createdAt: wsConfig.createdAt || Date.now(),
+    };
+
+    config.workspaces.push(newWorkspace);
+    added = true;
+  }
+
+  if (added) {
+    // If no active workspace, set to first
+    if (!config.activeWorkspaceId && config.workspaces.length > 0) {
+      config.activeWorkspaceId = config.workspaces[0]!.id;
+    }
+    saveConfig(config);
+  }
 }
 
 export async function removeWorkspace(workspaceId: string): Promise<boolean> {
@@ -502,22 +564,6 @@ function ensureWorkspaceDir(workspaceId: string): string {
   return dir;
 }
 
-// Update workspace session ID
-export function updateWorkspaceSessionId(workspaceId: string, sessionId: string | null): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-
-  const workspace = config.workspaces.find(w => w.id === workspaceId);
-  if (!workspace) return;
-
-  if (sessionId) {
-    workspace.sessionId = sessionId;
-  } else {
-    delete workspace.sessionId;
-  }
-
-  saveConfig(config);
-}
 
 // Re-export StoredAttachment for convenience (imported at top of file)
 export type { StoredAttachment };
@@ -615,9 +661,6 @@ export function clearWorkspaceConversation(workspaceId: string): void {
   if (existsSync(filePath)) {
     writeFileSync(filePath, '{}', 'utf-8');
   }
-
-  // Also clear session ID
-  updateWorkspaceSessionId(workspaceId, null);
 
   // Also clear any active plan (plans are session-scoped)
   clearWorkspacePlan(workspaceId);

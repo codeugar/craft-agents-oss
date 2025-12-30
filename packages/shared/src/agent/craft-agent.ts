@@ -8,7 +8,7 @@ import type { SubAgentDefinition } from '../agents/types.ts';
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
-import { shouldUseExtendedCacheTtl, loadStoredConfig, getWorkspaceSlug, type Workspace } from '../config/storage.ts';
+import { shouldUseExtendedCacheTtl, loadStoredConfig, type Workspace } from '../config/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
@@ -563,11 +563,10 @@ export class CraftAgent {
   }
 
   /**
-   * Get the workspace slug for workspace-scoped operations.
-   * Uses getWorkspaceSlug helper which falls back to id if no slug is set.
+   * Get the workspace root path for workspace-scoped operations.
    */
-  private get workspaceSlug(): string {
-    return getWorkspaceSlug(this.config.workspace);
+  private get workspaceRootPath(): string {
+    return this.config.workspace.rootPath;
   }
 
   // Callback for permission requests - set by TUI to receive permission prompts
@@ -695,7 +694,7 @@ export class CraftAgent {
       return; // Already running
     }
 
-    this.configWatcher = createConfigWatcher(this.workspaceSlug, {
+    this.configWatcher = createConfigWatcher(this.workspaceRootPath, {
       onSourceChange: (slug, source) => {
         debug('[CraftAgent] Source changed:', slug, source ? 'updated' : 'deleted');
         this.onSourceChange?.(slug, source);
@@ -985,7 +984,7 @@ export class CraftAgent {
         preferences: getPreferencesServer(hasActiveAgent),
         // Session-scoped tools (SubmitPlan, change_working_directory, etc.)
         // Pass activeAgentSlug so source_create defaults to agent-scoped when in agent context
-        session: getSessionScopedTools(sessionId, this.workspaceSlug, activeAgentSlug),
+        session: getSessionScopedTools(sessionId, this.workspaceRootPath, activeAgentSlug),
         // External docs MCP server (public, no auth required)
         // Provides Craft Agent documentation for agents, MCP servers, APIs, and setup
         docs: {
@@ -1020,6 +1019,9 @@ export class CraftAgent {
         if (lowerModel.includes('haiku')) return 8000;
         return 64000; // Opus and Sonnet
       };
+
+      // NOTE: Parent-child tracking for subagents is documented below (search for
+      // "PARENT-CHILD TOOL TRACKING"). The SDK's parent_tool_use_id is authoritative.
 
       const options: Options = {
         ...getDefaultOptions(),
@@ -1066,7 +1068,7 @@ export class CraftAgent {
               // All logic is centralized in mode-manager.ts
               // ============================================================
               if (isSafeMode) {
-                const plansFolderPath = sessionId ? getSessionPlansPath(this.workspaceSlug, sessionId) : undefined;
+                const plansFolderPath = sessionId ? getSessionPlansPath(this.workspaceRootPath, sessionId) : undefined;
                 const result = shouldAllowToolInMode(
                   input.tool_name,
                   input.tool_input,
@@ -1333,6 +1335,23 @@ export class CraftAgent {
               }
             }],
           }],
+          // ═══════════════════════════════════════════════════════════════════════════
+          // SUBAGENT HOOKS: Logging only - parent tracking uses SDK's parent_tool_use_id
+          // ═══════════════════════════════════════════════════════════════════════════
+          SubagentStart: [{
+            hooks: [async (input, _hookToolUseID) => {
+              const typedInput = input as { agent_id?: string; agent_type?: string };
+              console.log(`[CraftAgent] SubagentStart: agent_id=${typedInput.agent_id}, type=${typedInput.agent_type}`);
+              return { continue: true };
+            }],
+          }],
+          SubagentStop: [{
+            hooks: [async (input, _toolUseID) => {
+              const typedInput = input as { agent_id?: string };
+              console.log(`[CraftAgent] SubagentStop: agent_id=${typedInput.agent_id}`);
+              return { continue: true };
+            }],
+          }],
         },
         // Continue from previous session if we have one (enables conversation history & auto compaction)
         // Skip resume on retry (after session expiry) to start fresh
@@ -1430,41 +1449,67 @@ export class CraftAgent {
       const matchedToolIds = new Set<string>();
 
       // ═══════════════════════════════════════════════════════════════════════════
-      // PARENT-CHILD TOOL TRACKING (for Task/subagent tools)
+      // PARENT-CHILD TOOL TRACKING (for Task/TaskOutput subagent tools)
       // ═══════════════════════════════════════════════════════════════════════════
       //
-      // The SDK's `parent_tool_use_id` field has different semantics depending on context:
+      // PURPOSE: Track which tools are children of which parent (Task/TaskOutput)
+      // for correct UI hierarchy display and result matching.
       //
-      // 1. REGULAR TOOLS (Read, Grep, Bash, etc.):
-      //    - parent_tool_use_id = the tool's own ID (self-reference)
-      //    - OR null for in-process MCP tools (preferences, plan mode tools)
+      // ─────────────────────────────────────────────────────────────────────────────
+      // HOW IT WORKS: SDK's parent_tool_use_id
+      // ─────────────────────────────────────────────────────────────────────────────
       //
-      // 2. SUBAGENT CHILD TOOLS (tools running inside Task):
-      //    - parent_tool_use_id = the PARENT Task's ID, NOT the child tool's ID
-      //    - SDK is saying "this result belongs to a child of Task"
+      // The Claude Agent SDK provides `parent_tool_use_id` on ALL message types:
+      // - SDKAssistantMessage, SDKPartialAssistantMessage, SDKToolProgressMessage, SDKUserMessage
       //
-      // Example flow:
-      //   tool_start: Task (toolu_PARENT)     ← Parent starts
-      //   tool_start: Grep (toolu_CHILD1)     ← Child starts inside Task
-      //   tool_start: Read (toolu_CHILD2)     ← Another child
-      //   tool_result: parent_tool_use_id=toolu_PARENT  ← Result for CHILD1!
-      //   tool_result: parent_tool_use_id=toolu_PARENT  ← Result for CHILD2!
+      // For tools running INSIDE a subagent (Task), this field points to the parent Task's ID.
+      // This is the AUTHORITATIVE source for parent-child relationships.
       //
-      // Without tracking, we'd match all results to Task (wrong!).
-      // Solution: Track which tools are children of which parent, match results
-      // to children in FIFO order when parent_tool_use_id points to a parent tool.
+      // ─────────────────────────────────────────────────────────────────────────────
+      // PARENT ASSIGNMENT PATHS (at tool_start time)
+      // ─────────────────────────────────────────────────────────────────────────────
       //
-      // See also: apps/electron/src/main/sessions.ts implements similar tracking
-      // at the session manager level (parentToolStack, toolToParentMap).
+      // 1. SINGLE PARENT: When only one Task is active, assign child to it (unambiguous)
+      //    → Log: "CHILD REGISTERED (assistant/single-parent)"
+      //
+      // 2. MULTIPLE PARENTS + SDK PARENT: Use SDK's parent_tool_use_id (authoritative)
+      //    → Log: "CHILD REGISTERED (assistant/sdk-parent)" or "(stream/sdk-parent)"
+      //
+      // 3. FIFO FALLBACK: If SDK doesn't provide parent (edge case), use first active parent
+      //    → Log: "CHILD REGISTERED (assistant/fifo-fallback)" or "(stream/fifo-fallback)"
+      //    → This should rarely happen now that we use SDK's parent_tool_use_id
+      //
+      // ─────────────────────────────────────────────────────────────────────────────
+      // RESULT MATCHING (at tool_result time)
+      // ─────────────────────────────────────────────────────────────────────────────
+      //
+      // When a tool_result arrives with parent_tool_use_id pointing to a PARENT tool:
+      // - The result is for a CHILD of that parent, not the parent itself
+      // - Match to children in FIFO order using parentToChildren map
+      // - This handles: Task(A) → Grep, Read → results come back with parent=A
+      //
+      // ─────────────────────────────────────────────────────────────────────────────
+      // DATA STRUCTURES
+      // ─────────────────────────────────────────────────────────────────────────────
+      //
+      // PARENT_TOOL_NAMES: Tools that can spawn children (Task, TaskOutput)
+      // activeParentTools: Set of currently running parent tool IDs
+      // parentToChildren:  Map<parentId, childIds[]> - ordered for FIFO result matching
+      // childToParent:     Map<childId, parentId> - for UI hierarchy lookup
+      //
+      // ─────────────────────────────────────────────────────────────────────────────
+      // RELATED CODE
+      // ─────────────────────────────────────────────────────────────────────────────
+      //
+      // - SubagentStart/SubagentStop hooks (line ~1345): Logging only, not for mapping
+      // - apps/electron/src/main/sessions.ts: Similar tracking at session manager level
+      //   (uses parentToolStack as fallback, but prefers event.parentToolUseId from here)
+      //
       // ═══════════════════════════════════════════════════════════════════════════
       const PARENT_TOOL_NAMES = ['Task', 'TaskOutput'];
-      // Track parent tools that are currently running
-      const activeParentTools = new Set<string>();
-      // Track which tools are children of which parent (parentId -> childIds in order)
-      // Using array to preserve insertion order for FIFO matching
-      const parentToChildren = new Map<string, string[]>();
-      // Track child's parent for hierarchy (childId -> parentId)
-      const childToParent = new Map<string, string>();
+      const activeParentTools = new Set<string>();                    // Currently running parent tool IDs
+      const parentToChildren = new Map<string, string[]>();           // parentId → [childIds...] (FIFO order)
+      const childToParent = new Map<string, string>();                // childId → parentId (for hierarchy)
 
       // Process SDK messages and convert to AgentEvents
       let receivedComplete = false;
@@ -1782,7 +1827,7 @@ export class CraftAgent {
     // Add session state (always includes all modes with true/false state)
     // This lightweight format replaces the verbose mode context
     // Include plans folder path so agent knows where to write plans in safe mode
-    const plansFolderPath = getSessionPlansPath(this.workspaceSlug, this.modeSessionId);
+    const plansFolderPath = getSessionPlansPath(this.workspaceRootPath, this.modeSessionId);
     parts.push(formatSessionState(this.modeSessionId, { plansFolderPath }));
 
     // Add source state (always included to inform agent about available sources)
@@ -1826,7 +1871,7 @@ export class CraftAgent {
     // Add session state (always includes all modes with true/false state)
     // This lightweight format replaces the verbose mode context
     // Include plans folder path so agent knows where to write plans in safe mode
-    const plansFolderPath = getSessionPlansPath(this.workspaceSlug, this.modeSessionId);
+    const plansFolderPath = getSessionPlansPath(this.workspaceRootPath, this.modeSessionId);
     contentBlocks.push({ type: 'text', text: formatSessionState(this.modeSessionId, { plansFolderPath }) });
 
     // Add source state (always included to inform agent about available sources)
@@ -1992,9 +2037,7 @@ export class CraftAgent {
                 input: block.input as Record<string, unknown>,
               });
 
-              // ─────────────────────────────────────────────────────────────────────
-              // PARENT-CHILD TRACKING: Register this tool in the hierarchy
-              // ─────────────────────────────────────────────────────────────────────
+              // Register tool in parent-child hierarchy (see main docs above)
               const { PARENT_TOOL_NAMES, activeParentTools, parentToChildren, childToParent } = parentChildTracking;
               const isParentTool = PARENT_TOOL_NAMES.includes(block.name);
 
@@ -2004,18 +2047,32 @@ export class CraftAgent {
                 activeParentTools.add(block.id);
                 parentToChildren.set(block.id, []);
                 this.onDebug?.(`Parent tool started: ${block.name} (${block.id})`);
-              } else if (activeParentTools.size > 0) {
-                // This is a child tool - associate it with the most recent parent
-                // Note: We use the last active parent (most recently started)
-                const parentIds = Array.from(activeParentTools);
-                const lastParentId = parentIds[parentIds.length - 1];
-                if (lastParentId) {
-                  parentToChildren.get(lastParentId)?.push(block.id);
-                  childToParent.set(block.id, lastParentId);
-                  parentToolUseId = lastParentId;
-                  this.onDebug?.(`Child tool started: ${block.name} (${block.id}) under parent ${lastParentId}`);
+              } else if (activeParentTools.size === 1) {
+                // Single active parent - unambiguous, assign directly
+                const parentId = Array.from(activeParentTools)[0]!;
+                parentToChildren.get(parentId)?.push(block.id);
+                childToParent.set(block.id, parentId);
+                parentToolUseId = parentId;
+                console.log(`[CraftAgent] CHILD REGISTERED (assistant/single-parent): ${block.name} (${block.id}) under parent ${parentId}`);
+              } else if (activeParentTools.size > 1) {
+                // Multiple active parents - use SDK's parent_tool_use_id (authoritative source)
+                // Messages from subagent context include parent_tool_use_id pointing to the Task
+                const sdkParentId = (message as { parent_tool_use_id?: string | null }).parent_tool_use_id;
+                if (sdkParentId && activeParentTools.has(sdkParentId)) {
+                  parentToChildren.get(sdkParentId)?.push(block.id);
+                  childToParent.set(block.id, sdkParentId);
+                  parentToolUseId = sdkParentId;
+                  console.log(`[CraftAgent] CHILD REGISTERED (assistant/sdk-parent): ${block.name} (${block.id}) → Task (${sdkParentId})`);
+                } else {
+                  // Fallback: FIFO if SDK doesn't provide parent
+                  const parentId = Array.from(activeParentTools)[0]!;
+                  parentToChildren.get(parentId)?.push(block.id);
+                  childToParent.set(block.id, parentId);
+                  parentToolUseId = parentId;
+                  console.log(`[CraftAgent] CHILD REGISTERED (assistant/fifo-fallback): ${block.name} (${block.id}) → ${parentId} (sdk_parent=${sdkParentId})`);
                 }
               }
+              // else: no active parents - tool is top-level, no parent needed
 
               events.push({
                 type: 'tool_start',
@@ -2099,13 +2156,17 @@ export class CraftAgent {
               input: {},
             });
 
-            // ─────────────────────────────────────────────────────────────────────
-            // PARENT-CHILD TRACKING: Register this tool in the hierarchy
-            // This MUST happen here (stream_event), not just in assistant message,
-            // because stream_event arrives first and sets emittedToolStarts
-            // ─────────────────────────────────────────────────────────────────────
+            // Register tool in parent-child hierarchy (see main docs above)
+            // Must happen here (stream_event) because it arrives before assistant message
             const { PARENT_TOOL_NAMES, activeParentTools, parentToChildren, childToParent } = parentChildTracking;
             const isParentTool = PARENT_TOOL_NAMES.includes(toolBlock.name);
+
+            // SDK provides parent_tool_use_id on stream events for tools running inside Task
+            // This is the authoritative source - use it when available
+            const sdkParentId = message.parent_tool_use_id;
+
+            // Debug: log what SDK provides for parent tracking
+            console.log(`[CraftAgent] TOOL START: ${toolBlock.name} (${toolBlock.id}), sdk_parent=${sdkParentId}, activeParents=[${Array.from(activeParentTools).join(',')}]`);
 
             let parentToolUseId: string | undefined;
             if (isParentTool) {
@@ -2113,17 +2174,37 @@ export class CraftAgent {
               activeParentTools.add(toolBlock.id);
               parentToChildren.set(toolBlock.id, []);
               console.log(`[CraftAgent] PARENT REGISTERED (stream): ${toolBlock.name} (${toolBlock.id})`);
-            } else if (activeParentTools.size > 0) {
-              // This is a child tool - associate it with the most recent parent
-              const parentIds = Array.from(activeParentTools);
-              const lastParentId = parentIds[parentIds.length - 1];
-              if (lastParentId) {
-                parentToChildren.get(lastParentId)?.push(toolBlock.id);
-                childToParent.set(toolBlock.id, lastParentId);
-                parentToolUseId = lastParentId;
-                console.log(`[CraftAgent] CHILD REGISTERED (stream): ${toolBlock.name} (${toolBlock.id}) under parent ${lastParentId}`);
+            } else if (sdkParentId && activeParentTools.has(sdkParentId)) {
+              // SDK provides correct parent for subagent tools - use it
+              parentToolUseId = sdkParentId;
+              parentToChildren.get(sdkParentId)?.push(toolBlock.id);
+              childToParent.set(toolBlock.id, sdkParentId);
+              console.log(`[CraftAgent] CHILD REGISTERED (stream/sdk): ${toolBlock.name} (${toolBlock.id}) under parent ${sdkParentId}`);
+            } else if (activeParentTools.size === 1) {
+              // Single active parent - unambiguous, assign directly
+              const parentId = Array.from(activeParentTools)[0]!;
+              parentToChildren.get(parentId)?.push(toolBlock.id);
+              childToParent.set(toolBlock.id, parentId);
+              parentToolUseId = parentId;
+              console.log(`[CraftAgent] CHILD REGISTERED (stream/single-parent): ${toolBlock.name} (${toolBlock.id}) under parent ${parentId}`);
+            } else if (activeParentTools.size > 1) {
+              // Multiple active parents - use SDK's parent_tool_use_id (authoritative source)
+              // sdkParentId is already extracted above from message.parent_tool_use_id
+              if (sdkParentId && activeParentTools.has(sdkParentId)) {
+                parentToChildren.get(sdkParentId)?.push(toolBlock.id);
+                childToParent.set(toolBlock.id, sdkParentId);
+                parentToolUseId = sdkParentId;
+                console.log(`[CraftAgent] CHILD REGISTERED (stream/sdk-parent): ${toolBlock.name} (${toolBlock.id}) → Task (${sdkParentId})`);
+              } else {
+                // Fallback: FIFO if SDK doesn't provide parent
+                const parentId = Array.from(activeParentTools)[0]!;
+                parentToChildren.get(parentId)?.push(toolBlock.id);
+                childToParent.set(toolBlock.id, parentId);
+                parentToolUseId = parentId;
+                console.log(`[CraftAgent] CHILD REGISTERED (stream/fifo-fallback): ${toolBlock.name} (${toolBlock.id}) → ${parentId} (sdk_parent=${sdkParentId})`);
               }
             }
+            // else: no active parents - tool is top-level, no parent needed
 
             events.push({
               type: 'tool_start',
@@ -2276,10 +2357,47 @@ export class CraftAgent {
       }
 
       case 'tool_progress': {
-        // Debug: log tool_progress structure to understand when tools complete
-        if (this.onDebug) {
-          const progress = message as any;
-          this.onDebug(`tool_progress: tool_use_id=${progress.tool_use_id}, content_type=${progress.content?.type}, is_error=${progress.is_error}`);
+        // tool_progress events are emitted for subagent child tools
+        // These contain the correct parent_tool_use_id for tracking hierarchy
+        const progress = message as {
+          tool_use_id: string;
+          tool_name: string;
+          parent_tool_use_id: string | null;
+        };
+
+        // Debug: log tool_progress structure
+        console.log(`[CraftAgent] tool_progress: tool=${progress.tool_name} (${progress.tool_use_id}), parent=${progress.parent_tool_use_id}`);
+
+        // Check if this is a child tool we haven't seen yet
+        if (!emittedToolStarts.has(progress.tool_use_id)) {
+          emittedToolStarts.add(progress.tool_use_id);
+          pendingToolUses.set(progress.tool_use_id, {
+            name: progress.tool_name,
+            input: {},
+          });
+
+          // Track parent-child relationship using SDK's parent_tool_use_id (authoritative source)
+          const { PARENT_TOOL_NAMES, activeParentTools, parentToChildren, childToParent } = parentChildTracking;
+          const isParentTool = PARENT_TOOL_NAMES.includes(progress.tool_name);
+
+          let parentToolUseId: string | undefined;
+          if (!isParentTool && progress.parent_tool_use_id && activeParentTools.has(progress.parent_tool_use_id)) {
+            // This is a child tool with correct parent from SDK
+            parentToolUseId = progress.parent_tool_use_id;
+            parentToChildren.get(progress.parent_tool_use_id)?.push(progress.tool_use_id);
+            childToParent.set(progress.tool_use_id, progress.parent_tool_use_id);
+            console.log(`[CraftAgent] CHILD REGISTERED (tool_progress/sdk): ${progress.tool_name} (${progress.tool_use_id}) → ${progress.parent_tool_use_id}`);
+          }
+
+          // Emit tool_start for this child tool
+          events.push({
+            type: 'tool_start',
+            toolName: progress.tool_name,
+            toolUseId: progress.tool_use_id,
+            input: {},
+            turnId: turnId || undefined,
+            parentToolUseId,
+          });
         }
         break;
       }
@@ -2417,14 +2535,10 @@ export class CraftAgent {
     return this.config.workspace;
   }
 
-  setWorkspace(workspace: Workspace, restoreSession: boolean = false): void {
+  setWorkspace(workspace: Workspace): void {
     this.config.workspace = workspace;
-    // Either restore the saved session ID from workspace or start fresh
-    if (restoreSession && workspace.sessionId) {
-      this.sessionId = workspace.sessionId;
-    } else {
-      this.sessionId = null;
-    }
+    // Clear session when switching workspaces - caller should set session separately if needed
+    this.sessionId = null;
     // Note: MCP proxy needs to be reinitialized by the caller (useAgent hook)
   }
 

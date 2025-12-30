@@ -14,31 +14,27 @@ export type {
 
 // Storage functions
 export {
-  // Directory utilities
-  ensureWorkspacesDir,
-  getWorkspacePath,
+  // Path utilities
+  getDefaultWorkspacesDir,
+  ensureDefaultWorkspacesDir,
   getWorkspaceSourcesPath,
   getWorkspaceAgentsPath,
   getWorkspaceSessionsPath,
-  getWorkspacesDir,
   // Config operations
   loadWorkspaceConfig,
   saveWorkspaceConfig,
   // Load operations
   loadWorkspace,
-  listWorkspaces,
-  loadAllWorkspaces,
+  getWorkspaceSummary,
   // Create/Delete operations
-  generateWorkspaceSlug,
-  createWorkspace,
-  deleteWorkspace,
-  workspaceExists,
-  getWorkspaceByNameOrSlug,
-  renameWorkspace,
-  // Workspace selection
-  getCurrentWorkspaceSlug,
-  setCurrentWorkspaceSlug,
-  getCurrentWorkspace,
+  generateSlug,
+  createWorkspaceAtPath,
+  deleteWorkspaceFolder,
+  isValidWorkspace,
+  renameWorkspaceFolder,
+  // Auto-discovery
+  discoverWorkspacesInDefaultLocation,
   // Constants
   CONFIG_DIR,
+  DEFAULT_WORKSPACES_DIR,
 } from './storage.ts';

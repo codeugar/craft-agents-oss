@@ -17,8 +17,8 @@ export class WindowManager {
 
   /**
    * Create a new window for a workspace
-   * @param workspaceId - The workspace to open (empty string for onboarding/add-workspace)
-   * @param mode - Optional mode: 'add-workspace' opens the add workspace wizard
+   * @param workspaceId - The workspace to open (empty string for onboarding)
+   * @param mode - Optional mode for the window
    */
   createWindow(workspaceId: string, mode?: string): BrowserWindow {
     // Load platform-specific app icon

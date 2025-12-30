@@ -24,7 +24,6 @@ import { setTerminalProgressIndeterminate, clearTerminalProgress } from '../../u
 import {
   loadStoredConfig,
   saveConfig,
-  getWorkspaceSlug,
   saveWorkspacePlan,
   loadWorkspacePlan,
   clearWorkspacePlan,
@@ -270,7 +269,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     // Load conversation from session storage (primary scope)
     if (!session) return;
 
-    const savedSession = loadSession(session.workspaceSlug, session.id);
+    const savedSession = loadSession(session.workspaceRootPath, session.id);
     if (savedSession && savedSession.messages && savedSession.messages.length > 0) {
       // Only restore if conversation was edited within the last 5 minutes
       const fiveMinutesMs = 5 * 60 * 1000;
@@ -314,7 +313,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       const updatedSession: StoredSession = {
         id: session.id,
         sdkSessionId: agentRef.current?.getSessionId() ?? session.sdkSessionId,
-        workspaceSlug: session.workspaceSlug,
+        workspaceRootPath: session.workspaceRootPath,
         name: session.name,
         createdAt: session.createdAt,
         lastUsedAt: Date.now(),
@@ -343,7 +342,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
         debug('[useAgent] SDK session check:', sdkSessionId, 'current:', session.sdkSessionId, 'hasCallback:', !!config.onSdkSessionIdUpdate);
         if (sdkSessionId && sdkSessionId !== session.sdkSessionId) {
           debug('[useAgent] Updating SDK session ID:', sdkSessionId);
-          updateSessionSdkId(session.workspaceSlug, session.id, sdkSessionId);
+          updateSessionSdkId(session.workspaceRootPath, session.id, sdkSessionId);
           // Propagate to React state so UI stays in sync
           config.onSdkSessionIdUpdate?.(sdkSessionId);
         }
@@ -372,11 +371,8 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   useEffect(() => {
     let cancelled = false;
 
-    // Get workspace slug for folder-based agent manager
-    const workspaceSlug = getWorkspaceSlug(workspace);
-
     // Create folder-based agent manager (reads from disk)
-    const manager = new FolderAgentManager(workspaceSlug);
+    const manager = new FolderAgentManager(workspace.rootPath);
     agentManagerRef.current = manager;
     if (!cancelled) {
       setFolderAgentManager(manager);
@@ -509,16 +505,16 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       // Set up sources changed callback - reloads sources when created/authenticated/deleted
       agentRef.current.onSourcesChanged = async () => {
         if (!config.workspace) return;
-        const workspaceSlug = getWorkspaceSlug(config.workspace);
-        debug('[useAgent] onSourcesChanged - reloading sources for workspace:', workspaceSlug);
+        const rootPath = config.workspace.rootPath;
+        debug('[useAgent] onSourcesChanged - reloading sources for workspace:', rootPath);
 
         // Reload all sources from disk
-        const allSources = loadWorkspaceSources(workspaceSlug);
+        const allSources = loadWorkspaceSources(rootPath);
         agentRef.current?.setAllSources(allSources);
 
         // Rebuild MCP and API servers for enabled+authenticated sources
         const enabledSources = allSources.filter(s => s.config.enabled && s.config.isAuthenticated);
-        const sourceService = createSourceService(workspaceSlug);
+        const sourceService = createSourceService();
         const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources);
         agentRef.current?.setSourceServers(mcpServers, apiServers);
 
@@ -538,8 +534,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       }
       // Set all sources for context (agent sees full list with descriptions)
       if (config.workspace) {
-        const workspaceSlug = getWorkspaceSlug(config.workspace);
-        const allSources = loadWorkspaceSources(workspaceSlug);
+        const allSources = loadWorkspaceSources(config.workspace.rootPath);
         agentRef.current.setAllSources(allSources);
       }
     }
@@ -1082,7 +1077,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
         const updatedSession: StoredSession = {
           id: currentSession.id,
           sdkSessionId: sdkSessionId ?? currentSession.sdkSessionId,
-          workspaceSlug: currentSession.workspaceSlug,
+          workspaceRootPath: currentSession.workspaceRootPath,
           name: currentSession.name,
           createdAt: currentSession.createdAt,
           lastUsedAt: Date.now(),
@@ -1492,8 +1487,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
       }
 
       // Create new manager if none exists
-      const workspaceSlug = getWorkspaceSlug(workspace);
-      const manager = new FolderAgentManager(workspaceSlug);
+      const manager = new FolderAgentManager(workspace.rootPath);
       agentManagerRef.current = manager;
       setFolderAgentManager(manager);
 

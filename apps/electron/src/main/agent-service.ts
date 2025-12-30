@@ -3,11 +3,11 @@
  * Uses FolderAgentManager from core to discover and manage agents
  */
 
-import { getWorkspaceByNameOrId, loadStoredConfig, getWorkspaceSlug, type Workspace } from '@craft-agent/shared/config'
+import { getWorkspaceByNameOrId, loadStoredConfig, type Workspace } from '@craft-agent/shared/config'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
-import { FolderAgentManager, type LoadedAgent, ensureBuiltinAgent as ensureBuiltin, type SyncResult, type SyncOptions } from '@craft-agent/shared/agents'
+import { FolderAgentManager, type LoadedAgent, ensureBuiltinAgent as ensureBuiltin } from '@craft-agent/shared/agents'
 import type { SubAgentMetadata, SubAgentDefinition, McpServerConfig, ApiConfig } from '@craft-agent/shared/agents'
 import { CraftOAuth, getMcpBaseUrl } from '@craft-agent/shared/auth'
 import { validateMcpConnection } from '@craft-agent/shared/mcp'
@@ -19,24 +19,24 @@ export class AgentService {
   /**
    * Get or create an agent manager for a workspace
    */
-  private getAgentManager(workspaceSlug: string): FolderAgentManager {
-    let manager = this.agentManagers.get(workspaceSlug)
+  private getAgentManager(workspaceRootPath: string): FolderAgentManager {
+    let manager = this.agentManagers.get(workspaceRootPath)
     if (!manager) {
-      manager = new FolderAgentManager(workspaceSlug)
-      this.agentManagers.set(workspaceSlug, manager)
+      manager = new FolderAgentManager(workspaceRootPath)
+      this.agentManagers.set(workspaceRootPath, manager)
     }
     return manager
   }
 
   /**
-   * Get workspace slug from workspace ID
+   * Get workspace root path from workspace ID
    */
-  private getWorkspaceSlugFromId(workspaceId: string): string {
+  private getWorkspaceRootPath(workspaceId: string): string {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`)
     }
-    return getWorkspaceSlug(workspace)
+    return workspace.rootPath
   }
 
   /**
@@ -46,8 +46,8 @@ export class AgentService {
    */
   async getAgents(workspaceId: string): Promise<SubAgentMetadata[]> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       const agents = agentManager.getAvailableAgents()
       return agents.map((agent: LoadedAgent) => ({
         id: agent.config.slug, // slug IS the id
@@ -67,8 +67,8 @@ export class AgentService {
    */
   async refreshAgents(workspaceId: string): Promise<SubAgentMetadata[]> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       agentManager.reload()
       return this.getAgents(workspaceId)
     } catch (error) {
@@ -82,8 +82,8 @@ export class AgentService {
    */
   clearCache(workspaceId: string): void {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      this.agentManagers.delete(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      this.agentManagers.delete(workspaceRootPath)
     } catch {
       // Ignore if workspace not found
     }
@@ -103,11 +103,11 @@ export class AgentService {
    */
   async ensureBuiltinAgent(workspaceId: string, slug: string): Promise<string | null> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const config = ensureBuiltin(workspaceSlug, slug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const config = ensureBuiltin(workspaceRootPath, slug)
       if (config) {
         // Reload the agent manager to pick up the new agent
-        const agentManager = this.getAgentManager(workspaceSlug)
+        const agentManager = this.getAgentManager(workspaceRootPath)
         agentManager.reload()
         // Return slug, not ID - agent activation uses slugs for folder lookups
         return config.slug
@@ -128,8 +128,8 @@ export class AgentService {
     reason?: string
   }> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       const definition = agentManager.getAgentDefinition(agentSlug)
 
       if (!definition) {
@@ -167,8 +167,8 @@ export class AgentService {
    */
   async getAgentSetupStatus(workspaceId: string, agentSlug: string): Promise<AgentSetupStatus> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       const definition = agentManager.getAgentDefinition(agentSlug)
 
       if (!definition) {
@@ -206,8 +206,8 @@ export class AgentService {
    */
   async getAgentAuthStatus(workspaceId: string, agentSlug: string): Promise<AgentAuthStatus> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       const definition = agentManager.getAgentDefinition(agentSlug)
 
       if (!definition) {
@@ -241,8 +241,8 @@ export class AgentService {
    */
   async getAgentDefinition(workspaceId: string, agentSlug: string): Promise<SubAgentDefinition | null> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       return agentManager.getAgentDefinition(agentSlug)
     } catch (error) {
       console.error('[AgentService] Error getting agent definition:', error)
@@ -256,8 +256,8 @@ export class AgentService {
    */
   async reloadAgent(workspaceId: string, agentSlug: string): Promise<boolean> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       agentManager.reload()
       const definition = agentManager.getAgentDefinition(agentSlug)
       return definition !== null
@@ -273,8 +273,8 @@ export class AgentService {
    */
   async getAuthRequirements(workspaceId: string, agentSlug: string): Promise<AgentAuthRequirements> {
     try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
+      const workspaceRootPath = this.getWorkspaceRootPath(workspaceId)
+      const agentManager = this.getAgentManager(workspaceRootPath)
       const definition = agentManager.getAgentDefinition(agentSlug)
 
       if (!definition) {
@@ -367,151 +367,6 @@ export class AgentService {
     }
   }
 
-  // ============================================================
-  // Craft Sync Methods
-  // ============================================================
-
-  /**
-   * Sync agents from connected Craft Space
-   */
-  async syncAgentsFromCraft(workspaceId: string, options?: SyncOptions): Promise<SyncResult> {
-    console.log('[AgentService] syncAgentsFromCraft called for workspace:', workspaceId)
-    try {
-      const workspace = getWorkspaceByNameOrId(workspaceId)
-      if (!workspace) {
-        throw new Error(`Workspace not found: ${workspaceId}`)
-      }
-
-      const workspaceSlug = getWorkspaceSlug(workspace)
-      console.log('[AgentService] Workspace slug:', workspaceSlug)
-      const agentManager = this.getAgentManager(workspaceSlug)
-
-      // Get workspace MCP URL and auth token (stored at runtime but not in type)
-      const wsWithMcp = workspace as Workspace & { mcpUrl?: string; mcpAuthType?: string }
-      let mcpUrl = wsWithMcp.mcpUrl
-      let mcpAccessToken: string | undefined
-
-      console.log('[AgentService] MCP URL:', mcpUrl)
-      console.log('[AgentService] MCP Auth Type:', wsWithMcp.mcpAuthType)
-
-      if (mcpUrl) {
-        // Get workspace credentials if needed
-        if (wsWithMcp.mcpAuthType !== 'public') {
-          try {
-            const credManager = getCredentialManager()
-            await credManager.initialize()
-            const oauthCreds = await credManager.getWorkspaceOAuth(workspaceId)
-            if (oauthCreds?.accessToken) {
-              mcpAccessToken = oauthCreds.accessToken
-              console.log('[AgentService] Got OAuth token')
-            } else {
-              const bearerCreds = await credManager.getWorkspaceBearer(workspaceId)
-              if (bearerCreds) {
-                mcpAccessToken = bearerCreds
-                console.log('[AgentService] Got bearer token')
-              }
-            }
-          } catch (e) {
-            console.warn('[AgentService] Failed to get workspace credentials:', e)
-          }
-        } else {
-          console.log('[AgentService] Public workspace, no auth needed')
-        }
-      } else {
-        console.log('[AgentService] No MCP URL found for workspace')
-      }
-
-      // Pass MCP URL to sync if available
-      const syncOptions: SyncOptions = {
-        ...options,
-        mcpUrl,
-        mcpAccessToken,
-      }
-
-      console.log('[AgentService] Starting sync with options:', { mcpUrl: !!mcpUrl, hasToken: !!mcpAccessToken })
-      const result = await agentManager.syncFromCraft(syncOptions)
-
-      console.log('[AgentService] Sync result:', {
-        folderFound: result.folderFound,
-        discoveredCount: result.discoveredCount,
-        created: result.created.length,
-        updated: result.updated.length,
-        unchanged: result.unchanged.length,
-        errors: result.errors.length,
-      })
-
-      if (result.errors.length > 0) {
-        console.log('[AgentService] Sync errors:', result.errors)
-      }
-
-      // Reload to pick up new agents
-      agentManager.reload()
-
-      return result
-    } catch (error) {
-      console.error('[AgentService] Sync failed:', error)
-      return {
-        created: [],
-        updated: [],
-        unchanged: [],
-        errors: [{ slug: 'sync', name: 'Sync', action: 'error', error: error instanceof Error ? error.message : String(error) }],
-        folderFound: false,
-        discoveredCount: 0,
-      }
-    }
-  }
-
-  /**
-   * Discover all agents (local + Craft)
-   */
-  async discoverAllAgents(workspaceId: string): Promise<{
-    local: SubAgentMetadata[];
-    craft: Array<{ name: string; documentId: string; synced: boolean }>;
-    errors: string[];
-  }> {
-    try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
-      const discovery = await agentManager.discoverAllAgents()
-
-      return {
-        local: discovery.local.map((agent: LoadedAgent) => ({
-          id: agent.config.slug,
-          name: agent.config.name,
-          documentId: agent.config.slug,
-          workspaceId: workspaceId,
-          createdAt: agent.config.createdAt,
-        })),
-        craft: discovery.craft,
-        errors: discovery.errors,
-      }
-    } catch (error) {
-      console.error('[AgentService] Discovery failed:', error)
-      return {
-        local: [],
-        craft: [],
-        errors: [error instanceof Error ? error.message : String(error)],
-      }
-    }
-  }
-
-  /**
-   * Get sync status for all agents
-   */
-  async getAgentsSyncStatus(workspaceId: string): Promise<Array<{
-    slug: string;
-    name: string;
-    status: 'synced' | 'modified' | 'local-only' | 'not-found';
-  }>> {
-    try {
-      const workspaceSlug = this.getWorkspaceSlugFromId(workspaceId)
-      const agentManager = this.getAgentManager(workspaceSlug)
-      return agentManager.getAgentsSyncStatus()
-    } catch (error) {
-      console.error('[AgentService] Get sync status failed:', error)
-      return []
-    }
-  }
 }
 
 // Singleton instance

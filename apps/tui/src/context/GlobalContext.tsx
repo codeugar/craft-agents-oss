@@ -4,7 +4,6 @@ import {
   getCumulativeUsage,
   addToCumulativeUsage,
   switchWorkspaceAtomic,
-  getWorkspaceSlug,
 } from '@craft-agent/shared/config';
 import { createSession, type SessionConfig } from '@craft-agent/shared/sessions';
 
@@ -103,12 +102,11 @@ export function GlobalProvider({
 
   const startNewSession = useCallback(() => {
     // Create a new session in the current workspace
-    const workspaceSlug = getWorkspaceSlug(workspace);
-    const newSession = createSession(workspaceSlug);
+    const newSession = createSession(workspace.rootPath);
     // Update state (triggers SessionContainer remount via key)
     setSessionState(newSession);
     return newSession;
-  }, [workspace]);
+  }, [workspace.rootPath]);
 
   const addUsage = useCallback((delta: { costUsd: number; inputTokens: number; outputTokens: number }) => {
     // Only add if there's actual new usage

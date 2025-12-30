@@ -54,8 +54,6 @@ export {
   createSource,
   deleteSource,
   sourceExists,
-  // Workspace Craft source auto-creation
-  ensureWorkspaceCraftSource,
   // Parsing utilities
   parseGuideMarkdown,
 } from './storage.ts';

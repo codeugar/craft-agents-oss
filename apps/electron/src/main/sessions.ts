@@ -8,7 +8,6 @@ import {
   loadStoredConfig,
   getWorkspaces,
   getWorkspaceByNameOrId,
-  getWorkspaceSlug,
   getDefaultModes,
   getDefaultSkipPermissions,
   getDefaultWorkingDirectory,
@@ -31,7 +30,7 @@ import {
   type SessionMetadata,
   type TodoState,
 } from '@craft-agent/shared/sessions'
-import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource, createSourceService, type McpServerConfig, ensureWorkspaceCraftSource, getSourcesNeedingAuth } from '@craft-agent/shared/sources'
+import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource, createSourceService, type McpServerConfig, getSourcesNeedingAuth } from '@craft-agent/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { getAuthState } from '@craft-agent/shared/auth'
 import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath } from '@craft-agent/shared/agent'
@@ -216,51 +215,36 @@ export class SessionManager {
    * Public so ipc.ts can call it when sources are first requested
    * Supports multiple workspaces simultaneously
    */
-  setupConfigWatcher(workspaceSlug: string): void {
+  setupConfigWatcher(workspaceRootPath: string): void {
     // Check if already watching this workspace
-    if (this.configWatchers.has(workspaceSlug)) {
+    if (this.configWatchers.has(workspaceRootPath)) {
       return // Already watching this workspace
     }
 
-    console.log(`[SessionManager] Setting up ConfigWatcher for workspace: ${workspaceSlug}`)
-
-    // Ensure Craft source exists if workspace has MCP URL
-    // Find the workspace to get its mcpUrl
-    const workspaces = getWorkspaces()
-    const workspace = workspaces.find(w => getWorkspaceSlug(w) === workspaceSlug)
-    if (workspace?.mcpUrl) {
-      const craftSource = ensureWorkspaceCraftSource(workspaceSlug, workspace.mcpUrl)
-      if (craftSource) {
-        console.log(`[SessionManager] Ensured Craft source exists: ${craftSource.slug}`)
-        // Copy workspace OAuth credentials to Craft source if not already present
-        this.ensureCraftSourceCredentials(workspace, workspaceSlug).catch(err => {
-          console.error(`[SessionManager] Error copying credentials to Craft source:`, err)
-        })
-      }
-    }
+    console.log(`[SessionManager] Setting up ConfigWatcher for workspace: ${workspaceRootPath}`)
 
     const callbacks: ConfigWatcherCallbacks = {
       onSourcesListChange: (sources: LoadedSource[]) => {
-        console.log(`[SessionManager] Sources changed in ${workspaceSlug}, broadcasting update (${sources.length} sources)`)
+        console.log(`[SessionManager] Sources changed in ${workspaceRootPath}, broadcasting update (${sources.length} sources)`)
         this.broadcastSourcesChanged(sources)
       },
       onSourceChange: (slug: string, source: LoadedSource | null) => {
         console.log(`[SessionManager] Source updated: ${slug}`, source ? source.config.name : '(deleted)')
         // Broadcast updated list when individual source changes
-        const sources = loadWorkspaceSources(workspaceSlug)
+        const sources = loadWorkspaceSources(workspaceRootPath)
         this.broadcastSourcesChanged(sources)
       },
       onSourceGuideChange: (sourceSlug: string) => {
         console.log(`[SessionManager] Source guide changed: ${sourceSlug}`)
         // Broadcast the updated sources list so sidebar picks up guide changes
-        const sources = loadWorkspaceSources(workspaceSlug)
+        const sources = loadWorkspaceSources(workspaceRootPath)
         this.broadcastSourcesChanged(sources)
       },
     }
 
-    const watcher = new ConfigWatcher(workspaceSlug, callbacks)
+    const watcher = new ConfigWatcher(workspaceRootPath, callbacks)
     watcher.start()
-    this.configWatchers.set(workspaceSlug, watcher)
+    this.configWatchers.set(workspaceRootPath, watcher)
   }
 
   /**
@@ -282,56 +266,14 @@ export class SessionManager {
   }
 
   /**
-   * Ensure Craft source has credentials copied from workspace OAuth
-   * This is called when the Craft source is created from workspace MCP URL
-   */
-  private async ensureCraftSourceCredentials(workspace: Workspace, workspaceSlug: string): Promise<void> {
-    const credManager = getCredentialManager()
-    await credManager.initialize()
-
-    // Check if source already has credentials
-    const existingCred = await credManager.get({
-      type: 'source_oauth',
-      workspaceSlug,
-      sourceSlug: 'craft',
-    })
-
-    if (existingCred?.value) {
-      console.log(`[SessionManager] Craft source already has credentials`)
-      return
-    }
-
-    // Get workspace OAuth credentials
-    const workspaceOAuth = await credManager.getWorkspaceOAuth(workspace.id)
-    if (!workspaceOAuth?.accessToken) {
-      console.log(`[SessionManager] No workspace OAuth to copy to Craft source`)
-      return
-    }
-
-    // Copy workspace OAuth to source OAuth
-    console.log(`[SessionManager] Copying workspace OAuth to Craft source credentials`)
-    await credManager.set(
-      { type: 'source_oauth', workspaceSlug, sourceSlug: 'craft' },
-      {
-        value: workspaceOAuth.accessToken,
-        refreshToken: workspaceOAuth.refreshToken,
-        expiresAt: workspaceOAuth.expiresAt,
-        clientId: workspaceOAuth.clientId,
-        tokenType: workspaceOAuth.tokenType,
-      }
-    )
-    console.log(`[SessionManager] Craft source credentials copied successfully`)
-  }
-
-  /**
    * Get the folder-based agent manager for a workspace
    * Agents are loaded from disk on demand
    */
-  private getFolderAgentManager(workspaceSlug: string): FolderAgentManager {
-    let manager = this.folderAgentManagers.get(workspaceSlug)
+  private getFolderAgentManager(workspaceRootPath: string): FolderAgentManager {
+    let manager = this.folderAgentManagers.get(workspaceRootPath)
     if (!manager) {
-      manager = new FolderAgentManager(workspaceSlug)
-      this.folderAgentManagers.set(workspaceSlug, manager)
+      manager = new FolderAgentManager(workspaceRootPath)
+      this.folderAgentManagers.set(workspaceRootPath, manager)
     }
     return manager
   }
@@ -342,8 +284,8 @@ export class SessionManager {
    */
   private async loadAgentDefinition(agentId: string, workspace: Workspace): Promise<SubAgentDefinition | null> {
     try {
-      const workspaceSlug = getWorkspaceSlug(workspace)
-      const manager = this.getFolderAgentManager(workspaceSlug)
+      const workspaceRootPath = workspace.rootPath
+      const manager = this.getFolderAgentManager(workspaceRootPath)
       const definition = manager.getAgentDefinition(agentId)
       if (definition) {
         console.log(`[SessionManager] Loaded agent definition: ${definition.name}`)
@@ -384,8 +326,8 @@ export class SessionManager {
       console.error(`[SessionManager] Workspace not found: ${workspaceId}`)
       return null
     }
-    const workspaceSlug = getWorkspaceSlug(workspace)
-    const folderAgentManager = this.getFolderAgentManager(workspaceSlug)
+    const workspaceRootPath = workspace.rootPath
+    const folderAgentManager = this.getFolderAgentManager(workspaceRootPath)
 
     // Create AgentStateManager with folder-based agent manager
     const stateManager = new AgentStateManager(workspaceId, folderAgentManager)
@@ -608,12 +550,12 @@ export class SessionManager {
 
       // Iterate over each workspace and load its sessions
       for (const workspace of workspaces) {
-        const workspaceSlug = getWorkspaceSlug(workspace)
-        const sessionMetadata = listStoredSessions(workspaceSlug)
+        const workspaceRootPath = workspace.rootPath
+        const sessionMetadata = listStoredSessions(workspaceRootPath)
 
         for (const meta of sessionMetadata) {
           // Load full session data
-          const storedSession = loadStoredSession(workspaceSlug, meta.id)
+          const storedSession = loadStoredSession(workspaceRootPath, meta.id)
           if (!storedSession) {
             console.warn(`[SessionManager] Skipping session ${meta.id}: could not load from disk`)
             continue
@@ -687,10 +629,10 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         m.role !== 'error' && m.role !== 'status' && m.role !== 'system'
       )
 
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
+      const workspaceRootPath = managed.workspace.rootPath
       const storedSession: StoredSession = {
         id: managed.id,
-        workspaceSlug,
+        workspaceRootPath,
         name: managed.name,
         createdAt: managed.lastMessageAt,  // Approximate, will be overwritten if already exists
         lastUsedAt: Date.now(),
@@ -757,12 +699,12 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const defaultSkipPerms = getDefaultSkipPermissions()
     const defaultModes = getDefaultModes()
     const defaultWorkingDir = getDefaultWorkingDirectory()
-    const workspaceSlug = getWorkspaceSlug(workspace)
+    const workspaceRootPath = workspace.rootPath
 
     // Check if agent's sources need authentication
     let sourcesNeedingAuth: LoadedSource[] = []
     if (agentId) {
-      const folderAgentManager = this.getFolderAgentManager(workspaceSlug)
+      const folderAgentManager = this.getFolderAgentManager(workspaceRootPath)
       const loadedAgent = folderAgentManager.getAgentBySlug(agentId)
       if (loadedAgent) {
         sourcesNeedingAuth = getSourcesNeedingAuth(loadedAgent.sources)
@@ -774,7 +716,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     }
 
     // Use storage layer to create and persist the session
-    const storedSession = createStoredSession(workspaceSlug, {
+    const storedSession = createStoredSession(workspaceRootPath, {
       agentSlug: agentId,
       agentName,
       skipPermissions: defaultSkipPerms,
@@ -844,7 +786,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         // sdkSessionId is optional and used for conversation resumption
         session: {
           id: managed.id,
-          workspaceSlug: getWorkspaceSlug(managed.workspace),
+          workspaceRootPath: managed.workspace.rootPath,
           sdkSessionId: managed.sdkSessionId,
           createdAt: managed.lastMessageAt,
           lastUsedAt: managed.lastMessageAt,
@@ -969,10 +911,10 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // Wire up onSourcesChanged to reload sources when created/authenticated/deleted
       managed.agent.onSourcesChanged = async () => {
         console.log(`[SessionManager] Sources changed for session ${managed.id} - reloading`)
-        const workspaceSlug = getWorkspaceSlug(managed.workspace)
+        const workspaceRootPath = managed.workspace.rootPath
 
         // Reload all sources from disk
-        const allSources = loadWorkspaceSources(workspaceSlug)
+        const allSources = loadWorkspaceSources(workspaceRootPath)
         managed.agent?.setAllSources(allSources)
 
         // Rebuild MCP and API servers for session's enabled sources
@@ -980,7 +922,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         const enabledSources = allSources.filter(s =>
           enabledSlugs.includes(s.config.slug) && s.config.enabled && s.config.isAuthenticated
         )
-        const sourceService = createSourceService(workspaceSlug)
+        const sourceService = createSourceService()
         const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources)
         managed.sourceMcpServers = mcpServers
         managed.sourceApiServers = apiServers
@@ -992,7 +934,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // Wire up onSourceActivated to enable a source for this session
       managed.agent.onSourceActivated = async (sourceSlug: string) => {
         console.log(`[SessionManager] Activating source '${sourceSlug}' for session ${managed.id}`)
-        const workspaceSlug = getWorkspaceSlug(managed.workspace)
+        const workspaceRootPath = managed.workspace.rootPath
 
         // Add to enabled sources if not already there
         if (!managed.enabledSourceSlugs) {
@@ -1003,13 +945,13 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         }
 
         // Rebuild servers with the newly enabled source
-        const allSources = loadWorkspaceSources(workspaceSlug)
+        const allSources = loadWorkspaceSources(workspaceRootPath)
         managed.agent?.setAllSources(allSources)
 
         const enabledSources = allSources.filter(s =>
           managed.enabledSourceSlugs!.includes(s.config.slug) && s.config.enabled && s.config.isAuthenticated
         )
-        const sourceService = createSourceService(workspaceSlug)
+        const sourceService = createSourceService()
         const { mcpServers, apiServers } = await sourceService.buildAllServers(enabledSources)
         managed.sourceMcpServers = mcpServers
         managed.sourceApiServers = apiServers
@@ -1045,8 +987,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.isFlagged = true
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-      flagStoredSession(workspaceSlug, sessionId)
+      const workspaceRootPath = managed.workspace.rootPath
+      flagStoredSession(workspaceRootPath, sessionId)
     }
   }
 
@@ -1054,8 +996,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.isFlagged = false
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-      unflagStoredSession(workspaceSlug, sessionId)
+      const workspaceRootPath = managed.workspace.rootPath
+      unflagStoredSession(workspaceRootPath, sessionId)
     }
   }
 
@@ -1063,8 +1005,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.todoState = todoState
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-      setStoredSessionTodoState(workspaceSlug, sessionId, todoState)
+      const workspaceRootPath = managed.workspace.rootPath
+      setStoredSessionTodoState(workspaceRootPath, sessionId, todoState)
     }
   }
 
@@ -1082,15 +1024,15 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       throw new Error(`Session not found: ${sessionId}`)
     }
 
-    const workspaceSlug = getWorkspaceSlug(managed.workspace)
+    const workspaceRootPath = managed.workspace.rootPath
     console.log(`[SessionManager] Setting sources for session ${sessionId}:`, sourceSlugs)
 
     // Store the selection
     managed.enabledSourceSlugs = sourceSlugs
 
     // Build server configs from selected sources
-    const sources = getSourcesBySlugs(workspaceSlug, sourceSlugs)
-    const sourceService = createSourceService(workspaceSlug)
+    const sources = getSourcesBySlugs(workspaceRootPath, sourceSlugs)
+    const sourceService = createSourceService()
     const { mcpServers, apiServers, errors } = await sourceService.buildAllServers(sources)
 
     if (errors.length > 0) {
@@ -1105,7 +1047,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     // This ensures tool availability is updated mid-conversation
     if (managed.agent) {
       // Set all sources for context (agent sees full list with descriptions)
-      const allSources = loadWorkspaceSources(workspaceSlug)
+      const allSources = loadWorkspaceSources(workspaceRootPath)
       managed.agent.setAllSources(allSources)
       // Set active source servers (tools are only available from these)
       managed.agent.setSourceServers(mcpServers, apiServers)
@@ -1165,8 +1107,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       if (managed.lastReadMessageId !== lastFinalId) {
         managed.lastReadMessageId = lastFinalId
         // Persist to disk
-        const workspaceSlug = getWorkspaceSlug(managed.workspace)
-        updateSessionMetadata(workspaceSlug, sessionId, { lastReadMessageId: lastFinalId })
+        const workspaceRootPath = managed.workspace.rootPath
+        updateSessionMetadata(workspaceRootPath, sessionId, { lastReadMessageId: lastFinalId })
       }
     }
   }
@@ -1180,8 +1122,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     if (managed) {
       managed.lastReadMessageId = undefined
       // Persist to disk (undefined will clear the field)
-      const workspaceSlug = getWorkspaceSlug(managed.workspace)
-      updateSessionMetadata(workspaceSlug, sessionId, { lastReadMessageId: undefined })
+      const workspaceRootPath = managed.workspace.rootPath
+      updateSessionMetadata(workspaceRootPath, sessionId, { lastReadMessageId: undefined })
     }
   }
 
@@ -1252,7 +1194,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     }
 
     // Get workspace slug before deleting
-    const workspaceSlug = getWorkspaceSlug(managed.workspace)
+    const workspaceRootPath = managed.workspace.rootPath
 
     // If processing is in progress, abort and wait for cleanup
     if (managed.isProcessing && managed.abortController) {
@@ -1266,7 +1208,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     // not session-scoped. It will be reused by other sessions with the same agent.
 
     // Delete from disk too
-    deleteStoredSession(workspaceSlug, sessionId)
+    deleteStoredSession(workspaceRootPath, sessionId)
 
     // Clean up attachments directory (handled by deleteStoredSession for workspace-scoped storage)
     console.log(`[SessionManager] Deleted session ${sessionId}`)
@@ -1373,16 +1315,16 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     }
 
     // Always set all sources for context (even if none are enabled)
-    const workspaceSlug = getWorkspaceSlug(managed.workspace)
-    const allSources = loadWorkspaceSources(workspaceSlug)
+    const workspaceRootPath = managed.workspace.rootPath
+    const allSources = loadWorkspaceSources(workspaceRootPath)
     agent.setAllSources(allSources)
 
     // Apply source servers if any are enabled
     if (managed.enabledSourceSlugs?.length) {
       // Build server configs if not already built
       if (!managed.sourceMcpServers) {
-        const sources = getSourcesBySlugs(workspaceSlug, managed.enabledSourceSlugs)
-        const sourceService = createSourceService(workspaceSlug)
+        const sources = getSourcesBySlugs(workspaceRootPath, managed.enabledSourceSlugs)
+        const sourceService = createSourceService()
         const { mcpServers, apiServers, errors } = await sourceService.buildAllServers(sources)
         if (errors.length > 0) {
           console.warn(`[SessionManager] Source build errors:`, errors)
@@ -1685,11 +1627,20 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         const PARENT_TOOLS = ['Task', 'TaskOutput']
         const isParentTool = PARENT_TOOLS.includes(event.toolName)
 
-        // Determine parent BEFORE potentially pushing this tool onto the stack
-        // The parent is the most recent parent tool that's still running (top of stack)
-        const parentToolUseId = !isParentTool && managed.parentToolStack.length > 0
-          ? managed.parentToolStack[managed.parentToolStack.length - 1]
-          : undefined
+        // Use parentToolUseId from the event - CraftAgent computes this correctly
+        // using the SDK's parent_tool_use_id (authoritative for parallel Tasks)
+        // Only fall back to stack heuristic if event doesn't provide parent
+        let parentToolUseId: string | undefined
+        if (isParentTool) {
+          // Parent tools don't have a parent themselves
+          parentToolUseId = undefined
+        } else if (event.parentToolUseId) {
+          // CraftAgent provided the correct parent from SDK - use it
+          parentToolUseId = event.parentToolUseId
+        } else if (managed.parentToolStack.length > 0) {
+          // Fallback: use stack heuristic for edge cases
+          parentToolUseId = managed.parentToolStack[managed.parentToolStack.length - 1]
+        }
 
         // If this is a parent tool, push it onto the stack
         // IMPORTANT: Only push on first event, not duplicate events (SDK sends two tool_start per tool)
@@ -1772,21 +1723,21 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         if (stackIndex !== -1) {
           managed.parentToolStack.splice(stackIndex, 1)
           console.log(`[SessionManager] PARENT STACK POP: ${event.toolUseId}, stack=${JSON.stringify(managed.parentToolStack)}`)
-        } else {
-          console.log(`[SessionManager] PARENT STACK NOT FOUND: ${event.toolUseId}, stack=${JSON.stringify(managed.parentToolStack)}`)
-          // Defensive cleanup: if this is a parent tool type but ID wasn't found,
-          // try to find and remove by matching tool name in messages
-          if (PARENT_TOOLS.includes(toolName)) {
-            const fallbackIdx = managed.parentToolStack.findIndex(id => {
-              const msg = managed.messages.find(m => m.toolUseId === id)
-              return msg?.toolName === toolName
-            })
-            if (fallbackIdx !== -1) {
-              const removedId = managed.parentToolStack.splice(fallbackIdx, 1)[0]
-              console.log(`[SessionManager] PARENT STACK FALLBACK POP: ${removedId} (matched by toolName=${toolName}), stack=${JSON.stringify(managed.parentToolStack)}`)
-            }
+        } else if (PARENT_TOOLS.includes(toolName)) {
+          // Only log/warn for parent tools that SHOULD have been on the stack
+          // Non-parent tools (Read, Grep, Bash, etc.) are never on the stack - that's expected
+          console.warn(`[SessionManager] PARENT STACK UNEXPECTED: ${toolName} (${event.toolUseId}) not found, stack=${JSON.stringify(managed.parentToolStack)}`)
+          // Defensive cleanup: try to find and remove by matching tool name in messages
+          const fallbackIdx = managed.parentToolStack.findIndex(id => {
+            const msg = managed.messages.find(m => m.toolUseId === id)
+            return msg?.toolName === toolName
+          })
+          if (fallbackIdx !== -1) {
+            const removedId = managed.parentToolStack.splice(fallbackIdx, 1)[0]
+            console.log(`[SessionManager] PARENT STACK FALLBACK POP: ${removedId} (matched by toolName=${toolName}), stack=${JSON.stringify(managed.parentToolStack)}`)
           }
         }
+        // Non-parent tools: silent (expected behavior - they use toolToParentMap for hierarchy)
 
         // Get the stored parent mapping before cleaning up (for fallback)
         const storedParentId = managed.toolToParentMap.get(event.toolUseId)
@@ -1847,6 +1798,26 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
             isError: event.isError,
           }, workspaceId)
         }
+        break
+      }
+
+      case 'parent_update': {
+        // Deferred parent assignment: tool started without parent (multiple active Tasks),
+        // now we know the correct parent from the tool result
+        const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
+        if (existingToolMsg) {
+          console.log(`[SessionManager] PARENT UPDATE: ${event.toolUseId} -> parent ${event.parentToolUseId}`)
+          existingToolMsg.parentToolUseId = event.parentToolUseId
+          // Also update the toolToParentMap for consistency
+          managed.toolToParentMap.set(event.toolUseId, event.parentToolUseId)
+        }
+        // Send event to renderer so it can update UI grouping
+        this.sendEvent({
+          type: 'parent_update',
+          sessionId,
+          toolUseId: event.toolUseId,
+          parentToolUseId: event.parentToolUseId,
+        }, workspaceId)
         break
       }
 

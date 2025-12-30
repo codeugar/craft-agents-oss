@@ -11,13 +11,13 @@ import { CraftApi, type ProfileResponse } from '@craft-agent/shared/clients'
 import { getAuthState, getSetupNeeds } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { saveConfig, loadStoredConfig, generateWorkspaceId, type AuthType, type StoredConfig } from '@craft-agent/shared/config'
+import { getDefaultWorkspacesDir } from '@craft-agent/shared/workspaces'
 import { CraftOAuth, getMcpBaseUrl } from '@craft-agent/shared/auth'
 import { validateMcpConnection } from '@craft-agent/shared/mcp'
 import { getExistingClaudeToken, isClaudeCliInstalled, runClaudeSetupToken } from '@craft-agent/shared/auth'
 import {
   IPC_CHANNELS,
   type CraftOAuthResult,
-  type CraftMcpLink,
   type OnboardingSaveResult,
 } from '../shared/types'
 import type { SessionManager } from './sessions'
@@ -171,54 +171,6 @@ export function registerOnboardingHandlers(sessionManager: SessionManager): void
     }
   })
 
-  // Get MCP links for a space
-  ipcMain.handle(IPC_CHANNELS.ONBOARDING_GET_MCP_LINKS, async (_event, spaceId: string, authToken: string): Promise<CraftMcpLink[]> => {
-    try {
-      const craftApi = new CraftApi()
-      const links = await craftApi.getWorkflowLinks({ authToken, spaceId })
-
-      // Filter to only fullSpace MCP links
-      return links
-        .filter(link => link.type === 'mcp' && link.scope === 'fullSpace')
-        .map(link => ({
-          linkId: link.linkId,
-          name: link.name,
-          mcpUrl: link.urls?.mcp,
-          scope: link.scope,
-          enabled: link.enabled,
-        }))
-    } catch (error) {
-      console.error('[Onboarding] Get MCP links error:', error)
-      return []
-    }
-  })
-
-  // Create a new MCP link for a space
-  ipcMain.handle(IPC_CHANNELS.ONBOARDING_CREATE_MCP_LINK, async (_event, spaceId: string, authToken: string): Promise<CraftMcpLink> => {
-    try {
-      const craftApi = new CraftApi()
-      const link = await craftApi.createSpaceWorkflowLink({
-        authToken,
-        spaceId,
-        name: 'Craft Agents MCP',
-        type: 'mcp',
-        scope: 'fullSpace',
-      })
-
-      return {
-        linkId: link.linkId,
-        name: link.name,
-        mcpUrl: link.urls?.mcp,
-        scope: link.scope,
-        enabled: link.enabled,
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      console.error('[Onboarding] Create MCP link error:', message)
-      throw new Error(`Failed to create MCP link: ${message}`)
-    }
-  })
-
   // Validate MCP connection
   ipcMain.handle(IPC_CHANNELS.ONBOARDING_VALIDATE_MCP, async (_event, mcpUrl: string, accessToken?: string) => {
     try {
@@ -337,6 +289,7 @@ export function registerOnboardingHandlers(sessionManager: SessionManager): void
         const workspace = {
           id: workspaceId,
           name: config.workspace.name,
+          rootPath: existingWorkspace?.rootPath ?? `${getDefaultWorkspacesDir()}/${workspaceId}`,
           createdAt: existingWorkspace?.createdAt ?? Date.now(), // Preserve original creation time
           iconUrl: config.workspace.iconUrl,
           mcpUrl: config.workspace.mcpUrl,
@@ -364,6 +317,22 @@ export function registerOnboardingHandlers(sessionManager: SessionManager): void
         newConfig.activeWorkspaceId = workspaceId
       } else {
         console.log('[Onboarding:Main] No workspace to create (billing-only update)')
+
+        // 4b. Auto-create default workspace if no workspaces exist
+        // This ensures users have a workspace to start with after billing-only onboarding
+        if (newConfig.workspaces.length === 0) {
+          workspaceId = generateWorkspaceId()
+          console.log('[Onboarding:Main] Auto-creating default workspace:', workspaceId)
+
+          const defaultWorkspace = {
+            id: workspaceId,
+            name: 'Default',
+            rootPath: `${getDefaultWorkspacesDir()}/${workspaceId}`,
+            createdAt: Date.now(),
+          }
+          newConfig.workspaces.push(defaultWorkspace)
+          newConfig.activeWorkspaceId = workspaceId
+        }
       }
 
       // 5. Save config

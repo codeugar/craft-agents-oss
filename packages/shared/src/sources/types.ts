@@ -33,7 +33,6 @@ export type ApiAuthType = 'bearer' | 'header' | 'query' | 'basic' | 'oauth' | 'n
  * These have well-known OAuth endpoints or special behavior.
  */
 export type KnownProvider =
-  | 'craft' // Craft MCP - uses Craft OAuth flow
   | 'google' // Google APIs (Gmail, etc.) - uses Google OAuth
   | 'linear' // Linear - standard MCP OAuth
   | 'github' // GitHub - standard MCP OAuth

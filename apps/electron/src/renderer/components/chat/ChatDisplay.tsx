@@ -599,6 +599,7 @@ export function ChatDisplay({
                                 filePath,
                                 content,
                                 mode: 'write',
+                                error: activity.error,
                               })
                             }
                             // Bash tool → Terminal preview

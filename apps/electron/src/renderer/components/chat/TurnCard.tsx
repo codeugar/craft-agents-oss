@@ -19,8 +19,8 @@ import { Markdown } from '@/components/markdown'
 import { Spinner } from '@/components/ui/loading-indicator'
 import { stripMarkdown } from '@/utils/text'
 import { CircleCheckFilled } from '@/components/icons/TodoStateIcons'
-import { computeLastChildSet } from './turn-utils'
-import { expandedTurnsAtomFamily } from '@/atoms/sessions'
+import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, type ActivityGroup } from './turn-utils'
+import { expandedTurnsAtomFamily, expandedActivityGroupsAtomFamily } from '@/atoms/sessions'
 
 // ============================================================================
 // Size Configuration
@@ -325,6 +325,12 @@ function getPreviewText(
   // Check if we're in responding state
   if (isStreaming && hasResponse) return 'Responding...'
 
+  // Find running Task tools and show their description
+  const runningTask = activities.find(a => a.toolName === 'Task' && a.status === 'running')
+  if (runningTask?.toolInput?.description) {
+    return runningTask.toolInput.description as string
+  }
+
   // While still streaming, show the latest intermediate message content
   // This gives visibility into what the LLM is "thinking"
   if (isStreaming && !isComplete) {
@@ -346,6 +352,15 @@ function getPreviewText(
       .map(a => getToolDisplayName(a.toolName!))
       .slice(0, 3) // Max 3 names
     return `${toolNames.join(', ')}...`
+  }
+
+  // When complete, show first Task's description if available
+  const firstTask = activities.find(a => a.toolName === 'Task')
+  if (firstTask?.toolInput?.description) {
+    const errorSuffix = errorCount > 0
+      ? ` · ${errorCount} error${errorCount > 1 ? 's' : ''}`
+      : ''
+    return `${firstTask.toolInput.description as string}${errorSuffix}`
   }
 
   // When complete, show summary (badge already shows count)
@@ -391,38 +406,19 @@ interface ActivityRowProps {
 }
 
 /**
- * Renders vertical line connectors for nested tool calls (tree-view style)
- * Each depth level gets a vertical line with a horizontal connector at the deepest level
- * @param isLastChild - If true, the vertical line stops at center (└ corner) instead of extending below
+ * TreeViewConnector is no longer used - the vertical line from the expanded section
+ * already provides visual hierarchy. Keeping this as a no-op for now in case
+ * we need depth indentation in the future.
  */
-function TreeViewConnector({ depth, isLastChild }: { depth: number; isLastChild?: boolean }) {
+function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) {
   if (depth === 0) return null
 
+  // Just add indentation based on depth, no connectors
   return (
     <div className="flex self-stretch">
-      {Array.from({ length: depth }).map((_, i) => {
-        const isLastLevel = i === depth - 1
-        return (
-          <div
-            key={i}
-            className="w-4 shrink-0 relative"
-          >
-            {/* Vertical line - extends beyond row bounds to connect with adjacent rows
-                For last child at deepest level: only draw from top to center (└ corner) */}
-            <div
-              className="absolute left-1.5 w-px bg-border/60"
-              style={{
-                top: '-4px',
-                bottom: isLastLevel && isLastChild ? '50%' : '-4px'
-              }}
-            />
-            {/* Horizontal connector on the last level */}
-            {isLastLevel && (
-              <div className="absolute left-1.5 top-1/2 w-2.5 h-px bg-border/60 -translate-y-px" />
-            )}
-          </div>
-        )
-      })}
+      {Array.from({ length: depth }).map((_, i) => (
+        <div key={i} className="w-4 shrink-0" />
+      ))}
     </div>
   )
 }
@@ -534,12 +530,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild }: ActivityRowProps)
       >
         <ActivityStatusIcon status={activity.status} />
         {/* Tool name (always shown, darker) - underlined when clickable */}
-        <span className={cn("font-medium shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{toolName}</span>
+        <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{toolName}</span>
         {/* Intent/description if available (darker, after interpunct) */}
         {intentOrDescription && (
           <>
             <span className="opacity-60 shrink-0">·</span>
-            <span className="font-medium truncate min-w-0 max-w-[300px]">{intentOrDescription}</span>
+            <span className="truncate min-w-0 max-w-[300px]">{intentOrDescription}</span>
           </>
         )}
         {/* Additional params (lighter) */}
@@ -549,7 +545,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild }: ActivityRowProps)
         {activity.status === 'error' && activity.error && (
           <>
             <span className="text-destructive/60 shrink-0">·</span>
-            <span className="text-destructive truncate max-w-[200px]">{activity.error}</span>
+            <span className="text-destructive truncate min-w-[120px] max-w-[300px]">{activity.error}</span>
           </>
         )}
         {/* Spacer to push details button to right */}
@@ -579,6 +575,161 @@ function ActivityRow({ activity, onOpenDetails, isLastChild }: ActivityRowProps)
         )}
       </div>
     </div>
+  )
+}
+
+// ============================================================================
+// Activity Group Component (for Task subagents)
+// ============================================================================
+
+interface ActivityGroupRowProps {
+  group: ActivityGroup
+  /** Session ID for persistent state */
+  sessionId: string
+  /** Callback to open activity details in Monaco */
+  onOpenActivityDetails?: (activity: ActivityItem) => void
+  /** Animation index for staggered animation */
+  animationIndex?: number
+}
+
+/**
+ * Renders a Task subagent with its child activities grouped together.
+ * Provides visual containment and collapsible children.
+ */
+function ActivityGroupRow({ group, sessionId, onOpenActivityDetails, animationIndex = 0 }: ActivityGroupRowProps) {
+  // Use per-session atom to persist expanded state - default is collapsed (not in set)
+  const [expandedGroups, setExpandedGroups] = useAtom(expandedActivityGroupsAtomFamily(sessionId))
+  const groupId = group.parent.id
+  const isExpanded = expandedGroups.has(groupId)
+
+  const toggleExpanded = useCallback(() => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }, [groupId, setExpandedGroups])
+
+  const description = group.parent.toolInput?.description as string | undefined
+  const subagentType = group.parent.toolInput?.subagent_type as string | undefined
+  const isComplete = group.parent.status === 'completed' || group.parent.status === 'error'
+  const hasError = group.parent.status === 'error'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3 }}
+      className="space-y-0.5"
+    >
+      {/* Task header row - no left padding, chevron aligned with activity row icons */}
+      <div
+        className={cn(
+          "group/row flex items-center gap-2 py-0.5 rounded-md cursor-pointer text-muted-foreground",
+          "hover:text-foreground transition-colors",
+          SIZE_CONFIG.fontSize
+        )}
+        onClick={toggleExpanded}
+      >
+        {/* Chevron for expand/collapse - aligned with activity row icons */}
+        <motion.div
+          initial={false}
+          animate={{ rotate: isExpanded ? 90 : 0 }}
+          transition={{ duration: 0.15, ease: 'easeOut' }}
+          className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
+        >
+          <ChevronRight className={SIZE_CONFIG.iconSize} />
+        </motion.div>
+
+        {/* Status icon - aligned with tool call icons */}
+        <ActivityStatusIcon status={group.parent.status} />
+
+        {/* Tool count badge - same style as TurnCard header */}
+        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium tabular-nums">
+          {group.children.length}
+        </span>
+
+        {/* Task description or fallback */}
+        <span className={cn(
+          "truncate",
+          hasError && "text-destructive"
+        )}>
+          {description || 'Task'}
+        </span>
+
+        {/* Subagent type badge - same style as TurnCard header badge */}
+        {subagentType && (
+          <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium">
+            {subagentType}
+          </span>
+        )}
+
+        {/* Spacer to push details button to right */}
+        <span className="flex-1" />
+
+        {/* Open details button for the Task itself */}
+        {onOpenActivityDetails && isComplete && (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenActivityDetails(group.parent)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation()
+                onOpenActivityDetails(group.parent)
+              }
+            }}
+            className={cn(
+              "p-0.5 rounded-[3px] opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0",
+              "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            )}
+          >
+            <ArrowUpRight className={SIZE_CONFIG.iconSize} />
+          </div>
+        )}
+      </div>
+
+      {/* Children with indentation */}
+      <AnimatePresence initial={false}>
+        {isExpanded && group.children.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{
+              height: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+              opacity: { duration: 0.15 }
+            }}
+            className="overflow-hidden"
+          >
+            <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
+              {group.children.map((child, idx) => (
+                <motion.div
+                  key={child.id}
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.02 }}
+                  className="ml-[-4px]"
+                >
+                  <ActivityRow
+                    activity={child}
+                    onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
+                    isLastChild={idx === group.children.length - 1}
+                  />
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }
 
@@ -828,7 +979,7 @@ function TodoList({ todos }: TodoListProps) {
   if (todos.length === 0) return null
 
   return (
-    <div className="pl-4 pr-3 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[16px] bg-muted/20 rounded-r-md">
+    <div className="pl-4 pr-3 pt-2.5 pb-1.5 space-y-0.5 border-l-2 border-muted ml-[19px] bg-muted/20 rounded-r-md">
       {/* Header */}
       <div className={cn("text-muted-foreground pb-1", SIZE_CONFIG.fontSize)}>
         Todo List
@@ -913,10 +1064,24 @@ export function TurnCard({
     [activities]
   )
 
-  // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
-  const lastChildSet = useMemo(
-    () => computeLastChildSet(sortedActivities),
+  // Check if we have any Task subagents - if so, use grouped view
+  const hasTaskSubagents = useMemo(
+    () => sortedActivities.some(a => a.toolName === 'Task'),
     [sortedActivities]
+  )
+
+  // Group activities by parent Task for better visualization
+  // Only group if there are Task subagents, otherwise keep flat for simpler view
+  const groupedActivities = useMemo(
+    () => hasTaskSubagents ? groupActivitiesByParent(sortedActivities) : null,
+    [sortedActivities, hasTaskSubagents]
+  )
+
+  // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
+  // Only used for flat view (non-grouped)
+  const lastChildSet = useMemo(
+    () => !hasTaskSubagents ? computeLastChildSet(sortedActivities) : new Set<string>(),
+    [sortedActivities, hasTaskSubagents]
   )
 
   // Don't render if nothing to show and turn is complete
@@ -939,23 +1104,22 @@ export function TurnCard({
           <button
             onClick={toggleExpanded}
             className={cn(
-              "flex items-center gap-2 w-full px-3 py-1.5 rounded-[8px] text-left",
+              "flex items-center gap-2 w-full pl-4 pr-3 py-1.5 rounded-[8px] text-left",
               SIZE_CONFIG.fontSize,
               "text-muted-foreground",
               "hover:bg-muted/50 transition-colors",
               "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             )}
           >
-            {/* Chevron with rotation animation - fixed size wrapper prevents layout shift */}
-            <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-              <motion.div
-                initial={false}
-                animate={{ rotate: isExpanded ? 90 : 0 }}
-                transition={{ duration: 0.15, ease: 'easeOut' }}
-              >
-                <ChevronRight className={SIZE_CONFIG.iconSize} />
-              </motion.div>
-            </div>
+            {/* Chevron with rotation animation - aligned with activity row icons */}
+            <motion.div
+              initial={false}
+              animate={{ rotate: isExpanded ? 90 : 0 }}
+              transition={{ duration: 0.15, ease: 'easeOut' }}
+              className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
+            >
+              <ChevronRight className={SIZE_CONFIG.iconSize} />
+            </motion.div>
 
             {/* Step count badge */}
             <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium tabular-nums">
@@ -1017,9 +1181,10 @@ export function TurnCard({
                 className="overflow-hidden"
               >
                 {/* Scrollable container when many activities - subtle background for scroll context */}
+                {/* ml-[19px] positions the border-l under the chevron */}
                 <div
                   className={cn(
-                    "pl-4 pr-3 py-0 space-y-0.5 border-l-2 border-muted ml-[16px]",
+                    "pl-4 pr-3 py-0 space-y-0.5 border-l-2 border-muted ml-[19px]",
                     sortedActivities.length > SIZE_CONFIG.maxVisibleActivities && "bg-muted/30 rounded-r-md overflow-y-auto py-1.5"
                   )}
                   style={{
@@ -1028,21 +1193,49 @@ export function TurnCard({
                       : undefined
                   }}
                 >
-                  {sortedActivities.map((activity, index) => (
-                    <motion.div
-                      key={activity.id}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      // Only first 10 items get staggered delay, rest appear simultaneously
-                      transition={{ delay: index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : 0.3 }}
-                    >
-                      <ActivityRow
-                        activity={activity}
-                        onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
-                        isLastChild={lastChildSet.has(activity.id)}
-                      />
-                    </motion.div>
-                  ))}
+                  {/* Grouped view for Task subagents */}
+                  {groupedActivities ? (
+                    groupedActivities.map((item, index) => (
+                      isActivityGroup(item) ? (
+                        <ActivityGroupRow
+                          key={item.parent.id}
+                          group={item}
+                          sessionId={sessionId}
+                          onOpenActivityDetails={onOpenActivityDetails}
+                          animationIndex={index}
+                        />
+                      ) : (
+                        <motion.div
+                          key={item.id}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : 0.3 }}
+                        >
+                          <ActivityRow
+                            activity={item}
+                            onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
+                          />
+                        </motion.div>
+                      )
+                    ))
+                  ) : (
+                    /* Flat view for simple tool calls */
+                    sortedActivities.map((activity, index) => (
+                      <motion.div
+                        key={activity.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        // Only first 10 items get staggered delay, rest appear simultaneously
+                        transition={{ delay: index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : 0.3 }}
+                      >
+                        <ActivityRow
+                          activity={activity}
+                          onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
+                          isLastChild={lastChildSet.has(activity.id)}
+                        />
+                      </motion.div>
+                    ))
+                  )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {isThinking && (
                     <motion.div

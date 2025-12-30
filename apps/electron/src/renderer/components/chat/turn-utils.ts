@@ -709,3 +709,90 @@ export function computeLastChildSet(activities: ActivityItem[]): Set<string> {
 
   return new Set(lastByParent.values())
 }
+
+// ============================================================================
+// Activity Grouping for Task Subagents
+// ============================================================================
+
+/**
+ * Represents a Task tool with its child activities grouped together
+ */
+export interface ActivityGroup {
+  type: 'group'
+  parent: ActivityItem
+  children: ActivityItem[]
+}
+
+/**
+ * Type guard to check if an item is an ActivityGroup
+ */
+export function isActivityGroup(item: ActivityItem | ActivityGroup): item is ActivityGroup {
+  return 'type' in item && item.type === 'group' && 'parent' in item && 'children' in item
+}
+
+/**
+ * Groups activities by their parent Task tool.
+ *
+ * This transforms a flat chronological list into a grouped structure:
+ * - Orphan activities (no parent) appear first in order
+ * - Each Task tool becomes a group containing its child activities
+ * - Maintains chronological order within each group
+ *
+ * @param activities - Flat list of activities sorted by timestamp
+ * @returns Mixed array of standalone activities and activity groups
+ */
+export function groupActivitiesByParent(
+  activities: ActivityItem[]
+): (ActivityItem | ActivityGroup)[] {
+  // Find all Task tools (these become group headers)
+  const taskTools = activities.filter(a => a.toolName === 'Task')
+
+  // Find orphan activities (no parent AND not a Task tool itself)
+  const orphans = activities.filter(a => !a.parentId && a.toolName !== 'Task')
+
+  // Build a map of parentId -> children for efficient lookup
+  const childrenByParent = new Map<string, ActivityItem[]>()
+  for (const activity of activities) {
+    if (activity.parentId) {
+      const existing = childrenByParent.get(activity.parentId) || []
+      existing.push(activity)
+      childrenByParent.set(activity.parentId, existing)
+    }
+  }
+
+  // Build the grouped result
+  const result: (ActivityItem | ActivityGroup)[] = []
+
+  // Add orphan activities first (maintain their order)
+  result.push(...orphans)
+
+  // Add each Task as a group with its children
+  for (const parent of taskTools) {
+    const children = parent.toolUseId
+      ? (childrenByParent.get(parent.toolUseId) || [])
+      : []
+
+    result.push({
+      type: 'group',
+      parent,
+      children: children.sort((a, b) => a.timestamp - b.timestamp)
+    })
+  }
+
+  return result
+}
+
+/**
+ * Counts the total number of activities including those inside groups
+ */
+export function countTotalActivities(items: (ActivityItem | ActivityGroup)[]): number {
+  let count = 0
+  for (const item of items) {
+    if (isActivityGroup(item)) {
+      count += 1 + item.children.length // Parent + children
+    } else {
+      count += 1
+    }
+  }
+  return count
+}

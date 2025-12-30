@@ -7,13 +7,11 @@ import { ModelSelector } from './ModelSelector.tsx';
 import { MODELS } from '@craft-agent/shared/config';
 import { AgentMenu, type AgentAction } from './AgentMenu.tsx';
 import { WorkspaceSelector } from './WorkspaceSelector.tsx';
-import { WorkspaceAdd } from './WorkspaceAdd.tsx';
 import { WorkspaceRename } from './WorkspaceRename.tsx';
 import { ApiKeyChange } from './ApiKeyChange.tsx';
 import { ClaudeMaxAuth } from './ClaudeMaxAuth.tsx';
 import { AskUserQuestion } from './AskUserQuestion.tsx';
 import { TodoList } from './TodoList.tsx';
-import { McpAuth } from './McpAuth.tsx';
 import { ApiAuth } from './ApiAuth.tsx';
 import { PlanMenu, type PlanAction } from './PlanMenu.tsx';
 import { PlanSelector, type PlanFile } from './PlanSelector.tsx';
@@ -49,7 +47,6 @@ import {
   clearAllConfig,
   getTokenDisplay,
   getShowCost,
-  getWorkspaceSlug,
   type TokenDisplayMode,
 } from '@craft-agent/shared/config';
 import {
@@ -231,7 +228,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   // Only show welcome banner on truly new sessions (no prior messages)
   // This prevents duplicate banners when switching to workspaces with existing sessions
   const [showWelcome, setShowWelcome] = useState(() => {
-    const storedSession = loadSession(session.workspaceSlug, session.id);
+    const storedSession = loadSession(session.workspaceRootPath, session.id);
     return !storedSession?.messages?.length;
   });
   const [staticResetKey, setStaticResetKey] = useState(0);
@@ -516,7 +513,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     closeModal();
     let deleted = 0;
     for (const plan of plans) {
-      if (deletePlanFile(session.workspaceSlug, session.id, plan.name)) {
+      if (deletePlanFile(session.workspaceRootPath, session.id, plan.name)) {
         deleted++;
       }
     }
@@ -525,15 +522,14 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     } else {
       addLocalMessage('Failed to delete plans.', 'error');
     }
-  }, [closeModal, addLocalMessage, session.id]);
+  }, [closeModal, addLocalMessage, session.id, session.workspaceRootPath]);
 
   // Session menu handler - resumes selected session
   const handleSessionSelect = useCallback((selectedSession: SessionMetadata) => {
-    const workspaceSlug = getWorkspaceSlug(workspace);
-    const fullSession = getOrCreateSessionById(workspaceSlug, selectedSession.id);
+    const fullSession = getOrCreateSessionById(workspace.rootPath, selectedSession.id);
     setSession(fullSession);
     closeModal();
-  }, [workspace, setSession, closeModal]);
+  }, [workspace.rootPath, setSession, closeModal]);
 
   const handlePaste = useCallback(() => {
     try {
@@ -828,7 +824,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       {/* Plan selector overlay */}
       {isOpen('planSelector') && (
         <PlanSelector
-          plans={listPlanFiles(session.workspaceSlug, session.id)}
+          plans={listPlanFiles(session.workspaceRootPath, session.id)}
           onSelect={handlePlanSelect}
           onDelete={handlePlanDelete}
           onCancel={closeModal}
@@ -838,7 +834,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       {/* Session menu overlay */}
       {isOpen('sessionMenu') && (
         <SessionMenu
-          sessions={listSessions(getWorkspaceSlug(workspace))}
+          sessions={listSessions(workspace.rootPath)}
           currentSessionId={session.id}
           onSelect={handleSessionSelect}
           onCancel={closeModal}
@@ -852,18 +848,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           currentWorkspaceId={workspace.id}
           onSelect={workspaceHandlers.handleWorkspaceSelect}
           onCancel={workspaceHandlers.handleWorkspaceCancel}
-          onAdd={workspaceHandlers.handleWorkspaceAddOpen}
           onRename={workspaceHandlers.handleWorkspaceRenameOpen}
           onRemove={workspaceHandlers.handleWorkspaceRemove}
-        />
-      )}
-
-      {/* Workspace add wizard */}
-      {isOpen('workspaceAdd') && (
-        <WorkspaceAdd
-          onComplete={workspaceHandlers.handleWorkspaceAddComplete}
-          onCancel={workspaceHandlers.handleWorkspaceAddCancel}
-          onErrorAction={handleErrorAction}
         />
       )}
 
@@ -925,17 +911,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
             <Text color="red" bold>[N]o</Text>
           </Box>
         </Box>
-      )}
-
-      {/* MCP server authentication for sub-agents */}
-      {pendingMcpAuth && (
-        <McpAuth
-          servers={pendingMcpAuth.servers}
-          workspaceId={workspace.id}
-          agentId={pendingMcpAuth.agentId}
-          onComplete={completeMcpAuth}
-          onCancel={cancelMcpAuth}
-        />
       )}
 
       {/* API key authentication for REST API integrations */}

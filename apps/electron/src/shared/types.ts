@@ -231,17 +231,6 @@ export interface CraftSpace {
 }
 
 /**
- * MCP link from a Craft space
- */
-export interface CraftMcpLink {
-  linkId: string
-  name: string
-  mcpUrl?: string
-  scope: string
-  enabled: boolean
-}
-
-/**
  * Craft OAuth result with profile info
  */
 export interface CraftOAuthResult {
@@ -354,6 +343,7 @@ export type SessionEvent =
   | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; turnId?: string; parentToolUseId?: string }
   | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean }
+  | { type: 'parent_update'; sessionId: string; toolUseId: string; parentToolUseId: string }
   | { type: 'error'; sessionId: string; error: string }
   | { type: 'typed_error'; sessionId: string; error: TypedError }
   | { type: 'complete'; sessionId: string }
@@ -402,12 +392,12 @@ export const IPC_CHANNELS = {
 
   // Workspace management
   GET_WORKSPACES: 'workspaces:get',
+  CREATE_WORKSPACE: 'workspaces:create',
 
   // Window management
   GET_WINDOW_WORKSPACE: 'window:getWorkspace',
   GET_WINDOW_MODE: 'window:getMode',
   OPEN_WORKSPACE: 'window:openWorkspace',
-  OPEN_ADD_WORKSPACE: 'window:openAddWorkspace',
   CLOSE_WINDOW: 'window:close',
 
   // Agent management
@@ -427,11 +417,6 @@ export const IPC_CHANNELS = {
   SAVE_MCP_BEARER: 'agents:saveMcpBearer',
   SAVE_API_CREDENTIALS: 'agents:saveApiCredentials',
   VALIDATE_MCP_CONNECTION: 'agents:validateMcpConnection',
-
-  // Agent sync (Craft discovery)
-  SYNC_AGENTS_FROM_CRAFT: 'agents:syncFromCraft',
-  DISCOVER_ALL_AGENTS: 'agents:discoverAll',
-  GET_AGENTS_SYNC_STATUS: 'agents:getSyncStatus',
 
   // Agent state management (unified state machine, agent-scoped by workspaceId:agentId)
   AGENT_GET_STATUS: 'agent:getStatus',           // (workspaceId, agentId) → AgentStatus
@@ -486,8 +471,6 @@ export const IPC_CHANNELS = {
   ONBOARDING_GET_AUTH_STATE: 'onboarding:getAuthState',
   ONBOARDING_START_CRAFT_OAUTH: 'onboarding:startCraftOAuth',
   ONBOARDING_GET_CRAFT_PROFILE: 'onboarding:getCraftProfile',
-  ONBOARDING_GET_MCP_LINKS: 'onboarding:getMcpLinks',
-  ONBOARDING_CREATE_MCP_LINK: 'onboarding:createMcpLink',
   ONBOARDING_VALIDATE_MCP: 'onboarding:validateMcp',
   ONBOARDING_START_MCP_OAUTH: 'onboarding:startMcpOAuth',
   ONBOARDING_SAVE_CONFIG: 'onboarding:saveConfig',
@@ -584,6 +567,8 @@ export interface CodePreviewData {
   numLines?: number
   startLine?: number
   totalLines?: number
+  /** Error message if the write failed */
+  error?: string
 }
 
 /**
@@ -659,12 +644,12 @@ export interface ElectronAPI {
 
   // Workspace management
   getWorkspaces(): Promise<Workspace[]>
+  createWorkspace(folderPath: string, name: string): Promise<Workspace>
 
   // Window management
   getWindowWorkspace(): Promise<string | null>
   getWindowMode(): Promise<string | null>
   openWorkspace(workspaceId: string): Promise<void>
-  openAddWorkspaceWindow(): Promise<void>
   closeWindow(): Promise<void>
 
   // Agent management
@@ -694,16 +679,6 @@ export interface ElectronAPI {
   reloadAgentState(workspaceId: string, agentId: string): Promise<AgentStatus>
   resetAgentState(workspaceId: string, agentId: string): Promise<void>
   markAgentActive(workspaceId: string, agentId: string): Promise<void>
-
-  // Agent sync (from Craft)
-  syncAgentsFromCraft(workspaceId: string, options?: { documentIds?: string[]; forceUpdate?: boolean }): Promise<{
-    created: string[]
-    updated: string[]
-    unchanged: string[]
-    errors: Array<{ slug: string; name: string; action: string; error: string }>
-    folderFound: boolean
-    discoveredCount: number
-  }>
 
   // Event listeners
   onSessionEvent(callback: (event: SessionEvent) => void): () => void
@@ -749,8 +724,6 @@ export interface ElectronAPI {
   getSetupNeeds(): Promise<SetupNeeds>
   startCraftOAuth(): Promise<CraftOAuthResult>
   getCraftProfile(): Promise<CraftOAuthResult>  // Get profile using existing stored token
-  getMcpLinks(spaceId: string, authToken: string): Promise<CraftMcpLink[]>
-  createMcpLink(spaceId: string, authToken: string): Promise<CraftMcpLink>
   startWorkspaceMcpOAuth(mcpUrl: string): Promise<OAuthResult & { accessToken?: string; clientId?: string }>
   saveOnboardingConfig(config: {
     authType?: AuthType  // Optional - if not provided, preserves existing auth type (for add workspace)

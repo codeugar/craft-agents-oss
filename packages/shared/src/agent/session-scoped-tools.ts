@@ -2210,15 +2210,15 @@ Use this to discover what agents are available before creating or syncing.`,
           return {
             content: [{
               type: 'text' as const,
-              text: 'No agents found in this workspace.\n\nUse `agent_create` to create a new agent, or `agent_sync` to sync agents from a Craft Space.',
+              text: 'No agents found in this workspace.\n\nUse `agent_create` to create a new agent.',
             }],
             isError: false,
           };
         }
 
         const agentList = agents.map(a => {
-          const sourceInfo = a.config.source?.type === 'craft'
-            ? ` (from Craft: ${a.config.source.documentId})`
+          const sourceInfo = a.config.source?.type === 'url'
+            ? ` (from URL: ${a.config.source.url})`
             : a.config.source?.type === 'local'
             ? ' (local)'
             : '';
@@ -2311,114 +2311,6 @@ agent_create({
           content: [{
             type: 'text' as const,
             text: `Error creating agent: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          }],
-          isError: true,
-        };
-      }
-    }
-  );
-}
-
-/**
- * Sync agents from a Craft Space.
- */
-export function createAgentSyncTool(sessionId: string, workspaceSlug: string) {
-  return tool(
-    'agent_sync',
-    `Sync agents from a Craft Space's "Agents" folder.
-
-This discovers documents in the "Agents" folder of the connected Craft Space and creates/updates local agents from them.
-
-**How it works:**
-1. Uses the workspace's Craft source (auto-created from workspace MCP URL)
-2. Finds the "Agents" folder in the Craft Space
-3. For each document in that folder:
-   - Document title becomes the agent name
-   - Document content becomes the agent instructions
-4. Creates new local agents or updates existing ones
-
-**Prerequisites:**
-- The workspace must have a Craft source configured (auto-created if workspace has MCP URL)
-- The Craft Space must have an "Agents" folder at the root level
-
-**Example:**
-\`\`\`
-agent_sync({})  // Sync all agents from Craft
-agent_sync({ forceUpdate: true })  // Force update even if unchanged
-\`\`\``,
-    {
-      forceUpdate: z.boolean().optional().describe('Force update even if content unchanged (default: false)'),
-    },
-    async (args) => {
-      debug('[agent_sync] Syncing agents from Craft');
-
-      try {
-        const { AgentSyncService } = await import('../agents/sync-service.ts');
-
-        const syncService = new AgentSyncService(workspaceSlug);
-        const result = await syncService.syncFromCraft({
-          forceUpdate: args.forceUpdate,
-        });
-
-        if (!result.folderFound) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `**No "Agents" folder found in Craft Space**
-
-To sync agents from Craft:
-1. Create a folder named "Agents" in your Craft Space root
-2. Add documents to that folder - each document becomes an agent
-3. Document title = agent name, document content = instructions
-
-Alternatively, use \`agent_create\` to create agents locally.`,
-            }],
-            isError: false,
-          };
-        }
-
-        // Trigger agents reload callback
-        const callbacks = getSessionScopedToolCallbacks(sessionId);
-        try {
-          await callbacks?.onAgentsChanged?.();
-        } catch (err) {
-          console.log('[agent_sync] onAgentsChanged callback error:', err);
-        }
-
-        const summary = [];
-        if (result.created.length > 0) {
-          summary.push(`Created: ${result.created.map(a => a.name).join(', ')}`);
-        }
-        if (result.updated.length > 0) {
-          summary.push(`Updated: ${result.updated.map(a => a.name).join(', ')}`);
-        }
-        if (result.unchanged.length > 0) {
-          summary.push(`Unchanged: ${result.unchanged.length} agent(s)`);
-        }
-        if (result.errors.length > 0) {
-          summary.push(`Errors: ${result.errors.map(e => e.error).join(', ')}`);
-        }
-
-        const totalAgents = result.created.length + result.updated.length + result.unchanged.length;
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `**Sync complete**
-
-Discovered: ${result.discoveredCount} document(s) in Agents folder
-Total agents: ${totalAgents}
-
-${summary.join('\n')}`,
-          }],
-          isError: result.errors.length > 0 && totalAgents === 0,
-        };
-      } catch (error) {
-        debug('[agent_sync] Error:', error);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Error syncing agents: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
           isError: true,
         };
@@ -2539,7 +2431,6 @@ export function getSessionScopedTools(sessionId: string, workspaceSlug: string, 
         // Agent tools
         createAgentListTool(sessionId, workspaceSlug),
         createAgentCreateTool(sessionId, workspaceSlug),
-        createAgentSyncTool(sessionId, workspaceSlug),
         createAgentDeleteTool(sessionId, workspaceSlug),
       ],
     });

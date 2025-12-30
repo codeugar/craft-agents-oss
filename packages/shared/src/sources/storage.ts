@@ -2,11 +2,14 @@
  * Source Storage
  *
  * CRUD operations for workspace-scoped sources.
- * Sources are stored at ~/.craft-agent/workspaces/{workspaceSlug}/sources/{sourceSlug}/
+ * Sources are stored at {workspaceRootPath}/sources/{sourceSlug}/
+ *
+ * Note: All functions take `workspaceRootPath` (absolute path to workspace folder),
+ * NOT a workspace slug. The `LoadedSource.workspaceSlug` is derived via basename().
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type {
@@ -26,26 +29,26 @@ import { getWorkspaceSourcesPath, getWorkspaceAgentsPath } from '../workspaces/s
 /**
  * Get path to a source folder within a workspace
  */
-export function getSourcePath(workspaceSlug: string, sourceSlug: string): string {
-  return join(getWorkspaceSourcesPath(workspaceSlug), sourceSlug);
+export function getSourcePath(workspaceRootPath: string, sourceSlug: string): string {
+  return join(getWorkspaceSourcesPath(workspaceRootPath), sourceSlug);
 }
 
 /**
  * Get path to an agent-scoped source folder
  */
 export function getAgentSourcePath(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): string {
-  return join(getWorkspaceAgentsPath(workspaceSlug), agentSlug, 'sources', sourceSlug);
+  return join(getWorkspaceAgentsPath(workspaceRootPath), agentSlug, 'sources', sourceSlug);
 }
 
 /**
  * Ensure sources directory exists for a workspace
  */
-export function ensureSourcesDir(workspaceSlug: string): void {
-  const dir = getWorkspaceSourcesPath(workspaceSlug);
+export function ensureSourcesDir(workspaceRootPath: string): void {
+  const dir = getWorkspaceSourcesPath(workspaceRootPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -59,10 +62,10 @@ export function ensureSourcesDir(workspaceSlug: string): void {
  * Load source config.json
  */
 export function loadSourceConfig(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sourceSlug: string
 ): FolderSourceConfig | null {
-  const configPath = join(getSourcePath(workspaceSlug, sourceSlug), 'config.json');
+  const configPath = join(getSourcePath(workspaceRootPath, sourceSlug), 'config.json');
   if (!existsSync(configPath)) return null;
 
   try {
@@ -76,11 +79,11 @@ export function loadSourceConfig(
  * Load agent-scoped source config.json
  */
 export function loadAgentSourceConfig(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): FolderSourceConfig | null {
-  const configPath = join(getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug), 'config.json');
+  const configPath = join(getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug), 'config.json');
   if (!existsSync(configPath)) return null;
 
   try {
@@ -103,7 +106,7 @@ export interface SaveSourceConfigOptions {
  * @throws Error if config is invalid (unless skipValidation is true)
  */
 export function saveSourceConfig(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   config: FolderSourceConfig,
   options?: SaveSourceConfigOptions
 ): void {
@@ -117,7 +120,7 @@ export function saveSourceConfig(
     }
   }
 
-  const dir = getSourcePath(workspaceSlug, config.slug);
+  const dir = getSourcePath(workspaceRootPath, config.slug);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -130,7 +133,7 @@ export function saveSourceConfig(
  * Save agent-scoped source config.json
  */
 export function saveAgentSourceConfig(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   config: FolderSourceConfig,
   options?: SaveSourceConfigOptions
@@ -145,7 +148,7 @@ export function saveAgentSourceConfig(
     }
   }
 
-  const dir = getAgentSourcePath(workspaceSlug, agentSlug, config.slug);
+  const dir = getAgentSourcePath(workspaceRootPath, agentSlug, config.slug);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -206,8 +209,8 @@ function parseGuideMarkdown(raw: string): SourceGuide {
 /**
  * Load and parse guide.md with frontmatter cache
  */
-export function loadSourceGuide(workspaceSlug: string, sourceSlug: string): SourceGuide | null {
-  const guidePath = join(getSourcePath(workspaceSlug, sourceSlug), 'guide.md');
+export function loadSourceGuide(workspaceRootPath: string, sourceSlug: string): SourceGuide | null {
+  const guidePath = join(getSourcePath(workspaceRootPath, sourceSlug), 'guide.md');
   if (!existsSync(guidePath)) return null;
 
   try {
@@ -222,11 +225,11 @@ export function loadSourceGuide(workspaceSlug: string, sourceSlug: string): Sour
  * Load agent-scoped source guide
  */
 export function loadAgentSourceGuide(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): SourceGuide | null {
-  const guidePath = join(getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug), 'guide.md');
+  const guidePath = join(getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug), 'guide.md');
   if (!existsSync(guidePath)) return null;
 
   try {
@@ -274,11 +277,11 @@ export function extractTagline(guide: SourceGuide | null): string | null {
  * Save guide.md
  */
 export function saveSourceGuide(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sourceSlug: string,
   guide: SourceGuide
 ): void {
-  const dir = getSourcePath(workspaceSlug, sourceSlug);
+  const dir = getSourcePath(workspaceRootPath, sourceSlug);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -290,12 +293,12 @@ export function saveSourceGuide(
  * Save agent-scoped source guide.md
  */
 export function saveAgentSourceGuide(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string,
   guide: SourceGuide
 ): void {
-  const dir = getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug);
+  const dir = getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -307,11 +310,11 @@ export function saveAgentSourceGuide(
  * Update cache in guide.md frontmatter
  */
 export function updateSourceCache(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sourceSlug: string,
   updates: Record<string, unknown>
 ): void {
-  const guide = loadSourceGuide(workspaceSlug, sourceSlug) || { raw: '' };
+  const guide = loadSourceGuide(workspaceRootPath, sourceSlug) || { raw: '' };
   const existingCache = guide.cache || {};
   const newCache = { ...existingCache, ...updates, lastUpdated: new Date().toISOString() };
 
@@ -323,7 +326,7 @@ export function updateSourceCache(
   const yamlCache = stringifyYaml({ cache: newCache });
   const newRaw = `---\n${yamlCache}---\n\n${content.trim()}\n`;
 
-  saveSourceGuide(workspaceSlug, sourceSlug, { ...guide, raw: newRaw, cache: newCache });
+  saveSourceGuide(workspaceRootPath, sourceSlug, { ...guide, raw: newRaw, cache: newCache });
 }
 
 /**
@@ -380,8 +383,8 @@ export function findIconInDir(dir: string): string | null {
 /**
  * Find icon file for a source
  */
-export function findSourceIcon(workspaceSlug: string, sourceSlug: string): string | null {
-  return findIconInDir(getSourcePath(workspaceSlug, sourceSlug));
+export function findSourceIcon(workspaceRootPath: string, sourceSlug: string): string | null {
+  return findIconInDir(getSourcePath(workspaceRootPath, sourceSlug));
 }
 
 // ============================================================
@@ -390,15 +393,21 @@ export function findSourceIcon(workspaceSlug: string, sourceSlug: string): strin
 
 /**
  * Load complete source with all files
+ * @param workspaceRootPath - Absolute path to workspace folder (e.g., ~/.craft-agent/workspaces/xxx)
+ * @param sourceSlug - Source folder name
  */
-export function loadSource(workspaceSlug: string, sourceSlug: string): LoadedSource | null {
-  const folderPath = getSourcePath(workspaceSlug, sourceSlug);
-  const config = loadSourceConfig(workspaceSlug, sourceSlug);
+export function loadSource(workspaceRootPath: string, sourceSlug: string): LoadedSource | null {
+  const folderPath = getSourcePath(workspaceRootPath, sourceSlug);
+  const config = loadSourceConfig(workspaceRootPath, sourceSlug);
   if (!config) return null;
+
+  // Extract workspace folder name for credential lookup
+  // Credentials are keyed by folder name (e.g., "046a02d0-..."), not full path
+  const workspaceSlug = basename(workspaceRootPath);
 
   return {
     config,
-    guide: loadSourceGuide(workspaceSlug, sourceSlug),
+    guide: loadSourceGuide(workspaceRootPath, sourceSlug),
     folderPath,
     workspaceSlug,
   };
@@ -406,19 +415,23 @@ export function loadSource(workspaceSlug: string, sourceSlug: string): LoadedSou
 
 /**
  * Load agent-scoped source
+ * @param workspaceRootPath - Absolute path to workspace folder
  */
 export function loadAgentSource(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): LoadedSource | null {
-  const folderPath = getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug);
-  const config = loadAgentSourceConfig(workspaceSlug, agentSlug, sourceSlug);
+  const folderPath = getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug);
+  const config = loadAgentSourceConfig(workspaceRootPath, agentSlug, sourceSlug);
   if (!config) return null;
+
+  // Extract workspace folder name for credential lookup
+  const workspaceSlug = basename(workspaceRootPath);
 
   return {
     config,
-    guide: loadAgentSourceGuide(workspaceSlug, agentSlug, sourceSlug),
+    guide: loadAgentSourceGuide(workspaceRootPath, agentSlug, sourceSlug),
     folderPath,
     workspaceSlug,
     agentSlug,
@@ -428,11 +441,11 @@ export function loadAgentSource(
 /**
  * Load all sources for a workspace
  */
-export function loadWorkspaceSources(workspaceSlug: string): LoadedSource[] {
-  ensureSourcesDir(workspaceSlug);
+export function loadWorkspaceSources(workspaceRootPath: string): LoadedSource[] {
+  ensureSourcesDir(workspaceRootPath);
 
   const sources: LoadedSource[] = [];
-  const sourcesDir = getWorkspaceSourcesPath(workspaceSlug);
+  const sourcesDir = getWorkspaceSourcesPath(workspaceRootPath);
 
   if (!existsSync(sourcesDir)) return sources;
 
@@ -440,7 +453,7 @@ export function loadWorkspaceSources(workspaceSlug: string): LoadedSource[] {
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const source = loadSource(workspaceSlug, entry.name);
+      const source = loadSource(workspaceRootPath, entry.name);
       if (source) {
         sources.push(source);
       }
@@ -453,8 +466,8 @@ export function loadWorkspaceSources(workspaceSlug: string): LoadedSource[] {
 /**
  * Load all agent-scoped sources
  */
-export function loadAgentSources(workspaceSlug: string, agentSlug: string): LoadedSource[] {
-  const sourcesDir = join(getWorkspaceAgentsPath(workspaceSlug), agentSlug, 'sources');
+export function loadAgentSources(workspaceRootPath: string, agentSlug: string): LoadedSource[] {
+  const sourcesDir = join(getWorkspaceAgentsPath(workspaceRootPath), agentSlug, 'sources');
 
   if (!existsSync(sourcesDir)) return [];
 
@@ -463,7 +476,7 @@ export function loadAgentSources(workspaceSlug: string, agentSlug: string): Load
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const source = loadAgentSource(workspaceSlug, agentSlug, entry.name);
+      const source = loadAgentSource(workspaceRootPath, agentSlug, entry.name);
       if (source) {
         sources.push(source);
       }
@@ -476,17 +489,17 @@ export function loadAgentSources(workspaceSlug: string, agentSlug: string): Load
 /**
  * Get enabled sources for a workspace
  */
-export function getEnabledSources(workspaceSlug: string): LoadedSource[] {
-  return loadWorkspaceSources(workspaceSlug).filter((s) => s.config.enabled);
+export function getEnabledSources(workspaceRootPath: string): LoadedSource[] {
+  return loadWorkspaceSources(workspaceRootPath).filter((s) => s.config.enabled);
 }
 
 /**
  * Get sources by slugs for a workspace
  */
-export function getSourcesBySlugs(workspaceSlug: string, slugs: string[]): LoadedSource[] {
+export function getSourcesBySlugs(workspaceRootPath: string, slugs: string[]): LoadedSource[] {
   const sources: LoadedSource[] = [];
   for (const slug of slugs) {
-    const source = loadSource(workspaceSlug, slug);
+    const source = loadSource(workspaceRootPath, slug);
     if (source) {
       sources.push(source);
     }
@@ -501,7 +514,7 @@ export function getSourcesBySlugs(workspaceSlug: string, slugs: string[]): Loade
 /**
  * Generate URL-safe slug from name
  */
-export function generateSourceSlug(workspaceSlug: string, name: string): string {
+export function generateSourceSlug(workspaceRootPath: string, name: string): string {
   let slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -514,7 +527,7 @@ export function generateSourceSlug(workspaceSlug: string, name: string): string 
   }
 
   // Check for existing slugs and append number if needed
-  const sourcesDir = getWorkspaceSourcesPath(workspaceSlug);
+  const sourcesDir = getWorkspaceSourcesPath(workspaceRootPath);
   const existingSlugs = new Set<string>();
   if (existsSync(sourcesDir)) {
     const entries = readdirSync(sourcesDir, { withFileTypes: true });
@@ -542,10 +555,10 @@ export function generateSourceSlug(workspaceSlug: string, name: string): string 
  * Create a new source in a workspace
  */
 export function createSource(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   input: CreateSourceInput
 ): FolderSourceConfig {
-  const slug = generateSourceSlug(workspaceSlug, input.name);
+  const slug = generateSourceSlug(workspaceRootPath, input.name);
   const now = Date.now();
 
   const config: FolderSourceConfig = {
@@ -583,7 +596,7 @@ export function createSource(
     config.iconUrl = input.iconUrl;
   }
 
-  saveSourceConfig(workspaceSlug, config);
+  saveSourceConfig(workspaceRootPath, config);
 
   // Create default guide.md
   const guideContent = `# ${input.name}
@@ -596,7 +609,7 @@ export function createSource(
 
 (Add context about this source)
 `;
-  saveSourceGuide(workspaceSlug, slug, { raw: guideContent });
+  saveSourceGuide(workspaceRootPath, slug, { raw: guideContent });
 
   return config;
 }
@@ -604,8 +617,8 @@ export function createSource(
 /**
  * Delete a source from a workspace
  */
-export function deleteSource(workspaceSlug: string, sourceSlug: string): void {
-  const dir = getSourcePath(workspaceSlug, sourceSlug);
+export function deleteSource(workspaceRootPath: string, sourceSlug: string): void {
+  const dir = getSourcePath(workspaceRootPath, sourceSlug);
   if (existsSync(dir)) {
     rmSync(dir, { recursive: true });
   }
@@ -614,8 +627,8 @@ export function deleteSource(workspaceSlug: string, sourceSlug: string): void {
 /**
  * Check if a source exists in a workspace
  */
-export function sourceExists(workspaceSlug: string, sourceSlug: string): boolean {
-  return existsSync(join(getSourcePath(workspaceSlug, sourceSlug), 'config.json'));
+export function sourceExists(workspaceRootPath: string, sourceSlug: string): boolean {
+  return existsSync(join(getSourcePath(workspaceRootPath, sourceSlug), 'config.json'));
 }
 
 // ============================================================
@@ -626,7 +639,7 @@ export function sourceExists(workspaceSlug: string, sourceSlug: string): boolean
  * Generate URL-safe slug for agent-scoped source
  */
 export function generateAgentSourceSlug(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   name: string
 ): string {
@@ -642,7 +655,7 @@ export function generateAgentSourceSlug(
   }
 
   // Check for existing slugs in agent's sources folder
-  const sourcesDir = join(getWorkspaceAgentsPath(workspaceSlug), agentSlug, 'sources');
+  const sourcesDir = join(getWorkspaceAgentsPath(workspaceRootPath), agentSlug, 'sources');
   const existingSlugs = new Set<string>();
   if (existsSync(sourcesDir)) {
     const entries = readdirSync(sourcesDir, { withFileTypes: true });
@@ -670,11 +683,11 @@ export function generateAgentSourceSlug(
  * Create a new agent-scoped source
  */
 export function createAgentSource(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   input: CreateSourceInput
 ): FolderSourceConfig {
-  const slug = generateAgentSourceSlug(workspaceSlug, agentSlug, input.name);
+  const slug = generateAgentSourceSlug(workspaceRootPath, agentSlug, input.name);
   const now = Date.now();
 
   const config: FolderSourceConfig = {
@@ -712,7 +725,7 @@ export function createAgentSource(
     config.iconUrl = input.iconUrl;
   }
 
-  saveAgentSourceConfig(workspaceSlug, agentSlug, config);
+  saveAgentSourceConfig(workspaceRootPath, agentSlug, config);
 
   // Create default guide.md
   const guideContent = `# ${input.name}
@@ -725,7 +738,7 @@ export function createAgentSource(
 
 (Add context about this source)
 `;
-  saveAgentSourceGuide(workspaceSlug, agentSlug, slug, { raw: guideContent });
+  saveAgentSourceGuide(workspaceRootPath, agentSlug, slug, { raw: guideContent });
 
   return config;
 }
@@ -734,11 +747,11 @@ export function createAgentSource(
  * Delete an agent-scoped source
  */
 export function deleteAgentSource(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): void {
-  const dir = getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug);
+  const dir = getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug);
   if (existsSync(dir)) {
     rmSync(dir, { recursive: true });
   }
@@ -748,94 +761,11 @@ export function deleteAgentSource(
  * Check if an agent-scoped source exists
  */
 export function agentSourceExists(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string,
   sourceSlug: string
 ): boolean {
-  return existsSync(join(getAgentSourcePath(workspaceSlug, agentSlug, sourceSlug), 'config.json'));
-}
-
-// ============================================================
-// Workspace Craft Source Auto-Creation
-// ============================================================
-
-/**
- * Ensure a Craft source exists for a workspace that has an MCP URL.
- * This creates a source from the workspace's MCP connection if one doesn't already exist.
- *
- * @param workspaceSlug - Workspace slug
- * @param mcpUrl - Workspace MCP URL (from config)
- * @returns The existing or newly created Craft source config, or null if no mcpUrl
- */
-export function ensureWorkspaceCraftSource(
-  workspaceSlug: string,
-  mcpUrl: string | undefined
-): FolderSourceConfig | null {
-  if (!mcpUrl) {
-    return null;
-  }
-
-  // Check if a "craft" source already exists
-  if (sourceExists(workspaceSlug, 'craft')) {
-    return loadSourceConfig(workspaceSlug, 'craft');
-  }
-
-  // Also check for any source with provider="craft" or matching URL
-  const sources = loadWorkspaceSources(workspaceSlug);
-  const existingCraftSource = sources.find(
-    (s) =>
-      s.config.type === 'mcp' &&
-      (s.config.provider === 'craft' ||
-        s.config.mcp?.url === mcpUrl ||
-        s.config.slug === 'craft')
-  );
-
-  if (existingCraftSource) {
-    return existingCraftSource.config;
-  }
-
-  // Create a new Craft source from workspace MCP URL
-  debug('[ensureWorkspaceCraftSource] Creating Craft source from workspace MCP URL:', mcpUrl);
-
-  const now = Date.now();
-  const config: FolderSourceConfig = {
-    id: `src_${randomUUID().slice(0, 8)}`,
-    name: 'Craft',
-    slug: 'craft',
-    enabled: true,
-    provider: 'craft',
-    type: 'mcp',
-    mcp: {
-      url: mcpUrl,
-      authType: 'oauth', // Workspace MCP uses OAuth
-    },
-    iconUrl: 'https://craft.do',
-    tagline: 'Connected Craft Space for documents and agents.',
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  saveSourceConfig(workspaceSlug, config);
-
-  // Create guide.md
-  const guideContent = `# Craft
-
-Your connected Craft Space. Access documents, blocks, and smart folders.
-
-## Available Tools
-
-This MCP source provides access to Craft documents:
-- **folders_list** - List folders in the Space
-- **documents_list** - List documents in a folder
-- **document_search** - Search documents by content
-- **blocks_get** - Read document content
-- **blocks_add** - Create new content
-- **blocks_update** - Edit existing content
-`;
-  saveSourceGuide(workspaceSlug, 'craft', { raw: guideContent });
-
-  debug('[ensureWorkspaceCraftSource] Created Craft source:', config.slug);
-  return config;
+  return existsSync(join(getAgentSourcePath(workspaceRootPath, agentSlug, sourceSlug), 'config.json'));
 }
 
 // ============================================================
@@ -858,13 +788,13 @@ export interface SourceWithContext {
  * Returns null if not found in either location.
  */
 export function loadSourceConfigWithFallback(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sourceSlug: string,
   activeAgentSlug?: string
 ): SourceWithContext | null {
   // If active agent context, check agent folder first
   if (activeAgentSlug) {
-    const agentConfig = loadAgentSourceConfig(workspaceSlug, activeAgentSlug, sourceSlug);
+    const agentConfig = loadAgentSourceConfig(workspaceRootPath, activeAgentSlug, sourceSlug);
     if (agentConfig) {
       return {
         config: agentConfig,
@@ -875,7 +805,7 @@ export function loadSourceConfigWithFallback(
   }
 
   // Fall back to workspace folder
-  const workspaceConfig = loadSourceConfig(workspaceSlug, sourceSlug);
+  const workspaceConfig = loadSourceConfig(workspaceRootPath, sourceSlug);
   if (workspaceConfig) {
     return {
       config: workspaceConfig,
@@ -890,15 +820,15 @@ export function loadSourceConfigWithFallback(
  * Save source config back to the correct location based on context.
  */
 export function saveSourceConfigWithContext(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   config: FolderSourceConfig,
   context: { isAgentScoped: boolean; agentSlug?: string },
   options?: SaveSourceConfigOptions
 ): void {
   if (context.isAgentScoped && context.agentSlug) {
-    saveAgentSourceConfig(workspaceSlug, context.agentSlug, config, options);
+    saveAgentSourceConfig(workspaceRootPath, context.agentSlug, config, options);
   } else {
-    saveSourceConfig(workspaceSlug, config, options);
+    saveSourceConfig(workspaceRootPath, config, options);
   }
 }
 

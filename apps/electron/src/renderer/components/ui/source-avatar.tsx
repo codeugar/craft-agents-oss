@@ -22,7 +22,7 @@ import { Mail, Plug, Globe, HardDrive } from 'lucide-react'
 import { McpIcon } from '@/components/icons/McpIcon'
 import { getLogoUrl } from '@craft-agent/shared/utils/logo'
 import { resolveSourceIconUrl } from '@craft-agent/shared/utils/icon'
-import type { LoadedSource } from '../../../../shared/types'
+import type { LoadedSource } from '@craft-agent/shared/sources'
 
 export type SourceType = 'mcp' | 'api' | 'gmail' | 'local'
 export type SourceAvatarSize = 'xs' | 'sm' | 'md' | 'lg'

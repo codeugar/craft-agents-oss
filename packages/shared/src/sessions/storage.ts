@@ -2,7 +2,7 @@
  * Session Storage
  *
  * Workspace-scoped session CRUD operations.
- * Sessions are stored at ~/.craft-agent/workspaces/{slug}/sessions/{id}/session.json
+ * Sessions are stored at {workspaceRootPath}/sessions/{id}/session.json
  * Each session folder contains:
  * - session.json (main data)
  * - attachments/ (file attachments)
@@ -41,8 +41,8 @@ export type { SessionConfig } from './types.ts';
 /**
  * Ensure sessions directory exists for a workspace
  */
-export function ensureSessionsDir(workspaceSlug: string): string {
-  const dir = getWorkspaceSessionsPath(workspaceSlug);
+export function ensureSessionsDir(workspaceRootPath: string): string {
+  const dir = getWorkspaceSessionsPath(workspaceRootPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
@@ -52,29 +52,29 @@ export function ensureSessionsDir(workspaceSlug: string): string {
 /**
  * Get path to a session's directory
  */
-export function getSessionPath(workspaceSlug: string, sessionId: string): string {
-  return join(getWorkspaceSessionsPath(workspaceSlug), sessionId);
+export function getSessionPath(workspaceRootPath: string, sessionId: string): string {
+  return join(getWorkspaceSessionsPath(workspaceRootPath), sessionId);
 }
 
 /**
  * Get path to a session's JSON file (inside session folder)
  */
-export function getSessionFilePath(workspaceSlug: string, sessionId: string): string {
-  return join(getSessionPath(workspaceSlug, sessionId), 'session.json');
+export function getSessionFilePath(workspaceRootPath: string, sessionId: string): string {
+  return join(getSessionPath(workspaceRootPath, sessionId), 'session.json');
 }
 
 /**
  * Get path to legacy session JSON file (for backward compatibility)
  */
-function getLegacySessionFilePath(workspaceSlug: string, sessionId: string): string {
-  return join(getWorkspaceSessionsPath(workspaceSlug), `${sessionId}.json`);
+function getLegacySessionFilePath(workspaceRootPath: string, sessionId: string): string {
+  return join(getWorkspaceSessionsPath(workspaceRootPath), `${sessionId}.json`);
 }
 
 /**
  * Ensure session directory exists with all subdirectories
  */
-export function ensureSessionDir(workspaceSlug: string, sessionId: string): string {
-  const sessionDir = getSessionPath(workspaceSlug, sessionId);
+export function ensureSessionDir(workspaceRootPath: string, sessionId: string): string {
+  const sessionDir = getSessionPath(workspaceRootPath, sessionId);
   if (!existsSync(sessionDir)) {
     mkdirSync(sessionDir, { recursive: true });
   }
@@ -93,15 +93,15 @@ export function ensureSessionDir(workspaceSlug: string, sessionId: string): stri
 /**
  * Get the attachments directory for a session
  */
-export function getSessionAttachmentsPath(workspaceSlug: string, sessionId: string): string {
-  return join(getSessionPath(workspaceSlug, sessionId), 'attachments');
+export function getSessionAttachmentsPath(workspaceRootPath: string, sessionId: string): string {
+  return join(getSessionPath(workspaceRootPath, sessionId), 'attachments');
 }
 
 /**
  * Get the plans directory for a session
  */
-export function getSessionPlansPath(workspaceSlug: string, sessionId: string): string {
-  return join(getSessionPath(workspaceSlug, sessionId), 'plans');
+export function getSessionPlansPath(workspaceRootPath: string, sessionId: string): string {
+  return join(getSessionPath(workspaceRootPath, sessionId), 'plans');
 }
 
 // ============================================================
@@ -123,7 +123,7 @@ export function generateSessionId(): string {
  * Create a new session for a workspace
  */
 export function createSession(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   options?: {
     name?: string;
     agentSlug?: string;
@@ -134,17 +134,17 @@ export function createSession(
     enabledSourceSlugs?: string[];
   }
 ): SessionConfig {
-  ensureSessionsDir(workspaceSlug);
+  ensureSessionsDir(workspaceRootPath);
 
   const now = Date.now();
   const sessionId = generateSessionId();
 
   // Create session directory with all subdirectories (plans, attachments)
-  ensureSessionDir(workspaceSlug, sessionId);
+  ensureSessionDir(workspaceRootPath, sessionId);
 
   const session: SessionConfig = {
     id: sessionId,
-    workspaceSlug,
+    workspaceRootPath,
     name: options?.name,
     createdAt: now,
     lastUsedAt: now,
@@ -178,15 +178,15 @@ export function createSession(
  * Used for --session <id> flag to allow user-defined session IDs
  */
 export function getOrCreateSessionById(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string
 ): SessionConfig {
-  const existing = loadSession(workspaceSlug, sessionId);
+  const existing = loadSession(workspaceRootPath, sessionId);
   if (existing) {
     return {
       id: existing.id,
       sdkSessionId: existing.sdkSessionId,
-      workspaceSlug: existing.workspaceSlug,
+      workspaceRootPath: existing.workspaceRootPath,
       name: existing.name,
       createdAt: existing.createdAt,
       lastUsedAt: existing.lastUsedAt,
@@ -196,15 +196,15 @@ export function getOrCreateSessionById(
   }
 
   // Create new session with the specified ID
-  ensureSessionsDir(workspaceSlug);
+  ensureSessionsDir(workspaceRootPath);
 
   // Create session directory with all subdirectories (plans, attachments)
-  ensureSessionDir(workspaceSlug, sessionId);
+  ensureSessionDir(workspaceRootPath, sessionId);
 
   const now = Date.now();
   const session: SessionConfig = {
     id: sessionId,
-    workspaceSlug,
+    workspaceRootPath,
     createdAt: now,
     lastUsedAt: now,
   };
@@ -229,10 +229,10 @@ export function getOrCreateSessionById(
  * Save session (conversation data + metadata)
  */
 export function saveSession(session: StoredSession): void {
-  ensureSessionsDir(session.workspaceSlug);
+  ensureSessionsDir(session.workspaceRootPath);
   // Ensure session directory exists (creates plans/attachments subdirs too)
-  ensureSessionDir(session.workspaceSlug, session.id);
-  const filePath = getSessionFilePath(session.workspaceSlug, session.id);
+  ensureSessionDir(session.workspaceRootPath, session.id);
+  const filePath = getSessionFilePath(session.workspaceRootPath, session.id);
   session.lastUsedAt = Date.now();
   writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
 }
@@ -241,9 +241,9 @@ export function saveSession(session: StoredSession): void {
  * Load session by ID
  * Supports both new folder structure and legacy flat file structure for backward compatibility
  */
-export function loadSession(workspaceSlug: string, sessionId: string): StoredSession | null {
+export function loadSession(workspaceRootPath: string, sessionId: string): StoredSession | null {
   // First try new folder structure: {id}/session.json
-  const filePath = getSessionFilePath(workspaceSlug, sessionId);
+  const filePath = getSessionFilePath(workspaceRootPath, sessionId);
   try {
     if (existsSync(filePath)) {
       const content = readFileSync(filePath, 'utf-8');
@@ -254,7 +254,7 @@ export function loadSession(workspaceSlug: string, sessionId: string): StoredSes
   }
 
   // Fall back to legacy flat file structure: {id}.json
-  const legacyPath = getLegacySessionFilePath(workspaceSlug, sessionId);
+  const legacyPath = getLegacySessionFilePath(workspaceRootPath, sessionId);
   try {
     if (existsSync(legacyPath)) {
       const content = readFileSync(legacyPath, 'utf-8');
@@ -271,8 +271,8 @@ export function loadSession(workspaceSlug: string, sessionId: string): StoredSes
  * List sessions for a workspace
  * Supports both new folder structure and legacy flat file structure
  */
-export function listSessions(workspaceSlug: string): SessionMetadata[] {
-  const sessionsDir = getWorkspaceSessionsPath(workspaceSlug);
+export function listSessions(workspaceRootPath: string): SessionMetadata[] {
+  const sessionsDir = getWorkspaceSessionsPath(workspaceRootPath);
   if (!existsSync(sessionsDir)) {
     return [];
   }
@@ -291,7 +291,7 @@ export function listSessions(workspaceSlug: string): SessionMetadata[] {
           const content = readFileSync(sessionFile, 'utf-8');
           const session = JSON.parse(content) as StoredSession;
           processedIds.add(sessionId);
-          const metadata = extractSessionMetadata(session, workspaceSlug);
+          const metadata = extractSessionMetadata(session, workspaceRootPath);
           if (metadata) sessions.push(metadata);
         } catch {
           // Skip invalid files
@@ -310,7 +310,7 @@ export function listSessions(workspaceSlug: string): SessionMetadata[] {
       try {
         const content = readFileSync(join(sessionsDir, entry.name), 'utf-8');
         const session = JSON.parse(content) as StoredSession;
-        const metadata = extractSessionMetadata(session, workspaceSlug);
+        const metadata = extractSessionMetadata(session, workspaceRootPath);
         if (metadata) sessions.push(metadata);
       } catch {
         // Skip invalid files
@@ -325,7 +325,7 @@ export function listSessions(workspaceSlug: string): SessionMetadata[] {
 /**
  * Extract metadata from a stored session
  */
-function extractSessionMetadata(session: StoredSession, workspaceSlug: string): SessionMetadata | null {
+function extractSessionMetadata(session: StoredSession, workspaceRootPath: string): SessionMetadata | null {
   try {
     // Find first user message for preview
     const firstUserMessage = session.messages?.find(m => m.type === 'user');
@@ -346,11 +346,11 @@ function extractSessionMetadata(session: StoredSession, workspaceSlug: string): 
     }
 
     // Count plan files for this session
-    const planCount = listPlanFiles(workspaceSlug, session.id).length;
+    const planCount = listPlanFiles(workspaceRootPath, session.id).length;
 
     return {
       id: session.id,
-      workspaceSlug: session.workspaceSlug,
+      workspaceRootPath: session.workspaceRootPath,
       name: session.name,
       createdAt: session.createdAt,
       lastUsedAt: session.lastUsedAt,
@@ -373,16 +373,16 @@ function extractSessionMetadata(session: StoredSession, workspaceSlug: string): 
  * Delete a session and its associated files
  * Handles both new folder structure and legacy flat file structure
  */
-export function deleteSession(workspaceSlug: string, sessionId: string): boolean {
+export function deleteSession(workspaceRootPath: string, sessionId: string): boolean {
   try {
     // Delete session directory (new structure - includes session.json, attachments, plans)
-    const sessionDir = getSessionPath(workspaceSlug, sessionId);
+    const sessionDir = getSessionPath(workspaceRootPath, sessionId);
     if (existsSync(sessionDir)) {
       rmSync(sessionDir, { recursive: true });
     }
 
     // Also delete legacy flat file if it exists
-    const legacyPath = getLegacySessionFilePath(workspaceSlug, sessionId);
+    const legacyPath = getLegacySessionFilePath(workspaceRootPath, sessionId);
     if (existsSync(legacyPath)) {
       unlinkSync(legacyPath);
     }
@@ -396,14 +396,14 @@ export function deleteSession(workspaceSlug: string, sessionId: string): boolean
 /**
  * Get or create the latest session for a workspace
  */
-export function getOrCreateLatestSession(workspaceSlug: string): SessionConfig {
-  const sessions = listSessions(workspaceSlug);
+export function getOrCreateLatestSession(workspaceRootPath: string): SessionConfig {
+  const sessions = listSessions(workspaceRootPath);
   if (sessions.length > 0 && sessions[0]) {
     const latest = sessions[0];
     return {
       id: latest.id,
       sdkSessionId: latest.sdkSessionId,
-      workspaceSlug: latest.workspaceSlug,
+      workspaceRootPath: latest.workspaceRootPath,
       name: latest.name,
       createdAt: latest.createdAt,
       lastUsedAt: latest.lastUsedAt,
@@ -411,7 +411,7 @@ export function getOrCreateLatestSession(workspaceSlug: string): SessionConfig {
       agentName: latest.agentName,
     };
   }
-  return createSession(workspaceSlug);
+  return createSession(workspaceRootPath);
 }
 
 // ============================================================
@@ -422,11 +422,11 @@ export function getOrCreateLatestSession(workspaceSlug: string): SessionConfig {
  * Update SDK session ID for a session
  */
 export function updateSessionSdkId(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   sdkSessionId: string
 ): void {
-  const session = loadSession(workspaceSlug, sessionId);
+  const session = loadSession(workspaceRootPath, sessionId);
   if (session) {
     session.sdkSessionId = sdkSessionId;
     saveSession(session);
@@ -437,7 +437,7 @@ export function updateSessionSdkId(
  * Update session metadata
  */
 export function updateSessionMetadata(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   updates: Partial<Pick<SessionConfig,
     | 'agentSlug'
@@ -452,7 +452,7 @@ export function updateSessionMetadata(
     | 'activeModes'
   >>
 ): void {
-  const session = loadSession(workspaceSlug, sessionId);
+  const session = loadSession(workspaceRootPath, sessionId);
   if (!session) return;
 
   if (updates.agentSlug !== undefined) session.agentSlug = updates.agentSlug;
@@ -472,38 +472,38 @@ export function updateSessionMetadata(
 /**
  * Flag a session
  */
-export function flagSession(workspaceSlug: string, sessionId: string): void {
-  updateSessionMetadata(workspaceSlug, sessionId, { isFlagged: true });
+export function flagSession(workspaceRootPath: string, sessionId: string): void {
+  updateSessionMetadata(workspaceRootPath, sessionId, { isFlagged: true });
 }
 
 /**
  * Unflag a session
  */
-export function unflagSession(workspaceSlug: string, sessionId: string): void {
-  updateSessionMetadata(workspaceSlug, sessionId, { isFlagged: false });
+export function unflagSession(workspaceRootPath: string, sessionId: string): void {
+  updateSessionMetadata(workspaceRootPath, sessionId, { isFlagged: false });
 }
 
 /**
  * Set todo state for a session
  */
 export function setSessionTodoState(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   todoState: TodoState
 ): void {
-  updateSessionMetadata(workspaceSlug, sessionId, { todoState });
+  updateSessionMetadata(workspaceRootPath, sessionId, { todoState });
 }
 
 /**
  * Assign agent to a session
  */
 export function assignAgentToSession(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   agentSlug: string,
   agentName?: string
 ): void {
-  updateSessionMetadata(workspaceSlug, sessionId, { agentSlug, agentName });
+  updateSessionMetadata(workspaceRootPath, sessionId, { agentSlug, agentName });
 }
 
 // ============================================================
@@ -513,15 +513,15 @@ export function assignAgentToSession(
 /**
  * List flagged sessions
  */
-export function listFlaggedSessions(workspaceSlug: string): SessionMetadata[] {
-  return listSessions(workspaceSlug).filter(s => s.isFlagged === true);
+export function listFlaggedSessions(workspaceRootPath: string): SessionMetadata[] {
+  return listSessions(workspaceRootPath).filter(s => s.isFlagged === true);
 }
 
 /**
  * List completed sessions (done or cancelled)
  */
-export function listCompletedSessions(workspaceSlug: string): SessionMetadata[] {
-  return listSessions(workspaceSlug).filter(
+export function listCompletedSessions(workspaceRootPath: string): SessionMetadata[] {
+  return listSessions(workspaceRootPath).filter(
     s => s.todoState === 'done' || s.todoState === 'cancelled'
   );
 }
@@ -529,8 +529,8 @@ export function listCompletedSessions(workspaceSlug: string): SessionMetadata[] 
 /**
  * List inbox sessions (not done or cancelled)
  */
-export function listInboxSessions(workspaceSlug: string): SessionMetadata[] {
-  return listSessions(workspaceSlug).filter(
+export function listInboxSessions(workspaceRootPath: string): SessionMetadata[] {
+  return listSessions(workspaceRootPath).filter(
     s => s.todoState !== 'done' && s.todoState !== 'cancelled'
   );
 }
@@ -539,10 +539,10 @@ export function listInboxSessions(workspaceSlug: string): SessionMetadata[] {
  * List sessions by agent
  */
 export function listSessionsByAgent(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   agentSlug: string
 ): SessionMetadata[] {
-  return listSessions(workspaceSlug).filter(s => s.agentSlug === agentSlug);
+  return listSessions(workspaceRootPath).filter(s => s.agentSlug === agentSlug);
 }
 
 // ============================================================
@@ -591,8 +591,8 @@ function generatePlanFileName(plan: Plan, plansDir: string): string {
 /**
  * Ensure the plans directory exists
  */
-function ensurePlansDir(workspaceSlug: string, sessionId: string): string {
-  const plansDir = getSessionPlansPath(workspaceSlug, sessionId);
+function ensurePlansDir(workspaceRootPath: string, sessionId: string): string {
+  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId);
   if (!existsSync(plansDir)) {
     mkdirSync(plansDir, { recursive: true });
   }
@@ -712,12 +712,12 @@ export function parsePlanFromMarkdown(content: string, planId: string): Plan | n
  * Save a plan to a markdown file
  */
 export function savePlanToFile(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   plan: Plan,
   fileName?: string
 ): string {
-  const plansDir = ensurePlansDir(workspaceSlug, sessionId);
+  const plansDir = ensurePlansDir(workspaceRootPath, sessionId);
   const name = fileName || generatePlanFileName(plan, plansDir);
   const filePath = join(plansDir, `${name}.md`);
   const content = formatPlanAsMarkdown(plan);
@@ -730,11 +730,11 @@ export function savePlanToFile(
  * Load a plan from a markdown file by name
  */
 export function loadPlanFromFile(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   fileName: string
 ): Plan | null {
-  const plansDir = getSessionPlansPath(workspaceSlug, sessionId);
+  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId);
   const filePath = join(plansDir, `${fileName}.md`);
   if (!existsSync(filePath)) {
     return null;
@@ -769,10 +769,10 @@ export function loadPlanFromPath(filePath: string): Plan | null {
  * List all plan files in a session
  */
 export function listPlanFiles(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string
 ): Array<{ name: string; path: string; modifiedAt: number }> {
-  const plansDir = getSessionPlansPath(workspaceSlug, sessionId);
+  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId);
   if (!existsSync(plansDir)) {
     return [];
   }
@@ -801,11 +801,11 @@ export function listPlanFiles(
  * Delete a plan file
  */
 export function deletePlanFile(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string,
   fileName: string
 ): boolean {
-  const plansDir = getSessionPlansPath(workspaceSlug, sessionId);
+  const plansDir = getSessionPlansPath(workspaceRootPath, sessionId);
   const filePath = join(plansDir, `${fileName}.md`);
   if (existsSync(filePath)) {
     unlinkSync(filePath);
@@ -818,10 +818,10 @@ export function deletePlanFile(
  * Get the most recent plan file for a session
  */
 export function getMostRecentPlanFile(
-  workspaceSlug: string,
+  workspaceRootPath: string,
   sessionId: string
 ): { name: string; path: string } | null {
-  const files = listPlanFiles(workspaceSlug, sessionId);
+  const files = listPlanFiles(workspaceRootPath, sessionId);
   return files.length > 0 ? files[0]! : null;
 }
 
@@ -832,8 +832,8 @@ export function getMostRecentPlanFile(
 /**
  * Ensure attachments directory exists
  */
-export function ensureAttachmentsDir(workspaceSlug: string, sessionId: string): string {
-  const dir = getSessionAttachmentsPath(workspaceSlug, sessionId);
+export function ensureAttachmentsDir(workspaceRootPath: string, sessionId: string): string {
+  const dir = getSessionAttachmentsPath(workspaceRootPath, sessionId);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

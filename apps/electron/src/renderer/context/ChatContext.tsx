@@ -79,7 +79,6 @@ export interface ChatContextType {
 
   // Workspace
   onSelectWorkspace: (id: string) => void
-  onAddWorkspace: () => void
 
   // App actions
   onOpenSettings: () => void

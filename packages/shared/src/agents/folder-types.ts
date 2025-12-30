@@ -21,11 +21,7 @@ import type { McpServerConfig, ApiConfig } from './types.ts';
  * Agent source reference (where instructions came from)
  */
 export interface AgentSourceRef {
-  type: 'craft' | 'url' | 'local';
-
-  // For Craft documents
-  documentId?: string;
-  workspaceId?: string;
+  type: 'url' | 'local';
 
   // For URL sources
   url?: string;

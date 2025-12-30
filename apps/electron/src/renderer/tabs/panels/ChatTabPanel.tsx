@@ -149,11 +149,10 @@ export default function ChatTabPanel({ tab }: ChatTabPanelProps) {
     // Determine action based on banner state
     const getAction = () => {
       switch (agentState.bannerState) {
-        case 'setup':
-          return handleActivateAgent
         case 'error':
           return () => agentState.reload()
         default:
+          // For mcp_auth, api_auth - open setup wizard
           return handleOpenSetupWizard
       }
     }

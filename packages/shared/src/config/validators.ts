@@ -356,9 +356,7 @@ export const FolderSourceConfigSchema = z.object({
 // --- agents/{slug}/config.json ---
 
 const AgentSourceRefSchema = z.object({
-  type: z.enum(['craft', 'url', 'local']),
-  documentId: z.string().optional(),
-  workspaceId: z.string().optional(),
+  type: z.enum(['url', 'local']),
   url: z.string().url().optional(),
   lastSynced: z.number().int().min(0).optional(),
 });

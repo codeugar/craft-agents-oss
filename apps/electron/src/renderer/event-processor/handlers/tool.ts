@@ -5,7 +5,7 @@
  * Pure functions that return new state - no side effects.
  */
 
-import type { SessionState, ToolStartEvent, ToolResultEvent } from '../types'
+import type { SessionState, ToolStartEvent, ToolResultEvent, ParentUpdateEvent } from '../types'
 import type { Message } from '../../../shared/types'
 import {
   findToolMessage,
@@ -107,4 +107,31 @@ export function handleToolResult(
     session: appendMessage(session, toolMessage),
     streaming,
   }
+}
+
+/**
+ * Handle parent_update - deferred parent assignment
+ *
+ * When multiple parent tools (Tasks) are active at tool_start time, we can't
+ * determine the correct parent. This event assigns the correct parent once
+ * the tool result arrives with the authoritative parent_tool_use_id from SDK.
+ */
+export function handleParentUpdate(
+  state: SessionState,
+  event: ParentUpdateEvent
+): SessionState {
+  const { session, streaming } = state
+
+  const toolIndex = findToolMessage(session.messages, event.toolUseId)
+
+  if (toolIndex !== -1) {
+    // Update the tool message with correct parent
+    const updatedSession = updateMessageAt(session, toolIndex, {
+      parentToolUseId: event.parentToolUseId,
+    })
+    return { session: updatedSession, streaming }
+  }
+
+  // Tool not found - shouldn't happen, but return state unchanged
+  return state
 }
