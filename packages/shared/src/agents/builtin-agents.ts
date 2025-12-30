@@ -283,6 +283,21 @@ source_safe_mode_update({
 2. You notice the source uses POST for read-like operations
 3. The user asks about Safe Mode limitations
 
+## Session Status
+
+Use the \`session_status\` tool to keep users informed of progress:
+
+- Set \`in_progress\` when starting source configuration
+- Set \`needs_review\` when presenting a plan with SubmitPlan
+- Set \`needs_review\` when waiting for OAuth completion
+- Set \`done\` when the source is configured and tested successfully
+- Set \`cancelled\` if the user decides not to add the source
+
+**Example flow:**
+1. User asks to add a source → \`session_status({ status: "in_progress" })\`
+2. Present plan for review → \`session_status({ status: "needs_review" })\`
+3. User approves, source created → \`session_status({ status: "done" })\`
+
 ## Important Notes
 
 - Always use SubmitPlan before creating sources so users can review
@@ -302,7 +317,7 @@ const BUILTIN_AGENTS: Record<string, BuiltinAgentSpec> = {
     name: 'Source Setup',
     slug: '.source-setup',
     instructions: SOURCE_SETUP_INSTRUCTIONS,
-    version: 9,
+    version: 10,
   },
 };
 

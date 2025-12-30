@@ -14,9 +14,11 @@
  * - config_validate: Validate configuration files
  * - source_test: Test a source connection (MCP or API)
  * - oauth_trigger: Start OAuth authentication for a source
+ * - session_status: Update the session's workflow status
  */
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import type { SessionStatus } from '@craft-agent/core/types';
 import { z } from 'zod';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { getSessionPlansPath } from '../sessions/storage.ts';
@@ -119,6 +121,8 @@ export interface SessionScopedToolCallbacks {
   onSourceActivated?: (sourceSlug: string) => Promise<void>;
   /** Called when agents change (created/synced/deleted) - triggers reload of agent list */
   onAgentsChanged?: () => Promise<void>;
+  /** Called when session status changes - updates session in UI and persists */
+  onStatusChange?: (status: SessionStatus) => Promise<void>;
 }
 
 /**
@@ -2664,6 +2668,92 @@ export function createAgentDeleteTool(sessionId: string, workspaceSlug: string) 
 }
 
 // ============================================================
+// Session Status Tool
+// ============================================================
+
+/**
+ * Create a session-scoped session_status tool.
+ * Allows agents to update the conversation's workflow status.
+ */
+export function createSessionStatusTool(sessionId: string) {
+  return tool(
+    'session_status',
+    `Update the session's workflow status to reflect the current state of the conversation.
+
+**Available statuses:**
+- \`todo\`: Task is pending, not yet started
+- \`in_progress\`: Currently working on the task
+- \`needs_review\`: Work is complete but needs user review
+- \`done\`: Task is fully completed
+- \`cancelled\`: Task was cancelled or abandoned
+
+**When to update status:**
+- Set to \`in_progress\` when you start working on a task
+- Set to \`needs_review\` when you've completed work that needs user verification
+- Set to \`needs_review\` when asking for permission or requiring user input to continue
+- Set to \`done\` when the user confirms the task is complete
+- Set to \`cancelled\` if the user asks to stop or abandon the task
+
+**Examples:**
+- User asks "Write a new feature" → set \`in_progress\` while working
+- You finish implementation → set \`needs_review\`
+- You need user input or permission → set \`needs_review\`
+- User says "looks good" → set \`done\`
+- User says "never mind" → set \`cancelled\``,
+    {
+      status: z.enum(['todo', 'in_progress', 'needs_review', 'done', 'cancelled'])
+        .describe('The new status for this session'),
+      reason: z.string().optional()
+        .describe('Optional reason for the status change (shown in UI)'),
+    },
+    async (args) => {
+      debug('[session_status] Updating status:', args.status, args.reason);
+
+      const callbacks = getSessionScopedToolCallbacks(sessionId);
+
+      if (!callbacks?.onStatusChange) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Status update to '${args.status}' noted, but no handler is registered.`,
+          }],
+          isError: false,
+        };
+      }
+
+      try {
+        await callbacks.onStatusChange(args.status as SessionStatus);
+
+        const statusLabels: Record<string, string> = {
+          todo: 'To Do',
+          in_progress: 'In Progress',
+          needs_review: 'Needs Review',
+          done: 'Done',
+          cancelled: 'Cancelled',
+        };
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Session status updated to **${statusLabels[args.status]}**${args.reason ? `: ${args.reason}` : ''}.`,
+          }],
+          isError: false,
+        };
+      } catch (error) {
+        debug('[session_status] Error:', error);
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Error updating status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
+
+// ============================================================
 // Session-Scoped Tools Provider
 // ============================================================
 
@@ -2718,6 +2808,8 @@ export function getSessionScopedTools(sessionId: string, workspaceSlug: string, 
         createAgentListTool(sessionId, workspaceSlug),
         createAgentCreateTool(sessionId, workspaceSlug),
         createAgentDeleteTool(sessionId, workspaceSlug),
+        // Session status tool
+        createSessionStatusTool(sessionId),
       ],
     });
     sessionScopedToolsCache.set(cacheKey, cached);
