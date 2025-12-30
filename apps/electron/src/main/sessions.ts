@@ -31,7 +31,7 @@ import {
   type SessionMetadata,
   type TodoState,
 } from '@craft-agent/shared/sessions'
-import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource, createSourceService, type McpServerConfig, ensureWorkspaceCraftSource, getSourcesNeedingAuth } from '@craft-agent/shared/sources'
+import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource, createSourceService, type McpServerConfig, getSourcesNeedingAuth } from '@craft-agent/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { getAuthState } from '@craft-agent/shared/auth'
 import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath } from '@craft-agent/shared/agent'
@@ -224,21 +224,6 @@ export class SessionManager {
 
     console.log(`[SessionManager] Setting up ConfigWatcher for workspace: ${workspaceSlug}`)
 
-    // Ensure Craft source exists if workspace has MCP URL
-    // Find the workspace to get its mcpUrl
-    const workspaces = getWorkspaces()
-    const workspace = workspaces.find(w => getWorkspaceSlug(w) === workspaceSlug)
-    if (workspace?.mcpUrl) {
-      const craftSource = ensureWorkspaceCraftSource(workspaceSlug, workspace.mcpUrl)
-      if (craftSource) {
-        console.log(`[SessionManager] Ensured Craft source exists: ${craftSource.slug}`)
-        // Copy workspace OAuth credentials to Craft source if not already present
-        this.ensureCraftSourceCredentials(workspace, workspaceSlug).catch(err => {
-          console.error(`[SessionManager] Error copying credentials to Craft source:`, err)
-        })
-      }
-    }
-
     const callbacks: ConfigWatcherCallbacks = {
       onSourcesListChange: (sources: LoadedSource[]) => {
         console.log(`[SessionManager] Sources changed in ${workspaceSlug}, broadcasting update (${sources.length} sources)`)
@@ -279,48 +264,6 @@ export class SessionManager {
     if (!this.windowManager) return
 
     this.windowManager.broadcastToAll(IPC_CHANNELS.AGENTS_CHANGED)
-  }
-
-  /**
-   * Ensure Craft source has credentials copied from workspace OAuth
-   * This is called when the Craft source is created from workspace MCP URL
-   */
-  private async ensureCraftSourceCredentials(workspace: Workspace, workspaceSlug: string): Promise<void> {
-    const credManager = getCredentialManager()
-    await credManager.initialize()
-
-    // Check if source already has credentials
-    const existingCred = await credManager.get({
-      type: 'source_oauth',
-      workspaceSlug,
-      sourceSlug: 'craft',
-    })
-
-    if (existingCred?.value) {
-      console.log(`[SessionManager] Craft source already has credentials`)
-      return
-    }
-
-    // Get workspace OAuth credentials
-    const workspaceOAuth = await credManager.getWorkspaceOAuth(workspace.id)
-    if (!workspaceOAuth?.accessToken) {
-      console.log(`[SessionManager] No workspace OAuth to copy to Craft source`)
-      return
-    }
-
-    // Copy workspace OAuth to source OAuth
-    console.log(`[SessionManager] Copying workspace OAuth to Craft source credentials`)
-    await credManager.set(
-      { type: 'source_oauth', workspaceSlug, sourceSlug: 'craft' },
-      {
-        value: workspaceOAuth.accessToken,
-        refreshToken: workspaceOAuth.refreshToken,
-        expiresAt: workspaceOAuth.expiresAt,
-        clientId: workspaceOAuth.clientId,
-        tokenType: workspaceOAuth.tokenType,
-      }
-    )
-    console.log(`[SessionManager] Craft source credentials copied successfully`)
   }
 
   /**
