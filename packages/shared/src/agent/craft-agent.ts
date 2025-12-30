@@ -1084,8 +1084,65 @@ export class CraftAgent {
                 );
 
                 if (!result.allowed) {
-                  this.onDebug?.(`BLOCKED in safe mode: ${input.tool_name}`);
-                  return blockWithReason(result.reason);
+                  this.onDebug?.(`Safe mode: asking permission for ${input.tool_name}`);
+
+                  // Ask for permission instead of blocking outright
+                  const requestId = `safe-${input.tool_use_id}`;
+
+                  // Build description based on tool type
+                  let description = result.reason;
+                  if (input.tool_name === 'Bash') {
+                    const toolInput = input.tool_input as Record<string, unknown>;
+                    const command = toolInput?.command as string || '';
+                    description = `Execute bash command: ${command}`;
+                  } else if (input.tool_name === 'Write' || input.tool_name === 'Edit' || input.tool_name === 'MultiEdit') {
+                    const toolInput = input.tool_input as Record<string, unknown>;
+                    const filePath = toolInput?.file_path as string || '';
+                    description = `${input.tool_name}: ${filePath}`;
+                  } else if (input.tool_name.startsWith('mcp__')) {
+                    description = `MCP tool: ${input.tool_name}`;
+                  } else if (input.tool_name.startsWith('api_')) {
+                    const toolInput = input.tool_input as Record<string, unknown>;
+                    const method = (toolInput?.method as string) || 'POST';
+                    const path = (toolInput?.path as string) || '';
+                    description = `API ${method}: ${path}`;
+                  }
+
+                  const permissionPromise = new Promise<boolean>((resolve) => {
+                    this.pendingPermissions.set(requestId, {
+                      resolve,
+                      toolName: input.tool_name,
+                      command: description,
+                      baseCommand: input.tool_name,
+                    });
+                  });
+
+                  // Notify UI of permission request
+                  if (this.onPermissionRequest) {
+                    this.onPermissionRequest({
+                      requestId,
+                      toolName: input.tool_name,
+                      command: description,
+                      description: result.reason,
+                      type: 'safe_mode',
+                    });
+                  } else {
+                    // No permission handler - deny by default for safety
+                    this.pendingPermissions.delete(requestId);
+                    return blockWithReason(result.reason);
+                  }
+
+                  // Wait for user decision
+                  const allowed = await permissionPromise;
+                  this.pendingPermissions.delete(requestId);
+
+                  if (!allowed) {
+                    this.onDebug?.(`User denied safe mode permission for: ${input.tool_name}`);
+                    return blockWithReason(`User denied permission for ${input.tool_name} in Safe Mode.`);
+                  }
+
+                  this.onDebug?.(`User allowed safe mode permission for: ${input.tool_name}`);
+                  // Fall through to allow the tool
                 }
 
                 this.onDebug?.(`Allowed in safe mode: ${input.tool_name}`);
