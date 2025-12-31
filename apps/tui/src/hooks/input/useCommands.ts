@@ -66,11 +66,8 @@ export interface UseCommandsProps {
   safeMode: boolean;
   approvePlan: () => void;
   cancelPlan: () => void;
-  // Generic mode toggle API
-  setMode: (mode: Mode, enabled: boolean) => void;
-  // Legacy mode toggle aliases (deprecated - use setMode instead)
-  startSafeMode: () => void;
-  exitSafeModeAction: () => void;
+  // Permission mode control
+  setSessionPermissionMode: (mode: import('@craft-agent/shared/agent').PermissionMode) => void;
 
   // Exit handler
   exitApp: () => void;
@@ -120,9 +117,7 @@ export function useCommands(props: UseCommandsProps) {
     safeMode,
     approvePlan,
     cancelPlan,
-    setMode,
-    startSafeMode,
-    exitSafeModeAction,
+    setSessionPermissionMode,
     exitApp,
   } = props;
 
@@ -506,7 +501,7 @@ export function useCommands(props: UseCommandsProps) {
             };
           }
           // Start Safe Mode (blocks writes during exploration)
-          setMode('safe', true);
+          setSessionPermissionMode('safe');
           return {
             handled: true,
             message: {
@@ -604,7 +599,7 @@ export function useCommands(props: UseCommandsProps) {
               message: { content: 'No active safe mode to cancel.', type: 'error' },
             };
           }
-          setMode('safe', false);
+          setSessionPermissionMode('ask');
           return {
             handled: true,
             message: { content: 'Safe mode cancelled. Returned to normal mode.', type: 'system' },
@@ -820,7 +815,7 @@ export function useCommands(props: UseCommandsProps) {
     safeMode,
     approvePlan,
     cancelPlan,
-    setMode,
+    setSessionPermissionMode,
     exitApp,
   ]);
 

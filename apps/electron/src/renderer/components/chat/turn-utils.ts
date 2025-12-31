@@ -864,15 +864,8 @@ export function groupActivitiesByParent(
   for (const activity of activities) {
     if (activity.toolName === 'TaskOutput' && activity.status === 'completed') {
       const taskId = activity.toolInput?.task_id as string | undefined
-      console.log('[turn-utils] TaskOutput activity:', {
-        toolUseId: activity.toolUseId,
-        taskId,
-        hasContent: !!activity.content,
-        contentPreview: activity.content?.slice(0, 200),
-      })
       if (taskId) {
         const data = extractTaskOutputData(activity)
-        console.log('[turn-utils] Extracted TaskOutput data:', { taskId, data })
         if (data) {
           taskOutputByAgentId.set(taskId, data)
         }
@@ -887,21 +880,11 @@ export function groupActivitiesByParent(
     if (activity.toolName === 'Task' && activity.status === 'completed' && activity.content) {
       // Parse agent ID from Task result - look for "agentId: xyz" pattern
       const agentIdMatch = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
-      console.log('[turn-utils] Task activity:', {
-        toolUseId: activity.toolUseId,
-        hasContent: !!activity.content,
-        contentPreview: activity.content?.slice(0, 300),
-        agentIdMatch: agentIdMatch?.[1],
-      })
       if (agentIdMatch && activity.toolUseId) {
         taskToAgentId.set(activity.toolUseId, agentIdMatch[1])
       }
     }
   }
-  console.log('[turn-utils] Maps built:', {
-    taskOutputByAgentId: Array.from(taskOutputByAgentId.entries()),
-    taskToAgentId: Array.from(taskToAgentId.entries()),
-  })
 
   // Build the grouped result maintaining chronological order
   const result: (ActivityItem | ActivityGroup)[] = []

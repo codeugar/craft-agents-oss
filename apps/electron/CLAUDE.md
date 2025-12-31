@@ -453,6 +453,7 @@ The app uses Electron's IPC for main ↔ renderer communication:
 |---------|-----------|---------|
 | `sessions:*` | renderer → main | Session CRUD (create, delete, rename, archive) |
 | `sessions:sendMessage` | renderer → main | Send message with optional file attachments |
+| `sessions:setPermissionMode` | renderer → main | Set session permission mode ('safe', 'ask', 'allow-all') |
 | `workspaces:get` | renderer → main | Get configured workspaces |
 | `agents:*` | renderer → main | Get agents, refresh, check auth status |
 | `session:event` | main → renderer | Stream events (text_delta, tool_start, title_generated, etc.) |
@@ -463,6 +464,10 @@ The app uses Electron's IPC for main ↔ renderer communication:
 | `shell:openFile` | renderer → main | Open file in default application |
 | `theme:*` | both | Theme preference sync |
 | `deeplink:navigate` | main → renderer | Deep link tab navigation |
+| `sources:getSafeMode` | renderer → main | Get safe mode config for a source |
+| `sources:getMcpTools` | renderer → main | Get MCP tools with permission status |
+| `settings:getDefaultPermissionMode` | renderer → main | Get default permission mode for new sessions |
+| `settings:setDefaultPermissionMode` | renderer → main | Set default permission mode |
 
 **Event streaming pattern:** `sendMessage` returns immediately. Results stream via `SESSION_EVENT` channel.
 
@@ -794,6 +799,41 @@ Sessions support naming, archiving, and persistence:
 **Archive:**
 - Sessions can be archived/unarchived (moved between Inbox and Archive views)
 - Archived sessions are hidden from main inbox but preserved
+
+## Permission Modes
+
+Sessions use a three-level permission mode system to control tool execution:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `'safe'` | Blocks all write operations, never prompts | Read-only exploration, planning |
+| `'ask'` | Prompts user for bash commands (default) | Normal interactive use |
+| `'allow-all'` | Auto-approves all commands | Trusted automation |
+
+**Session-level:**
+```typescript
+// Set permission mode for a session
+await window.electronAPI.setPermissionMode(sessionId, 'safe')
+```
+
+**Default for new sessions:**
+```typescript
+const mode = await window.electronAPI.getDefaultPermissionMode()
+await window.electronAPI.setDefaultPermissionMode('ask')
+```
+
+**Session state:**
+```typescript
+interface Session {
+  permissionMode?: PermissionMode  // Default: 'ask'
+  // ...
+}
+```
+
+**Events:**
+- `permission_mode_changed` event sent when mode changes: `{ sessionId, permissionMode }`
+
+**UI:** The `ChatDisplay` component shows a permission mode badge with dropdown for cycling modes.
 
 ## Shell Operations
 

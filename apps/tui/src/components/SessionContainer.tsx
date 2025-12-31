@@ -164,17 +164,13 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     // Permission mode (safe/ask/allow-all)
     permissionMode,
     cycleMode,
-    // Legacy safe mode (deprecated - use permissionMode instead)
+    setSessionPermissionMode,
+    // Legacy safe mode flag (deprecated - use permissionMode instead)
     safeMode,
     // Plan handling
     activePlan,
     cancelPlan,
     approvePlan,
-    // Generic mode toggle API (legacy)
-    setMode,
-    // Legacy mode toggle aliases (deprecated - use cycleMode instead)
-    startSafeMode,
-    exitSafeModeAction,
     // Todos (from TodoWrite tool)
     todos,
     // Ultrathink mode
@@ -377,9 +373,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     safeMode,
     approvePlan,
     cancelPlan,
-    setMode,
-    startSafeMode,
-    exitSafeModeAction,
+    setSessionPermissionMode,
     exitApp,
   });
 
@@ -462,7 +456,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     switch (action.type) {
       case 'start':
         // Start Craft Agents safe mode (same as /safe and SHIFT+TAB)
-        startSafeMode();
+        setSessionPermissionMode('safe');
         addLocalMessage(PERMISSION_MODE_MESSAGES['safe'], 'system');
         sendMessage(PERMISSION_MODE_PROMPTS['safe']);
         break;
@@ -491,7 +485,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         }
         break;
     }
-  }, [activePlan, approvePlan, cancelPlan, closeModal, openModal, addLocalMessage, sendMessage, startSafeMode]);
+  }, [activePlan, approvePlan, cancelPlan, closeModal, openModal, addLocalMessage, sendMessage, setSessionPermissionMode]);
 
   // Plan selector handler - loads selected plan as attachment
   const handlePlanSelect = useCallback((plan: PlanFile) => {

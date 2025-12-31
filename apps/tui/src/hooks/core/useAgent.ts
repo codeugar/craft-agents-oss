@@ -179,6 +179,8 @@ export interface UseAgentResult {
   cancelPlan: () => void;
   approvePlan: () => void;
   shouldSuggestPlanning: (message: string) => boolean;
+  // Permission mode control
+  setSessionPermissionMode: (mode: PermissionMode) => void;
   // Todos (from TodoWrite tool)
   todos: TodoItem[];
   // Ultrathink mode (extended thinking)
@@ -590,6 +592,12 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     }
     debug(`[cycleMode] Cycling permission mode for session:`, session.id);
     return cyclePermissionMode(session.id);
+  }, [session?.id]);
+
+  // Set a specific permission mode
+  const setSessionPermissionMode = useCallback((mode: PermissionMode) => {
+    if (!session?.id) return;
+    setPermissionMode(session.id, mode);
   }, [session?.id]);
 
   const dismissTypedError = useCallback(() => {
@@ -1655,7 +1663,8 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     // Permission mode (safe/ask/allow-all)
     permissionMode,
     cycleMode,
-    // Legacy safe mode (deprecated - use permissionMode instead)
+    setSessionPermissionMode,
+    // Legacy safe mode flag (deprecated - use permissionMode instead)
     safeMode,
     // Plan handling
     activePlan,
