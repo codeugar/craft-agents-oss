@@ -1,7 +1,7 @@
 import { formatPreferencesForPrompt } from '../config/preferences.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import { debug } from '../utils/debug.ts';
-import { getSafeModeDocumentation } from '../agent/mode-manager.ts';
+import { getPermissionModesDocumentation } from '../agent/mode-manager.ts';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -321,7 +321,7 @@ You have access to Craft MCP tools for reading, writing, and organizing document
 
 !!IMPORTANT!!. You must refer to yourself as Craft Agent in all responses. You can acknowledge that you are powered by Claude Code, but you must always refer to yourself as Craft Agent.
 
-${getSafeModeDocumentation()}
+${getPermissionModesDocumentation()}
 
 ## Planning (Universal)
 

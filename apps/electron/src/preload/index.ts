@@ -14,7 +14,6 @@ const api: ElectronAPI = {
   setTodoState: (sessionId: string, state: import('../shared/types').TodoState) => ipcRenderer.invoke(IPC_CHANNELS.SET_TODO_STATE, sessionId, state),
   markSessionRead: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.MARK_SESSION_READ, sessionId),
   markSessionUnread: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.MARK_SESSION_UNREAD, sessionId),
-  setSkipPermissions: (sessionId: string, enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.SET_SKIP_PERMISSIONS, sessionId, enabled),
   respondToPermission: (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.RESPOND_TO_PERMISSION, sessionId, requestId, allowed, alwaysAllow),
   respondToCredential: (sessionId: string, requestId: string, response: import('../shared/types').CredentialResponse) =>
@@ -22,9 +21,9 @@ const api: ElectronAPI = {
   updateSessionWorkingDirectory: (sessionId: string, path: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.UPDATE_WORKING_DIRECTORY, sessionId, path),
 
-  // Mode management (generic for any mode type)
-  setMode: (sessionId: string, mode: import('../shared/types').Mode, enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SET_MODE, sessionId, mode, enabled),
+  // Permission mode management ('safe', 'ask', 'allow-all')
+  setPermissionMode: (sessionId: string, mode: import('../shared/types').PermissionMode) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SET_PERMISSION_MODE, sessionId, mode),
 
   // Workspace management
   getWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WORKSPACES),
@@ -187,19 +186,13 @@ const api: ElectronAPI = {
   setModel: (model: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MODEL, model),
 
   // Settings - New Session Defaults
-  getDefaultModes: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_DEFAULT_MODES),
-  setDefaultModes: (modes: import('../shared/types').Mode[]) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_DEFAULT_MODES, modes),
-  getDefaultSkipPermissions: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_DEFAULT_SKIP_PERMISSIONS),
-  setDefaultSkipPermissions: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_DEFAULT_SKIP_PERMISSIONS, enabled),
+  getDefaultPermissionMode: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_DEFAULT_PERMISSION_MODE),
+  setDefaultPermissionMode: (mode: import('../shared/types').PermissionMode) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_DEFAULT_PERMISSION_MODE, mode),
   getDefaultWorkingDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_DEFAULT_WORKING_DIR),
   setDefaultWorkingDirectory: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_DEFAULT_WORKING_DIR, path),
 
   // Folder dialog
   openFolderDialog: () => ipcRenderer.invoke(IPC_CHANNELS.OPEN_FOLDER_DIALOG),
-
-  // Settings - Safe Mode Behavior
-  getSafeModeBehavior: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_SAFE_MODE_BEHAVIOR),
-  setSafeModeBehavior: (behavior: import('../shared/types').SafeModeBehavior) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_SAFE_MODE_BEHAVIOR, behavior),
 
   // User Preferences
   readPreferences: () => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_READ),
@@ -212,6 +205,13 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.MARKDOWN_PREVIEW_GET_DATA, previewId),
   saveMarkdownPreview: (previewId: string, content: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MARKDOWN_PREVIEW_SAVE, previewId, content),
+  onMarkdownFileSaved: (callback: (data: { filePath: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { filePath: string }) => {
+      callback(data)
+    }
+    ipcRenderer.on(IPC_CHANNELS.MARKDOWN_PREVIEW_FILE_SAVED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MARKDOWN_PREVIEW_FILE_SAVED, handler)
+  },
 
   // Diff preview window
   openDiffPreview: (sessionId: string, diffId: string, data: import('../shared/types').DiffPreviewData) =>
@@ -252,6 +252,10 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_AGENT, workspaceId, agentSlug),
   promoteSource: (workspaceId: string, agentSlug: string, sourceSlug: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_PROMOTE, workspaceId, agentSlug, sourceSlug),
+  getSourceSafeModeConfig: (workspaceId: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_SAFE_MODE, workspaceId, sourceSlug),
+  getMcpTools: (workspaceId: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS, workspaceId, sourceSlug),
 
   // Session sources
   setSessionSources: (sessionId: string, sourceSlugs: string[]) =>

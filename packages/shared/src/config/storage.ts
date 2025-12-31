@@ -12,7 +12,7 @@ import {
 } from '../workspaces/storage.ts';
 import type { StoredAttachment } from '@craft-agent/core/types';
 import type { Plan } from '../agents/plan-types.ts';
-import type { Mode } from '../agent/mode-manager.ts';
+import type { PermissionMode } from '../agent/mode-manager.ts';
 
 /**
  * OAuth credentials from a fresh authentication flow.
@@ -57,9 +57,6 @@ export interface CumulativeUsage {
   lastUpdated: number;
 }
 
-/** Safe Mode behavior: block operations silently or ask for permission */
-export type SafeModeBehavior = 'block' | 'ask_permission';
-
 // Config stored in JSON file (credentials stored in encrypted file, not here)
 export interface StoredConfig {
   authType?: AuthType;
@@ -72,11 +69,8 @@ export interface StoredConfig {
   showCost?: boolean;  // Whether to show cost in status bar (only relevant for API Key auth)
   cumulativeUsage?: CumulativeUsage;  // Global cumulative cost across all workspaces
   // New session defaults
-  defaultModes?: Mode[];  // Modes enabled by default for new sessions (e.g., ['safe'])
-  defaultSkipPermissions?: boolean;  // Whether new sessions auto-approve permissions (default: false)
+  defaultPermissionMode?: PermissionMode;  // Default permission mode for new sessions ('safe', 'ask', 'allow-all')
   defaultWorkingDirectory?: string;  // Default working directory for new sessions
-  // Safe Mode behavior
-  safeModeBehavior?: SafeModeBehavior;  // How Safe Mode handles blocked operations: 'block' or 'ask_permission'
 }
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
@@ -96,8 +90,8 @@ export function loadStoredConfig(): StoredConfig | null {
     const content = readFileSync(CONFIG_FILE, 'utf-8');
     const config = JSON.parse(content) as StoredConfig;
 
-    // Must have workspaces array (legacy single-workspace configs not supported)
-    if (!Array.isArray(config.workspaces) || config.workspaces.length === 0) {
+    // Must have workspaces array
+    if (!Array.isArray(config.workspaces)) {
       return null;
     }
 
@@ -106,18 +100,6 @@ export function loadStoredConfig(): StoredConfig | null {
     if (!activeWorkspace) {
       // Default to first workspace
       config.activeWorkspaceId = config.workspaces[0]?.id || null;
-    }
-
-    // Auto-populate missing rootPath for legacy workspaces
-    let needsSave = false;
-    for (const workspace of config.workspaces) {
-      if (!workspace.rootPath) {
-        workspace.rootPath = join(CONFIG_DIR, 'workspaces', workspace.id);
-        needsSave = true;
-      }
-    }
-    if (needsSave) {
-      saveConfig(config);
     }
 
     // Ensure workspace folder structure exists for all workspaces
@@ -245,31 +227,22 @@ export function setShowCost(show: boolean): void {
 
 // New session defaults getters/setters
 
-export function getDefaultModes(): Mode[] {
+/**
+ * Get the default permission mode for new sessions.
+ * Defaults to 'safe' if not set.
+ */
+export function getDefaultPermissionMode(): PermissionMode {
   const config = loadStoredConfig();
-  // Backward compatibility: if old defaultSafeMode exists, convert it
-  if (config?.defaultModes === undefined && (config as { defaultSafeMode?: boolean })?.defaultSafeMode) {
-    return ['safe'];
-  }
-  return config?.defaultModes ?? [];
+  return config?.defaultPermissionMode ?? 'ask';
 }
 
-export function setDefaultModes(modes: Mode[]): void {
+/**
+ * Set the default permission mode for new sessions.
+ */
+export function setDefaultPermissionMode(mode: PermissionMode): void {
   const config = loadStoredConfig();
   if (!config) return;
-  config.defaultModes = modes;
-  saveConfig(config);
-}
-
-export function getDefaultSkipPermissions(): boolean {
-  const config = loadStoredConfig();
-  return config?.defaultSkipPermissions ?? false;
-}
-
-export function setDefaultSkipPermissions(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.defaultSkipPermissions = enabled;
+  config.defaultPermissionMode = mode;
   saveConfig(config);
 }
 
@@ -282,18 +255,6 @@ export function setDefaultWorkingDirectory(path: string): void {
   const config = loadStoredConfig();
   if (!config) return;
   config.defaultWorkingDirectory = path;
-  saveConfig(config);
-}
-
-export function getSafeModeBehavior(): SafeModeBehavior {
-  const config = loadStoredConfig();
-  return config?.safeModeBehavior ?? 'ask_permission'; // Default to ask permission (current behavior)
-}
-
-export function setSafeModeBehavior(behavior: SafeModeBehavior): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.safeModeBehavior = behavior;
   saveConfig(config);
 }
 

@@ -1,15 +1,14 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { rm, readFile } from 'fs/promises'
-import { CraftAgent, type AgentEvent, enterMode, exitMode, type Mode, isModeActive, unregisterSessionScopedToolCallbacks } from '@craft-agent/shared/agent'
+import { CraftAgent, type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks } from '@craft-agent/shared/agent'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
 import {
   loadStoredConfig,
   getWorkspaces,
   getWorkspaceByNameOrId,
-  getDefaultModes,
-  getDefaultSkipPermissions,
+  getDefaultPermissionMode,
   getDefaultWorkingDirectory,
   type Workspace,
 } from '@craft-agent/shared/config'
@@ -80,10 +79,8 @@ interface ManagedSession {
   agentId?: string
   agentName?: string
   isFlagged: boolean
-  // Advanced options (persisted per session)
-  skipPermissions: boolean
-  /** Active operational modes for this session */
-  activeModes: Mode[]
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
+  permissionMode?: PermissionMode
   // SDK session ID for conversation continuity
   sdkSessionId?: string
   // Track whether agent was successfully activated via AgentStateManager
@@ -581,8 +578,7 @@ export class SessionManager {
             agentId: storedSession.agentSlug,
             agentName: storedSession.agentName,
             isFlagged: storedSession.isFlagged ?? false,
-            skipPermissions: storedSession.skipPermissions ?? false,
-            activeModes: storedSession.activeModes ?? [],
+            permissionMode: storedSession.permissionMode,
             sdkSessionId: storedSession.sdkSessionId,
             tokenUsage: storedSession.tokenUsage,
             todoState: storedSession.todoState,
@@ -640,8 +636,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         agentSlug: managed.agentId,  // agentId in ManagedSession is actually the slug
         agentName: managed.agentName,
         isFlagged: managed.isFlagged,
-        skipPermissions: managed.skipPermissions,
-        activeModes: managed.activeModes,
+        permissionMode: managed.permissionMode,
         todoState: managed.todoState,
         enabledSourceSlugs: managed.enabledSourceSlugs,
         workingDirectory: managed.workingDirectory,
@@ -679,8 +674,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         agentId: m.agentId,
         agentName: m.agentName,
         isFlagged: m.isFlagged,
-        skipPermissions: m.skipPermissions,
-        activeModes: m.activeModes,
+        permissionMode: m.permissionMode,
         todoState: m.todoState,
         lastReadMessageId: m.lastReadMessageId,
         workingDirectory: m.workingDirectory,
@@ -696,8 +690,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     }
 
     // Get new session defaults from settings
-    const defaultSkipPerms = getDefaultSkipPermissions()
-    const defaultModes = getDefaultModes()
+    const defaultPermissionMode = getDefaultPermissionMode()
     const defaultWorkingDir = getDefaultWorkingDirectory()
     const workspaceRootPath = workspace.rootPath
 
@@ -719,8 +712,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const storedSession = createStoredSession(workspaceRootPath, {
       agentSlug: agentId,
       agentName,
-      skipPermissions: defaultSkipPerms,
-      activeModes: defaultModes,
+      permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
     })
 
@@ -739,8 +731,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       agentId,
       agentName,
       isFlagged: false,
-      skipPermissions: defaultSkipPerms,
-      activeModes: defaultModes,
+      permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
       // Auto-setup tracking
       sourcesNeedingAuth: sourcesNeedingAuth.length > 0 ? sourcesNeedingAuth : undefined,
@@ -749,8 +740,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
 
     this.sessions.set(storedSession.id, managed)
 
-    // Persist with agent info or if defaults are set
-    if (agentId || agentName || defaultSkipPerms || defaultModes.length > 0) {
+    // Persist with agent info or if non-default permission mode is set
+    if (agentId || agentName || defaultPermissionMode !== 'ask') {
       this.persistSession(managed)
     }
 
@@ -764,8 +755,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       agentId,
       agentName,
       isFlagged: false,
-      skipPermissions: defaultSkipPerms,
-      activeModes: defaultModes,
+      permissionMode: defaultPermissionMode,
       todoState: undefined,  // User-controlled, defaults to undefined (treated as 'todo')
       workingDirectory: defaultWorkingDir,
     }
@@ -827,22 +817,14 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         })
       }
 
-      // Set up mode change handlers (safe mode, and future modes)
-      managed.agent.onSafeModeChange = (enabled) => {
-        console.log(`[SessionManager] Mode 'safe' changed for session ${managed.id}:`, enabled)
-        // Update activeModes array
-        if (enabled) {
-          if (!managed.activeModes.includes('safe')) {
-            managed.activeModes = [...managed.activeModes, 'safe']
-          }
-        } else {
-          managed.activeModes = managed.activeModes.filter(m => m !== 'safe')
-        }
+      // Set up mode change handlers
+      managed.agent.onPermissionModeChange = (mode) => {
+        console.log(`[SessionManager] Permission mode changed for session ${managed.id}:`, mode)
+        managed.permissionMode = mode
         this.sendEvent({
-          type: 'mode_changed',
+          type: 'permission_mode_changed',
           sessionId: managed.id,
-          mode: 'safe',
-          enabled,
+          permissionMode: managed.permissionMode,
         }, managed.workspace.id)
       }
 
@@ -973,11 +955,11 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // NOTE: Agent definition is now applied in sendMessage() via AgentStateManager.activate()
       // This ensures proper state machine flow: extraction → auth checks → activation
 
-      // Apply session-scoped active modes to the newly created agent
+      // Apply session-scoped permission mode to the newly created agent
       // This ensures the UI toggle state is reflected in the agent before first message
-      for (const mode of managed.activeModes) {
-        enterMode(managed.id, mode)
-        console.log(`[SessionManager] Applied mode '${mode}' to agent for session ${managed.id}`)
+      if (managed.permissionMode) {
+        setPermissionMode(managed.id, managed.permissionMode)
+        console.log(`[SessionManager] Applied permission mode '${managed.permissionMode}' to agent for session ${managed.id}`)
       }
     }
     return managed.agent
@@ -1124,14 +1106,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // Persist to disk (undefined will clear the field)
       const workspaceRootPath = managed.workspace.rootPath
       updateSessionMetadata(workspaceRootPath, sessionId, { lastReadMessageId: undefined })
-    }
-  }
-
-  setSkipPermissions(sessionId: string, enabled: boolean): void {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.skipPermissions = enabled
-      this.persistSession(managed)
     }
   }
 
@@ -1515,32 +1489,21 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
   }
 
   /**
-   * Set a mode for a session (generic for any mode type)
+   * Set the permission mode for a session ('safe', 'ask', 'allow-all')
    */
-  setMode(sessionId: string, mode: Mode, enabled: boolean): void {
+  setSessionPermissionMode(sessionId: string, mode: PermissionMode): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      // Update activeModes array
-      if (enabled) {
-        if (!managed.activeModes.includes(mode)) {
-          managed.activeModes = [...managed.activeModes, mode]
-        }
-      } else {
-        managed.activeModes = managed.activeModes.filter(m => m !== mode)
-      }
+      // Update permission mode
+      managed.permissionMode = mode
 
       // Update the mode state for this specific session via mode manager
-      if (enabled) {
-        enterMode(sessionId, mode)
-      } else {
-        exitMode(sessionId, mode)
-      }
+      setPermissionMode(sessionId, mode)
 
       this.sendEvent({
-        type: 'mode_changed',
+        type: 'permission_mode_changed',
         sessionId: managed.id,
-        mode,
-        enabled,
+        permissionMode: mode,
       }, managed.workspace.id)
       // Persist to disk
       this.persistSession(managed)

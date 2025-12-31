@@ -239,8 +239,8 @@ Use \`source_safe_mode_update\` to create rules:
 \`\`\`
 source_safe_mode_update({
   sourceSlug: "linkedin-rapidapi",
-  allowedApiMethods: [
-    { method: "POST", comment: "Search endpoints use POST for queries" }
+  allowedApiEndpoints: [
+    { method: "POST", path: "/.*", comment: "API uses POST for all operations" }
   ]
 })
 \`\`\`
@@ -251,8 +251,9 @@ source_safe_mode_update({
 \`\`\`
 source_safe_mode_update({
   sourceSlug: "linkedin-rapidapi",
-  allowedApiMethods: [
-    { method: "POST", comment: "API uses POST for search queries" }
+  allowedApiEndpoints: [
+    { method: "POST", path: "^/search", comment: "Search endpoint uses POST" },
+    { method: "POST", path: "^/query", comment: "Query endpoint uses POST" }
   ]
 })
 \`\`\`

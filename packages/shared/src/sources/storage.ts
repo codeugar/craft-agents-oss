@@ -94,30 +94,19 @@ export function loadAgentSourceConfig(
 }
 
 /**
- * Options for saveSourceConfig
- */
-export interface SaveSourceConfigOptions {
-  /** Skip validation (use for migrations or debugging only) */
-  skipValidation?: boolean;
-}
-
-/**
  * Save source config.json
- * @throws Error if config is invalid (unless skipValidation is true)
+ * @throws Error if config is invalid
  */
 export function saveSourceConfig(
   workspaceRootPath: string,
-  config: FolderSourceConfig,
-  options?: SaveSourceConfigOptions
+  config: FolderSourceConfig
 ): void {
   // Validate config before writing
-  if (!options?.skipValidation) {
-    const validation = validateSourceConfig(config);
-    if (!validation.valid) {
-      const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
-      debug('[saveSourceConfig] Validation failed:', errorMessages);
-      throw new Error(`Invalid source config: ${errorMessages}`);
-    }
+  const validation = validateSourceConfig(config);
+  if (!validation.valid) {
+    const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
+    debug('[saveSourceConfig] Validation failed:', errorMessages);
+    throw new Error(`Invalid source config: ${errorMessages}`);
   }
 
   const dir = getSourcePath(workspaceRootPath, config.slug);
@@ -135,17 +124,14 @@ export function saveSourceConfig(
 export function saveAgentSourceConfig(
   workspaceRootPath: string,
   agentSlug: string,
-  config: FolderSourceConfig,
-  options?: SaveSourceConfigOptions
+  config: FolderSourceConfig
 ): void {
   // Validate config before writing
-  if (!options?.skipValidation) {
-    const validation = validateSourceConfig(config);
-    if (!validation.valid) {
-      const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
-      debug('[saveAgentSourceConfig] Validation failed:', errorMessages);
-      throw new Error(`Invalid source config: ${errorMessages}`);
-    }
+  const validation = validateSourceConfig(config);
+  if (!validation.valid) {
+    const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
+    debug('[saveAgentSourceConfig] Validation failed:', errorMessages);
+    throw new Error(`Invalid source config: ${errorMessages}`);
   }
 
   const dir = getAgentSourcePath(workspaceRootPath, agentSlug, config.slug);
@@ -554,10 +540,10 @@ export function generateSourceSlug(workspaceRootPath: string, name: string): str
 /**
  * Create a new source in a workspace
  */
-export function createSource(
+export async function createSource(
   workspaceRootPath: string,
   input: CreateSourceInput
-): FolderSourceConfig {
+): Promise<FolderSourceConfig> {
   const slug = generateSourceSlug(workspaceRootPath, input.name);
   const now = Date.now();
 
@@ -591,9 +577,18 @@ export function createSource(
       break;
   }
 
-  // Add icon URL if provided
+  // Add icon URL - user override or auto-fetch high-res favicon
   if (input.iconUrl) {
-    config.iconUrl = input.iconUrl;
+    config.iconUrl = input.iconUrl;  // User provided
+  } else {
+    // Auto-fetch high-res favicon from service URL
+    const serviceUrl = input.type === 'api' ? input.api?.baseUrl :
+                       input.type === 'mcp' ? input.mcp?.url : null;
+    if (serviceUrl) {
+      const { getHighQualityLogoUrl } = await import('../utils/logo.js');
+      const logoUrl = await getHighQualityLogoUrl(serviceUrl);
+      config.iconUrl = logoUrl ?? undefined;  // Convert null to undefined
+    }
   }
 
   saveSourceConfig(workspaceRootPath, config);
@@ -682,11 +677,11 @@ export function generateAgentSourceSlug(
 /**
  * Create a new agent-scoped source
  */
-export function createAgentSource(
+export async function createAgentSource(
   workspaceRootPath: string,
   agentSlug: string,
   input: CreateSourceInput
-): FolderSourceConfig {
+): Promise<FolderSourceConfig> {
   const slug = generateAgentSourceSlug(workspaceRootPath, agentSlug, input.name);
   const now = Date.now();
 
@@ -720,9 +715,18 @@ export function createAgentSource(
       break;
   }
 
-  // Add icon URL if provided
+  // Add icon URL - user override or auto-fetch high-res favicon
   if (input.iconUrl) {
-    config.iconUrl = input.iconUrl;
+    config.iconUrl = input.iconUrl;  // User provided
+  } else {
+    // Auto-fetch high-res favicon from service URL
+    const serviceUrl = input.type === 'api' ? input.api?.baseUrl :
+                       input.type === 'mcp' ? input.mcp?.url : null;
+    if (serviceUrl) {
+      const { getHighQualityLogoUrl } = await import('../utils/logo.js');
+      const logoUrl = await getHighQualityLogoUrl(serviceUrl);
+      config.iconUrl = logoUrl ?? undefined;  // Convert null to undefined
+    }
   }
 
   saveAgentSourceConfig(workspaceRootPath, agentSlug, config);
@@ -822,13 +826,12 @@ export function loadSourceConfigWithFallback(
 export function saveSourceConfigWithContext(
   workspaceRootPath: string,
   config: FolderSourceConfig,
-  context: { isAgentScoped: boolean; agentSlug?: string },
-  options?: SaveSourceConfigOptions
+  context: { isAgentScoped: boolean; agentSlug?: string }
 ): void {
   if (context.isAgentScoped && context.agentSlug) {
-    saveAgentSourceConfig(workspaceRootPath, context.agentSlug, config, options);
+    saveAgentSourceConfig(workspaceRootPath, context.agentSlug, config);
   } else {
-    saveSourceConfig(workspaceRootPath, config, options);
+    saveSourceConfig(workspaceRootPath, config);
   }
 }
 

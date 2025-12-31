@@ -17,7 +17,7 @@ import type {
   PermissionRequest,
   CredentialRequest,
   CredentialResponse,
-  Mode,
+  PermissionMode,
   TodoState,
   LoadedSource,
 } from '../../shared/types'
@@ -40,7 +40,7 @@ export interface ChatContextType {
   /** All enabled sources for this workspace - provided by Chat component */
   enabledSources?: LoadedSource[]
 
-  // Unified session options (replaces ultrathinkSessions, skipPermissionsSessions, sessionModes)
+  // Unified session options (replaces ultrathinkSessions and sessionModes)
   /** All session-scoped options in one map. Use useSessionOptionsFor() hook for easy access. */
   sessionOptions: Map<string, SessionOptions>
 
@@ -169,18 +169,17 @@ export function usePendingCredential(sessionId: string): CredentialRequest | und
  * This is the primary way components should access session options.
  *
  * Usage:
- *   const { options, setMode, toggleUltrathink } = useSessionOptionsFor(sessionId)
+ *   const { options, setPermissionMode, toggleUltrathink } = useSessionOptionsFor(sessionId)
  *   if (options.ultrathinkEnabled) { ... }
- *   setMode('safe', true)
+ *   setPermissionMode('safe')
  */
 export function useSessionOptionsFor(sessionId: string): {
   options: SessionOptions
   setOption: <K extends keyof SessionOptions>(key: K, value: SessionOptions[K]) => void
   setOptions: (updates: SessionOptionUpdates) => void
   toggleUltrathink: () => void
-  toggleSkipPermissions: () => void
-  setMode: (mode: Mode, enabled: boolean) => void
-  isModeActive: (mode: Mode) => boolean
+  setPermissionMode: (mode: PermissionMode) => void
+  isSafeModeActive: () => boolean
 } {
   const { sessionOptions, onSessionOptionsChange } = useChatContext()
 
@@ -201,33 +200,21 @@ export function useSessionOptionsFor(sessionId: string): {
     setOption('ultrathinkEnabled', !options.ultrathinkEnabled)
   }, [options.ultrathinkEnabled, setOption])
 
-  const toggleSkipPermissions = useCallback(() => {
-    setOption('skipPermissions', !options.skipPermissions)
-  }, [options.skipPermissions, setOption])
+  const setPermissionMode = useCallback((mode: PermissionMode) => {
+    setOption('permissionMode', mode)
+  }, [setOption])
 
-  const setMode = useCallback((mode: Mode, enabled: boolean) => {
-    const currentModes = options.activeModes
-    if (enabled) {
-      if (!currentModes.includes(mode)) {
-        setOption('activeModes', [...currentModes, mode])
-      }
-    } else {
-      setOption('activeModes', currentModes.filter(m => m !== mode))
-    }
-  }, [options.activeModes, setOption])
-
-  const isModeActive = useCallback((mode: Mode) => {
-    return options.activeModes.includes(mode)
-  }, [options.activeModes])
+  const isSafeModeActive = useCallback(() => {
+    return options.permissionMode === 'safe'
+  }, [options.permissionMode])
 
   return {
     options,
     setOption,
     setOptions,
     toggleUltrathink,
-    toggleSkipPermissions,
-    setMode,
-    isModeActive,
+    setPermissionMode,
+    isSafeModeActive,
   }
 }
 

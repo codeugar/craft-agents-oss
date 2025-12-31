@@ -13,9 +13,10 @@ import type {
   StoredAttachment as CoreStoredAttachment,
 } from '@craft-agent/core/types';
 
-// Import Mode type from shared package for generic mode handling
-import type { Mode } from '@craft-agent/shared/agent';
-export type { Mode };
+// Import mode types from dedicated subpath export (avoids pulling in SDK)
+import type { Mode, PermissionMode } from '@craft-agent/shared/agent/modes';
+export type { Mode, PermissionMode };
+export { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/modes';
 
 export type {
   CoreMessage as Message,
@@ -29,13 +30,14 @@ export type {
 };
 
 // Import and re-export agent types for Info dialog
+// Use types-only subpath to avoid pulling in debug.ts (Node.js fs dependency)
 import type {
   SubAgentDefinition,
   McpServerConfig,
   ApiConfig,
   AgentStatus,
   AgentActivateOptions,
-} from '@craft-agent/shared/agents';
+} from '@craft-agent/shared/agents/types';
 
 export type {
   SubAgentDefinition,
@@ -46,12 +48,13 @@ export type {
 };
 
 // Import and re-export auth types for onboarding
-import type { AuthState, SetupNeeds } from '@craft-agent/shared/auth';
-import type { AuthType, SafeModeBehavior } from '@craft-agent/shared/config';
-export type { AuthState, SetupNeeds, AuthType, SafeModeBehavior };
+// Use types-only subpaths to avoid pulling in Node.js dependencies
+import type { AuthState, SetupNeeds } from '@craft-agent/shared/auth/types';
+import type { AuthType } from '@craft-agent/shared/config/types';
+export type { AuthState, SetupNeeds, AuthType };
 
 // Import source types for session source selection
-import type { LoadedSource, FolderSourceConfig, SourceConnectionStatus } from '@craft-agent/shared/sources';
+import type { LoadedSource, FolderSourceConfig, SourceConnectionStatus } from '@craft-agent/shared/sources/types';
 export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
 export { generateMessageId } from '@craft-agent/core/types';
 
@@ -78,6 +81,24 @@ export interface McpValidationResult {
   success: boolean
   error?: string
   tools?: string[]
+}
+
+/**
+ * MCP tool with safe mode permission status
+ */
+export interface McpToolWithPermission {
+  name: string
+  description?: string
+  allowed: boolean  // true if allowed in safe mode, false if requires permission
+}
+
+/**
+ * Result of fetching MCP tools with permission status
+ */
+export interface McpToolsResult {
+  success: boolean
+  error?: string
+  tools?: McpToolWithPermission[]
 }
 
 /**
@@ -300,9 +321,8 @@ export interface Session {
   agentName?: string
   isFlagged?: boolean
   // Advanced options (persisted per session)
-  skipPermissions?: boolean
-  /** Active operational modes for this session (e.g., 'safe' for read-only exploration) */
-  activeModes?: Mode[]
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
+  permissionMode?: PermissionMode
   // Todo state (user-controlled) - determines inbox vs completed
   todoState?: TodoState
   // Read/unread tracking - ID of last message user has read
@@ -355,8 +375,8 @@ export type SessionEvent =
   | { type: 'agent_status'; sessionId: string; status: AgentStatus }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }
   | { type: 'credential_request'; sessionId: string; request: CredentialRequest }
-  // Mode events (generic for any mode type)
-  | { type: 'mode_changed'; sessionId: string; mode: Mode; enabled: boolean }
+  // Permission mode events
+  | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
   | { type: 'plan_submitted'; sessionId: string; message: CoreMessage }
   | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
   // Source events
@@ -379,7 +399,6 @@ export const IPC_CHANNELS = {
   CANCEL_PROCESSING: 'sessions:cancel',
   FLAG_SESSION: 'sessions:flag',
   UNFLAG_SESSION: 'sessions:unflag',
-  SET_SKIP_PERMISSIONS: 'sessions:setSkipPermissions',
   SET_TODO_STATE: 'sessions:setTodoState',
   MARK_SESSION_READ: 'sessions:markRead',
   MARK_SESSION_UNREAD: 'sessions:markUnread',
@@ -387,8 +406,8 @@ export const IPC_CHANNELS = {
   RESPOND_TO_CREDENTIAL: 'sessions:respondToCredential',
   UPDATE_WORKING_DIRECTORY: 'sessions:updateWorkingDirectory',
 
-  // Mode management (generic for any mode type)
-  SET_MODE: 'sessions:setMode',
+  // Permission mode management ('safe', 'ask', 'allow-all')
+  SET_PERMISSION_MODE: 'sessions:setPermissionMode',
 
   // Workspace management
   GET_WORKSPACES: 'workspaces:get',
@@ -489,19 +508,13 @@ export const IPC_CHANNELS = {
   SETTINGS_SET_MODEL: 'settings:setModel',
 
   // Settings - New Session Defaults
-  SETTINGS_GET_DEFAULT_MODES: 'settings:getDefaultModes',
-  SETTINGS_SET_DEFAULT_MODES: 'settings:setDefaultModes',
-  SETTINGS_GET_DEFAULT_SKIP_PERMISSIONS: 'settings:getDefaultSkipPermissions',
-  SETTINGS_SET_DEFAULT_SKIP_PERMISSIONS: 'settings:setDefaultSkipPermissions',
+  SETTINGS_GET_DEFAULT_PERMISSION_MODE: 'settings:getDefaultPermissionMode',
+  SETTINGS_SET_DEFAULT_PERMISSION_MODE: 'settings:setDefaultPermissionMode',
   SETTINGS_GET_DEFAULT_WORKING_DIR: 'settings:getDefaultWorkingDir',
   SETTINGS_SET_DEFAULT_WORKING_DIR: 'settings:setDefaultWorkingDir',
 
   // Folder dialog (for selecting working directory)
   OPEN_FOLDER_DIALOG: 'dialog:openFolder',
-
-  // Settings - Safe Mode Behavior
-  SETTINGS_GET_SAFE_MODE_BEHAVIOR: 'settings:getSafeModeBehavior',
-  SETTINGS_SET_SAFE_MODE_BEHAVIOR: 'settings:setSafeModeBehavior',
 
   // User Preferences
   PREFERENCES_READ: 'preferences:read',
@@ -528,10 +541,16 @@ export const IPC_CHANNELS = {
   SESSION_SET_SOURCES: 'sessions:setSources',
   SESSION_GET_SOURCES: 'sessions:getSources',
 
+  // Source safe mode config
+  SOURCES_GET_SAFE_MODE: 'sources:getSafeMode',
+  // MCP tools listing
+  SOURCES_GET_MCP_TOOLS: 'sources:getMcpTools',
+
   // Markdown preview window
   MARKDOWN_PREVIEW_OPEN: 'markdownPreview:open',
   MARKDOWN_PREVIEW_GET_DATA: 'markdownPreview:getData',
   MARKDOWN_PREVIEW_SAVE: 'markdownPreview:save',
+  MARKDOWN_PREVIEW_FILE_SAVED: 'markdownPreview:fileSaved', // Broadcast: { filePath: string }
 
   // Diff preview window
   DIFF_PREVIEW_OPEN: 'diffPreview:open',
@@ -640,11 +659,10 @@ export interface ElectronAPI {
   markSessionUnread(sessionId: string): Promise<void>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
-  setSkipPermissions(sessionId: string, enabled: boolean): Promise<void>
   updateSessionWorkingDirectory(sessionId: string, path: string): Promise<void>
 
-  // Mode management (generic for any mode type)
-  setMode(sessionId: string, mode: Mode, enabled: boolean): Promise<void>
+  // Permission mode management ('safe', 'ask', 'allow-all')
+  setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
 
   // Workspace management
   getWorkspaces(): Promise<Workspace[]>
@@ -750,19 +768,13 @@ export interface ElectronAPI {
   setModel(model: string): Promise<void>
 
   // Settings - New Session Defaults
-  getDefaultModes(): Promise<Mode[]>
-  setDefaultModes(modes: Mode[]): Promise<void>
-  getDefaultSkipPermissions(): Promise<boolean>
-  setDefaultSkipPermissions(enabled: boolean): Promise<void>
+  getDefaultPermissionMode(): Promise<PermissionMode>
+  setDefaultPermissionMode(mode: PermissionMode): Promise<void>
   getDefaultWorkingDirectory(): Promise<string>
   setDefaultWorkingDirectory(path: string): Promise<void>
 
   // Folder dialog
   openFolderDialog(): Promise<string | null>
-
-  // Settings - Safe Mode Behavior
-  getSafeModeBehavior(): Promise<SafeModeBehavior>
-  setSafeModeBehavior(behavior: SafeModeBehavior): Promise<void>
 
   // User Preferences
   readPreferences(): Promise<{ content: string; exists: boolean }>
@@ -799,6 +811,8 @@ export interface ElectronAPI {
   startSourceOAuth(workspaceSlug: string, sourceSlug: string): Promise<{ success: boolean; error?: string; accessToken?: string }>
   saveSourceCredentials(workspaceSlug: string, sourceSlug: string, credential: string): Promise<void>
   promoteSource(workspaceSlug: string, agentSlug: string, sourceSlug: string): Promise<void>
+  getSourceSafeModeConfig(workspaceSlug: string, sourceSlug: string): Promise<import('@craft-agent/shared/agent').SafeModeCustomConfig | null>
+  getMcpTools(workspaceSlug: string, sourceSlug: string): Promise<McpToolsResult>
 
   // Session sources
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>

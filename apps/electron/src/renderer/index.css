@@ -561,6 +561,25 @@ html[data-font="system"] {
 }
 
 /* =============================================================================
+   SOURCES LIST - SEPARATOR VISIBILITY
+
+   Hide separators when source items are hovered or selected.
+   Same logic as session list.
+============================================================================= */
+
+/* Hide own separator when item is hovered or selected */
+.source-item:hover > .source-separator,
+.source-item[data-selected] > .source-separator {
+  opacity: 0;
+}
+
+/* Hide next item's separator when current item is hovered or selected */
+.source-item:hover + .source-item > .source-separator,
+.source-item[data-selected] + .source-item > .source-separator {
+  opacity: 0;
+}
+
+/* =============================================================================
    LOADING INDICATOR - SPINKIT GRID SPINNER
 
    3x3 grid spinner based on SpinKit Grid.

@@ -27,30 +27,26 @@ export {
 
 // Export mode-manager - Centralized mode management
 export {
-  // Generic Mode API
-  isModeActive,
-  enterMode,
-  exitMode,
-  toggleMode,
-  getActiveModes,
+  // Permission Mode API (primary)
+  getPermissionMode,
+  setPermissionMode,
+  cyclePermissionMode,
+  subscribeModeChanges,
+  PERMISSION_MODE_ORDER,
+  PERMISSION_MODE_CONFIG,
+  type PermissionMode,
   getModeState,
   initializeModeState,
   cleanupModeState,
   // Tool blocking (centralized)
   shouldAllowToolInMode,
   blockWithReason,
-  getBlockReason,
   // Session state (lightweight per-message injection)
   getSessionState,
   formatSessionState,
-  // Mode context for user messages (deprecated - use formatSessionState)
-  getModeContext,
-  // Mode configurations
-  MODE_CONFIGS,
   // Mode manager singleton (for advanced use cases)
   modeManager,
   // Types
-  type Mode,
   type ModeState,
   type ModeCallbacks,
   type ModeConfig,

@@ -19,7 +19,7 @@ import { Markdown } from '@/components/markdown'
 import { Spinner } from '@/components/ui/loading-indicator'
 import { stripMarkdown } from '@/utils/text'
 import { CircleCheckFilled } from '@/components/icons/TodoStateIcons'
-import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, type ActivityGroup } from './turn-utils'
+import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, type ActivityGroup } from './turn-utils'
 import { expandedTurnsAtomFamily, expandedActivityGroupsAtomFamily } from '@/atoms/sessions'
 
 // ============================================================================
@@ -648,9 +648,9 @@ function ActivityGroupRow({ group, sessionId, onOpenActivityDetails, animationIn
         {/* Status icon - aligned with tool call icons */}
         <ActivityStatusIcon status={group.parent.status} />
 
-        {/* Tool count badge - same style as TurnCard header */}
-        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium tabular-nums">
-          {group.children.length}
+        {/* Subagent type badge */}
+        <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium">
+          {subagentType || 'Task'}
         </span>
 
         {/* Task description or fallback */}
@@ -661,10 +661,21 @@ function ActivityGroupRow({ group, sessionId, onOpenActivityDetails, animationIn
           {description || 'Task'}
         </span>
 
-        {/* Subagent type badge - same style as TurnCard header badge */}
-        {subagentType && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-white dark:bg-zinc-800 shadow-minimal text-[10px] font-medium">
-            {subagentType}
+        {/* Duration and token stats from TaskOutput (only when complete) */}
+        {isComplete && group.taskOutputData && (
+          <span className="shrink-0 text-muted-foreground/60 tabular-nums">
+            {group.taskOutputData.durationMs !== undefined && (
+              <span>{formatDuration(group.taskOutputData.durationMs)}</span>
+            )}
+            {group.taskOutputData.durationMs !== undefined &&
+              (group.taskOutputData.inputTokens !== undefined || group.taskOutputData.outputTokens !== undefined) && (
+              <span className="mx-1">·</span>
+            )}
+            {(group.taskOutputData.inputTokens !== undefined || group.taskOutputData.outputTokens !== undefined) && (
+              <span>
+                {formatTokens((group.taskOutputData.inputTokens || 0) + (group.taskOutputData.outputTokens || 0))} tokens
+              </span>
+            )}
           </span>
         )}
 

@@ -27,7 +27,7 @@ import type {
   SubAgentDefinition,
   McpServerConfig,
   ApiConfig,
-} from '@craft-agent/shared/agents'
+} from '@craft-agent/shared/agents/types'
 import type { BannerState } from '../components/chat/SetupAuthBanner'
 
 // Renderer-side cache for agent status to prevent banner flash on session switch

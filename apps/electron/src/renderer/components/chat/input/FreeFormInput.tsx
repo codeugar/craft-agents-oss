@@ -33,6 +33,8 @@ import { AttachmentPreview } from '../AttachmentPreview'
 import { MODELS, getModelDisplayName } from '@config/models'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import type { FileAttachment, LoadedSource } from '../../../../shared/types'
+import type { PermissionMode } from '@craft-agent/shared/agent/modes'
+import { PERMISSION_MODE_ORDER } from '@craft-agent/shared/agent/modes'
 
 export interface FreeFormInputProps {
   /** Placeholder text for the textarea */
@@ -54,10 +56,8 @@ export interface FreeFormInputProps {
   // Advanced options
   ultrathinkEnabled?: boolean
   onUltrathinkChange?: (enabled: boolean) => void
-  skipPermissions?: boolean
-  onSkipPermissionsChange?: (enabled: boolean) => void
-  safeModeEnabled?: boolean
-  onSafeModeChange?: (enabled: boolean) => void
+  permissionMode?: PermissionMode
+  onPermissionModeChange?: (mode: PermissionMode) => void
   // Controlled input value (for persisting across mode switches and conversation changes)
   /** Current input value - if provided, component becomes controlled */
   inputValue?: string
@@ -105,10 +105,8 @@ export function FreeFormInput({
   onModelChange,
   ultrathinkEnabled = false,
   onUltrathinkChange,
-  skipPermissions = false,
-  onSkipPermissionsChange,
-  safeModeEnabled = false,
-  onSafeModeChange,
+  permissionMode = 'ask',
+  onPermissionModeChange,
   inputValue,
   onInputChange,
   unstyled = false,
@@ -222,15 +220,17 @@ export function FreeFormInput({
         toast.error('No details provided')
         return
       }
-      // Disable safe mode first
-      onSafeModeChange?.(false)
+      // Switch to ask mode if in safe mode (allow execution)
+      if (permissionMode === 'safe') {
+        onPermissionModeChange?.('ask')
+      }
       // Submit the message
       onSubmit(text, undefined)
     }
 
     window.addEventListener('craft:approve-plan', handleApprovePlan as EventListener)
     return () => window.removeEventListener('craft:approve-plan', handleApprovePlan as EventListener)
-  }, [sessionId, onSafeModeChange, onSubmit])
+  }, [sessionId, permissionMode, onPermissionModeChange, onSubmit])
 
   // Listen for craft:paste-files events (for global paste when input not focused)
   React.useEffect(() => {
@@ -272,18 +272,21 @@ export function FreeFormInput({
   // Build active commands list for slash command menu
   const activeCommands = React.useMemo(() => {
     const active: SlashCommandId[] = []
-    if (safeModeEnabled) active.push('safe')
+    // Add the currently active permission mode
+    if (permissionMode === 'safe') active.push('safe')
+    else if (permissionMode === 'ask') active.push('ask')
+    else if (permissionMode === 'allow-all') active.push('allow-all')
     if (ultrathinkEnabled) active.push('ultrathink')
-    if (skipPermissions) active.push('skip-permissions')
     return active
-  }, [safeModeEnabled, ultrathinkEnabled, skipPermissions])
+  }, [permissionMode, ultrathinkEnabled])
 
   // Handle slash command selection
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
-    if (commandId === 'safe') onSafeModeChange?.(!safeModeEnabled)
+    if (commandId === 'safe') onPermissionModeChange?.('safe')
+    else if (commandId === 'ask') onPermissionModeChange?.('ask')
+    else if (commandId === 'allow-all') onPermissionModeChange?.('allow-all')
     else if (commandId === 'ultrathink') onUltrathinkChange?.(!ultrathinkEnabled)
-    else if (commandId === 'skip-permissions') onSkipPermissionsChange?.(!skipPermissions)
-  }, [safeModeEnabled, ultrathinkEnabled, skipPermissions, onSafeModeChange, onUltrathinkChange, onSkipPermissionsChange])
+  }, [permissionMode, ultrathinkEnabled, onPermissionModeChange, onUltrathinkChange])
 
   // Inline slash command hook
   const inlineSlash = useInlineSlashCommand({
@@ -486,10 +489,13 @@ export function FreeFormInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Shift+Tab toggles safe mode
+    // Shift+Tab cycles through permission modes
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault()
-      onSafeModeChange?.(!safeModeEnabled)
+      const currentIndex = PERMISSION_MODE_ORDER.indexOf(permissionMode)
+      const nextIndex = (currentIndex + 1) % PERMISSION_MODE_ORDER.length
+      const nextMode = PERMISSION_MODE_ORDER[nextIndex]
+      onPermissionModeChange?.(nextMode)
       return
     }
 
@@ -797,7 +803,6 @@ export function FreeFormInput({
                                     <SourceAvatar
                                       source={source}
                                       size="sm"
-                                      showStatus
                                     />
                                   </div>
                                   <div className="flex-1 min-w-0 truncate">{source.config.name}</div>

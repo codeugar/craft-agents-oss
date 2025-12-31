@@ -16,7 +16,7 @@ import type {
   SubAgentDefinition,
   McpServerConfig,
   ApiConfig,
-} from '@craft-agent/shared/agents'
+} from '@craft-agent/shared/agents/types'
 
 export type SetupStep = 'idle' | 'extracting' | 'mcp-auth' | 'api-auth' | 'ready' | 'error'
 export type McpServerAuthStatus = 'pending' | 'authenticating' | 'authenticated' | 'skipped' | 'bearer-input'

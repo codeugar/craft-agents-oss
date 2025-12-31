@@ -5,7 +5,7 @@
  * Sessions are stored at {workspaceRootPath}/sessions/{id}/session.json
  */
 
-import type { Mode } from '../agent/mode-manager.ts';
+import type { PermissionMode } from '../agent/mode-manager.ts';
 import type { StoredAttachment } from '@craft-agent/core/types';
 
 /**
@@ -82,10 +82,8 @@ export interface SessionConfig {
   agentName?: string;
   /** Whether this session is flagged */
   isFlagged?: boolean;
-  /** Auto-approve all permission requests */
-  skipPermissions?: boolean;
-  /** Active modes for this session (e.g., ['safe']) */
-  activeModes?: Mode[];
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
+  permissionMode?: PermissionMode;
   /** User-controlled todo state - determines inbox vs completed */
   todoState?: TodoState;
   /** ID of last message user has read */

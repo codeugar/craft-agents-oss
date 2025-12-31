@@ -10,8 +10,7 @@ import { getCurrentVersion } from '@craft-agent/shared/version';
 import type { ModalName } from '../modals/useModalState.ts';
 import type { Message } from '../../components/Messages.tsx';
 import type { SubAgentDefinition } from '@craft-agent/shared/agents';
-import { SAFE_MODE_ENTER_MESSAGE, SAFE_MODE_ENTER_PROMPT } from '@craft-agent/shared/agents';
-import type { Mode } from '@craft-agent/shared/agent';
+import { PERMISSION_MODE_MESSAGES, PERMISSION_MODE_PROMPTS } from '@craft-agent/shared/agents';
 
 /**
  * Result of command execution
@@ -511,10 +510,10 @@ export function useCommands(props: UseCommandsProps) {
           return {
             handled: true,
             message: {
-              content: SAFE_MODE_ENTER_MESSAGE,
+              content: PERMISSION_MODE_MESSAGES['safe'],
               type: 'system',
             },
-            sendToAgent: SAFE_MODE_ENTER_PROMPT,
+            sendToAgent: PERMISSION_MODE_PROMPTS['safe'],
           };
         }
 

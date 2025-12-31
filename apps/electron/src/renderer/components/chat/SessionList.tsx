@@ -40,7 +40,8 @@ import { useSession } from "@/hooks/useSession"
 import { useFocusZone, useRovingTabIndex } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
 import { getSessionTitle } from "@/utils/session"
-import type { Session } from "../../../shared/types"
+import type { Session, PermissionMode } from "../../../shared/types"
+import { PERMISSION_MODE_CONFIG } from "../../../shared/types"
 
 /**
  * Format a date for the date header
@@ -227,8 +228,8 @@ interface SessionItemProps {
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onSelect: (forceNewTab: boolean) => void
   onOpenInNewTab: () => void
-  /** Whether safe mode is enabled for this session (from real-time state) */
-  isSafeModeEnabled?: boolean
+  /** Current permission mode for this session (from real-time state) */
+  permissionMode?: PermissionMode
   /** Current search query for highlighting matches */
   searchQuery?: string
 }
@@ -253,7 +254,7 @@ function SessionItem({
   onDelete,
   onSelect,
   onOpenInNewTab,
-  isSafeModeEnabled,
+  permissionMode,
   searchQuery,
 }: SessionItemProps) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -355,9 +356,14 @@ function SessionItem({
               {item.isFlagged && (
                 <Flag className="h-[10px] w-[10px] text-amber-500 fill-amber-500 shrink-0" />
               )}
-              {isSafeModeEnabled && (
-                <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-500/10 text-emerald-600">
-                  Safe
+              {permissionMode && (
+                <span className={cn(
+                  "shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded",
+                  permissionMode === 'safe' && "bg-emerald-500/10 text-emerald-600",
+                  permissionMode === 'ask' && "bg-amber-500/10 text-amber-600",
+                  permissionMode === 'allow-all' && "bg-red-500/10 text-red-600"
+                )}>
+                  {PERMISSION_MODE_CONFIG[permissionMode].shortName}
                 </span>
               )}
               <span className="truncate">
@@ -827,7 +833,7 @@ export function SessionList({
                       // Open in new tab without changing selection
                       onSessionSelect?.(item, { forceNewTab: true })
                     }}
-                    isSafeModeEnabled={sessionOptions?.get(item.id)?.activeModes?.includes('safe')}
+                    permissionMode={sessionOptions?.get(item.id)?.permissionMode}
                     searchQuery={searchQuery}
                   />
                 )

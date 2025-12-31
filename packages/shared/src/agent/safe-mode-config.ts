@@ -17,7 +17,7 @@ import { z } from 'zod';
 import { debug } from '../utils/debug.ts';
 import { getWorkspacePath } from '../workspaces/storage.ts';
 import { getSourcePath } from '../sources/storage.ts';
-import { MODE_CONFIGS } from './mode-manager.ts';
+import { SAFE_MODE_CONFIG } from './mode-manager.ts';
 
 // ============================================================
 // Zod Schemas
@@ -57,8 +57,6 @@ export const SafeModeConfigSchema = z.object({
   allowedMcpPatterns: z.array(PatternSchema).optional(),
   /** API endpoint rules - method + path pattern */
   allowedApiEndpoints: z.array(ApiEndpointRuleSchema).optional(),
-  /** Legacy: API methods to allow (use allowedApiEndpoints for finer control) */
-  allowedApiMethods: z.array(z.string()).optional(),
 });
 
 export type SafeModeConfigFile = z.infer<typeof SafeModeConfigSchema>;
@@ -77,8 +75,6 @@ export interface SafeModeCustomConfig {
   allowedBashPatterns: string[];
   /** Additional MCP patterns to allow (as regex strings) */
   allowedMcpPatterns: string[];
-  /** Additional API methods to allow (legacy, coarse-grained) */
-  allowedApiMethods: string[];
   /** API endpoint rules for fine-grained control */
   allowedApiEndpoints: ApiEndpointRule[];
 }
@@ -98,7 +94,6 @@ export interface MergedSafeModeConfig {
   blockedTools: Set<string>;
   readOnlyBashPatterns: RegExp[];
   readOnlyMcpPatterns: RegExp[];
-  readOnlyApiMethods: Set<string>;
   /** Fine-grained API endpoint rules */
   allowedApiEndpoints: CompiledApiEndpointRule[];
   /** Display name for error messages */
@@ -128,7 +123,6 @@ export function parseSafeModeJson(content: string): SafeModeCustomConfig {
     blockedTools: [],
     allowedBashPatterns: [],
     allowedMcpPatterns: [],
-    allowedApiMethods: [],
     allowedApiEndpoints: [],
   };
 
@@ -157,7 +151,6 @@ export function parseSafeModeJson(content: string): SafeModeCustomConfig {
       blockedTools: data.blockedTools ?? [],
       allowedBashPatterns: normalizePatterns(data.allowedBashPatterns),
       allowedMcpPatterns: normalizePatterns(data.allowedMcpPatterns),
-      allowedApiMethods: data.allowedApiMethods ?? [],
       allowedApiEndpoints: data.allowedApiEndpoints ?? [],
     };
   } catch (error) {
@@ -286,9 +279,6 @@ export function isApiEndpointAllowed(
   // GET is always allowed
   if (upperMethod === 'GET') return true;
 
-  // Check legacy method-based rules
-  if (config.readOnlyApiMethods.has(upperMethod)) return true;
-
   // Check fine-grained endpoint rules
   for (const rule of config.allowedApiEndpoints) {
     if (rule.method === upperMethod && rule.pathPattern.test(path)) {
@@ -377,14 +367,13 @@ class SafeModeConfigCache {
   }
 
   private buildMergedConfig(context: SafeModeContext): MergedSafeModeConfig {
-    const defaults = MODE_CONFIGS.safe;
+    const defaults = SAFE_MODE_CONFIG;
 
     // Start with defaults
     const merged: MergedSafeModeConfig = {
       blockedTools: new Set(defaults.blockedTools),
       readOnlyBashPatterns: [...defaults.readOnlyBashPatterns],
       readOnlyMcpPatterns: [...defaults.readOnlyMcpPatterns],
-      readOnlyApiMethods: new Set(defaults.readOnlyApiMethods),
       allowedApiEndpoints: [],
       displayName: defaults.displayName,
       shortcutHint: defaults.shortcutHint,
@@ -433,11 +422,6 @@ class SafeModeConfigCache {
       } else {
         debug(`[SafeMode] Invalid MCP pattern, skipping: ${pattern}`);
       }
-    }
-
-    // Add allowed API methods (legacy)
-    for (const method of custom.allowedApiMethods) {
-      merged.readOnlyApiMethods.add(method.toUpperCase());
     }
 
     // Add allowed API endpoints (fine-grained)

@@ -18,7 +18,7 @@ export function PermissionBanner({ request, onRespond }: PermissionBannerProps) 
   const isSafeMode = request.type === 'safe_mode'
 
   return (
-    <div className={`rounded-[8px] border shadow-middle overflow-hidden ${
+    <div className={`rounded-[8px] border shadow-middle overflow-hidden py-2 ${
       isSafeMode
         ? 'bg-[#fff8f5] dark:bg-[#1a0d08] border-orange-500/30'
         : 'bg-[#fffcf5] dark:bg-[#1a1608] border-amber-500/30'

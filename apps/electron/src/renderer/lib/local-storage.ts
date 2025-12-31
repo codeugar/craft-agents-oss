@@ -14,6 +14,8 @@ export const KEYS = {
   sidebarVisible: 'sidebar-visible',
   sidebarWidth: 'sidebar-width',
   sessionListWidth: 'session-list-width',
+  sidebarMode: 'sidebar-mode',
+  selectedSourceSlug: 'selected-source-slug',
   listFilter: 'list-filter',
   expandedFolders: 'expanded-folders',
   statusCollapsed: 'status-collapsed',

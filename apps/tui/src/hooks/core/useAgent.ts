@@ -10,10 +10,10 @@ import {
   setGlobalPermissionHandler,
   resolveGlobalPermission,
   clearGlobalPermissions,
-  enterMode,
-  exitMode,
-  isModeActive,
-  type Mode,
+  setPermissionMode,
+  getPermissionMode,
+  cyclePermissionMode,
+  type PermissionMode,
 } from '@craft-agent/shared/agent';
 import { parseSDKErrorText, isSDKErrorText, type AgentError } from '@craft-agent/shared/agent';
 import type { UpdateInstructionsContext, UpdateInstructionsProgressEvent } from '@craft-agent/shared/agents';
@@ -45,7 +45,7 @@ import { debug } from '@craft-agent/shared/utils';
 import { loadWorkspaceSources, createSourceService } from '@craft-agent/shared/sources';
 import { containsUltrathink, stripUltrathink } from '../../utils/gradient.ts';
 import { useAgentState } from './useAgentState.ts';
-import { useSafeMode } from './useModeState.ts';
+import { useSafeMode, usePermissionMode } from './useModeState.ts';
 
 // MCP auth request for sub-agent servers
 export interface PendingMcpAuthRequest {
@@ -179,11 +179,6 @@ export interface UseAgentResult {
   cancelPlan: () => void;
   approvePlan: () => void;
   shouldSuggestPlanning: (message: string) => boolean;
-  // Generic mode toggle API
-  setMode: (mode: Mode, enabled: boolean) => void;
-  // Legacy mode toggle aliases (deprecated - use setMode instead)
-  startSafeMode: () => void;
-  exitSafeModeAction: () => void;
   // Todos (from TodoWrite tool)
   todos: TodoItem[];
   // Ultrathink mode (extended thinking)
@@ -231,9 +226,10 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
   // Ultrathink mode (extended thinking)
   const [isUltrathink, setIsUltrathink] = useState(false);
 
-  // Safe mode state - uses useSyncExternalStore for direct Mode Manager integration
+  // Permission mode state - uses useSyncExternalStore for direct Mode Manager integration
   // No more React state duplication - Mode Manager is the single source of truth
-  const safeMode = useSafeMode(session?.id);
+  const permissionMode = usePermissionMode(session?.id);
+  const safeMode = permissionMode === 'safe'; // Legacy compatibility
   const [activePlan, setActivePlan] = useState<Plan | null>(null);
   // Todos (from TodoWrite tool)
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -586,23 +582,15 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     }
   }, [pendingQuestion]);
 
-  // Generic mode toggle API - works with any mode type
-  const setMode = useCallback((mode: Mode, enabled: boolean) => {
+  // Cycle through permission modes: safe → ask → allow-all → safe
+  const cycleMode = useCallback((): PermissionMode => {
     if (!session?.id) {
-      debug(`[setMode] No session ID, cannot ${enabled ? 'enter' : 'exit'} ${mode} mode`);
-      return;
+      debug(`[cycleMode] No session ID, cannot cycle mode`);
+      return 'safe';
     }
-    debug(`[setMode] ${enabled ? 'Entering' : 'Exiting'} ${mode} mode for session:`, session.id);
-    if (enabled) {
-      enterMode(session.id, mode);
-    } else {
-      exitMode(session.id, mode);
-    }
+    debug(`[cycleMode] Cycling permission mode for session:`, session.id);
+    return cyclePermissionMode(session.id);
   }, [session?.id]);
-
-  // Legacy aliases for backward compatibility (use setMode instead)
-  const startSafeMode = useCallback(() => setMode('safe', true), [setMode]);
-  const exitSafeModeAction = useCallback(() => setMode('safe', false), [setMode]);
 
   const dismissTypedError = useCallback(() => {
     setTypedError(null);
@@ -1021,7 +1009,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
 
     // Clear safe mode state to avoid being stuck
     if (session?.id) {
-      exitMode(session.id, 'safe');
+      setPermissionMode(session.id, 'ask');
     }
 
     setMessages((prev) => [
@@ -1033,7 +1021,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
         timestamp: Date.now(),
       },
     ]);
-  }, []);
+  }, [session?.id]);
 
   // Sync model changes to CraftAgent (GlobalContext is source of truth)
   // When model changes in GlobalContext → config.model updates → update agent
@@ -1592,7 +1580,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
 
     // Exit safe mode via mode manager
     if (session?.id) {
-      exitMode(session.id, 'safe');
+      setPermissionMode(session.id, 'ask');
     }
 
     // Clear from storage
@@ -1607,7 +1595,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
    */
   const approvePlan = useCallback(() => {
     if (session?.id) {
-      exitMode(session.id, 'safe');
+      setPermissionMode(session.id, 'ask');
     }
 
     debug('[approvePlan] Plan approved, exiting safe mode');
@@ -1664,17 +1652,16 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     completeApiAuth,
     cancelApiAuth,
     triggerApiAuth,
-    // Safe mode (read-only exploration)
-    activePlan,
+    // Permission mode (safe/ask/allow-all)
+    permissionMode,
+    cycleMode,
+    // Legacy safe mode (deprecated - use permissionMode instead)
     safeMode,
+    // Plan handling
+    activePlan,
     cancelPlan,
     approvePlan,
     shouldSuggestPlanning,
-    // Generic mode toggle API
-    setMode,
-    // Legacy mode toggle aliases (deprecated - use setMode instead)
-    startSafeMode,
-    exitSafeModeAction,
     // Todos (from TodoWrite tool)
     todos,
     // Ultrathink mode (extended thinking)

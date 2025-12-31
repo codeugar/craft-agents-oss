@@ -73,8 +73,16 @@ import type { Session, Workspace, SubAgentMetadata, FileAttachment, PermissionRe
 import { type TodoStateId, DEFAULT_TODO_STATES, getStateColor } from "@/config/todo-states"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
-
-type ViewMode = 'inbox' | 'archive' | 'flagged' | 'agent' | `state:${TodoStateId}`
+import {
+  type SidebarMode,
+  type ChatFilter,
+  isChatsMode,
+  isSourcesMode,
+  DEFAULT_SIDEBAR_MODE,
+  getSidebarModeKey,
+  parseSidebarModeKey,
+} from "./sidebar-types"
+import { SourcesListPanel } from "./SourcesListPanel"
 
 /**
  * ChatProps - Minimal props interface for Chat component
@@ -194,6 +202,8 @@ interface AgentTreeProps {
   onToggleAgentSources?: (agentSlug: string) => void
   /** Promote agent source to workspace */
   onPromoteSource?: (agentSlug: string, sourceSlug: string) => void
+  /** Open source info tab */
+  onOpenSourceInfo?: (source: LoadedSource, agentSlug: string) => void
 }
 
 // Union type for sorting agents and folders together alphabetically
@@ -236,6 +246,7 @@ function AgentTree({
   expandedAgentSources,
   onToggleAgentSources,
   onPromoteSource,
+  onOpenSourceInfo,
 }: AgentTreeProps) {
   // Track which agent has an open context menu
   const [openMenuAgentId, setOpenMenuAgentId] = React.useState<string | null>(null)
@@ -369,31 +380,43 @@ function AgentTree({
             <AnimatedCollapsibleContent isOpen={isSourcesExpanded}>
               <div className="ml-6 pl-3 border-l border-foreground/10 space-y-0.5 py-0.5">
                 {sources.map((source) => (
-                  <div
+                  <button
                     key={source.config.slug}
-                    className="group/source flex items-center gap-2 px-2 py-1 rounded-md hover:bg-foreground/5"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenSourceInfo?.(source, agent.id)
+                    }}
+                    className="group/source flex items-center gap-2 px-2 py-1 rounded-md hover:bg-foreground/5 w-full text-left"
                   >
-                    <SourceAvatar source={source} size="xs" showStatus />
+                    <SourceAvatar source={source} size="xs" />
                     <span className="text-[12px] text-foreground/80 truncate flex-1">
                       {source.config.name}
                     </span>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <button
+                        <span
                           onClick={(e) => {
                             e.stopPropagation()
                             onPromoteSource?.(agent.id, source.config.slug)
                           }}
                           className="p-0.5 rounded hover:bg-foreground/10 text-muted-foreground hover:text-foreground opacity-0 group-hover/source:opacity-100 transition-opacity"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.stopPropagation()
+                              onPromoteSource?.(agent.id, source.config.slug)
+                            }
+                          }}
                         >
                           <Plus className="h-3 w-3" />
-                        </button>
+                        </span>
                       </TooltipTrigger>
                       <TooltipContent side="right" sideOffset={4}>
                         Add to sources
                       </TooltipContent>
                     </Tooltip>
-                  </div>
+                  </button>
                 ))}
               </div>
             </AnimatedCollapsibleContent>
@@ -427,6 +450,7 @@ function AgentTree({
       expandedAgentSources={expandedAgentSources}
       onToggleAgentSources={onToggleAgentSources}
       onPromoteSource={onPromoteSource}
+      onOpenSourceInfo={onOpenSourceInfo}
     />
   )
 
@@ -548,8 +572,26 @@ export function Chat({
   const resizeHandleRef = React.useRef<HTMLDivElement>(null)
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
-  const [viewMode, setViewMode] = React.useState<ViewMode>('inbox')
+
+  // Sidebar mode - persisted to localStorage
+  const [sidebarMode, setSidebarMode] = React.useState<SidebarMode>(() => {
+    const savedKey = storage.get<string | null>(storage.KEYS.sidebarMode, null)
+    if (savedKey) {
+      const parsed = parseSidebarModeKey(savedKey)
+      if (parsed) return parsed
+    }
+    return DEFAULT_SIDEBAR_MODE
+  })
+
+  // Selected source slug - persisted to localStorage
+  const [selectedSourceSlug, setSelectedSourceSlug] = React.useState<string | null>(() => {
+    return storage.get<string | null>(storage.KEYS.selectedSourceSlug, null)
+  })
+
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null)
+
+  // Helper to get filter kind for session filtering (when in chats mode)
+  const chatFilter = isChatsMode(sidebarMode) ? sidebarMode.filter : null
   // Session list filter: empty set shows all, otherwise shows only sessions with selected states
   const [listFilter, setListFilter] = React.useState<Set<TodoStateId>>(() => {
     const saved = storage.get<TodoStateId[]>(storage.KEYS.listFilter, [])
@@ -563,7 +605,7 @@ export function Chat({
   React.useEffect(() => {
     setSearchActive(false)
     setSearchQuery('')
-  }, [viewMode, selectedAgentId])
+  }, [sidebarMode, selectedAgentId])
 
   // Cmd+F to activate search
   React.useEffect(() => {
@@ -577,6 +619,17 @@ export function Chat({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
+  // Persist sidebar mode to localStorage when it changes
+  React.useEffect(() => {
+    const key = getSidebarModeKey(sidebarMode)
+    storage.set(storage.KEYS.sidebarMode, key)
+  }, [sidebarMode])
+
+  // Persist selected source slug to localStorage when it changes
+  React.useEffect(() => {
+    storage.set(storage.KEYS.selectedSourceSlug, selectedSourceSlug)
+  }, [selectedSourceSlug])
+
   // Agent status indicators - tracks setup/auth status for sidebar icons
   const [agentStatus, setAgentStatus] = React.useState<Map<string, SidebarAgentStatus>>(new Map())
   // Agent service logos - extracted from definition when agent is ready/active
@@ -586,19 +639,19 @@ export function Chat({
   // This ensures the banner in the session list shows the same state as ChatTabPanel
   const selectedAgentState = useAgentState(
     activeWorkspaceId,
-    viewMode === 'agent' ? selectedAgentId : null
+    chatFilter?.kind === 'agent' ? selectedAgentId : null
   )
 
   // Banner state from centralized hook (single source of truth)
   const bannerState = React.useMemo((): { state: BannerState; reason?: string } => {
-    if (viewMode !== 'agent' || !selectedAgentId) {
+    if (chatFilter?.kind !== 'agent' || !selectedAgentId) {
       return { state: 'hidden' }
     }
     return {
       state: selectedAgentState.bannerState,
       reason: selectedAgentState.bannerReason ?? undefined
     }
-  }, [viewMode, selectedAgentId, selectedAgentState.bannerState, selectedAgentState.bannerReason])
+  }, [chatFilter, selectedAgentId, selectedAgentState.bannerState, selectedAgentState.bannerReason])
 
   // Unified sidebar keyboard navigation state
   // Load expanded folders from localStorage (default: all collapsed)
@@ -615,10 +668,7 @@ export function Chat({
   const [agentsCollapsed, setAgentsCollapsed] = React.useState(() => {
     return storage.get(storage.KEYS.agentsCollapsed, false)
   })
-  const [sourcesCollapsed, setSourcesCollapsed] = React.useState(() => {
-    return storage.get(storage.KEYS.sourcesCollapsed, false)
-  })
-
+  
   // Sources state (workspace-scoped)
   const [sources, setSources] = React.useState<LoadedSource[]>([])
 
@@ -743,6 +793,7 @@ export function Chat({
     openShortcutsTab,
     openAgentInfoTab,
     openAgentSetupTab,
+    openSourceInfoTab,
     updateChatTabLabel,
     validateTabs,
     previousTab,
@@ -750,6 +801,30 @@ export function Chat({
     closeTab,
     activeTab,
   } = useTabs()
+
+  // Handle opening source info tab (agent-scoped)
+  const handleOpenSourceInfo = React.useCallback((source: LoadedSource, agentSlug: string) => {
+    if (!activeWorkspaceId) return
+    openSourceInfoTab(
+      source.config.slug,
+      activeWorkspaceId,
+      source.config.name,
+      agentSlug
+    )
+  }, [activeWorkspaceId, openSourceInfoTab])
+
+  // Handle opening source info tab (workspace-scoped)
+  const handleOpenWorkspaceSourceInfo = React.useCallback((source: LoadedSource) => {
+    if (!activeWorkspaceId) return
+    // Update selected source slug for highlighting in sources list
+    setSelectedSourceSlug(source.config.slug)
+    openSourceInfoTab(
+      source.config.slug,
+      activeWorkspaceId,
+      source.config.name,
+      undefined // No agentSlug for workspace-scoped sources
+    )
+  }, [activeWorkspaceId, openSourceInfoTab])
 
   // Focus zone management
   const { focusZone, focusNextZone, focusPreviousZone } = useFocusContext()
@@ -772,15 +847,15 @@ export function Chat({
       { key: '3', cmd: true, action: () => focusZone('chat') },
       // Tab navigation between zones
       { key: 'Tab', action: focusNextZone, when: () => !document.querySelector('[role="dialog"]') },
-      // Shift+Tab toggles safe mode (textarea handles its own, this handles when focus is elsewhere)
+      // Shift+Tab cycles permission mode: safe → ask → allow-all → safe (textarea handles its own, this handles when focus is elsewhere)
       { key: 'Tab', shift: true, action: () => {
         if (activeTab?.type === 'chat') {
           const sessionId = (activeTab as ChatTab).sessionId
           const currentOptions = contextValue.sessionOptions.get(sessionId)
-          const isCurrentlySafe = currentOptions?.activeModes?.includes('safe') ?? false
-          // Toggle safe mode: set to ['safe'] or empty array
-          const newModes: ('safe')[] = isCurrentlySafe ? [] : ['safe']
-          contextValue.onSessionOptionsChange(sessionId, { activeModes: newModes })
+          const currentMode = currentOptions?.permissionMode ?? 'ask'
+          // Cycle through permission modes: safe → ask → allow-all → safe
+          const nextMode = currentMode === 'safe' ? 'ask' : currentMode === 'ask' ? 'allow-all' : 'safe'
+          contextValue.onSessionOptionsChange(sessionId, { permissionMode: nextMode })
         }
       }, when: () => !document.querySelector('[role="dialog"]') && document.activeElement?.tagName !== 'TEXTAREA' },
       // Panel tab navigation
@@ -925,35 +1000,45 @@ export function Chat({
     return workspaceSessions.filter(s => s.agentId === agentId && !isDone(s)).length
   }, [workspaceSessions])
 
-  // Filter sessions based on view mode and agent selection
+  // Filter sessions based on sidebar mode and chat filter
   const filteredSessions = React.useMemo(() => {
+    // When in sources mode, return empty (no sessions to show)
+    if (!chatFilter) {
+      return []
+    }
+
     let result: Session[]
 
-    if (viewMode === 'inbox') {
-      // "All Chats" - shows all sessions (no filtering by done status)
-      result = workspaceSessions
-    } else if (viewMode === 'archive') {
-      result = workspaceSessions.filter(s => isDone(s))
-    } else if (viewMode === 'flagged') {
-      // Flagged view shows both done and not done flagged items
-      result = workspaceSessions.filter(s => s.isFlagged)
-    } else if (viewMode === 'agent' && selectedAgentId) {
-      result = workspaceSessions.filter(s => s.agentId === selectedAgentId && !isDone(s))
-    } else if (viewMode.startsWith('state:')) {
-      // Filter by specific todo state
-      const stateId = viewMode.replace('state:', '') as TodoStateId
-      result = workspaceSessions.filter(s => (s.todoState || 'todo') === stateId)
-    } else {
-      result = workspaceSessions
+    switch (chatFilter.kind) {
+      case 'inbox':
+        // "All Chats" - shows all sessions (no filtering by done status)
+        result = workspaceSessions
+        break
+      case 'archive':
+        result = workspaceSessions.filter(s => isDone(s))
+        break
+      case 'flagged':
+        // Flagged view shows both done and not done flagged items
+        result = workspaceSessions.filter(s => s.isFlagged)
+        break
+      case 'agent':
+        result = workspaceSessions.filter(s => s.agentId === chatFilter.agentId && !isDone(s))
+        break
+      case 'state':
+        // Filter by specific todo state
+        result = workspaceSessions.filter(s => (s.todoState || 'todo') === chatFilter.stateId)
+        break
+      default:
+        result = workspaceSessions
     }
 
     // Apply secondary filter by todo states if any are selected (only in inbox view)
-    if (viewMode === 'inbox' && listFilter.size > 0) {
+    if (chatFilter.kind === 'inbox' && listFilter.size > 0) {
       result = result.filter(s => listFilter.has((s.todoState || 'todo') as TodoStateId))
     }
 
     return result
-  }, [workspaceSessions, viewMode, selectedAgentId, listFilter])
+  }, [workspaceSessions, chatFilter, listFilter])
 
   const selectedSession = sessions.find(s => s.id === session.selected) || null
 
@@ -1089,10 +1174,6 @@ export function Chat({
     storage.set(storage.KEYS.agentsCollapsed, agentsCollapsed)
   }, [agentsCollapsed])
 
-  React.useEffect(() => {
-    storage.set(storage.KEYS.sourcesCollapsed, sourcesCollapsed)
-  }, [sourcesCollapsed])
-
   // Helper to map AgentStatus to SidebarAgentStatus (centralized logic)
   const mapAgentStatusToSidebar = React.useCallback((status: import('../../../shared/types').AgentStatus): SidebarAgentStatus => {
     switch (status.status) {
@@ -1212,7 +1293,7 @@ export function Chat({
 
     // Always select the agent - banner state is derived from useAgentState hook
     setSelectedAgentId(agentId)
-    setViewMode('agent')
+    setSidebarMode({ type: 'chats', filter: { kind: 'agent', agentId } })
   }, [activeWorkspaceId])
 
   // Handle banner action (open setup tab)
@@ -1227,26 +1308,33 @@ export function Chat({
   }, [selectedAgentId, activeWorkspaceId, agents, openAgentSetupTab])
 
   const handleInboxClick = useCallback(() => {
-    setViewMode('inbox')
+    setSidebarMode({ type: 'chats', filter: { kind: 'inbox' } })
     setSelectedAgentId(null)
     setSession({ selected: null })
   }, [setSession])
 
   const handleArchiveClick = useCallback(() => {
-    setViewMode('archive')
+    setSidebarMode({ type: 'chats', filter: { kind: 'archive' } })
     setSelectedAgentId(null)
     setSession({ selected: null })
   }, [setSession])
 
   const handleFlaggedClick = useCallback(() => {
-    setViewMode('flagged')
+    setSidebarMode({ type: 'chats', filter: { kind: 'flagged' } })
     setSelectedAgentId(null)
     setSession({ selected: null })
   }, [setSession])
 
   // Handler for individual todo state views
   const handleTodoStateClick = useCallback((stateId: TodoStateId) => {
-    setViewMode(`state:${stateId}`)
+    setSidebarMode({ type: 'chats', filter: { kind: 'state', stateId } })
+    setSelectedAgentId(null)
+    setSession({ selected: null })
+  }, [setSession])
+
+  // Handler for sources view
+  const handleSourcesClick = useCallback(() => {
+    setSidebarMode({ type: 'sources' })
     setSelectedAgentId(null)
     setSession({ selected: null })
   }, [setSession])
@@ -1256,19 +1344,19 @@ export function Chat({
   const handleNewChat = useCallback(async (useCurrentAgent: boolean = true) => {
     if (!activeWorkspace) return
 
-    const agentId = useCurrentAgent && viewMode === 'agent' ? selectedAgentId || undefined : undefined
+    const agentId = useCurrentAgent && chatFilter?.kind === 'agent' ? selectedAgentId || undefined : undefined
     const newSession = await onCreateSession(activeWorkspace.id, agentId)
     setSession({ selected: newSession.id })
-  }, [activeWorkspace, viewMode, selectedAgentId, onCreateSession, setSession])
+  }, [activeWorkspace, chatFilter, selectedAgentId, onCreateSession, setSession])
 
   // Create a new chat in a new tab (CMD+T)
   const handleNewChatInNewTab = useCallback(async () => {
     if (!activeWorkspace) return
 
-    const agentId = viewMode === 'agent' ? selectedAgentId || undefined : undefined
+    const agentId = chatFilter?.kind === 'agent' ? selectedAgentId || undefined : undefined
     const newSession = await onCreateSession(activeWorkspace.id, agentId)
     openChatTab(newSession.id, activeWorkspace.id, 'New Chat', agentId, { forceNew: true })
-  }, [activeWorkspace, viewMode, selectedAgentId, onCreateSession, openChatTab])
+  }, [activeWorkspace, chatFilter, selectedAgentId, onCreateSession, openChatTab])
 
   // Add Source - opens a chat with the .source-setup builtin agent
   const handleAddSource = useCallback(async () => {
@@ -1345,7 +1433,7 @@ export function Chat({
       case 'new_conversation':
         // Create a new conversation with this agent
         setSelectedAgentId(action.agent.id)
-        setViewMode('agent')
+        setSidebarMode({ type: 'chats', filter: { kind: 'agent', agentId: action.agent.id } })
         const newSession = await onCreateSession(activeWorkspaceId, action.agent.id)
         setSession({ selected: newSession.id })
         break
@@ -1376,7 +1464,7 @@ export function Chat({
 
     // Create a new conversation with this agent
     setSelectedAgentId(agent.id)
-    setViewMode('agent')
+    setSidebarMode({ type: 'chats', filter: { kind: 'agent', agentId: agent.id } })
     const newSession = await onCreateSession(activeWorkspaceId, agent.id)
     setSession({ selected: newSession.id })
 
@@ -1582,22 +1670,30 @@ export function Chat({
     }
   }, [sidebarFocused, focusedSidebarItemId, unifiedSidebarItems])
 
-  // Get title based on view mode
+  // Get title based on sidebar mode
   const listTitle = React.useMemo(() => {
-    if (viewMode === 'archive') return 'Archive'
-    if (viewMode === 'flagged') return 'Flagged'
-    if (viewMode === 'agent' && selectedAgentId) {
-      return agents.find(a => a.id === selectedAgentId)?.displayName ||
-             agents.find(a => a.id === selectedAgentId)?.name ||
-             'All Chats'
+    // Sources mode
+    if (isSourcesMode(sidebarMode)) return 'Sources'
+
+    // Chats mode - use chatFilter
+    if (!chatFilter) return 'All Chats'
+
+    switch (chatFilter.kind) {
+      case 'archive':
+        return 'Archive'
+      case 'flagged':
+        return 'Flagged'
+      case 'agent':
+        return agents.find(a => a.id === chatFilter.agentId)?.displayName ||
+               agents.find(a => a.id === chatFilter.agentId)?.name ||
+               'All Chats'
+      case 'state':
+        const state = DEFAULT_TODO_STATES.find(s => s.id === chatFilter.stateId)
+        return state?.label || 'All Chats'
+      default:
+        return 'All Chats'
     }
-    if (viewMode.startsWith('state:')) {
-      const stateId = viewMode.replace('state:', '') as TodoStateId
-      const state = DEFAULT_TODO_STATES.find(s => s.id === stateId)
-      return state?.label || 'All Chats'
-    }
-    return 'All Chats'
-  }, [viewMode, selectedAgentId, agents])
+  }, [sidebarMode, chatFilter, agents])
 
   return (
     <ChatProvider value={chatContextValue}>
@@ -1683,14 +1779,14 @@ export function Chat({
                   <Button
                     variant="ghost"
                     onClick={() => handleNewChat(true)}
-                    disabled={viewMode === 'agent' && bannerState.state !== 'hidden'}
+                    disabled={chatFilter?.kind === 'agent' && bannerState.state !== 'hidden'}
                     className="w-full justify-start gap-2 py-[7px] px-2 text-[13px] font-normal rounded-[6px] shadow-minimal bg-background"
                   >
                     <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
                     New Chat
                   </Button>
                 </div>
-                {/* Primary Nav: All Chats, Flagged */}
+                {/* Primary Nav: All Chats, Sources, Flagged */}
                 <LeftSidebar
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
@@ -1701,15 +1797,23 @@ export function Chat({
                       title: "All Chats",
                       label: String(workspaceSessions.length),
                       icon: Inbox,
-                      variant: viewMode === 'inbox' ? "default" : "ghost",
+                      variant: chatFilter?.kind === 'inbox' ? "default" : "ghost",
                       onClick: handleInboxClick,
+                    },
+                    {
+                      id: "nav:sources",
+                      title: "Sources",
+                      label: String(sources.length),
+                      icon: <McpIcon className="h-4 w-4" />,
+                      variant: isSourcesMode(sidebarMode) ? "default" : "ghost",
+                      onClick: handleSourcesClick,
                     },
                     {
                       id: "nav:flagged",
                       title: "Flagged",
                       label: String(flaggedCount),
                       icon: Flag,
-                      variant: viewMode === 'flagged' ? "default" : "ghost",
+                      variant: chatFilter?.kind === 'flagged' ? "default" : "ghost",
                       onClick: handleFlaggedClick,
                     },
                   ]}
@@ -1738,7 +1842,7 @@ export function Chat({
                           label: String(todoStateCounts['todo']),
                           icon: <CircleDashed className="h-3.5 w-3.5" />,
                           iconColor: "text-muted-foreground",
-                          variant: viewMode === 'state:todo' ? "default" : "ghost",
+                          variant: chatFilter?.kind === 'state' && chatFilter.stateId === 'todo' ? "default" : "ghost",
                           onClick: () => handleTodoStateClick('todo'),
                         },
                         {
@@ -1747,7 +1851,7 @@ export function Chat({
                           label: String(todoStateCounts['in-progress']),
                           icon: <CircleProgress className="h-3.5 w-3.5" />,
                           iconColor: getStateColor('in-progress'),
-                          variant: viewMode === 'state:in-progress' ? "default" : "ghost",
+                          variant: chatFilter?.kind === 'state' && chatFilter.stateId === 'in-progress' ? "default" : "ghost",
                           onClick: () => handleTodoStateClick('in-progress'),
                         },
                         {
@@ -1756,7 +1860,7 @@ export function Chat({
                           label: String(todoStateCounts['needs-review']),
                           icon: <CircleEye className="h-3.5 w-3.5" />,
                           iconColor: getStateColor('needs-review'),
-                          variant: viewMode === 'state:needs-review' ? "default" : "ghost",
+                          variant: chatFilter?.kind === 'state' && chatFilter.stateId === 'needs-review' ? "default" : "ghost",
                           onClick: () => handleTodoStateClick('needs-review'),
                         },
                         {
@@ -1765,7 +1869,7 @@ export function Chat({
                           label: String(todoStateCounts['done']),
                           icon: <CircleCheckFilled className="h-3.5 w-3.5" />,
                           iconColor: "text-[#9570BE]",
-                          variant: viewMode === 'state:done' ? "default" : "ghost",
+                          variant: chatFilter?.kind === 'state' && chatFilter.stateId === 'done' ? "default" : "ghost",
                           onClick: () => handleTodoStateClick('done'),
                         },
                         {
@@ -1774,73 +1878,11 @@ export function Chat({
                           label: String(todoStateCounts['cancelled']),
                           icon: <CircleXFilled className="h-3.5 w-3.5" />,
                           iconColor: "text-muted-foreground/60",
-                          variant: viewMode === 'state:cancelled' ? "default" : "ghost",
+                          variant: chatFilter?.kind === 'state' && chatFilter.stateId === 'cancelled' ? "default" : "ghost",
                           onClick: () => handleTodoStateClick('cancelled'),
                         },
                       ]}
                     />
-                  </AnimatedCollapsibleContent>
-                </Collapsible>
-                {/* Sources Section - Collapsible */}
-                <Collapsible
-                  open={!sourcesCollapsed}
-                  onOpenChange={(open) => setSourcesCollapsed(!open)}
-                  className="flex-shrink-0 flex flex-col overflow-hidden mb-1"
-                >
-                  <CollapsibleTrigger asChild>
-                    <button className="group flex items-center justify-between w-full pl-4 pr-3.5 pt-2 pb-1 shrink-0">
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-xs font-medium text-muted-foreground select-none">Sources</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span
-                          className="p-0.5 rounded hover:bg-foreground/5 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleAddSource()
-                          }}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </span>
-                        <ChevronDown className={cn(
-                          "h-3.5 w-3.5 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-all duration-200",
-                          sourcesCollapsed && "-rotate-90"
-                        )} />
-                      </span>
-                    </button>
-                  </CollapsibleTrigger>
-                  <AnimatedCollapsibleContent isOpen={!sourcesCollapsed}>
-                    <div className="px-2 py-1">
-                      {sources.length === 0 ? (
-                        <p className="text-xs text-muted-foreground px-2 py-2">
-                          No sources configured. Click + to add one.
-                        </p>
-                      ) : (
-                        <div className="space-y-0.5">
-                          {sources.map((source) => (
-                            <div
-                              key={source.config.slug}
-                              className="group/source flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-foreground/5 cursor-pointer"
-                            >
-                              <SourceAvatar source={source} size="sm" showStatus />
-                              <span className="text-[13px] text-foreground truncate flex-1">
-                                {source.config.name}
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteSource(source.config.name)
-                                }}
-                                className="p-0.5 rounded hover:bg-foreground/10 text-muted-foreground hover:text-foreground opacity-0 group-hover/source:opacity-100 transition-opacity"
-                                title="Delete source"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
                   </AnimatedCollapsibleContent>
                 </Collapsible>
                 {/* Agent Tree: Hierarchical list of agents - Collapsible */}
@@ -1926,6 +1968,7 @@ export function Chat({
                               expandedAgentSources={expandedAgentSources}
                               onToggleAgentSources={handleToggleAgentSources}
                               onPromoteSource={handlePromoteSource}
+                              onOpenSourceInfo={handleOpenSourceInfo}
                             />
                           )}
                         </motion.div>
@@ -2005,10 +2048,12 @@ export function Chat({
             >
               <div className="flex-1 min-w-0 flex flex-col justify-center">
                 <h1 className="text-sm font-semibold truncate font-sans leading-tight">{listTitle}</h1>
-                <p className="text-[11px] opacity-50 font-sans leading-tight">{filteredSessions.length} conversations</p>
+                <p className="text-[11px] opacity-50 font-sans leading-tight">
+                  {isSourcesMode(sidebarMode) ? `${sources.length} sources` : `${filteredSessions.length} conversations`}
+                </p>
               </div>
               {/* Filter dropdown - allows filtering by todo states (only in All Chats view) */}
-              {viewMode === 'inbox' && (
+              {chatFilter?.kind === 'inbox' && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -2125,8 +2170,8 @@ export function Chat({
                   </StyledDropdownMenuContent>
                 </DropdownMenu>
               )}
-              {/* More menu with Search for non-inbox views */}
-              {viewMode !== 'inbox' && (
+              {/* More menu with Search for non-inbox views (only for chats mode) */}
+              {isChatsMode(sidebarMode) && chatFilter?.kind !== 'inbox' && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -2151,54 +2196,69 @@ export function Chat({
               )}
             </motion.div>
             <Separator />
-            {/* Activation/Auth Banner - shows when agent needs activation or authentication */}
-            <SetupAuthBanner
-              state={viewMode === 'agent' ? bannerState.state : 'hidden'}
-              agentName={selectedAgentId ? agents.find(a => a.id === selectedAgentId)?.displayName || agents.find(a => a.id === selectedAgentId)?.name : undefined}
-              reason={bannerState.reason}
-              onAction={handleBannerAction}
-            />
-            {/* SessionList: Scrollable list of session cards */}
-            {/* Key on viewMode forces full remount when switching views, skipping animations */}
-            <SessionList
-              key={viewMode}
-              items={filteredSessions}
-              onDelete={handleDeleteSession}
-              onFlag={onFlagSession}
-              onUnflag={onUnflagSession}
-              onMarkUnread={onMarkSessionUnread}
-              onTodoStateChange={onTodoStateChange}
-              onRename={onRenameSession}
-              onFocusChatInput={focusChatInput}
-              onSessionSelect={(selectedSession, { forceNewTab }) => {
-                if (activeWorkspaceId) {
-                  openChatTab(
-                    selectedSession.id,
-                    activeWorkspaceId,
-                    getSessionTitle(selectedSession),
-                    selectedSession.agentId,
-                    { forceNew: forceNewTab }
-                  )
-                }
-              }}
-              onNavigateToView={(view) => {
-                if (view === 'completed') {
-                  setViewMode('archive')
-                } else if (view === 'inbox') {
-                  setViewMode('inbox')
-                } else if (view === 'flagged') {
-                  setViewMode('flagged')
-                }
-              }}
-              sessionOptions={sessionOptions}
-              searchActive={searchActive}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onSearchClose={() => {
-                setSearchActive(false)
-                setSearchQuery('')
-              }}
-            />
+            {/* Content: Either SessionList or SourcesListPanel based on sidebar mode */}
+            {isSourcesMode(sidebarMode) ? (
+              /* Sources List */
+              <SourcesListPanel
+                sources={sources}
+                onAddSource={handleAddSource}
+                onDeleteSource={handleDeleteSource}
+                onSourceClick={handleOpenWorkspaceSourceInfo}
+                selectedSourceSlug={selectedSourceSlug}
+              />
+            ) : (
+              /* Sessions List */
+              <>
+                {/* Activation/Auth Banner - shows when agent needs activation or authentication */}
+                <SetupAuthBanner
+                  state={chatFilter?.kind === 'agent' ? bannerState.state : 'hidden'}
+                  agentName={selectedAgentId ? agents.find(a => a.id === selectedAgentId)?.displayName || agents.find(a => a.id === selectedAgentId)?.name : undefined}
+                  reason={bannerState.reason}
+                  onAction={handleBannerAction}
+                />
+                {/* SessionList: Scrollable list of session cards */}
+                {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
+                <SessionList
+                  key={chatFilter?.kind}
+                  items={filteredSessions}
+                  onDelete={handleDeleteSession}
+                  onFlag={onFlagSession}
+                  onUnflag={onUnflagSession}
+                  onMarkUnread={onMarkSessionUnread}
+                  onTodoStateChange={onTodoStateChange}
+                  onRename={onRenameSession}
+                  onFocusChatInput={focusChatInput}
+                  onSessionSelect={(selectedSession, { forceNewTab }) => {
+                    if (activeWorkspaceId) {
+                      openChatTab(
+                        selectedSession.id,
+                        activeWorkspaceId,
+                        getSessionTitle(selectedSession),
+                        selectedSession.agentId,
+                        { forceNew: forceNewTab }
+                      )
+                    }
+                  }}
+                  onNavigateToView={(view) => {
+                    if (view === 'completed') {
+                      setSidebarMode({ type: 'chats', filter: { kind: 'archive' } })
+                    } else if (view === 'inbox') {
+                      setSidebarMode({ type: 'chats', filter: { kind: 'inbox' } })
+                    } else if (view === 'flagged') {
+                      setSidebarMode({ type: 'chats', filter: { kind: 'flagged' } })
+                    }
+                  }}
+                  sessionOptions={sessionOptions}
+                  searchActive={searchActive}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  onSearchClose={() => {
+                    setSearchActive(false)
+                    setSearchQuery('')
+                  }}
+                />
+              </>
+            )}
           </div>
 
           {/* Session List Resize Handle */}

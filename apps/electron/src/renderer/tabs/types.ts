@@ -14,6 +14,7 @@ export type TabType =
   | 'file'
   | 'browser'
   | 'preferences'
+  | 'source-info'
 
 /**
  * Base interface for all tab types
@@ -99,6 +100,17 @@ export interface PreferencesTab extends TabBase {
 }
 
 /**
+ * Source info tab - displays source details (view-only)
+ */
+export interface SourceInfoTab extends TabBase {
+  type: 'source-info'
+  sourceSlug: string
+  workspaceId: string
+  /** If this is an agent-scoped source */
+  agentSlug?: string
+}
+
+/**
  * Union type of all tab types
  */
 export type Tab =
@@ -110,6 +122,7 @@ export type Tab =
   | FileTab
   | BrowserTab
   | PreferencesTab
+  | SourceInfoTab
 
 /**
  * Tab state stored in Jotai atom
@@ -182,6 +195,11 @@ export const TAB_DEFINITIONS: Record<TabType, TabDefinition> = {
   preferences: {
     type: 'preferences',
     singleton: true,
+    defaultClosable: true,
+  },
+  'source-info': {
+    type: 'source-info',
+    singleton: false,
     defaultClosable: true,
   },
 }

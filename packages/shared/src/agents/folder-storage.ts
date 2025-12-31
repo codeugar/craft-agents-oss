@@ -63,30 +63,19 @@ export function loadAgentConfig(
 }
 
 /**
- * Options for saveAgentConfig
- */
-export interface SaveAgentConfigOptions {
-  /** Skip validation (use for migrations or debugging only) */
-  skipValidation?: boolean;
-}
-
-/**
  * Save agent config.json
- * @throws Error if config is invalid (unless skipValidation is true)
+ * @throws Error if config is invalid
  */
 export function saveAgentConfig(
   workspaceSlug: string,
-  config: FolderAgentConfig,
-  options?: SaveAgentConfigOptions
+  config: FolderAgentConfig
 ): void {
   // Validate config before writing
-  if (!options?.skipValidation) {
-    const validation = validateAgentConfig(config);
-    if (!validation.valid) {
-      const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
-      debug('[saveAgentConfig] Validation failed:', errorMessages);
-      throw new Error(`Invalid agent config: ${errorMessages}`);
-    }
+  const validation = validateAgentConfig(config);
+  if (!validation.valid) {
+    const errorMessages = validation.errors.map((e) => `${e.path}: ${e.message}`).join(', ');
+    debug('[saveAgentConfig] Validation failed:', errorMessages);
+    throw new Error(`Invalid agent config: ${errorMessages}`);
   }
 
   const dir = getAgentPath(workspaceSlug, config.slug);

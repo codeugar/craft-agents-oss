@@ -7,9 +7,9 @@
 
 import { useSyncExternalStore, useCallback } from 'react';
 import {
-  isModeActive,
   subscribeModeChanges,
-  type Mode
+  getPermissionMode,
+  type PermissionMode,
 } from '@craft-agent/shared/agent/craft-agent';
 
 /**
@@ -19,7 +19,7 @@ import {
  * @param mode - The mode to track
  * @returns boolean indicating if the mode is active
  */
-export function useModeState(sessionId: string | undefined, mode: Mode): boolean {
+export function useModeState(sessionId: string | undefined, mode: PermissionMode): boolean {
   const subscribe = useCallback(
     (callback: () => void) => {
       if (!sessionId) return () => {};
@@ -30,7 +30,7 @@ export function useModeState(sessionId: string | undefined, mode: Mode): boolean
 
   const getSnapshot = useCallback(() => {
     if (!sessionId) return false;
-    return isModeActive(sessionId, mode);
+    return getPermissionMode(sessionId) === mode;
   }, [sessionId, mode]);
 
   // Server snapshot is same as client (no SSR considerations for TUI)
@@ -45,4 +45,28 @@ export function useModeState(sessionId: string | undefined, mode: Mode): boolean
  */
 export function useSafeMode(sessionId: string | undefined): boolean {
   return useModeState(sessionId, 'safe');
+}
+
+/**
+ * Hook to get the current permission mode reactively
+ *
+ * @param sessionId - The session ID to track permission mode for
+ * @returns The current PermissionMode ('safe', 'ask', 'allow-all')
+ */
+export function usePermissionMode(sessionId: string | undefined): PermissionMode {
+  const subscribe = useCallback(
+    (callback: () => void) => {
+      if (!sessionId) return () => {};
+      return subscribeModeChanges(sessionId, callback);
+    },
+    [sessionId]
+  );
+
+  const getSnapshot = useCallback((): PermissionMode => {
+    if (!sessionId) return 'safe'; // Default to safe if no session
+    return getPermissionMode(sessionId);
+  }, [sessionId]);
+
+  // Server snapshot is same as client (no SSR considerations for TUI)
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

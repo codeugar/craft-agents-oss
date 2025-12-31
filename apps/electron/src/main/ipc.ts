@@ -15,7 +15,7 @@ import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type DiffPreviewData, type CodePreviewData, type TerminalPreviewData } from '../shared/types'
 import { readFileAttachment } from '@craft-agent/shared/utils'
 import { getAiCreditTopUpUrl } from '@craft-agent/shared/auth'
-import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultModes, setDefaultModes, getDefaultSkipPermissions, setDefaultSkipPermissions, getDefaultWorkingDirectory, setDefaultWorkingDirectory, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config'
+import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultPermissionMode, setDefaultPermissionMode, getDefaultWorkingDirectory, setDefaultWorkingDirectory, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config'
 import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
@@ -227,11 +227,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return sessionManager.renameSession(sessionId, name)
   })
 
-  // Set skip permissions for a session
-  ipcMain.handle(IPC_CHANNELS.SET_SKIP_PERMISSIONS, async (_event, sessionId: string, enabled: boolean) => {
-    return sessionManager.setSkipPermissions(sessionId, enabled)
-  })
-
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
   ipcMain.handle(IPC_CHANNELS.RESPOND_TO_PERMISSION, async (_event, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
@@ -244,9 +239,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
-  // Set a mode for a session (generic for any mode type)
-  ipcMain.handle(IPC_CHANNELS.SET_MODE, async (_event, sessionId: string, mode: import('../shared/types').Mode, enabled: boolean) => {
-    return sessionManager.setMode(sessionId, mode, enabled)
+  // Set the permission mode for a session ('safe', 'ask', 'allow-all')
+  ipcMain.handle(IPC_CHANNELS.SET_PERMISSION_MODE, async (_event, sessionId: string, mode: import('../shared/types').PermissionMode) => {
+    return sessionManager.setSessionPermissionMode(sessionId, mode)
   })
 
   // Update working directory for a session
@@ -791,26 +786,15 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Settings - New Session Defaults
   // ============================================================
 
-  // Get default modes for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_DEFAULT_MODES, async (): Promise<import('../shared/types').Mode[]> => {
-    return getDefaultModes()
+  // Get default permission mode for new sessions
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_DEFAULT_PERMISSION_MODE, async (): Promise<import('../shared/types').PermissionMode> => {
+    return getDefaultPermissionMode()
   })
 
-  // Set default modes for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_DEFAULT_MODES, async (_event, modes: import('../shared/types').Mode[]) => {
-    setDefaultModes(modes)
-    console.log(`[IPC] Default modes updated to:`, modes)
-  })
-
-  // Get default skip permissions for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_DEFAULT_SKIP_PERMISSIONS, async (): Promise<boolean> => {
-    return getDefaultSkipPermissions()
-  })
-
-  // Set default skip permissions for new sessions
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_DEFAULT_SKIP_PERMISSIONS, async (_event, enabled: boolean) => {
-    setDefaultSkipPermissions(enabled)
-    console.log(`[IPC] Default skip permissions updated to: ${enabled}`)
+  // Set default permission mode for new sessions
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_DEFAULT_PERMISSION_MODE, async (_event, mode: import('../shared/types').PermissionMode) => {
+    setDefaultPermissionMode(mode)
+    console.log(`[IPC] Default permission mode updated to:`, mode)
   })
 
   // Get default working directory for new sessions
@@ -831,21 +815,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       title: 'Select Working Directory',
     })
     return result.canceled ? null : result.filePaths[0]
-  })
-
-  // ============================================================
-  // Settings - Safe Mode Behavior
-  // ============================================================
-
-  // Get safe mode behavior setting
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_SAFE_MODE_BEHAVIOR, async (): Promise<SafeModeBehavior> => {
-    return getSafeModeBehavior()
-  })
-
-  // Set safe mode behavior setting
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_SAFE_MODE_BEHAVIOR, async (_event, behavior: SafeModeBehavior) => {
-    setSafeModeBehavior(behavior)
-    console.log(`[IPC] Safe mode behavior updated to: ${behavior}`)
   })
 
   // ============================================================
@@ -1127,6 +1096,95 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
     console.log(`[IPC] Promoted source ${sourceSlug} from agent ${agentSlug} to workspace`)
     return newConfig
+  })
+
+  // Get safe mode config for a source
+  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_SAFE_MODE, async (_event, workspaceId: string, sourceSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return null
+    const { loadSourceSafeModeConfig } = await import('@craft-agent/shared/agent')
+    return loadSourceSafeModeConfig(workspace.rootPath, sourceSlug)
+  })
+
+  // Get MCP tools for a source with permission status
+  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS, async (_event, workspaceId: string, sourceSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return { success: false, error: 'Workspace not found' }
+
+    try {
+      // Load source config
+      const sources = await loadWorkspaceSources(workspace.rootPath)
+      const source = sources.find(s => s.config.slug === sourceSlug)
+      if (!source) return { success: false, error: 'Source not found' }
+      if (source.config.type !== 'mcp') return { success: false, error: 'Source is not an MCP server' }
+      if (!source.config.mcp) return { success: false, error: 'MCP config not found' }
+
+      // Check connection status
+      if (source.config.connectionStatus === 'needs_auth') {
+        return { success: false, error: 'Source requires authentication' }
+      }
+      if (source.config.connectionStatus === 'failed') {
+        return { success: false, error: source.config.connectionError || 'Connection failed' }
+      }
+      if (source.config.connectionStatus === 'untested') {
+        return { success: false, error: 'Source has not been tested yet' }
+      }
+
+      // Get access token if needed
+      let accessToken: string | undefined
+      if (source.config.mcp.authType === 'oauth' || source.config.mcp.authType === 'bearer') {
+        const credentialManager = getCredentialManager()
+        const credentialKey = source.config.mcp.authType === 'oauth'
+          ? `source_oauth::${sourceSlug}`
+          : `source_bearer::${sourceSlug}`
+        accessToken = await credentialManager.get(credentialKey) ?? undefined
+      }
+
+      // Connect to MCP and list tools
+      console.log(`[IPC] Fetching MCP tools from ${source.config.mcp.url}`)
+      const { CraftMcpClient } = await import('@craft-agent/shared/mcp')
+      const client = new CraftMcpClient({
+        url: source.config.mcp.url,
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      })
+
+      const tools = await client.listTools()
+      await client.close()
+
+      // Load safe mode patterns
+      const { loadSourceSafeModeConfig, safeModeConfigCache } = await import('@craft-agent/shared/agent')
+      const safeModeConfig = loadSourceSafeModeConfig(workspace.rootPath, sourceSlug)
+
+      // Get merged safe mode config
+      const mergedConfig = safeModeConfigCache.getMergedConfig({
+        workspaceSlug: workspace.rootPath,
+        activeSourceSlugs: [sourceSlug],
+      })
+
+      // Check each tool against safe mode patterns
+      const toolsWithPermission = tools.map(tool => {
+        // Check if tool matches any allowed pattern
+        const allowed = mergedConfig.readOnlyMcpPatterns.some(pattern => pattern.test(tool.name))
+        return {
+          name: tool.name,
+          description: tool.description,
+          allowed,
+        }
+      })
+
+      return { success: true, tools: toolsWithPermission }
+    } catch (error) {
+      console.error('[IPC] Failed to get MCP tools:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to fetch tools'
+      // Provide more helpful error messages
+      if (errorMessage.includes('404')) {
+        return { success: false, error: 'MCP server endpoint not found. The server may be offline or the URL may be incorrect.' }
+      }
+      if (errorMessage.includes('401') || errorMessage.includes('403')) {
+        return { success: false, error: 'Authentication failed. Please re-authenticate with this source.' }
+      }
+      return { success: false, error: errorMessage }
+    }
   })
 
   // ============================================================

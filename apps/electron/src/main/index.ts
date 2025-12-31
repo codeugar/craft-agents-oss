@@ -134,6 +134,7 @@ app.whenReady().then(async () => {
 
     // Initialize preview window manager
     previewWindowManager = new PreviewWindowManager()
+    previewWindowManager.setWindowManager(windowManager)
 
     // Initialize diff preview window manager
     diffPreviewWindowManager = new DiffPreviewWindowManager()

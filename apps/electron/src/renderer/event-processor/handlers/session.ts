@@ -20,7 +20,7 @@ import type {
   InterruptedEvent,
   TitleGeneratedEvent,
   WorkingDirectoryChangedEvent,
-  ModeChangedEvent,
+  PermissionModeChangedEvent,
   AskQuestionRequestEvent,
 } from '../types'
 import type { Message } from '../../../shared/types'
@@ -295,19 +295,18 @@ export function handleWorkingDirectoryChanged(
 }
 
 /**
- * Handle mode_changed - return effect for parent to handle session options
+ * Handle permission_mode_changed - return effect for parent to handle session options
  */
-export function handleModeChanged(
+export function handlePermissionModeChanged(
   state: SessionState,
-  event: ModeChangedEvent
+  event: PermissionModeChangedEvent
 ): ProcessResult {
   return {
     state,
     effects: [{
-      type: 'mode_changed',
+      type: 'permission_mode_changed',
       sessionId: event.sessionId,
-      mode: event.mode,
-      enabled: event.enabled,
+      permissionMode: event.permissionMode,
     }],
   }
 }

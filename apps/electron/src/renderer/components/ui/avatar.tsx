@@ -73,6 +73,9 @@ function CrossfadeAvatar({
   const [isLoaded, setIsLoaded] = React.useState(false)
   const [currentSrc, setCurrentSrc] = React.useState(src)
 
+  // Detect if the image is an SVG
+  const isSvg = React.useMemo(() => src?.endsWith('.svg') ?? false, [src])
+
   // Reset loaded state when src changes
   React.useEffect(() => {
     if (src !== currentSrc) {
@@ -80,6 +83,14 @@ function CrossfadeAvatar({
       setCurrentSrc(src)
     }
   }, [src, currentSrc])
+
+  // Callback ref to check if image is cached immediately when element mounts
+  const imgCallbackRef = React.useCallback((node: HTMLImageElement | null) => {
+    if (node && node.complete && node.naturalWidth > 0) {
+      // Image is already cached/loaded
+      setIsLoaded(true)
+    }
+  }, [src])
 
   return (
     <div
@@ -101,16 +112,46 @@ function CrossfadeAvatar({
 
       {/* Image - fades in when loaded */}
       {src && (
-        <img
-          src={src}
-          alt={alt}
-          onLoad={() => setIsLoaded(true)}
-          className={cn(
-            "aspect-square h-full w-full object-cover transition-opacity duration-200",
-            isLoaded ? "opacity-100" : "opacity-0",
-            imageClassName
-          )}
-        />
+        isSvg ? (
+          // SVG as background image for better control
+          <div
+            className={cn(
+              "w-full h-full transition-opacity duration-200",
+              isLoaded ? "opacity-100" : "opacity-0",
+              imageClassName
+            )}
+            style={{
+              backgroundImage: `url("${src}")`,
+              backgroundSize: 'contain',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+            }}
+            role="img"
+            aria-label={alt}
+          >
+            {/* Hidden img for load detection and caching */}
+            <img
+              ref={imgCallbackRef}
+              src={src}
+              alt=""
+              onLoad={() => setIsLoaded(true)}
+              style={{ display: 'none' }}
+            />
+          </div>
+        ) : (
+          // Regular image
+          <img
+            ref={imgCallbackRef}
+            src={src}
+            alt={alt}
+            onLoad={() => setIsLoaded(true)}
+            className={cn(
+              "h-full w-full object-cover transition-opacity duration-200",
+              isLoaded ? "opacity-100" : "opacity-0",
+              imageClassName
+            )}
+          />
+        )
       )}
 
       {/* Show fallback statically if no src */}

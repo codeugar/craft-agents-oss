@@ -26,7 +26,7 @@ import { Mail, Plug, Globe, HardDrive } from 'lucide-react'
 import { McpIcon } from '@/components/icons/McpIcon'
 import { getLogoUrl } from '@craft-agent/shared/utils/logo'
 import { resolveSourceIconUrl } from '@craft-agent/shared/utils/icon'
-import type { LoadedSource } from '@craft-agent/shared/sources'
+import type { LoadedSource } from '@craft-agent/shared/sources/types'
 import type { SourceConnectionStatus } from '../../../shared/types'
 import { SourceStatusIndicator, deriveConnectionStatus } from './source-status-indicator'
 
@@ -149,9 +149,13 @@ export function SourceAvatar(props: SourceAvatarProps) {
     connectionError = directProps.statusError
   }
 
-  const containerSize = SIZE_CONFIG[size]
   const FallbackIcon = FALLBACK_ICONS[type] ?? Plug
   const statusSize = STATUS_SIZE_CONFIG[size]
+
+  // Only apply size classes if className doesn't contain custom size classes
+  const hasCustomSize = className?.match(/\b(h-|w-|size-)/)
+  const containerSize = hasCustomSize ? undefined : SIZE_CONFIG[size]
+  const defaultClasses = hasCustomSize ? undefined : 'rounded-[4px] ring-1 ring-border/30 shrink-0'
 
   return (
     <span className="relative inline-flex shrink-0">
@@ -160,7 +164,7 @@ export function SourceAvatar(props: SourceAvatarProps) {
         alt={name}
         className={cn(
           containerSize,
-          'rounded-[4px] ring-1 ring-border/30 shrink-0',
+          defaultClasses,
           className
         )}
         fallbackClassName="bg-muted rounded-[4px]"

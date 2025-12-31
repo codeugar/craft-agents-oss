@@ -3,6 +3,7 @@ import type { ComponentEntry } from './types'
 import { cn } from '@/lib/utils'
 import { MODELS } from '@config/models'
 import { toast } from 'sonner'
+import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 
 // Import REAL components from the main app
 import { FreeFormInput } from '@/components/chat/input/FreeFormInput'
@@ -31,8 +32,7 @@ interface FreeFormInputPlaygroundProps {
   isProcessing?: boolean
   currentModel: string
   ultrathinkEnabled?: boolean
-  skipPermissions?: boolean
-  safeModeEnabled?: boolean
+  permissionMode?: PermissionMode
   inputValue?: string
   onInputChange?: (value: string) => void
   unstyled?: boolean
@@ -44,8 +44,7 @@ function FreeFormInputPlayground({
   isProcessing = false,
   currentModel,
   ultrathinkEnabled = false,
-  skipPermissions = false,
-  safeModeEnabled = false,
+  permissionMode = 'ask',
   inputValue,
   onInputChange,
   unstyled = false,
@@ -53,13 +52,11 @@ function FreeFormInputPlayground({
   // Local state for options since playground doesn't have parent state management
   const [model, setModel] = React.useState(currentModel)
   const [ultrathink, setUltrathink] = React.useState(ultrathinkEnabled)
-  const [skipPerms, setSkipPerms] = React.useState(skipPermissions)
-  const [safeMode, setSafeMode] = React.useState(safeModeEnabled)
+  const [mode, setMode] = React.useState<PermissionMode>(permissionMode)
 
   React.useEffect(() => setModel(currentModel), [currentModel])
   React.useEffect(() => setUltrathink(ultrathinkEnabled), [ultrathinkEnabled])
-  React.useEffect(() => setSkipPerms(skipPermissions), [skipPermissions])
-  React.useEffect(() => setSafeMode(safeModeEnabled), [safeModeEnabled])
+  React.useEffect(() => setMode(permissionMode), [permissionMode])
 
   return (
     <FreeFormInput
@@ -70,10 +67,8 @@ function FreeFormInputPlayground({
       onModelChange={setModel}
       ultrathinkEnabled={ultrathink}
       onUltrathinkChange={setUltrathink}
-      skipPermissions={skipPerms}
-      onSkipPermissionsChange={setSkipPerms}
-      safeModeEnabled={safeMode}
-      onSafeModeChange={setSafeMode}
+      permissionMode={mode}
+      onPermissionModeChange={setMode}
       inputValue={inputValue}
       onInputChange={onInputChange}
       onSubmit={() => {}} // No-op for playground
@@ -405,16 +400,10 @@ export const inputComponents: ComponentEntry[] = [
         control: { type: 'boolean' },
         defaultValue: false,
       },
-      {
-        name: 'skipPermissions',
-        description: 'Skip permissions badge active',
-        control: { type: 'boolean' },
-        defaultValue: false,
-      },
     ],
     variants: [
       { name: 'Default', props: { currentModel: 'claude-sonnet-4-20250514' } },
-      { name: 'With Badges', props: { currentModel: 'claude-sonnet-4-20250514', safeModeEnabled: true, ultrathinkEnabled: true } },
+      { name: 'With Badges', props: { currentModel: 'claude-sonnet-4-20250514', permissionMode: 'safe' as PermissionMode, ultrathinkEnabled: true } },
       { name: 'Processing', props: { currentModel: 'claude-sonnet-4-20250514', isProcessing: true } },
       { name: 'Disabled', props: { currentModel: 'claude-sonnet-4-20250514', disabled: true } },
     ],

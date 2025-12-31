@@ -105,7 +105,8 @@ async function checkCapturedApiError(): Promise<CheckResult> {
   }
 
   // Other 4xx errors - report but don't fail (might be expected)
-  return { ok: true, detail: `✓ API error: ${apiError.status} (non-blocking)` };
+  // Include the message so users can see what actually went wrong
+  return { ok: true, detail: `✓ API error: ${apiError.status} - ${apiError.message}` };
 }
 
 /**

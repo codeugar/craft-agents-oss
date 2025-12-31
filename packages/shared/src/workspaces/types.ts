@@ -12,7 +12,7 @@
  *   └── sessions/        - Conversation sessions
  */
 
-import type { Mode } from '../agent/mode-manager.ts';
+import type { PermissionMode } from '../agent/mode-manager.ts';
 
 /**
  * Workspace configuration (stored in config.json)
@@ -28,8 +28,7 @@ export interface WorkspaceConfig {
   defaults?: {
     model?: string;
     enabledSourceSlugs?: string[]; // Sources to enable by default
-    modes?: Mode[]; // Default modes (e.g., ['safe'])
-    skipPermissions?: boolean;
+    permissionMode?: PermissionMode; // Default permission mode ('safe', 'ask', 'allow-all')
     workingDirectory?: string;
   };
 

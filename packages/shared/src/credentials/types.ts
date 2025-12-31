@@ -81,12 +81,6 @@ export interface CredentialId {
   agentSlug?: string;
   /** Server name or API name */
   name?: string;
-
-  // Legacy fields (kept for backwards compatibility with old MCP/API credentials)
-  /** @deprecated Use workspaceSlug instead */
-  workspaceId?: string;
-  /** @deprecated For agent-scoped credentials (subagent MCP/API) */
-  agentId?: string;
 }
 
 /**
@@ -181,19 +175,7 @@ export function credentialIdToAccount(id: CredentialId): string {
     return parts.join(CREDENTIAL_DELIMITER);
   }
 
-  // Legacy workspace ID-based credentials
-  if (id.workspaceId) {
-    parts.push(id.workspaceId);
-    if (id.agentId) {
-      parts.push(id.agentId);
-      if (id.name) {
-        parts.push(id.name);
-      }
-    }
-  } else {
-    parts.push('global');
-  }
-
+  parts.push('global');
   return parts.join(CREDENTIAL_DELIMITER);
 }
 
@@ -239,17 +221,6 @@ export function accountToCredentialId(account: string): CredentialId | null {
     return { type };
   }
 
-  // Legacy workspace ID-based: type/workspaceId
-  if (parts.length === 2) {
-    return { type, workspaceId: parts[1] };
-  }
-
-  // Legacy agent-scoped: type/workspaceId/agentId or type/workspaceId/agentId/name
-  const id: CredentialId = { type, workspaceId: parts[1], agentId: parts[2] };
-
-  if (parts[3]) {
-    id.name = parts[3];
-  }
-
-  return id;
+  // Unknown format
+  return null;
 }

@@ -32,6 +32,7 @@ import type {
   FileTab,
   BrowserTab,
   PreferencesTab,
+  SourceInfoTab,
   OpenChatTabOptions,
 } from './types'
 
@@ -233,6 +234,68 @@ export function useTabs() {
   }, [openTab])
 
   /**
+   * Open a source info tab (view-only)
+   * - Default: switches existing tab to source (if one exists) or replaces current source-info tab
+   */
+  const openSourceInfoTab = useCallback(
+    (
+      sourceSlug: string,
+      workspaceId: string,
+      sourceName: string,
+      agentSlug?: string
+    ) => {
+      // Include agentSlug in ID to distinguish agent-scoped from workspace-scoped
+      const tabId = agentSlug
+        ? `source-info:${agentSlug}:${sourceSlug}`
+        : `source-info:${sourceSlug}`
+
+      // Check if a source-info tab for this source already exists
+      const existingTab = state.tabs.find(
+        (t) => t.type === 'source-info' && t.id === tabId
+      ) as SourceInfoTab | undefined
+
+      if (existingTab) {
+        // Activate existing tab
+        setActiveTab(existingTab.id)
+        return
+      }
+
+      // Find an existing source-info tab to replace (hybrid behavior)
+      const currentSourceInfoTab = state.tabs.find(
+        (t) => t.type === 'source-info' && t.id === state.activeTabId
+      ) as SourceInfoTab | undefined
+
+      if (currentSourceInfoTab) {
+        // Replace the current source-info tab with this source
+        const newTab: SourceInfoTab = {
+          id: tabId,
+          type: 'source-info',
+          sourceSlug,
+          workspaceId,
+          agentSlug,
+          label: sourceName,
+          closable: true,
+        }
+        replaceTab({ oldTabId: currentSourceInfoTab.id, newTab })
+        return
+      }
+
+      // Create new tab
+      const tab: SourceInfoTab = {
+        id: tabId,
+        type: 'source-info',
+        sourceSlug,
+        workspaceId,
+        agentSlug,
+        label: sourceName,
+        closable: true,
+      }
+      openTab(tab)
+    },
+    [openTab, state.tabs, state.activeTabId, setActiveTab, replaceTab]
+  )
+
+  /**
    * Update a chat tab's label (e.g., when session is renamed)
    */
   const updateChatTabLabel = useCallback(
@@ -300,6 +363,7 @@ export function useTabs() {
     openFileTab,
     openBrowserTab,
     openPreferencesTab,
+    openSourceInfoTab,
 
     // Helpers
     updateChatTabLabel,

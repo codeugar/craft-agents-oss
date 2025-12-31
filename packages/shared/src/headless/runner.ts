@@ -1,4 +1,4 @@
-import { CraftAgent, type CraftAgentConfig } from '../agent/craft-agent.ts';
+import { CraftAgent, type CraftAgentConfig, type PermissionMode } from '../agent/craft-agent.ts';
 import { FolderAgentManager } from '../agents/folder-manager.ts';
 import type { SubAgentDefinition } from '../agents/types.ts';
 import type { AgentDefinition } from '../agents/folder-types.ts';
@@ -14,6 +14,24 @@ import type {
   HeadlessEvent,
   ToolCallRecord,
 } from './types.ts';
+
+/**
+ * Map headless permission policy to PermissionMode
+ * - deny-all: Use 'safe' mode (blocks writes without prompting)
+ * - allow-safe: Use 'ask' mode (but headless auto-allows safe commands)
+ * - allow-all: Use 'allow-all' mode (skip all permission checks)
+ */
+function policyToPermissionMode(policy: HeadlessConfig['permissionPolicy']): PermissionMode {
+  switch (policy) {
+    case 'allow-all':
+      return 'allow-all';
+    case 'allow-safe':
+      return 'ask';
+    case 'deny-all':
+    default:
+      return 'safe';
+  }
+}
 
 // Safe commands that can be auto-allowed with 'allow-safe' policy
 const SAFE_COMMANDS = new Set([
@@ -273,7 +291,7 @@ ${this.config.prompt}
     // Build MCP and API server configs (with credential lookup)
     this.mcpServers = await this.buildMcpServers(agentDef);
     this.apiServers = await this.buildApiServers(agentDef);
-    this.activeDefinition = this.convertToSubAgentDef(agentDef);
+    this.activeDefinition = agentDef;
 
     debug('[HeadlessRunner] Agent activated:', agentName, 'mcpServers:', Object.keys(this.mcpServers).length);
 
@@ -284,10 +302,22 @@ ${this.config.prompt}
    * Create CraftAgent with headless callbacks for permissions and questions.
    */
   private createAgent(): void {
+    // Map permission policy to the new PermissionMode system
+    const permissionMode = policyToPermissionMode(this.config.permissionPolicy);
+    debug('[HeadlessRunner] Using permission mode:', permissionMode, 'from policy:', this.config.permissionPolicy || 'deny-all');
+
     const agentConfig: CraftAgentConfig = {
       workspace: this.config.workspace,
       model: this.config.model,
       isHeadless: true,
+      // Create a minimal session config with the permission mode
+      session: {
+        id: `headless-${Date.now()}`,
+        workspaceRootPath: this.config.workspace.rootPath,
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        permissionMode,
+      },
     };
 
     this.agent = new CraftAgent(agentConfig);
@@ -477,19 +507,5 @@ ${this.config.prompt}
       default:
         return 'bearer';
     }
-  }
-
-  /**
-   * Convert folder-based AgentDefinition to legacy SubAgentDefinition
-   */
-  private convertToSubAgentDef(agentDef: AgentDefinition): SubAgentDefinition {
-    return {
-      name: agentDef.name,
-      instructions: agentDef.instructions,
-      mcpServers: agentDef.mcpServers,
-      apis: agentDef.apis,
-      rawContent: agentDef.rawContent,
-      parsedAt: agentDef.parsedAt,
-    };
   }
 }

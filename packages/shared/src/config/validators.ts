@@ -71,6 +71,9 @@ const CumulativeUsageSchema = z.object({
   lastUpdated: z.number().int().min(0),
 });
 
+// Permission mode for sessions
+const PermissionModeSchema = z.enum(['safe', 'ask', 'allow-all']);
+
 export const StoredConfigSchema = z.object({
   authType: AuthTypeSchema.optional(),
   workspaces: z.array(WorkspaceSchema).min(0),
@@ -81,8 +84,7 @@ export const StoredConfigSchema = z.object({
   tokenDisplay: TokenDisplayModeSchema.optional(),
   showCost: z.boolean().optional(),
   cumulativeUsage: CumulativeUsageSchema.optional(),
-  defaultModes: z.array(ModeSchema).optional(),
-  defaultSkipPermissions: z.boolean().optional(),
+  defaultPermissionMode: PermissionModeSchema.optional(),
   defaultWorkingDirectory: z.string().optional(),
 });
 

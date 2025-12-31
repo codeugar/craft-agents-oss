@@ -1,13 +1,14 @@
 import * as React from 'react'
 import { Command as CommandPrimitive } from 'cmdk'
-import { Brain, Shield, ShieldOff, Check } from 'lucide-react'
+import { Brain, ListTodo, Info, ShieldOff, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/modes'
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type SlashCommandId = 'safe' | 'ultrathink' | 'skip-permissions'
+export type SlashCommandId = 'safe' | 'ask' | 'allow-all' | 'ultrathink'
 
 export interface SlashCommand {
   id: SlashCommandId
@@ -28,15 +29,22 @@ const MENU_ICON_SIZE = 'h-3.5 w-3.5'
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'safe',
-    label: 'Safe Mode',
-    description: 'Read-only exploration mode',
-    icon: <Shield className={MENU_ICON_SIZE} />,
+    label: PERMISSION_MODE_CONFIG.safe.displayName,
+    description: PERMISSION_MODE_CONFIG.safe.description,
+    icon: <ListTodo className={MENU_ICON_SIZE} />,
     activeStyle: 'bg-green-500/10 text-green-500 border-green-500/30',
   },
   {
-    id: 'skip-permissions',
-    label: 'Skip Permissions',
-    description: 'Auto-approve all permission prompts',
+    id: 'ask',
+    label: PERMISSION_MODE_CONFIG.ask.displayName,
+    description: PERMISSION_MODE_CONFIG.ask.description,
+    icon: <Info className={MENU_ICON_SIZE} />,
+    activeStyle: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
+  },
+  {
+    id: 'allow-all',
+    label: PERMISSION_MODE_CONFIG['allow-all'].displayName,
+    description: PERMISSION_MODE_CONFIG['allow-all'].description,
     icon: <ShieldOff className={MENU_ICON_SIZE} />,
     activeStyle: 'bg-red-500/10 text-red-500 border-red-500/30',
   },

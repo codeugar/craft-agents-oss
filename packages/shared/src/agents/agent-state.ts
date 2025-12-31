@@ -185,9 +185,8 @@ export class AgentStateManager extends TypedEventEmitter<AgentStateEvents> {
         message: 'Loading agent definition...',
       });
 
-      // Convert AgentDefinition to SubAgentDefinition for compatibility
-      // Pass agentId as the slug (folder name = slug)
-      const definition = this.convertToSubAgentDefinition(agentDef, agentId);
+      // Add slug to AgentDefinition for SubAgentDefinition compatibility
+      const definition: SubAgentDefinition = { ...agentDef, slug: agentId };
       this.pendingDefinition = definition;
 
       // Continue to auth checks
@@ -205,22 +204,6 @@ export class AgentStateManager extends TypedEventEmitter<AgentStateEvents> {
     } finally {
       this.isActivating = false;
     }
-  }
-
-  /**
-   * Convert folder-based AgentDefinition to legacy SubAgentDefinition
-   */
-  private convertToSubAgentDefinition(agentDef: AgentDefinition, agentSlug: string): SubAgentDefinition {
-    return {
-      slug: agentSlug,
-      name: agentDef.name,
-      instructions: agentDef.instructions,
-      mcpServers: agentDef.mcpServers,
-      apis: agentDef.apis,
-      localSources: agentDef.localSources,
-      rawContent: agentDef.rawContent,
-      parsedAt: agentDef.parsedAt,
-    };
   }
 
   /**

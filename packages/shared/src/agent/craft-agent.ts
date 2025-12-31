@@ -8,7 +8,7 @@ import type { SubAgentDefinition } from '../agents/types.ts';
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
-import { shouldUseExtendedCacheTtl, loadStoredConfig, getSafeModeBehavior, type Workspace } from '../config/storage.ts';
+import { shouldUseExtendedCacheTtl, loadStoredConfig, getDefaultPermissionMode, type Workspace } from '../config/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
@@ -28,16 +28,16 @@ import {
   type CredentialResponse,
 } from './session-scoped-tools.ts';
 import {
-  isModeActive,
-  enterMode,
-  exitMode,
-  toggleMode,
+  getPermissionMode,
+  setPermissionMode,
+  cyclePermissionMode,
   initializeModeState,
   cleanupModeState,
   formatSessionState,
   shouldAllowToolInMode,
   blockWithReason,
-  getActiveModes,
+  type PermissionMode,
+  PERMISSION_MODE_CONFIG,
 } from './mode-manager.ts';
 import type { SafeModeContext } from './safe-mode-config.ts';
 import { getSessionPlansPath } from '../sessions/storage.ts';
@@ -50,15 +50,16 @@ import type { ValidationIssue } from '../config/validators.ts';
 import type { LoadedSource } from '../sources/types.ts';
 import type { LoadedAgent } from '../agents/folder-types.ts';
 
-// Re-export mode functions for TUI/Electron usage
+// Re-export permission mode functions for TUI/Electron usage
 export {
-  // Generic mode API
-  isModeActive,
-  enterMode,
-  exitMode,
-  toggleMode,
+  // Permission mode API
+  getPermissionMode,
+  setPermissionMode,
+  cyclePermissionMode,
   subscribeModeChanges,
-  type Mode,
+  type PermissionMode,
+  PERMISSION_MODE_ORDER,
+  PERMISSION_MODE_CONFIG,
 } from './mode-manager.ts';
 // Documentation is now served via external HTTP MCP at agents.craft.do/docs/mcp
 
@@ -579,8 +580,8 @@ export class CraftAgent {
   // Callback for AskUserQuestion tool - set by TUI to receive question prompts
   public onAskUserQuestion: ((request: { requestId: string; questions: Question[] }) => void) | null = null;
 
-  // Callback for safe mode changes - set by TUI to sync React state
-  public onSafeModeChange: ((safeMode: boolean) => void) | null = null;
+  /** Callback when permission mode changes */
+  public onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
 
   // Callback when a plan is submitted - set by TUI to display plan message
   public onPlanSubmitted: ((planPath: string) => void) | null = null;
@@ -625,17 +626,17 @@ export class CraftAgent {
       this.sessionId = config.session.sdkSessionId;
     }
 
-    // Initialize safe mode state with callbacks
+    // Initialize permission mode state with callbacks
     const sessionId = this.modeSessionId;
-    const initialSafeMode = config.session?.activeModes?.includes('safe') ?? false;
+    // Get initial mode: from session, or from global default
+    const initialMode: PermissionMode = config.session?.permissionMode ?? getDefaultPermissionMode();
 
-    initializeModeState(sessionId, { safeMode: initialSafeMode }, {
+    initializeModeState(sessionId, initialMode, {
       onStateChange: (state) => {
-        // Sync safe mode state with agent
-        const isSafe = state.activeModes.has('safe');
-        this.safeMode = isSafe;
-        // Notify TUI of safe mode changes
-        this.onSafeModeChange?.(isSafe);
+        // Sync permission mode state with agent
+        this.safeMode = state.permissionMode === 'safe';
+        // Notify UI of permission mode changes
+        this.onPermissionModeChange?.(state.permissionMode);
       },
     });
 
@@ -860,7 +861,7 @@ export class CraftAgent {
    * Uses modeManager as single source of truth.
    */
   isInSafeMode(): boolean {
-    return isModeActive(this.modeSessionId, 'safe');
+    return getPermissionMode(this.modeSessionId) === 'safe';
   }
 
   /**
@@ -1059,17 +1060,25 @@ export class CraftAgent {
                 return { continue: true };
               }
 
-              // Check safe mode directly from modeManager (single source of truth)
-              // This ensures tool blocking and LLM context are always in sync
-              const isSafeMode = isModeActive(sessionId, 'safe');
-              this.onDebug?.(`PreToolUse hook: ${input.tool_name} (safeMode=${isSafeMode})`);
+              // Get current permission mode (single source of truth)
+              const permissionMode = getPermissionMode(sessionId);
+              this.onDebug?.(`PreToolUse hook: ${input.tool_name} (permissionMode=${permissionMode})`);
 
               // ============================================================
-              // SAFE MODE: Block write operations when in read-only mode
-              // All logic is centralized in mode-manager.ts
-              // Uses per-workspace and per-source custom configs when available
+              // PERMISSION MODE HANDLING
+              // - 'safe': Block writes entirely (read-only mode)
+              // - 'ask': Prompt for dangerous operations
+              // - 'allow-all': Everything allowed, no prompts
               // ============================================================
-              if (isSafeMode) {
+
+              // In 'allow-all' mode, skip all permission checks
+              if (permissionMode === 'allow-all') {
+                this.onDebug?.(`Allow-all mode: allowing ${input.tool_name}`);
+                // Fall through to source blocking and other checks below
+              }
+
+              // In 'safe' mode, check against read-only allowlist
+              if (permissionMode === 'safe') {
                 const plansFolderPath = sessionId ? getSessionPlansPath(this.workspaceRootPath, sessionId) : undefined;
                 const result = shouldAllowToolInMode(
                   input.tool_name,
@@ -1079,77 +1088,13 @@ export class CraftAgent {
                 );
 
                 if (!result.allowed) {
-                  const safeModeBehavior = getSafeModeBehavior();
-
-                  // If behavior is 'block', silently block without asking
-                  if (safeModeBehavior === 'block') {
-                    this.onDebug?.(`Safe mode: blocking ${input.tool_name} (behavior=block)`);
-                    return blockWithReason(result.reason);
-                  }
-
-                  // behavior is 'ask_permission' - ask user for permission
-                  this.onDebug?.(`Safe mode: asking permission for ${input.tool_name}`);
-
-                  const requestId = `safe-${input.tool_use_id}`;
-
-                  // Build description based on tool type
-                  let description = result.reason;
-                  if (input.tool_name === 'Bash') {
-                    const toolInput = input.tool_input as Record<string, unknown>;
-                    const command = toolInput?.command as string || '';
-                    description = `Execute bash command: ${command}`;
-                  } else if (input.tool_name === 'Write' || input.tool_name === 'Edit' || input.tool_name === 'MultiEdit') {
-                    const toolInput = input.tool_input as Record<string, unknown>;
-                    const filePath = toolInput?.file_path as string || '';
-                    description = `${input.tool_name}: ${filePath}`;
-                  } else if (input.tool_name.startsWith('mcp__')) {
-                    description = `MCP tool: ${input.tool_name}`;
-                  } else if (input.tool_name.startsWith('api_')) {
-                    const toolInput = input.tool_input as Record<string, unknown>;
-                    const method = (toolInput?.method as string) || 'POST';
-                    const path = (toolInput?.path as string) || '';
-                    description = `API ${method}: ${path}`;
-                  }
-
-                  const permissionPromise = new Promise<boolean>((resolve) => {
-                    this.pendingPermissions.set(requestId, {
-                      resolve,
-                      toolName: input.tool_name,
-                      command: description,
-                      baseCommand: input.tool_name,
-                    });
-                  });
-
-                  // Notify UI of permission request
-                  if (this.onPermissionRequest) {
-                    this.onPermissionRequest({
-                      requestId,
-                      toolName: input.tool_name,
-                      command: description,
-                      description: result.reason,
-                      type: 'safe_mode',
-                    });
-                  } else {
-                    // No permission handler - deny by default for safety
-                    this.pendingPermissions.delete(requestId);
-                    return blockWithReason(result.reason);
-                  }
-
-                  // Wait for user decision
-                  const allowed = await permissionPromise;
-                  this.pendingPermissions.delete(requestId);
-
-                  if (!allowed) {
-                    this.onDebug?.(`User denied safe mode permission for: ${input.tool_name}`);
-                    return blockWithReason(`User denied permission for ${input.tool_name} in Safe Mode.`);
-                  }
-
-                  this.onDebug?.(`User allowed safe mode permission for: ${input.tool_name}`);
-                  // Fall through to allow the tool
+                  // In safe mode, always block without prompting
+                  this.onDebug?.(`Safe mode: blocking ${input.tool_name}`);
+                  return blockWithReason(result.reason);
                 }
 
                 this.onDebug?.(`Allowed in safe mode: ${input.tool_name}`);
-                return { continue: true };
+                // Fall through to source blocking and other checks below
               }
 
               // ============================================================
@@ -1226,8 +1171,10 @@ export class CraftAgent {
                 }
               }
 
-              // For Bash, check if we need permission
-              if (input.tool_name === 'Bash') {
+              // For Bash in 'ask' mode, check if we need permission
+              // In 'safe' mode, bash permission is handled by shouldAllowToolInMode above
+              // In 'allow-all' mode, skip permission checks entirely
+              if (input.tool_name === 'Bash' && permissionMode === 'ask') {
                 // Extract command and base command
                 const command = typeof input.tool_input === 'object' && input.tool_input !== null
                   ? (input.tool_input as Record<string, unknown>).command
@@ -2789,7 +2736,6 @@ When you see <setup_required> in a message, help the user authenticate those sou
     this.onPermissionRequest = null;
     this.onDebug = null;
     this.onAskUserQuestion = null;
-    this.onSafeModeChange = null;
     this.onPlanSubmitted = null;
     this.onSourceChange = null;
     this.onSourcesListChange = null;

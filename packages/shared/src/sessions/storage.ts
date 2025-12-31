@@ -64,13 +64,6 @@ export function getSessionFilePath(workspaceRootPath: string, sessionId: string)
 }
 
 /**
- * Get path to legacy session JSON file (for backward compatibility)
- */
-function getLegacySessionFilePath(workspaceRootPath: string, sessionId: string): string {
-  return join(getWorkspaceSessionsPath(workspaceRootPath), `${sessionId}.json`);
-}
-
-/**
  * Ensure session directory exists with all subdirectories
  */
 export function ensureSessionDir(workspaceRootPath: string, sessionId: string): string {
@@ -129,8 +122,7 @@ export function createSession(
     agentSlug?: string;
     agentName?: string;
     workingDirectory?: string;
-    activeModes?: SessionConfig['activeModes'];
-    skipPermissions?: boolean;
+    permissionMode?: SessionConfig['permissionMode'];
     enabledSourceSlugs?: string[];
   }
 ): SessionConfig {
@@ -151,8 +143,7 @@ export function createSession(
     agentSlug: options?.agentSlug,
     agentName: options?.agentName,
     workingDirectory: options?.workingDirectory,
-    activeModes: options?.activeModes,
-    skipPermissions: options?.skipPermissions,
+    permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
   };
 
@@ -239,25 +230,14 @@ export function saveSession(session: StoredSession): void {
 
 /**
  * Load session by ID
- * Supports both new folder structure and legacy flat file structure for backward compatibility
+ * Loads session from folder structure
  */
 export function loadSession(workspaceRootPath: string, sessionId: string): StoredSession | null {
-  // First try new folder structure: {id}/session.json
+  // Load from folder structure: {id}/session.json
   const filePath = getSessionFilePath(workspaceRootPath, sessionId);
   try {
     if (existsSync(filePath)) {
       const content = readFileSync(filePath, 'utf-8');
-      return JSON.parse(content) as StoredSession;
-    }
-  } catch {
-    // Fall through to try legacy path
-  }
-
-  // Fall back to legacy flat file structure: {id}.json
-  const legacyPath = getLegacySessionFilePath(workspaceRootPath, sessionId);
-  try {
-    if (existsSync(legacyPath)) {
-      const content = readFileSync(legacyPath, 'utf-8');
       return JSON.parse(content) as StoredSession;
     }
   } catch {
@@ -269,7 +249,7 @@ export function loadSession(workspaceRootPath: string, sessionId: string): Store
 
 /**
  * List sessions for a workspace
- * Supports both new folder structure and legacy flat file structure
+ * Lists sessions from folder structure
  */
 export function listSessions(workspaceRootPath: string): SessionMetadata[] {
   const sessionsDir = getWorkspaceSessionsPath(workspaceRootPath);
@@ -279,9 +259,8 @@ export function listSessions(workspaceRootPath: string): SessionMetadata[] {
 
   const entries = readdirSync(sessionsDir, { withFileTypes: true });
   const sessions: SessionMetadata[] = [];
-  const processedIds = new Set<string>();
 
-  // Process session folders (new structure: {id}/session.json)
+  // Process session folders: {id}/session.json
   for (const entry of entries) {
     if (entry.isDirectory()) {
       const sessionId = entry.name;
@@ -290,30 +269,11 @@ export function listSessions(workspaceRootPath: string): SessionMetadata[] {
         try {
           const content = readFileSync(sessionFile, 'utf-8');
           const session = JSON.parse(content) as StoredSession;
-          processedIds.add(sessionId);
           const metadata = extractSessionMetadata(session, workspaceRootPath);
           if (metadata) sessions.push(metadata);
         } catch {
           // Skip invalid files
         }
-      }
-    }
-  }
-
-  // Process legacy flat files (old structure: {id}.json)
-  for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.json')) {
-      const sessionId = entry.name.replace('.json', '');
-      // Skip if already processed from folder structure
-      if (processedIds.has(sessionId)) continue;
-
-      try {
-        const content = readFileSync(join(sessionsDir, entry.name), 'utf-8');
-        const session = JSON.parse(content) as StoredSession;
-        const metadata = extractSessionMetadata(session, workspaceRootPath);
-        if (metadata) sessions.push(metadata);
-      } catch {
-        // Skip invalid files
       }
     }
   }
@@ -371,20 +331,14 @@ function extractSessionMetadata(session: StoredSession, workspaceRootPath: strin
 
 /**
  * Delete a session and its associated files
- * Handles both new folder structure and legacy flat file structure
+ * Deletes session folder and all associated files
  */
 export function deleteSession(workspaceRootPath: string, sessionId: string): boolean {
   try {
-    // Delete session directory (new structure - includes session.json, attachments, plans)
+    // Delete session directory (includes session.json, attachments, plans)
     const sessionDir = getSessionPath(workspaceRootPath, sessionId);
     if (existsSync(sessionDir)) {
       rmSync(sessionDir, { recursive: true });
-    }
-
-    // Also delete legacy flat file if it exists
-    const legacyPath = getLegacySessionFilePath(workspaceRootPath, sessionId);
-    if (existsSync(legacyPath)) {
-      unlinkSync(legacyPath);
     }
 
     return true;
@@ -448,8 +402,7 @@ export function updateSessionMetadata(
     | 'lastReadMessageId'
     | 'enabledSourceSlugs'
     | 'workingDirectory'
-    | 'skipPermissions'
-    | 'activeModes'
+    | 'permissionMode'
   >>
 ): void {
   const session = loadSession(workspaceRootPath, sessionId);
@@ -462,8 +415,7 @@ export function updateSessionMetadata(
   if (updates.todoState !== undefined) session.todoState = updates.todoState;
   if (updates.enabledSourceSlugs !== undefined) session.enabledSourceSlugs = updates.enabledSourceSlugs;
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
-  if (updates.skipPermissions !== undefined) session.skipPermissions = updates.skipPermissions;
-  if (updates.activeModes !== undefined) session.activeModes = updates.activeModes;
+  if (updates.permissionMode !== undefined) session.permissionMode = updates.permissionMode;
   if ('lastReadMessageId' in updates) session.lastReadMessageId = updates.lastReadMessageId;
 
   saveSession(session);

@@ -78,6 +78,7 @@ const AgentSetupTabPanel = lazy(() => import('./panels/AgentSetupTabPanel'))
 const FileTabPanel = lazy(() => import('./panels/FileTabPanel'))
 const BrowserTabPanel = lazy(() => import('./panels/BrowserTabPanel'))
 const PreferencesTabPanel = lazy(() => import('./panels/PreferencesTabPanel'))
+const SourceInfoTabPanel = lazy(() => import('./panels/SourceInfoTabPanel'))
 
 /**
  * Map tab types to their panel components
@@ -91,6 +92,7 @@ const TAB_PANELS: Record<TabType, React.LazyExoticComponent<React.ComponentType<
   file: FileTabPanel,
   browser: BrowserTabPanel,
   preferences: PreferencesTabPanel,
+  'source-info': SourceInfoTabPanel,
 }
 
 interface TabContentProps {
@@ -149,7 +151,7 @@ export function TabContent({ className }: TabContentProps) {
             key={tab.id}
             className={cn(
               'h-full',
-              !isActive && 'invisible absolute inset-0'
+              !isActive && 'invisible absolute inset-0 -z-10'
             )}
           >
             <TabErrorBoundary tabId={tab.id} onClose={() => closeTab(tab.id)}>

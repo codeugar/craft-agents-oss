@@ -5,6 +5,7 @@ import type { AuthType, TokenDisplayMode } from '@craft-agent/shared/config';
 import { AnimatedSpinner } from './Spinner.tsx';
 import { DEFAULT_MODEL, getModelDisplayName } from '@craft-agent/shared/config';
 import { CRAFT_LOGO } from '@craft-agent/shared/branding';
+import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent';
 
 export interface HeaderProps {
   connected: boolean;
@@ -20,6 +21,9 @@ export interface HeaderProps {
   tokenDisplay?: TokenDisplayMode;
   showCost?: boolean;
   version?: string;
+  /** Current permission mode ('safe', 'ask', 'allow-all') */
+  permissionMode?: PermissionMode;
+  /** @deprecated Use permissionMode instead */
   safeMode?: boolean;
   /** Show "Press Ctrl+C again to exit" warning */
   exitWarning?: boolean;
@@ -39,9 +43,23 @@ export const Header: React.FC<HeaderProps> = memo(({
   tokenDisplay = 'hidden',
   showCost = true,
   version,
+  permissionMode,
   safeMode = false,
   exitWarning = false,
 }) => {
+  // Resolve permission mode: prefer explicit prop, fallback to legacy safeMode
+  const resolvedMode: PermissionMode = permissionMode ?? (safeMode ? 'safe' : 'ask');
+  const modeConfig = PERMISSION_MODE_CONFIG[resolvedMode];
+
+  // Map color names to background colors for terminal display
+  const modeBackgroundColor = useMemo(() => {
+    switch (modeConfig.color) {
+      case 'green': return '#006400';  // Dark green
+      case 'amber': return '#B8860B';  // Dark goldenrod (amber)
+      case 'red': return '#8B0000';    // Dark red
+      default: return '#006400';
+    }
+  }, [modeConfig.color]);
   // Map model IDs to friendly names
   const modelDisplay = useMemo(() => getModelDisplayName(model), [model]);
 
@@ -67,12 +85,8 @@ export const Header: React.FC<HeaderProps> = memo(({
         ) : (
           <Text color="magenta" bold>craft</Text>
         )}
-        {safeMode && (
-          <>
-            <Text dimColor> </Text>
-            <Text backgroundColor="#006400" color="white" bold> SAFE </Text>
-          </>
-        )}
+        <Text dimColor> </Text>
+        <Text backgroundColor={modeBackgroundColor} color="white" bold> {modeConfig.shortName.toUpperCase()} </Text>
         <Text dimColor> | </Text>
         <Text color={connected ? 'green' : 'red'}>
           {connected ? '●' : '○'}

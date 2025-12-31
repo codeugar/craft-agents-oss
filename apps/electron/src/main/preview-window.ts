@@ -2,6 +2,7 @@ import { BrowserWindow, shell, nativeTheme } from 'electron'
 import { join, basename } from 'path'
 import { readFile, writeFile } from 'fs/promises'
 import { IPC_CHANNELS, type MarkdownPreviewData } from '../shared/types'
+import type { WindowManager } from './window-manager'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -28,6 +29,14 @@ interface MarkdownPreviewWindowData {
  */
 export class PreviewWindowManager {
   private windows: Map<string, MarkdownPreviewWindowData> = new Map()
+  private windowManager: WindowManager | null = null
+
+  /**
+   * Set the window manager for broadcasting file save events
+   */
+  setWindowManager(windowManager: WindowManager): void {
+    this.windowManager = windowManager
+  }
 
   /**
    * Open or focus an existing preview window
@@ -162,6 +171,11 @@ export class PreviewWindowManager {
     windowData.originalContent = content
 
     console.log(`[PreviewWindowManager] Saved content to ${filePath}`)
+
+    // Broadcast file saved event to all workspace windows
+    if (this.windowManager) {
+      this.windowManager.broadcastToAll(IPC_CHANNELS.MARKDOWN_PREVIEW_FILE_SAVED, { filePath })
+    }
   }
 
   /**

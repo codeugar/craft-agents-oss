@@ -34,12 +34,10 @@ import {
 } from '../hooks/index.ts';
 import { isShiftTab } from '../keyboard/index.ts';
 import {
-  SAFE_MODE_ENTER_MESSAGE,
-  SAFE_MODE_EXIT_MESSAGE,
-  SAFE_MODE_ENTER_PROMPT,
-  SAFE_MODE_EXIT_PROMPT,
+  PERMISSION_MODE_MESSAGES,
+  PERMISSION_MODE_PROMPTS,
 } from '@craft-agent/shared/agents';
-import { isModeActive } from '@craft-agent/shared/agent';
+import { getPermissionMode, type PermissionMode } from '@craft-agent/shared/agent';
 import { useGlobalContext } from '../context/GlobalContext.tsx';
 import {
   getWorkspaces,
@@ -163,14 +161,18 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     completeApiAuth,
     cancelApiAuth,
     triggerApiAuth,
-    // Safe mode (read-only exploration)
-    activePlan,
+    // Permission mode (safe/ask/allow-all)
+    permissionMode,
+    cycleMode,
+    // Legacy safe mode (deprecated - use permissionMode instead)
     safeMode,
+    // Plan handling
+    activePlan,
     cancelPlan,
     approvePlan,
-    // Generic mode toggle API
+    // Generic mode toggle API (legacy)
     setMode,
-    // Legacy mode toggle aliases (deprecated - use setMode instead)
+    // Legacy mode toggle aliases (deprecated - use cycleMode instead)
     startSafeMode,
     exitSafeModeAction,
     // Todos (from TodoWrite tool)
@@ -461,8 +463,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       case 'start':
         // Start Craft Agents safe mode (same as /safe and SHIFT+TAB)
         startSafeMode();
-        addLocalMessage(SAFE_MODE_ENTER_MESSAGE, 'system');
-        sendMessage(SAFE_MODE_ENTER_PROMPT);
+        addLocalMessage(PERMISSION_MODE_MESSAGES['safe'], 'system');
+        sendMessage(PERMISSION_MODE_PROMPTS['safe']);
         break;
       case 'plans':
         // Open unified plan selector (list/load/delete)
@@ -689,24 +691,14 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       }
     }
 
-    // SHIFT+TAB: Toggle Safe Mode (read-only exploration)
-    // Use synchronous internal state (isModeActive) instead of async React state (safeMode)
-    // to avoid race conditions when toggling quickly
+    // SHIFT+TAB: Cycle Permission Mode (safe → ask → allow-all → safe)
     if (isShiftTab(input, key)) {
-      const internalSafeMode = isModeActive(session.id, 'safe');
-      if (internalSafeMode) {
-        // Exit Safe Mode
-        setMode('safe', false);
-        addLocalMessage(SAFE_MODE_EXIT_MESSAGE, 'system');
-        // Only send exit prompt if not already processing
-        if (!isProcessing) {
-          sendMessage(SAFE_MODE_EXIT_PROMPT);
-        }
-      } else if (!isProcessing) {
-        // Enter Safe Mode
-        setMode('safe', true);
-        addLocalMessage(SAFE_MODE_ENTER_MESSAGE, 'system');
-        sendMessage(SAFE_MODE_ENTER_PROMPT);
+      // Cycle to the next mode
+      const newMode = cycleMode();
+      // Show mode change message and send prompt to Claude
+      addLocalMessage(PERMISSION_MODE_MESSAGES[newMode], 'system');
+      if (!isProcessing) {
+        sendMessage(PERMISSION_MODE_PROMPTS[newMode]);
       }
       return;
     }
@@ -1009,7 +1001,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           tokenDisplay={tokenDisplayMode}
           showCost={showCostSetting}
           version={getCurrentVersion()}
-          safeMode={safeMode}
+          permissionMode={permissionMode}
           exitWarning={showExitWarning}
         />
       </Box>

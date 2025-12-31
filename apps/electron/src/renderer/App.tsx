@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useSetAtom, useStore } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, Mode } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -66,8 +66,8 @@ export default function App() {
   // Using ref instead of state to avoid re-renders during typing - drafts are only
   // needed for initial value restoration and disk persistence, not reactive updates
   const sessionDraftsRef = useRef<Map<string, string>>(new Map())
-  // Unified session options - replaces ultrathinkSessions, skipPermissionsSessions, sessionModes
-  // All session-scoped options in one place (ultrathink, skipPermissions, activeModes, etc.)
+  // Unified session options - replaces ultrathinkSessions and sessionModes
+  // All session-scoped options in one place (ultrathink, permissionMode)
   const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
 
   // Ref for sessionOptions to access current value in event handlers without re-registering
@@ -190,12 +190,11 @@ export default function App() {
       const optionsMap = new Map<string, SessionOptions>()
       for (const s of loadedSessions) {
         // Only store non-default options to keep the map lean
-        const hasOptions = s.skipPermissions || (s.activeModes && s.activeModes.length > 0)
-        if (hasOptions) {
+        const hasNonDefaultMode = s.permissionMode && s.permissionMode !== 'ask'
+        if (hasNonDefaultMode) {
           optionsMap.set(s.id, {
             ultrathinkEnabled: false, // ultrathink is single-shot, never persisted
-            skipPermissions: s.skipPermissions ?? false,
-            activeModes: s.activeModes ?? [],
+            permissionMode: s.permissionMode ?? 'ask',
           })
         }
       }
@@ -261,32 +260,20 @@ export default function App() {
       for (const effect of effects) {
         switch (effect.type) {
           case 'permission_request': {
-            if (sessionOptionsRef.current.get(sessionId)?.skipPermissions) {
-              console.log('[App] permission_request: auto-approving (skipPermissions enabled)')
-              window.electronAPI.respondToPermission(sessionId, effect.request.requestId, true, false)
-            } else {
-              setPendingPermissions(prevPerms => {
-                const next = new Map(prevPerms)
-                const existingQueue = next.get(sessionId) || []
-                next.set(sessionId, [...existingQueue, effect.request])
-                return next
-              })
-            }
+            setPendingPermissions(prevPerms => {
+              const next = new Map(prevPerms)
+              const existingQueue = next.get(sessionId) || []
+              next.set(sessionId, [...existingQueue, effect.request])
+              return next
+            })
             break
           }
-          case 'mode_changed': {
-            console.log('[App] mode_changed:', effect.sessionId, effect.mode, effect.enabled)
+          case 'permission_mode_changed': {
+            console.log('[App] permission_mode_changed:', effect.sessionId, effect.permissionMode)
             setSessionOptions(prevOpts => {
               const next = new Map(prevOpts)
               const current = next.get(effect.sessionId) ?? defaultSessionOptions
-              const currentModes = current.activeModes
-              let newModes: Mode[]
-              if (effect.enabled) {
-                newModes = currentModes.includes(effect.mode) ? currentModes : [...currentModes, effect.mode]
-              } else {
-                newModes = currentModes.filter(m => m !== effect.mode)
-              }
-              next.set(effect.sessionId, { ...current, activeModes: newModes })
+              next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
               return next
             })
             break
@@ -437,14 +424,13 @@ export default function App() {
     addSession(session)
 
     // Apply session defaults to the unified sessionOptions
-    const hasDefaults = session.skipPermissions || (session.activeModes && session.activeModes.length > 0)
-    if (hasDefaults) {
+    const hasNonDefaultMode = session.permissionMode && session.permissionMode !== 'ask'
+    if (hasNonDefaultMode) {
       setSessionOptions(prev => {
         const next = new Map(prev)
         next.set(session.id, {
           ultrathinkEnabled: false,
-          skipPermissions: session.skipPermissions ?? false,
-          activeModes: session.activeModes ?? [],
+          permissionMode: session.permissionMode ?? 'ask',
         })
         return next
       })
@@ -685,22 +671,9 @@ export default function App() {
     })
 
     // Handle persistence/backend for specific options
-    if (updates.skipPermissions !== undefined) {
-      window.electronAPI.setSkipPermissions(sessionId, updates.skipPermissions)
-    }
-    if (updates.activeModes !== undefined) {
-      // Sync mode changes with backend (compare to get added/removed modes)
-      const current = sessionOptions.get(sessionId)?.activeModes ?? []
-      for (const mode of updates.activeModes) {
-        if (!current.includes(mode)) {
-          window.electronAPI.setMode(sessionId, mode, true)
-        }
-      }
-      for (const mode of current) {
-        if (!updates.activeModes.includes(mode)) {
-          window.electronAPI.setMode(sessionId, mode, false)
-        }
-      }
+    if (updates.permissionMode !== undefined) {
+      // Sync permission mode change with backend
+      window.electronAPI.setPermissionMode(sessionId, updates.permissionMode)
     }
     // ultrathinkEnabled is UI-only (single-shot), no backend persistence needed
   }, [sessionOptions])

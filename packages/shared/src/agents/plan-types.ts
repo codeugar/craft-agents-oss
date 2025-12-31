@@ -208,19 +208,23 @@ export function addRefinementEntry(
 }
 
 // ============================================
-// Safe Mode UI Messages (single source of truth)
+// Permission Mode UI Messages (single source of truth)
 // ============================================
-// Safe Mode is a read-only exploration mode that blocks write operations.
-// User can toggle via SHIFT+TAB or /safe command.
+// Permission modes control tool execution behavior.
+// User can cycle via SHIFT+TAB: Safe → Ask → Allow All → Safe
 
-/** Message shown to user when entering safe mode */
-export const SAFE_MODE_ENTER_MESSAGE = 'Safe mode active. Read-only exploration enabled.';
+import type { PermissionMode } from '../agent/mode-manager.ts';
 
-/** Message shown to user when exiting safe mode */
-export const SAFE_MODE_EXIT_MESSAGE = 'Exited safe mode.';
+/** User-visible messages for each permission mode */
+export const PERMISSION_MODE_MESSAGES: Record<PermissionMode, string> = {
+  'safe': 'Safe mode active. Read-only exploration enabled.',
+  'ask': 'Ask mode active. Prompts for dangerous operations.',
+  'allow-all': 'Allow-all mode active. All operations permitted.',
+};
 
-/** System prompt sent to Claude when entering safe mode via Shift+Tab */
-export const SAFE_MODE_ENTER_PROMPT = 'The user has activated safe mode. You are now in read-only exploration mode. You can read files, search, and explore the codebase, but write operations (Bash, Write, Edit, API calls) are blocked. Focus on understanding and explaining rather than making changes.';
-
-/** System prompt sent to Claude when exiting safe mode via Shift+Tab */
-export const SAFE_MODE_EXIT_PROMPT = 'The user has exited safe mode. You now have full access to all tools. Ask how you can help.';
+/** System prompts sent to Claude when mode changes */
+export const PERMISSION_MODE_PROMPTS: Record<PermissionMode, string> = {
+  'safe': 'The user has switched to Safe mode (read-only). You can read files, search, and explore the codebase, but write operations (Bash, Write, Edit, API calls) are blocked. Focus on understanding and explaining rather than making changes.',
+  'ask': 'The user has switched to Ask mode. Most operations are allowed, but dangerous bash commands will prompt for user approval. You have access to write operations.',
+  'allow-all': 'The user has switched to Allow-all mode. All operations are permitted without prompts. Use with care.',
+};

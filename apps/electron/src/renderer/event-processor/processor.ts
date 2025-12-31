@@ -28,7 +28,7 @@ import {
   handleInterrupted,
   handleTitleGenerated,
   handleWorkingDirectoryChanged,
-  handleModeChanged,
+  handlePermissionModeChanged,
   handleAskQuestionRequest,
 } from './handlers/session'
 
@@ -96,8 +96,8 @@ export function processEvent(
     case 'working_directory_changed':
       return handleWorkingDirectoryChanged(state, event)
 
-    case 'mode_changed':
-      return handleModeChanged(state, event)
+    case 'permission_mode_changed':
+      return handlePermissionModeChanged(state, event)
 
     case 'ask_question_request':
       return handleAskQuestionRequest(state, event)

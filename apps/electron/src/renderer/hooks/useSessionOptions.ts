@@ -10,7 +10,7 @@
  * 3. Add UI control in FreeFormInput.tsx (or wherever needed)
  */
 
-import type { Mode } from '../../shared/types'
+import type { PermissionMode } from '../../shared/types'
 
 /**
  * All session-scoped options in one place.
@@ -18,17 +18,14 @@ import type { Mode } from '../../shared/types'
 export interface SessionOptions {
   /** Extended thinking mode (single-shot per message) */
   ultrathinkEnabled: boolean
-  /** Auto-approve all permission requests */
-  skipPermissions: boolean
-  /** Active operational modes (e.g., 'safe' for read-only exploration) */
-  activeModes: Mode[]
+  /** Permission mode ('safe', 'ask', 'allow-all') */
+  permissionMode: PermissionMode
 }
 
 /** Default values for new sessions */
 export const defaultSessionOptions: SessionOptions = {
   ultrathinkEnabled: false,
-  skipPermissions: false,
-  activeModes: [],
+  permissionMode: 'ask', // Default to ask mode (prompt for permissions)
 }
 
 /** Type for partial updates to session options */

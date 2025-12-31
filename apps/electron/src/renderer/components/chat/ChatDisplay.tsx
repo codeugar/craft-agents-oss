@@ -22,11 +22,15 @@ import { FileTypeIcon, getFileTypeLabel } from "./AttachmentPreview"
 import { Spinner } from "@/components/ui/loading-indicator"
 import { useFocusZone } from "@/hooks/keyboard"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource } from "../../../shared/types"
+import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import { SetupAuthBanner, type BannerState } from "./SetupAuthBanner"
 import { TurnCard } from "./TurnCard"
 import { PlanCard } from "./PlanCard"
 import { groupMessagesByTurn, formatTurnAsMarkdown, formatActivityAsMarkdown, type Turn, type AssistantTurn, type UserTurn, type SystemTurn, type PlanTurn } from "./turn-utils"
 import { InputContainer, type StructuredInputState, type StructuredResponse, type PermissionResponse } from "./input"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { SlashCommandMenu, DEFAULT_SLASH_COMMANDS, type SlashCommandId } from "@/components/ui/slash-command-menu"
+import { CONTENT_MAX_WIDTH_CLASS } from "@/config/layout"
 
 /** Agent setup state for showing setup indicator in input area */
 interface AgentSetupState {
@@ -65,12 +69,9 @@ interface ChatDisplayProps {
   /** Enable ultrathink mode for extended reasoning */
   ultrathinkEnabled?: boolean
   onUltrathinkChange?: (enabled: boolean) => void
-  /** Skip all permission prompts automatically */
-  skipPermissions?: boolean
-  onSkipPermissionsChange?: (enabled: boolean) => void
-  /** Enable safe mode for read-only exploration */
-  safeModeEnabled?: boolean
-  onSafeModeChange?: (enabled: boolean) => void
+  /** Current permission mode */
+  permissionMode?: PermissionMode
+  onPermissionModeChange?: (mode: PermissionMode) => void
   // Input value preservation (controlled from parent)
   /** Current input value - preserved across mode switches and conversation changes */
   inputValue?: string
@@ -259,10 +260,8 @@ export function ChatDisplay({
   // Advanced options
   ultrathinkEnabled = false,
   onUltrathinkChange,
-  skipPermissions = false,
-  onSkipPermissionsChange,
-  safeModeEnabled = false,
-  onSafeModeChange,
+  permissionMode = 'ask',
+  onPermissionModeChange,
   // Input value preservation
   inputValue,
   onInputChange,
@@ -283,6 +282,23 @@ export function ChatDisplay({
   const isStickToBottomRef = React.useRef(true)
   const internalTextareaRef = React.useRef<HTMLTextAreaElement>(null)
   const textareaRef = externalTextareaRef || internalTextareaRef
+
+  // State for permission mode dropdown
+  const [permissionModeOpen, setPermissionModeOpen] = React.useState(false)
+
+  // Filter slash commands to only permission modes
+  const permissionModeCommands = React.useMemo(() =>
+    DEFAULT_SLASH_COMMANDS.filter(cmd => ['safe', 'ask', 'allow-all'].includes(cmd.id)),
+    []
+  )
+
+  // Handle permission mode selection from dropdown
+  const handlePermissionModeSelect = React.useCallback((commandId: SlashCommandId) => {
+    if (commandId === 'safe') onPermissionModeChange?.('safe')
+    else if (commandId === 'ask') onPermissionModeChange?.('ask')
+    else if (commandId === 'allow-all') onPermissionModeChange?.('allow-all')
+    setPermissionModeOpen(false)
+  }, [onPermissionModeChange])
 
   // Register as focus zone - when zone gains focus, focus the textarea
   const { zoneRef, isFocused } = useFocusZone({
@@ -446,7 +462,7 @@ export function ChatDisplay({
             {/* Top fade gradient - absolutely positioned overlay */}
             <div className="absolute top-0 left-0 right-2 h-8 z-10 bg-gradient-to-b from-background to-transparent pointer-events-none" />
             <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef}>
-            <div className="max-w-[960px] mx-auto px-5 py-8 space-y-2.5 min-w-0">
+            <div className={cn(CONTENT_MAX_WIDTH_CLASS, "mx-auto px-5 py-8 space-y-2.5 min-w-0")}>
               {session.messages.length === 0 ? (
                 /* Empty State: Welcome message for new sessions */
                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground px-8">
@@ -745,7 +761,7 @@ export function ChatDisplay({
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
-          <div className="max-w-[960px] mx-auto w-full px-4 pb-4 mt-1">
+          <div className={cn(CONTENT_MAX_WIDTH_CLASS, "mx-auto w-full px-4 pb-4 mt-1")}>
             {/* Agent Setup Banner - shown instead of input when agent needs setup */}
             {agentSetupState && agentSetupState.state !== 'hidden' && !pendingPermission ? (
               <SetupAuthBanner
@@ -758,7 +774,7 @@ export function ChatDisplay({
             ) : (
               <>
                 {/* Active option badges - positioned above input */}
-                {(ultrathinkEnabled || safeModeEnabled || skipPermissions) && (
+                {(ultrathinkEnabled || permissionMode) && (
                   <div className="flex justify-start gap-2 mb-2">
                     {ultrathinkEnabled && (
                       <button
@@ -771,30 +787,45 @@ export function ChatDisplay({
                         <X className="h-3 w-3 text-purple-500 opacity-60 hover:opacity-100 translate-y-px" />
                       </button>
                     )}
-                    {safeModeEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => onSafeModeChange?.(false)}
-                        className="h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 transition-all bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 shadow-tinted"
-                        style={{ '--shadow-color': '6, 95, 70' } as React.CSSProperties}
+                    {/* Permission Mode Badge with Dropdown */}
+                    <Popover open={permissionModeOpen} onOpenChange={setPermissionModeOpen}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn(
+                            "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 transition-all shadow-tinted",
+                            permissionMode === 'safe' && "bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10",
+                            permissionMode === 'ask' && "bg-amber-500/5 text-amber-700 hover:bg-amber-500/10",
+                            permissionMode === 'allow-all' && "bg-red-500/5 text-red-700 hover:bg-red-500/10"
+                          )}
+                          style={{
+                            '--shadow-color': permissionMode === 'safe' ? '6, 95, 70' : permissionMode === 'ask' ? '217, 119, 6' : '220, 38, 38'
+                          } as React.CSSProperties}
+                        >
+                          {permissionMode === 'safe' && <ListTodo className="h-3.5 w-3.5" />}
+                          {permissionMode === 'ask' && <Info className="h-3.5 w-3.5" />}
+                          {permissionMode === 'allow-all' && <ShieldOff className="h-3.5 w-3.5" />}
+                          <span>
+                            {permissionMode === 'safe' && 'Safe Mode'}
+                            {permissionMode === 'ask' && 'Ask Permission'}
+                            {permissionMode === 'allow-all' && 'Allow All'}
+                          </span>
+                          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="w-auto p-0 bg-background/80 backdrop-blur-xl backdrop-saturate-150 border-border/50"
+                        align="start"
+                        sideOffset={4}
+                        style={{ borderRadius: '8px', boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)' }}
                       >
-                        <ListTodo className="h-3.5 w-3.5" />
-                        <span>Safe Mode</span>
-                        <X className="h-3.5 w-3.5 opacity-60 hover:opacity-100" />
-                      </button>
-                    )}
-                    {skipPermissions && (
-                      <button
-                        type="button"
-                        onClick={() => onSkipPermissionsChange?.(false)}
-                        className="h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 transition-all bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 shadow-tinted"
-                        style={{ '--shadow-color': '146, 64, 14' } as React.CSSProperties}
-                      >
-                        <ShieldOff className="h-3.5 w-3.5" />
-                        <span>Skipping Permissions</span>
-                        <X className="h-3.5 w-3.5 opacity-60 hover:opacity-100" />
-                      </button>
-                    )}
+                        <SlashCommandMenu
+                          commands={permissionModeCommands}
+                          activeCommands={[permissionMode as SlashCommandId]}
+                          onSelect={handlePermissionModeSelect}
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 )}
                 <InputContainer
@@ -808,10 +839,8 @@ export function ChatDisplay({
                 onModelChange={onModelChange}
                 ultrathinkEnabled={ultrathinkEnabled}
                 onUltrathinkChange={onUltrathinkChange}
-                skipPermissions={skipPermissions}
-                onSkipPermissionsChange={onSkipPermissionsChange}
-                safeModeEnabled={safeModeEnabled}
-                onSafeModeChange={onSafeModeChange}
+                permissionMode={permissionMode}
+                onPermissionModeChange={onPermissionModeChange}
                 structuredInput={structuredInput}
                 onStructuredResponse={handleStructuredResponse}
                 inputValue={inputValue}

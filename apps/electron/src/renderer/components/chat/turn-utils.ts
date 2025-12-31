@@ -711,8 +711,66 @@ export function computeLastChildSet(activities: ActivityItem[]): Set<string> {
 }
 
 // ============================================================================
+// Formatting Helpers
+// ============================================================================
+
+/**
+ * Format duration in milliseconds to human-readable string.
+ * @example formatDuration(1234) => "1.2s"
+ * @example formatDuration(65000) => "1m 5s"
+ * @example formatDuration(125000) => "2m+"
+ */
+export function formatDuration(ms: number): string {
+  // Guard against invalid inputs
+  if (!Number.isFinite(ms) || ms < 0) {
+    return '--'
+  }
+  const seconds = ms / 1000
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.round(seconds % 60)
+  if (minutes >= 2) {
+    return `${minutes}m+`
+  }
+  return `${minutes}m ${remainingSeconds}s`
+}
+
+/**
+ * Format token count to human-readable string.
+ * @example formatTokens(500) => "500"
+ * @example formatTokens(1500) => "1.5k"
+ * @example formatTokens(15000) => "15k"
+ */
+export function formatTokens(count: number): string {
+  // Guard against invalid inputs
+  if (!Number.isFinite(count) || count < 0) {
+    return '0'
+  }
+  count = Math.floor(count) // Tokens are integers
+  if (count < 1000) {
+    return count.toString()
+  }
+  const k = count / 1000
+  if (k < 10) {
+    return `${k.toFixed(1)}k`
+  }
+  return `${Math.round(k)}k`
+}
+
+// ============================================================================
 // Activity Grouping for Task Subagents
 // ============================================================================
+
+/**
+ * Data extracted from TaskOutput tool result
+ */
+export interface TaskOutputData {
+  durationMs?: number
+  inputTokens?: number
+  outputTokens?: number
+}
 
 /**
  * Represents a Task tool with its child activities grouped together
@@ -721,6 +779,8 @@ export interface ActivityGroup {
   type: 'group'
   parent: ActivityItem
   children: ActivityItem[]
+  /** Data from TaskOutput result (duration, tokens) */
+  taskOutputData?: TaskOutputData
 }
 
 /**
@@ -731,12 +791,48 @@ export function isActivityGroup(item: ActivityItem | ActivityGroup): item is Act
 }
 
 /**
+ * Extract TaskOutput data from an activity's result content.
+ * TaskOutput results are JSON with: result, usage, total_cost_usd, duration_ms
+ */
+function extractTaskOutputData(activity: ActivityItem): TaskOutputData | undefined {
+  if (!activity.content) return undefined
+
+  try {
+    const parsed = JSON.parse(activity.content)
+    const data: TaskOutputData = {}
+
+    if (typeof parsed.duration_ms === 'number') {
+      data.durationMs = parsed.duration_ms
+    }
+
+    if (parsed.usage) {
+      if (typeof parsed.usage.input_tokens === 'number') {
+        data.inputTokens = parsed.usage.input_tokens
+      }
+      if (typeof parsed.usage.output_tokens === 'number') {
+        data.outputTokens = parsed.usage.output_tokens
+      }
+    }
+
+    // Only return if we have some data
+    if (data.durationMs !== undefined || data.inputTokens !== undefined || data.outputTokens !== undefined) {
+      return data
+    }
+  } catch {
+    // Not valid JSON or missing fields
+  }
+
+  return undefined
+}
+
+/**
  * Groups activities by their parent Task tool.
  *
  * This transforms a flat chronological list into a grouped structure:
- * - Orphan activities (no parent) appear first in order
+ * - Maintains chronological order of top-level items (orphans and Task groups)
  * - Each Task tool becomes a group containing its child activities
  * - Maintains chronological order within each group
+ * - TaskOutput activities are hidden but their data enriches the parent Task
  *
  * @param activities - Flat list of activities sorted by timestamp
  * @returns Mixed array of standalone activities and activity groups
@@ -744,12 +840,6 @@ export function isActivityGroup(item: ActivityItem | ActivityGroup): item is Act
 export function groupActivitiesByParent(
   activities: ActivityItem[]
 ): (ActivityItem | ActivityGroup)[] {
-  // Find all Task tools (these become group headers)
-  const taskTools = activities.filter(a => a.toolName === 'Task')
-
-  // Find orphan activities (no parent AND not a Task tool itself)
-  const orphans = activities.filter(a => !a.parentId && a.toolName !== 'Task')
-
   // Build a map of parentId -> children for efficient lookup
   const childrenByParent = new Map<string, ActivityItem[]>()
   for (const activity of activities) {
@@ -760,23 +850,99 @@ export function groupActivitiesByParent(
     }
   }
 
-  // Build the grouped result
+  // Build set of child activity IDs to skip (they're included in their parent's group)
+  const childIds = new Set<string>()
+  for (const children of childrenByParent.values()) {
+    for (const child of children) {
+      childIds.add(child.id)
+    }
+  }
+
+  // Build a map of task_id (agent ID) -> TaskOutput data
+  // TaskOutput.toolInput.task_id contains the agent ID returned when Task runs in background
+  const taskOutputByAgentId = new Map<string, TaskOutputData>()
+  for (const activity of activities) {
+    if (activity.toolName === 'TaskOutput' && activity.status === 'completed') {
+      const taskId = activity.toolInput?.task_id as string | undefined
+      console.log('[turn-utils] TaskOutput activity:', {
+        toolUseId: activity.toolUseId,
+        taskId,
+        hasContent: !!activity.content,
+        contentPreview: activity.content?.slice(0, 200),
+      })
+      if (taskId) {
+        const data = extractTaskOutputData(activity)
+        console.log('[turn-utils] Extracted TaskOutput data:', { taskId, data })
+        if (data) {
+          taskOutputByAgentId.set(taskId, data)
+        }
+      }
+    }
+  }
+
+  // Build a map of Task toolUseId -> agent ID (extracted from Task result content)
+  // When Task runs with run_in_background: true, the result contains "agentId: xyz"
+  const taskToAgentId = new Map<string, string>()
+  for (const activity of activities) {
+    if (activity.toolName === 'Task' && activity.status === 'completed' && activity.content) {
+      // Parse agent ID from Task result - look for "agentId: xyz" pattern
+      const agentIdMatch = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
+      console.log('[turn-utils] Task activity:', {
+        toolUseId: activity.toolUseId,
+        hasContent: !!activity.content,
+        contentPreview: activity.content?.slice(0, 300),
+        agentIdMatch: agentIdMatch?.[1],
+      })
+      if (agentIdMatch && activity.toolUseId) {
+        taskToAgentId.set(activity.toolUseId, agentIdMatch[1])
+      }
+    }
+  }
+  console.log('[turn-utils] Maps built:', {
+    taskOutputByAgentId: Array.from(taskOutputByAgentId.entries()),
+    taskToAgentId: Array.from(taskToAgentId.entries()),
+  })
+
+  // Build the grouped result maintaining chronological order
   const result: (ActivityItem | ActivityGroup)[] = []
 
-  // Add orphan activities first (maintain their order)
-  result.push(...orphans)
+  for (const activity of activities) {
+    // Skip activities that are children of a Task (they're in their parent's group)
+    if (childIds.has(activity.id)) {
+      continue
+    }
 
-  // Add each Task as a group with its children
-  for (const parent of taskTools) {
-    const children = parent.toolUseId
-      ? (childrenByParent.get(parent.toolUseId) || [])
-      : []
+    // Skip TaskOutput activities - their data is attached to parent Task groups
+    if (activity.toolName === 'TaskOutput') {
+      continue
+    }
 
-    result.push({
-      type: 'group',
-      parent,
-      children: children.sort((a, b) => a.timestamp - b.timestamp)
-    })
+    // Task tools become groups with their children
+    if (activity.toolName === 'Task') {
+      const children = activity.toolUseId
+        ? (childrenByParent.get(activity.toolUseId) || [])
+        : []
+
+      // Look up TaskOutput data for this Task via the agent ID chain:
+      // Task.toolUseId -> agentId -> TaskOutput data
+      let taskOutputData: TaskOutputData | undefined
+      if (activity.toolUseId) {
+        const agentId = taskToAgentId.get(activity.toolUseId)
+        if (agentId) {
+          taskOutputData = taskOutputByAgentId.get(agentId)
+        }
+      }
+
+      result.push({
+        type: 'group',
+        parent: activity,
+        children: children.sort((a, b) => a.timestamp - b.timestamp),
+        taskOutputData,
+      })
+    } else {
+      // Orphan activity - add directly
+      result.push(activity)
+    }
   }
 
   return result

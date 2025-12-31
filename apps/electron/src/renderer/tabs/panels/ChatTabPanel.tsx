@@ -43,7 +43,7 @@ export default function ChatTabPanel({ tab }: ChatTabPanelProps) {
   const {
     options: sessionOpts,
     setOption,
-    setMode,
+    setPermissionMode,
   } = useSessionOptionsFor(chatTab.sessionId)
 
   const { closeTab, openAgentSetupTab } = useTabs()
@@ -203,10 +203,8 @@ export default function ChatTabPanel({ tab }: ChatTabPanelProps) {
       // Advanced options - using unified session options hook
       ultrathinkEnabled={sessionOpts.ultrathinkEnabled}
       onUltrathinkChange={(enabled) => setOption('ultrathinkEnabled', enabled)}
-      skipPermissions={sessionOpts.skipPermissions}
-      onSkipPermissionsChange={(enabled) => setOption('skipPermissions', enabled)}
-      safeModeEnabled={sessionOpts.activeModes.includes('safe')}
-      onSafeModeChange={(enabled) => setMode('safe', enabled)}
+      permissionMode={sessionOpts.permissionMode}
+      onPermissionModeChange={setPermissionMode}
       // Input draft preservation - initial value only, FreeFormInput manages its own state
       inputValue={initialInputValue}
       onInputChange={handleInputChange}

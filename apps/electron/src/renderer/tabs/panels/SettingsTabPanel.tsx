@@ -18,7 +18,7 @@ import { Switch } from '@/components/ui/switch'
 import { Monitor, Sun, Moon, Eye, EyeOff, Check, ExternalLink, CheckCircle2 } from 'lucide-react'
 import { Spinner } from '@/components/ui/loading-indicator'
 import type { Tab } from '../types'
-import type { AuthType, SafeModeBehavior } from '../../../shared/types'
+import type { AuthType } from '../../../shared/types'
 
 interface SettingsTabPanelProps {
   tab: Tab
@@ -202,7 +202,7 @@ function CraftCreditsOption({ selected, onClick }: CraftCreditsOptionProps) {
       >
         <div className="flex-1 min-w-0">
           <span className="text-sm">Craft Credits</span>
-          <span className="text-sm text-muted-foreground ml-1.5">— included with Craft</span>
+          <span className="text-sm text-muted-foreground ml-1.5">· included with Craft</span>
         </div>
         <div
           className={cn(
@@ -263,7 +263,7 @@ function ApiKeyInput({ value, onChange, onSave, onCancel, isSaving, hasExistingK
       <div className="flex items-center justify-between">
         <div className="flex-1 min-w-0">
           <span className="text-sm">API Key</span>
-          <span className="text-sm text-muted-foreground ml-1.5">— your Anthropic key</span>
+          <span className="text-sm text-muted-foreground ml-1.5">· your Anthropic key</span>
         </div>
       </div>
 
@@ -376,7 +376,7 @@ function ClaudeOAuth({
     <div className="flex items-center justify-between">
       <div className="flex-1 min-w-0">
         <span className="text-sm">Claude Max</span>
-        <span className="text-sm text-muted-foreground ml-1.5">— subscription</span>
+        <span className="text-sm text-muted-foreground ml-1.5">· subscription</span>
       </div>
     </div>
   )
@@ -531,29 +531,20 @@ export default function SettingsTabPanel({
   const [claudeOAuthError, setClaudeOAuthError] = useState<string | undefined>()
 
   // New session defaults state
-  const [defaultSafeMode, setDefaultSafeMode] = useState(false)
-  const [defaultSkipPermissions, setDefaultSkipPermissions] = useState(false)
+  const [defaultPermissionMode, setDefaultPermissionModeState] = useState<import('../../../shared/types').PermissionMode>('ask')
   const [defaultWorkingDirectory, setDefaultWorkingDirectory] = useState('')
-
-  // Safe mode behavior state
-  const [safeModeBehavior, setSafeModeBehaviorState] = useState<SafeModeBehavior>('ask_permission')
 
   // Load new session defaults on mount
   useEffect(() => {
     const loadDefaults = async () => {
       if (!window.electronAPI) return
       try {
-        const [modes, skipPerms, workingDir, safeBehavior] = await Promise.all([
-          window.electronAPI.getDefaultModes(),
-          window.electronAPI.getDefaultSkipPermissions(),
+        const [permissionMode, workingDir] = await Promise.all([
+          window.electronAPI.getDefaultPermissionMode(),
           window.electronAPI.getDefaultWorkingDirectory(),
-          window.electronAPI.getSafeModeBehavior(),
         ])
-        // Check if 'safe' mode is in the default modes array
-        setDefaultSafeMode(modes.includes('safe'))
-        setDefaultSkipPermissions(skipPerms)
+        setDefaultPermissionModeState(permissionMode)
         setDefaultWorkingDirectory(workingDir)
-        setSafeModeBehaviorState(safeBehavior)
       } catch (error) {
         console.error('Failed to load session defaults:', error)
       }
@@ -562,32 +553,19 @@ export default function SettingsTabPanel({
   }, [])
 
   // Handlers for new session defaults
-  const handleDefaultSafeModeChange = useCallback(async (enabled: boolean) => {
-    if (!window.electronAPI) return
-    setDefaultSafeMode(enabled)
-    try {
-      // Get current modes, then add or remove 'safe' mode
-      const currentModes = await window.electronAPI.getDefaultModes()
-      const newModes = enabled
-        ? (currentModes.includes('safe') ? currentModes : [...currentModes, 'safe'] as import('../../../shared/types').Mode[])
-        : currentModes.filter(m => m !== 'safe')
-      await window.electronAPI.setDefaultModes(newModes)
-    } catch (error) {
-      console.error('Failed to save default safe mode:', error)
-      setDefaultSafeMode(!enabled) // Revert on error
-    }
-  }, [])
+  const handleDefaultPermissionModeChange = useCallback(async (mode: import('../../../shared/types').PermissionMode) => {
+    const previousMode = defaultPermissionMode
+    setDefaultPermissionModeState(mode)  // Update UI immediately
 
-  const handleDefaultSkipPermissionsChange = useCallback(async (enabled: boolean) => {
     if (!window.electronAPI) return
-    setDefaultSkipPermissions(enabled)
+
     try {
-      await window.electronAPI.setDefaultSkipPermissions(enabled)
+      await window.electronAPI.setDefaultPermissionMode(mode)
     } catch (error) {
-      console.error('Failed to save default skip permissions:', error)
-      setDefaultSkipPermissions(!enabled) // Revert on error
+      console.error('Failed to save default permission mode:', error)
+      setDefaultPermissionModeState(previousMode) // Revert on error
     }
-  }, [])
+  }, [defaultPermissionMode])
 
   const handleChangeWorkingDirectory = useCallback(async () => {
     if (!window.electronAPI) return
@@ -599,18 +577,6 @@ export default function SettingsTabPanel({
       }
     } catch (error) {
       console.error('Failed to change working directory:', error)
-    }
-  }, [])
-
-  const handleSafeModeBehaviorChange = useCallback(async (behavior: SafeModeBehavior) => {
-    if (!window.electronAPI) return
-    setSafeModeBehaviorState(behavior)
-    try {
-      await window.electronAPI.setSafeModeBehavior(behavior)
-    } catch (error) {
-      console.error('Failed to save safe mode behavior:', error)
-      // Revert on error
-      setSafeModeBehaviorState(behavior === 'block' ? 'ask_permission' : 'block')
     }
   }, [])
 
@@ -816,57 +782,44 @@ export default function SettingsTabPanel({
                 selected={model === 'claude-opus-4-5-20251101'}
                 onClick={() => onModelChange?.('claude-opus-4-5-20251101')}
                 label="Opus 4.5"
-                description="— most capable"
+                description="· most capable"
               />
               <RadioOption
                 selected={model === 'claude-sonnet-4-5-20250929'}
                 onClick={() => onModelChange?.('claude-sonnet-4-5-20250929')}
                 label="Sonnet 4.5"
-                description="— balanced"
+                description="· balanced"
               />
               <RadioOption
                 selected={model === 'claude-haiku-4-5-20251001'}
                 onClick={() => onModelChange?.('claude-haiku-4-5-20251001')}
                 label="Haiku 4.5"
-                description="— fast"
+                description="· fast"
               />
             </div>
           </div>
 
           {/* New Sessions - default settings for new chats */}
           <div>
-            <SectionHeader>New Sessions</SectionHeader>
+            <SectionHeader>Default Permission Mode</SectionHeader>
             <div>
-              <ToggleRow
+              <RadioOption
+                selected={defaultPermissionMode === 'safe'}
+                onClick={() => handleDefaultPermissionModeChange('safe')}
                 label="Safe Mode"
-                description="— start with safe mode enabled"
-                checked={defaultSafeMode}
-                onCheckedChange={handleDefaultSafeModeChange}
-              />
-              <ToggleRow
-                label="Skip Permissions"
-                description="— auto-approve tool use"
-                checked={defaultSkipPermissions}
-                onCheckedChange={handleDefaultSkipPermissionsChange}
-              />
-            </div>
-          </div>
-
-          {/* Safe Mode Behavior */}
-          <div>
-            <SectionHeader>Safe Mode Behavior</SectionHeader>
-            <div>
-              <RadioOption
-                selected={safeModeBehavior === 'ask_permission'}
-                onClick={() => handleSafeModeBehaviorChange('ask_permission')}
-                label="Ask Permission"
-                description="— prompt before blocking"
+                description="· read-only, blocks all write operations"
               />
               <RadioOption
-                selected={safeModeBehavior === 'block'}
-                onClick={() => handleSafeModeBehaviorChange('block')}
-                label="Block Always"
-                description="— silently block restricted actions"
+                selected={defaultPermissionMode === 'ask'}
+                onClick={() => handleDefaultPermissionModeChange('ask')}
+                label="Ask"
+                description="· prompt before tool execution (default)"
+              />
+              <RadioOption
+                selected={defaultPermissionMode === 'allow-all'}
+                onClick={() => handleDefaultPermissionModeChange('allow-all')}
+                label="Allow All"
+                description="· auto-approve all tool use"
               />
             </div>
           </div>
@@ -880,7 +833,7 @@ export default function SettingsTabPanel({
                   {defaultWorkingDirectory ? defaultWorkingDirectory.split('/').pop() : 'Home'}
                 </span>
                 <span className="text-sm text-muted-foreground ml-1.5 truncate">
-                  — {defaultWorkingDirectory || '~'}
+                  · {defaultWorkingDirectory || '~'}
                 </span>
               </div>
               <button
@@ -919,7 +872,7 @@ export default function SettingsTabPanel({
                   selected={authType === 'api_key'}
                   onClick={() => handleMethodClick('api_key')}
                   label="API Key"
-                  description={authType === 'api_key' && hasCredential ? '— configured' : '— your Anthropic key'}
+                  description={authType === 'api_key' && hasCredential ? '· configured' : '· your Anthropic key'}
                 />
               )}
 
@@ -941,7 +894,7 @@ export default function SettingsTabPanel({
                   selected={authType === 'oauth_token'}
                   onClick={() => handleMethodClick('oauth_token')}
                   label="Claude Max"
-                  description={authType === 'oauth_token' && hasCredential ? '— connected' : '— subscription'}
+                  description={authType === 'oauth_token' && hasCredential ? '· connected' : '· subscription'}
                 />
               )}
             </div>

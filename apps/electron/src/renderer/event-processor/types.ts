@@ -5,7 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, Mode, AskQuestionRequest, TodoState } from '../../shared/types'
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, AskQuestionRequest, TodoState } from '../../shared/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -195,13 +195,12 @@ export interface WorkingDirectoryChangedEvent {
 }
 
 /**
- * Mode changed event
+ * Permission mode changed event
  */
-export interface ModeChangedEvent {
-  type: 'mode_changed'
+export interface PermissionModeChangedEvent {
+  type: 'permission_mode_changed'
   sessionId: string
-  mode: Mode
-  enabled: boolean
+  permissionMode: PermissionMode
 }
 
 /**
@@ -244,7 +243,7 @@ export type AgentEvent =
   | InterruptedEvent
   | TitleGeneratedEvent
   | WorkingDirectoryChangedEvent
-  | ModeChangedEvent
+  | PermissionModeChangedEvent
   | AskQuestionRequestEvent
 
 /**
@@ -254,7 +253,7 @@ export type Effect =
   | { type: 'permission_request'; request: PermissionRequest }
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
-  | { type: 'mode_changed'; sessionId: string; mode: Mode; enabled: boolean }
+  | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
   | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
 
 /**

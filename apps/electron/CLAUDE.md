@@ -236,6 +236,25 @@ When creating dropdowns or popovers that need consistent styling regardless of t
 - Use `pl-6` on shortcuts for spacing from label (keeps `ml-auto` right alignment)
 - Use `pr-4` on items for right padding
 
+**Destructive actions:**
+- Always use `variant="destructive"` on `StyledDropdownMenuItem` for destructive actions (delete, remove, etc.)
+- The destructive variant automatically applies red color to both the label AND icon
+- Never manually add `className="text-red-500"` - use the variant prop instead
+
+```tsx
+// Good - uses destructive variant
+<StyledDropdownMenuItem variant="destructive" onClick={handleDelete}>
+  <Trash2 />
+  Delete Source
+</StyledDropdownMenuItem>
+
+// Bad - manual color classes
+<StyledDropdownMenuItem className="text-red-500" onClick={handleDelete}>
+  <Trash2 />
+  Delete Source
+</StyledDropdownMenuItem>
+```
+
 ### Toast Notifications
 
 **Always use Sonner** for toast notifications (success, error, info, warning). The `<Toaster />` component is already mounted in `main.tsx`.
@@ -351,10 +370,48 @@ apps/electron/
 │   ├── preload/           # Context bridge (main ↔ renderer)
 │   │   └── index.ts       # Exposes electronAPI to renderer (incl. theme APIs)
 │   ├── renderer/          # React UI (browser context)
-│   │   ├── App.tsx        # Main app, session event handling
-│   │   ├── main.tsx       # React entry point, ThemeProvider
-│   │   ├── index.css      # CSS variables (:root, .dark, data-theme)
-│   │   ├── atoms/
+```
+
+## ⚠️ Common Mistake: Node.js APIs in Renderer
+
+**NEVER import `@craft-agent/shared` packages directly in the renderer!** The renderer runs in a browser context and doesn't have access to Node.js APIs.
+
+❌ **Wrong** (will fail with errors like `randomUUID is not a function`):
+```tsx
+// In renderer component
+const { loadSourceSafeModeConfig } = await import('@craft-agent/shared/agent')
+const config = loadSourceSafeModeConfig(workspaceSlug, sourceSlug)
+```
+
+✅ **Correct** (use IPC to call main process):
+```tsx
+// 1. Add IPC channel to shared/types.ts
+export const IPC_CHANNELS = {
+  SOURCES_GET_SAFE_MODE: 'sources:getSafeMode',
+  // ...
+}
+
+// 2. Add handler in main/ipc.ts
+ipcMain.handle(IPC_CHANNELS.SOURCES_GET_SAFE_MODE, async (_event, workspaceId: string, sourceSlug: string) => {
+  const { loadSourceSafeModeConfig } = await import('@craft-agent/shared/agent')
+  const workspace = getWorkspaceByNameOrId(workspaceId)
+  return loadSourceSafeModeConfig(workspace.rootPath, sourceSlug)
+})
+
+// 3. Add to preload/index.ts
+contextBridge.exposeInMainWorld('electronAPI', {
+  getSourceSafeModeConfig: (workspaceId: string, sourceSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_SAFE_MODE, workspaceId, sourceSlug),
+  // ...
+})
+
+// 4. Use in renderer
+const config = await window.electronAPI.getSourceSafeModeConfig(workspaceId, sourceSlug)
+```
+
+**Why?** The `@craft-agent/shared` package uses Node.js APIs (`crypto`, `fs`, etc.) that aren't available in the browser/renderer context. All business logic must run in the main process and communicate via IPC.
+
+### IPC Communication
 │   │   │   └── sessions.ts # Per-session Jotai atoms for performance isolation
 │   │   ├── components/
 │   │   │   ├── chat/      # Chat UI (Chat, ChatInput, ChatDisplay, SessionList, PermissionBanner)

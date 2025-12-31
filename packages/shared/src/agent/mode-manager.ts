@@ -1,38 +1,72 @@
 /**
- * Centralized Mode Manager
+ * Centralized Permission Mode Manager
  *
- * Manages agent operational modes (Safe Mode, and future modes).
+ * Manages agent permission modes for tool execution.
  * Each session has its own mode state - no global state contamination.
  *
- * Available Modes:
- * - 'safe': Read-only exploration mode (no writes/edits)
- *
- * Future modes could include:
- * - 'plan': Planning mode (research before execution)
- * - 'explore': Deep codebase exploration
- * - 'debug': Debug/investigation mode
+ * Available Permission Modes:
+ * - 'safe': Read-only exploration mode (blocks writes, never prompts)
+ * - 'ask': Ask for permission on dangerous operations (default interactive behavior)
+ * - 'allow-all': Skip all permission checks (everything allowed)
  */
 
 import { debug } from '../utils/debug.ts';
 import type { SafeModeContext, MergedSafeModeConfig } from './safe-mode-config.ts';
 
 // ============================================================
-// Mode Types
+// Permission Mode Types
 // ============================================================
 
 /**
- * Available operational modes
+ * Available permission modes
+ * - 'safe': Read-only, blocks writes, never prompts (green)
+ * - 'ask': Prompts for dangerous operations (amber)
+ * - 'allow-all': Everything allowed, no prompts (red)
  */
-export type Mode = 'safe';
+export type PermissionMode = 'safe' | 'ask' | 'allow-all';
 
 /**
- * State for a single session's modes
+ * Order of modes for cycling with SHIFT+TAB
+ */
+export const PERMISSION_MODE_ORDER: PermissionMode[] = ['safe', 'ask', 'allow-all'];
+
+/**
+ * Display configuration for each mode
+ */
+export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
+  displayName: string;
+  shortName: string;
+  color: 'green' | 'amber' | 'red';
+  description: string;
+}> = {
+  'safe': {
+    displayName: 'Safe Mode',
+    shortName: 'Safe',
+    color: 'green',
+    description: 'Read-only exploration. Blocks writes, never prompts.',
+  },
+  'ask': {
+    displayName: 'Ask Permission',
+    shortName: 'Ask',
+    color: 'amber',
+    description: 'Prompts for dangerous operations.',
+  },
+  'allow-all': {
+    displayName: 'Allow All',
+    shortName: 'Allow All',
+    color: 'red',
+    description: 'Everything allowed, no prompts.',
+  },
+};
+
+/**
+ * State for a single session's permission mode
  */
 export interface ModeState {
   /** Session ID */
   sessionId: string;
-  /** Active modes (can have multiple active at once in future) */
-  activeModes: Set<Mode>;
+  /** Current permission mode */
+  permissionMode: PermissionMode;
   /** Callback when mode state changes */
   onStateChange?: (state: ModeState) => void;
 }
@@ -53,17 +87,15 @@ export interface CompiledApiEndpointRule {
 }
 
 /**
- * Mode configuration - defines behavior for each mode
+ * Safe mode configuration - defines behavior for read-only mode
  */
 export interface ModeConfig {
-  /** Tools that are always blocked in this mode (Write, Edit, etc.) */
+  /** Tools that are always blocked in safe mode (Write, Edit, etc.) */
   blockedTools: Set<string>;
   /** Read-only Bash command patterns (commands matching these are allowed) */
   readOnlyBashPatterns: RegExp[];
   /** Read-only MCP patterns (tools matching these are allowed) */
   readOnlyMcpPatterns: RegExp[];
-  /** Read-only API methods (legacy, coarse-grained) */
-  readOnlyApiMethods: Set<string>;
   /** Fine-grained API endpoint rules (method + path pattern) */
   allowedApiEndpoints: CompiledApiEndpointRule[];
   /** User-friendly name */
@@ -73,179 +105,176 @@ export interface ModeConfig {
 }
 
 // ============================================================
-// Mode Configurations
+// Safe Mode Configuration
 // ============================================================
 
 /**
- * Configuration for each mode
+ * Configuration for safe mode (read-only exploration)
  */
-export const MODE_CONFIGS: Record<Mode, ModeConfig> = {
-  safe: {
-    // Tools that are always blocked (no read-only variant)
-    blockedTools: new Set([
-      'Write',
-      'Edit',
-      'MultiEdit',
-      'NotebookEdit',
-    ]),
-    // Read-only Bash commands that are safe to run
-    readOnlyBashPatterns: [
-      // File listing and inspection
-      /^ls\b/,
-      /^ll\b/,
-      /^la\b/,
-      /^tree\b/,
-      /^file\b/,
-      /^stat\b/,
-      /^du\b/,
-      /^df\b/,
-      /^wc\b/,
-      /^head\b/,
-      /^tail\b/,
-      /^cat\b/,
-      /^less\b/,
-      /^more\b/,
-      /^bat\b/,
+export const SAFE_MODE_CONFIG: ModeConfig = {
+  // Tools that are always blocked (no read-only variant)
+  blockedTools: new Set([
+    'Write',
+    'Edit',
+    'MultiEdit',
+    'NotebookEdit',
+  ]),
+  // Read-only Bash commands that are safe to run
+  readOnlyBashPatterns: [
+    // File listing and inspection
+    /^ls\b/,
+    /^ll\b/,
+    /^la\b/,
+    /^tree\b/,
+    /^file\b/,
+    /^stat\b/,
+    /^du\b/,
+    /^df\b/,
+    /^wc\b/,
+    /^head\b/,
+    /^tail\b/,
+    /^cat\b/,
+    /^less\b/,
+    /^more\b/,
+    /^bat\b/,
 
-      // Search and find
-      /^find\b/,
-      /^locate\b/,
-      /^which\b/,
-      /^whereis\b/,
-      /^type\b/,
-      /^grep\b/,
-      /^rg\b/,
-      /^ag\b/,
-      /^ack\b/,
-      /^fd\b/,
-      /^fzf\b/,
+    // Search and find
+    /^find\b/,
+    /^locate\b/,
+    /^which\b/,
+    /^whereis\b/,
+    /^type\b/,
+    /^grep\b/,
+    /^rg\b/,
+    /^ag\b/,
+    /^ack\b/,
+    /^fd\b/,
+    /^fzf\b/,
 
-      // Git read operations
-      /^git\s+(status|log|diff|show|branch|tag|remote|stash\s+list|describe|rev-parse|config\s+--get|config\s+-l|ls-files|ls-tree|shortlog|blame|annotate|reflog|cherry|whatchanged|ls-remote)\b/,
+    // Git read operations
+    /^git\s+(status|log|diff|show|branch|tag|remote|stash\s+list|describe|rev-parse|config\s+--get|config\s+-l|ls-files|ls-tree|shortlog|blame|annotate|reflog|cherry|whatchanged|ls-remote)\b/,
 
-      // GitHub CLI read operations
-      /^gh\s+(pr|issue|repo|release|run|workflow|gist|project)\s+(view|list|status|diff|checks|comments)\b/,
-      /^gh\s+api\b.*--method\s+GET\b/,
-      /^gh\s+api\b(?!.*--method)/,  // gh api without method defaults to GET
-      /^gh\s+auth\s+status\b/,
-      /^gh\s+config\s+(get|list)\b/,
+    // GitHub CLI read operations
+    /^gh\s+(pr|issue|repo|release|run|workflow|gist|project)\s+(view|list|status|diff|checks|comments)\b/,
+    /^gh\s+api\b.*--method\s+GET\b/,
+    /^gh\s+api\b(?!.*--method)/,  // gh api without method defaults to GET
+    /^gh\s+auth\s+status\b/,
+    /^gh\s+config\s+(get|list)\b/,
 
-      // Package manager read operations
-      /^npm\s+(ls|list|view|info|show|outdated|audit|search|explain|why|config\s+get|config\s+list)\b/,
-      /^yarn\s+(list|info|why|outdated|audit)\b/,
-      /^pnpm\s+(list|ls|why|outdated|audit)\b/,
-      /^bun\s+(pm\s+ls)\b/,
-      /^pip\s+(list|show|freeze|check)\b/,
-      /^pip3\s+(list|show|freeze|check)\b/,
-      /^cargo\s+(tree|metadata|pkgid|verify-project)\b/,
-      /^go\s+(list|mod\s+graph|mod\s+why|version)\b/,
-      /^composer\s+(show|info|outdated|licenses)\b/,
-      /^gem\s+(list|info|dependency|environment)\b/,
-      /^bundle\s+(list|info|outdated)\b/,
+    // Package manager read operations
+    /^npm\s+(ls|list|view|info|show|outdated|audit|search|explain|why|config\s+get|config\s+list)\b/,
+    /^yarn\s+(list|info|why|outdated|audit)\b/,
+    /^pnpm\s+(list|ls|why|outdated|audit)\b/,
+    /^bun\s+(pm\s+ls)\b/,
+    /^pip\s+(list|show|freeze|check)\b/,
+    /^pip3\s+(list|show|freeze|check)\b/,
+    /^cargo\s+(tree|metadata|pkgid|verify-project)\b/,
+    /^go\s+(list|mod\s+graph|mod\s+why|version)\b/,
+    /^composer\s+(show|info|outdated|licenses)\b/,
+    /^gem\s+(list|info|dependency|environment)\b/,
+    /^bundle\s+(list|info|outdated)\b/,
 
-      // System info
-      /^pwd\b/,
-      /^whoami\b/,
-      /^id\b/,
-      /^groups\b/,
-      /^uname\b/,
-      /^hostname\b/,
-      /^date\b/,
-      /^uptime\b/,
-      /^env\b/,
-      /^printenv\b/,
-      /^echo\s+\$/,  // echo $VAR (reading env vars)
-      /^ps\b/,
-      /^top\s+-[lb]/,  // batch/list mode only
-      /^htop\b/,
-      /^free\b/,
-      /^vmstat\b/,
-      /^iostat\b/,
-      /^lscpu\b/,
-      /^lsmem\b/,
-      /^lsblk\b/,
-      /^lsusb\b/,
-      /^lspci\b/,
+    // System info
+    /^pwd\b/,
+    /^whoami\b/,
+    /^id\b/,
+    /^groups\b/,
+    /^uname\b/,
+    /^hostname\b/,
+    /^date\b/,
+    /^uptime\b/,
+    /^env\b/,
+    /^printenv\b/,
+    /^echo\s+\$/,  // echo $VAR (reading env vars)
+    /^ps\b/,
+    /^top\s+-[lb]/,  // batch/list mode only
+    /^htop\b/,
+    /^free\b/,
+    /^vmstat\b/,
+    /^iostat\b/,
+    /^lscpu\b/,
+    /^lsmem\b/,
+    /^lsblk\b/,
+    /^lsusb\b/,
+    /^lspci\b/,
 
-      // Docker read operations
-      /^docker\s+(ps|images|logs|inspect|stats|top|port|diff|history|version|info|system\s+info|system\s+df|network\s+ls|network\s+inspect|volume\s+ls|volume\s+inspect|container\s+ls|image\s+ls)\b/,
-      /^docker-compose\s+(ps|logs|config|images|top|version)\b/,
-      /^docker\s+compose\s+(ps|logs|config|images|top|version)\b/,
+    // Docker read operations
+    /^docker\s+(ps|images|logs|inspect|stats|top|port|diff|history|version|info|system\s+info|system\s+df|network\s+ls|network\s+inspect|volume\s+ls|volume\s+inspect|container\s+ls|image\s+ls)\b/,
+    /^docker-compose\s+(ps|logs|config|images|top|version)\b/,
+    /^docker\s+compose\s+(ps|logs|config|images|top|version)\b/,
 
-      // Kubernetes read operations
-      /^kubectl\s+(get|describe|logs|top|explain|api-resources|api-versions|cluster-info|config\s+view|config\s+get-contexts|version)\b/,
+    // Kubernetes read operations
+    /^kubectl\s+(get|describe|logs|top|explain|api-resources|api-versions|cluster-info|config\s+view|config\s+get-contexts|version)\b/,
 
-      // Text processing (read-only)
-      /^awk\b/,
-      /^sed\s+-n\b/,  // sed -n (print only, no editing)
-      /^sort\b/,
-      /^uniq\b/,
-      /^cut\b/,
-      /^tr\b/,
-      /^column\b/,
-      /^jq\b/,
-      /^yq\b/,
-      /^xq\b/,
-      /^xmllint\b/,
-      /^json_pp\b/,
-      /^python\s+-m\s+json\.tool\b/,
+    // Text processing (read-only)
+    /^awk\b/,
+    /^sed\s+-n\b/,  // sed -n (print only, no editing)
+    /^sort\b/,
+    /^uniq\b/,
+    /^cut\b/,
+    /^tr\b/,
+    /^column\b/,
+    /^jq\b/,
+    /^yq\b/,
+    /^xq\b/,
+    /^xmllint\b/,
+    /^json_pp\b/,
+    /^python\s+-m\s+json\.tool\b/,
 
-      // Network diagnostics (read-only)
-      /^ping\b/,
-      /^traceroute\b/,
-      /^tracepath\b/,
-      /^mtr\b/,
-      /^dig\b/,
-      /^nslookup\b/,
-      /^host\b/,
-      /^netstat\b/,
-      /^ss\b/,
-      /^ip\s+(addr|link|route|neigh)\s*(show)?\b/,
-      /^ifconfig\b/,
+    // Network diagnostics (read-only)
+    /^ping\b/,
+    /^traceroute\b/,
+    /^tracepath\b/,
+    /^mtr\b/,
+    /^dig\b/,
+    /^nslookup\b/,
+    /^host\b/,
+    /^netstat\b/,
+    /^ss\b/,
+    /^ip\s+(addr|link|route|neigh)\s*(show)?\b/,
+    /^ifconfig\b/,
 
-      // Version checks
-      /^node\s+(--version|-v)\b/,
-      /^npm\s+(--version|-v)\b/,
-      /^yarn\s+(--version|-v)\b/,
-      /^pnpm\s+(--version|-v)\b/,
-      /^bun\s+(--version|-v)\b/,
-      /^python\s+(--version|-V)\b/,
-      /^python3\s+(--version|-V)\b/,
-      /^ruby\s+(--version|-v)\b/,
-      /^go\s+version\b/,
-      /^rustc\s+(--version|-V)\b/,
-      /^cargo\s+(--version|-V)\b/,
-      /^java\s+(-version|--version)\b/,
-      /^dotnet\s+--version\b/,
-      /^php\s+(--version|-v)\b/,
-      /^perl\s+(--version|-v)\b/,
+    // Version checks
+    /^node\s+(--version|-v)\b/,
+    /^npm\s+(--version|-v)\b/,
+    /^yarn\s+(--version|-v)\b/,
+    /^pnpm\s+(--version|-v)\b/,
+    /^bun\s+(--version|-v)\b/,
+    /^python\s+(--version|-V)\b/,
+    /^python3\s+(--version|-V)\b/,
+    /^ruby\s+(--version|-v)\b/,
+    /^go\s+version\b/,
+    /^rustc\s+(--version|-V)\b/,
+    /^cargo\s+(--version|-V)\b/,
+    /^java\s+(-version|--version)\b/,
+    /^dotnet\s+--version\b/,
+    /^php\s+(--version|-v)\b/,
+    /^perl\s+(--version|-v)\b/,
 
-      // Help commands
-      /^man\b/,
-      /--help\b/,
-      /-h\b$/,
-    ],
-    readOnlyMcpPatterns: [
-      // Craft MCP - read operations
-      /blocks_read/,
-      /blocks_list/,
-      /blocks_get/,
-      /document_get/,
-      /document_list/,
-      /spaces_list/,
-      /folders_list/,
-      /search/,
-      /list/,
-      /get/,
-      /read/,
-      // Docs MCP - all operations are read-only
-      /^mcp__docs__/,
-    ],
-    readOnlyApiMethods: new Set(['GET']),
-    allowedApiEndpoints: [], // Use safe-mode.json to add endpoint-specific rules
-    displayName: 'Safe Mode',
-    shortcutHint: 'SHIFT+TAB',
-  },
+    // Help commands
+    /^man\b/,
+    /--help\b/,
+    /-h\b$/,
+  ],
+  readOnlyMcpPatterns: [
+    // Craft MCP - read operations
+    /blocks_read/,
+    /blocks_list/,
+    /blocks_get/,
+    /document_get/,
+    /document_list/,
+    /spaces_list/,
+    /folders_list/,
+    /search/,
+    /list/,
+    /get/,
+    /read/,
+    // Docs MCP - all operations are read-only
+    /^mcp__docs__/,
+  ],
+  allowedApiEndpoints: [], // Use safe-mode.json to add endpoint-specific rules
+  displayName: 'Safe Mode',
+  shortcutHint: 'SHIFT+TAB',
 };
 
 // ============================================================
@@ -253,7 +282,7 @@ export const MODE_CONFIGS: Record<Mode, ModeConfig> = {
 // ============================================================
 
 /**
- * Manager for per-session mode state.
+ * Manager for per-session permission mode state.
  * Each session has its own state - NO GLOBAL STATE.
  */
 class ModeManager {
@@ -269,7 +298,7 @@ class ModeManager {
     if (!state) {
       state = {
         sessionId,
-        activeModes: new Set(),
+        permissionMode: 'ask', // Default to 'ask' until initialized
       };
       this.states.set(sessionId, state);
     }
@@ -277,12 +306,14 @@ class ModeManager {
   }
 
   /**
-   * Set modes for a session
+   * Set permission mode for a session
    */
-  setModes(sessionId: string, activeModes: Set<Mode>): void {
+  setPermissionMode(sessionId: string, mode: PermissionMode): void {
     const existing = this.getState(sessionId);
-    const newState = { ...existing, activeModes: new Set(activeModes) };
+    const newState = { ...existing, permissionMode: mode };
     this.states.set(sessionId, newState);
+
+    debug(`[Mode] Set permission mode to ${mode} for session ${sessionId}`);
 
     // Notify callbacks (for CraftAgent internal sync)
     const callbacks = this.callbacks.get(sessionId);
@@ -338,57 +369,35 @@ class ModeManager {
 export const modeManager = new ModeManager();
 
 // ============================================================
-// Generic Mode API
+// Permission Mode API
 // ============================================================
 
 /**
- * Check if a mode is active for a session
+ * Get the current permission mode for a session
  */
-export function isModeActive(sessionId: string, mode: Mode): boolean {
-  return modeManager.getState(sessionId).activeModes.has(mode);
+export function getPermissionMode(sessionId: string): PermissionMode {
+  return modeManager.getState(sessionId).permissionMode;
 }
 
 /**
- * Enter a mode for a session (called by UI)
+ * Set the permission mode for a session
  */
-export function enterMode(sessionId: string, mode: Mode): void {
-  debug(`[Mode] Entering ${mode} mode for session ${sessionId}`);
-  const state = modeManager.getState(sessionId);
-  const newModes = new Set(state.activeModes);
-  newModes.add(mode);
-  modeManager.setModes(sessionId, newModes);
+export function setPermissionMode(sessionId: string, mode: PermissionMode): void {
+  modeManager.setPermissionMode(sessionId, mode);
 }
 
 /**
- * Exit a mode for a session (called by UI)
+ * Cycle to the next permission mode (for SHIFT+TAB)
+ * Returns the new mode
  */
-export function exitMode(sessionId: string, mode: Mode): void {
-  debug(`[Mode] Exiting ${mode} mode for session ${sessionId}`);
-  const state = modeManager.getState(sessionId);
-  const newModes = new Set(state.activeModes);
-  newModes.delete(mode);
-  modeManager.setModes(sessionId, newModes);
-}
-
-/**
- * Toggle a mode for a session (called by UI)
- * Returns the new state (true = active, false = inactive)
- */
-export function toggleMode(sessionId: string, mode: Mode): boolean {
-  if (isModeActive(sessionId, mode)) {
-    exitMode(sessionId, mode);
-    return false;
-  } else {
-    enterMode(sessionId, mode);
-    return true;
-  }
-}
-
-/**
- * Get all active modes for a session
- */
-export function getActiveModes(sessionId: string): Mode[] {
-  return Array.from(modeManager.getState(sessionId).activeModes);
+export function cyclePermissionMode(sessionId: string): PermissionMode {
+  const currentMode = getPermissionMode(sessionId);
+  const currentIndex = PERMISSION_MODE_ORDER.indexOf(currentMode);
+  const nextIndex = (currentIndex + 1) % PERMISSION_MODE_ORDER.length;
+  // Safe assertion: nextIndex is always valid due to modulo operation
+  const nextMode = PERMISSION_MODE_ORDER[nextIndex] as PermissionMode;
+  setPermissionMode(sessionId, nextMode);
+  return nextMode;
 }
 
 /**
@@ -407,32 +416,30 @@ export function getModeState(sessionId: string): ModeState {
 }
 
 /**
- * Initialize mode state for a session with callbacks
+ * Initialize permission mode state for a session with callbacks
  */
 export function initializeModeState(
   sessionId: string,
-  initialModes: Mode[] | { safeMode?: boolean },
+  initialMode: PermissionMode | { permissionMode?: PermissionMode },
   callbacks?: ModeCallbacks
 ): void {
-  // Support both new array format and legacy { safeMode: boolean } format
-  let modes: Set<Mode>;
-  if (Array.isArray(initialModes)) {
-    modes = new Set(initialModes);
+  let mode: PermissionMode;
+
+  if (typeof initialMode === 'string') {
+    mode = initialMode;
+  } else if ('permissionMode' in initialMode && initialMode.permissionMode) {
+    mode = initialMode.permissionMode;
   } else {
-    // Legacy format
-    modes = new Set<Mode>();
-    if (initialModes.safeMode) {
-      modes.add('safe');
-    }
+    // Default to 'ask' if not specified
+    mode = 'ask';
   }
 
-  // IMPORTANT: Register callbacks BEFORE setting modes so the initial
-  // state change triggers the callback. This ensures CraftAgent.safeMode
-  // is synced with the initial mode state.
+  // IMPORTANT: Register callbacks BEFORE setting mode so the initial
+  // state change triggers the callback.
   if (callbacks) {
     modeManager.registerCallbacks(sessionId, callbacks);
   }
-  modeManager.setModes(sessionId, modes);
+  modeManager.setPermissionMode(sessionId, mode);
 }
 
 /**
@@ -468,16 +475,13 @@ function isReadOnlyMcpToolWithConfig(toolName: string, config: ToolCheckConfig):
 
 /**
  * Check if an API call is allowed using the given config
- * Checks both legacy method-based rules and fine-grained endpoint rules
+ * Checks fine-grained endpoint rules (method + path pattern)
  */
 function isApiCallAllowedWithConfig(method: string, path: string | undefined, config: ToolCheckConfig): boolean {
   const upperMethod = method.toUpperCase();
 
   // GET is always allowed
   if (upperMethod === 'GET') return true;
-
-  // Check legacy method-based rules
-  if (config.readOnlyApiMethods.has(upperMethod)) return true;
 
   // Check fine-grained endpoint rules (if path is available)
   if (path && config.allowedApiEndpoints) {
@@ -492,49 +496,55 @@ function isApiCallAllowedWithConfig(method: string, path: string | undefined, co
 }
 
 /**
- * Check if a Bash command is read-only in a specific mode (legacy, uses default config)
- */
-function isReadOnlyBashCommand(command: string, mode: Mode): boolean {
-  return isReadOnlyBashCommandWithConfig(command, MODE_CONFIGS[mode]);
-}
-
-/**
- * Check if an MCP tool is read-only in a specific mode (legacy, uses default config)
- */
-function isReadOnlyMcpTool(toolName: string, mode: Mode): boolean {
-  return isReadOnlyMcpToolWithConfig(toolName, MODE_CONFIGS[mode]);
-}
-
-/**
  * Tools that are always allowed in any mode (read-only by nature)
  */
 const ALWAYS_ALLOWED_TOOLS = new Set([
   'Read', 'Glob', 'Grep',           // File reading
-  'Task', 'TaskOutput',             // Agent orchestration (TaskOutput replaces BashOutput + AgentOutputTool)
+  'Task', 'TaskOutput',             // Agent orchestration
   'WebFetch', 'WebSearch',          // Web research
   'TodoWrite',                       // Task tracking
   'AskUserQuestion',                // User interaction
-  'SubmitPlan',                     // Plan submission (works in any mode)
+  'SubmitPlan',                     // Plan submission
+  'LSP',                            // Language server (read-only)
 ]);
 
 /**
- * Centralized check: should a tool be allowed in a specific mode?
+ * Result type for tool permission checks
+ */
+export type ToolCheckResult =
+  | { allowed: true; requiresPermission?: false }
+  | { allowed: true; requiresPermission: true; description: string }
+  | { allowed: false; reason: string };
+
+/**
+ * Centralized check: should a tool be allowed based on permission mode?
  *
- * This is the single source of truth for tool permissions in modes.
- * Returns { allowed: true } or { allowed: false, reason: string }
- *
- * When safeModeContext is provided, uses custom per-workspace and per-source configs.
- * Otherwise falls back to default MODE_CONFIGS.
+ * This is the single source of truth for tool permissions.
+ * Returns different results based on the permission mode:
+ * - 'safe': Block writes entirely (no prompting)
+ * - 'ask': Allow but may require permission for dangerous operations
+ * - 'allow-all': Allow everything
  */
 export function shouldAllowToolInMode(
   toolName: string,
   toolInput: unknown,
-  mode: Mode,
+  mode: PermissionMode,
   options?: {
     plansFolderPath?: string;
     safeModeContext?: SafeModeContext;
   }
-): { allowed: true } | { allowed: false; reason: string } {
+): ToolCheckResult {
+  // In 'allow-all' mode, everything is allowed
+  if (mode === 'allow-all') {
+    return { allowed: true };
+  }
+
+  // In 'ask' mode, most things are allowed (permission handled separately)
+  if (mode === 'ask') {
+    return { allowed: true };
+  }
+
+  // Safe mode: check against read-only allowlist
   // Get config: merged custom if context provided, otherwise defaults
   let config: ToolCheckConfig;
 
@@ -543,7 +553,7 @@ export function shouldAllowToolInMode(
     const { safeModeConfigCache } = require('./safe-mode-config.ts');
     config = safeModeConfigCache.getMergedConfig(options.safeModeContext);
   } else {
-    config = MODE_CONFIGS[mode];
+    config = SAFE_MODE_CONFIG;
   }
 
   // Always-allowed tools (read-only by nature)
@@ -567,7 +577,7 @@ export function shouldAllowToolInMode(
     }
     return {
       allowed: false,
-      reason: `This Bash command is not in the read-only allowlist for ${config.displayName}. Exit ${config.displayName} (${config.shortcutHint}) to run it.`
+      reason: `This Bash command is not in the read-only allowlist for ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to run it.`
     };
   }
 
@@ -608,7 +618,7 @@ export function shouldAllowToolInMode(
     }
     return {
       allowed: false,
-      reason: `MCP write operations are blocked in ${config.displayName}. Exit ${config.displayName} (${config.shortcutHint}) to make changes.`
+      reason: `MCP write operations are blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to make changes.`
     };
   }
 
@@ -622,7 +632,7 @@ export function shouldAllowToolInMode(
     }
     return {
       allowed: false,
-      reason: `API ${method} ${path ?? ''} is blocked in ${config.displayName}. Exit ${config.displayName} (${config.shortcutHint}) to make changes.`
+      reason: `API ${method} ${path ?? ''} is blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to make changes.`
     };
   }
 
@@ -638,25 +648,18 @@ function getBlockReasonWithConfig(toolName: string, config: ToolCheckConfig): st
   const shortcut = config.shortcutHint;
 
   if (toolName === 'Bash') {
-    return `Bash commands are blocked in ${displayName}. Exit ${displayName} (${shortcut}) to run commands.`;
+    return `Bash commands are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to run commands.`;
   }
   if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
-    return `File modifications are blocked in ${displayName}. Exit ${displayName} (${shortcut}) to make changes.`;
+    return `File modifications are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
   }
   if (toolName.startsWith('mcp__')) {
-    return `MCP write operations are blocked in ${displayName}. Exit ${displayName} (${shortcut}) to make changes.`;
+    return `MCP write operations are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
   }
   if (toolName.startsWith('api_')) {
-    return `API mutations are blocked in ${displayName}. Exit ${displayName} (${shortcut}) to make changes.`;
+    return `API mutations are blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to make changes.`;
   }
-  return `${toolName} is blocked in ${displayName}. Exit ${displayName} (${shortcut}) to use this tool.`;
-}
-
-/**
- * Get a user-friendly message explaining why a tool is blocked
- */
-export function getBlockReason(toolName: string, mode: Mode): string {
-  return getBlockReasonWithConfig(toolName, MODE_CONFIGS[mode]);
+  return `${toolName} is blocked in ${displayName}. Switch to Ask or Allow All mode (${shortcut}) to use this tool.`;
 }
 
 /**
@@ -674,46 +677,32 @@ export function blockWithReason(reason: string) {
 }
 
 // ============================================================
-// Mode Context (for user messages)
+// Session State Context (for user messages)
 // ============================================================
 
 /**
- * All possible modes - used for explicit state reporting.
- * Add new modes here as they're implemented.
+ * Get the current session state for prompt injection
  */
-const ALL_MODES: Mode[] = ['safe'];
-
-/**
- * Get the current state of all modes for a session.
- * Returns an object with all modes and their active/inactive state.
- * This ensures the model always knows the explicit state of every mode.
- */
-export function getSessionState(sessionId: string): Record<Mode, boolean> {
-  const activeModes = new Set(getActiveModes(sessionId));
-  return Object.fromEntries(
-    ALL_MODES.map(mode => [mode, activeModes.has(mode)])
-  ) as Record<Mode, boolean>;
+export function getSessionState(sessionId: string): { permissionMode: PermissionMode } {
+  return {
+    permissionMode: getPermissionMode(sessionId),
+  };
 }
 
 /**
  * Format session state as a lightweight XML block for injection into user messages.
- * Always includes all modes with their current state (true/false).
  * When in safe mode, includes the plans folder path so agent knows where to write plans.
- * This replaces the verbose getModeContext() for per-message injection.
  */
 export function formatSessionState(
   sessionId: string,
   options?: { plansFolderPath?: string }
 ): string {
-  const state = getSessionState(sessionId);
-  const lines = Object.entries(state)
-    .map(([mode, active]) => `${mode}: ${active}`)
-    .join('\n');
+  const mode = getPermissionMode(sessionId);
 
-  let result = `<session_state>\nsessionId: ${sessionId}\n${lines}`;
+  let result = `<session_state>\nsessionId: ${sessionId}\npermissionMode: ${mode}`;
 
   // Include plans folder path when in safe mode so agent knows where to write plans
-  if (state.safe && options?.plansFolderPath) {
+  if (mode === 'safe' && options?.plansFolderPath) {
     result += `\nplansFolderPath: ${options.plansFolderPath}`;
   }
 
@@ -721,72 +710,43 @@ export function formatSessionState(
   return result;
 }
 
-/**
- * @deprecated Use formatSessionState() instead for lightweight per-message injection.
- * This verbose format is kept for backwards compatibility but should not be used.
- *
- * Generate verbose context for all active modes to inject into user messages.
- * Returns null if no modes are active.
- */
-export function getModeContext(sessionId: string): string | null {
-  const activeModes = getActiveModes(sessionId);
-  if (activeModes.length === 0) {
-    return null;
-  }
-
-  const parts: string[] = [];
-
-  for (const mode of activeModes) {
-    const config = MODE_CONFIGS[mode];
-    parts.push(`<${mode}_mode_active>`);
-    parts.push(`You are in **${config.displayName.toUpperCase()}** (read-only exploration).`);
-    parts.push('');
-    parts.push('**Allowed:**');
-    parts.push('- Reading files, searching, exploring the codebase');
-    parts.push('- MCP read operations (blocks_read, search, etc.)');
-    parts.push('- API GET requests');
-    parts.push('- Asking questions, having conversations');
-    parts.push('- Write/Edit to plans folder (for SubmitPlan)');
-    parts.push('');
-    parts.push('**Blocked:**');
-    parts.push(`- ${Array.from(config.blockedTools).join(', ')} (except plans folder)`);
-    parts.push('- MCP write operations');
-    parts.push('- API mutations (POST, PUT, DELETE)');
-    parts.push('');
-    parts.push(`The user can exit ${config.displayName} via ${config.shortcutHint} or the UI toggle.`);
-    parts.push(`</${mode}_mode_active>`);
-  }
-
-  return parts.join('\n');
-}
-
 // ============================================================
-// System Prompt Documentation (generated from MODE_CONFIGS)
+// System Prompt Documentation
 // ============================================================
 
 /**
- * Generate the Safe Mode documentation section for the system prompt.
- * This is generated from MODE_CONFIGS to ensure consistency.
- *
- * SINGLE SOURCE OF TRUTH: The blocked tools list comes from MODE_CONFIGS.safe.blockedTools
+ * Generate the permission modes documentation section for the system prompt.
  */
-export function getSafeModeDocumentation(): string {
-  const config = MODE_CONFIGS.safe;
-  const blockedTools = Array.from(config.blockedTools).join(', ');
+export function getPermissionModesDocumentation(): string {
+  const safeConfig = SAFE_MODE_CONFIG;
+  const blockedTools = Array.from(safeConfig.blockedTools).join(', ');
 
-  return `## Safe Mode
+  return `## Permission Modes
 
-Safe Mode is a read-only exploration mode the user can toggle. When active, you can read, search, and explore but cannot make changes.
+Craft Agent has three permission modes that control tool execution. The user can cycle through modes with SHIFT+TAB.
 
-You will know you're in Safe Mode when you see \`<session_state>\` with \`safe: true\` in your context.
+| Mode | Color | Description |
+|------|-------|-------------|
+| **Safe** | Green | Read-only exploration. Blocks writes, never prompts. |
+| **Ask** | Amber | Prompts for dangerous operations. Default for interactive use. |
+| **Allow All** | Red | Everything allowed, no prompts. Use with caution. |
 
-### When Safe Mode is Active
+You will know the current mode from the \`<session_state>\` block in your context:
+\`\`\`
+<session_state>
+sessionId: abc123
+permissionMode: safe
+plansFolderPath: /path/to/plans
+</session_state>
+\`\`\`
+
+### Safe Mode (permissionMode: safe)
+
+Read-only exploration mode. You can read, search, and explore but cannot make changes.
 
 | Operation | Allowed? | Notes |
 |-----------|----------|-------|
-| Ask user questions | ✅ | Normal conversation |
 | Read Craft documents | ✅ | blocks_get, document_search, etc. |
-| List Craft structure | ✅ | folders_list, documents_list |
 | File exploration | ✅ | Read, Glob, Grep |
 | Web search/fetch | ✅ | WebSearch, WebFetch |
 | API GET requests | ✅ | Read-only API calls |
@@ -796,35 +756,17 @@ You will know you're in Safe Mode when you see \`<session_state>\` with \`safe: 
 | Craft modifications | ❌ | blocks_add, blocks_update blocked |
 | API mutations | ❌ | POST, PUT, DELETE blocked |
 
-### Bash Commands in Safe Mode
+When ready to implement, use \`SubmitPlan\` to present your plan. The "Accept Plan" button switches to Ask mode and authorizes implementation.
 
-Many read-only bash commands work in Safe Mode:
-- **File inspection**: ls, cat, head, tail, tree, find, grep, file, stat
-- **Git read ops**: git status, git log, git diff, git branch, git show
-- **System info**: pwd, whoami, date, env, ps, uname
-- **Package info**: npm list, pip list, cargo tree
+### Ask Mode (permissionMode: ask)
 
-**If unsure whether a command is allowed, try it.** The system will block non-read-only commands and explain what happened. You don't need to ask permission first.
+Default interactive mode. Most operations are allowed, but dangerous bash commands prompt for user approval.
 
-### Plans Folder Exception
+- File operations (Write, Edit) are allowed
+- Bash commands prompt for permission (with "Always allow this session" option)
+- Dangerous commands (rm, sudo, git push) always require explicit approval
 
-You CAN use Write, Edit, and MultiEdit to create/modify files in the session's plans folder. The exact path is provided in the \`plansFolderPath\` field of the \`<session_state>\` block when Safe Mode is active. This allows SubmitPlan to work in Safe Mode for creating structured plans.
+### Allow All Mode (permissionMode: allow-all)
 
-### Transitioning to Implementation
-
-When you've finished exploring and are ready to make changes:
-1. Write a structured plan to the plans folder (use the path from \`plansFolderPath\` in session state)
-2. Call \`SubmitPlan\` to present the plan
-3. The user can click "Accept Plan" to exit Safe Mode and authorize implementation
-
-This provides a smooth workflow: explore → plan → implement.
-
-### Exiting Safe Mode
-
-The user toggles Safe Mode via the UI (${config.shortcutHint} or badge). You cannot enter or exit Safe Mode directly - only the user can.
-
-**Recommended:** When ready to implement, use \`SubmitPlan\` to present your plan. The "Accept Plan" button exits Safe Mode and authorizes implementation in one action.
-
-When the user exits Safe Mode, you can proceed with any operations they've requested.`;
+Everything is allowed without prompts. Use with caution.`;
 }
-
