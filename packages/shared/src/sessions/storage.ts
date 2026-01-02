@@ -226,10 +226,12 @@ export function saveSession(session: StoredSession): void {
   ensureSessionDir(session.workspaceRootPath, session.id);
   const filePath = getSessionFilePath(session.workspaceRootPath, session.id);
 
-  // Store with portable path for cross-machine compatibility
+  // Store with portable paths for cross-machine compatibility
   const storageSession: StoredSession = {
     ...session,
     workspaceRootPath: toPortablePath(session.workspaceRootPath),
+    // Also make workingDirectory portable if set
+    workingDirectory: session.workingDirectory ? toPortablePath(session.workingDirectory) : undefined,
     lastUsedAt: Date.now(),
   };
 
@@ -247,9 +249,12 @@ export function loadSession(workspaceRootPath: string, sessionId: string): Store
     if (existsSync(filePath)) {
       const content = readFileSync(filePath, 'utf-8');
       const session = JSON.parse(content) as StoredSession;
-      // Expand portable path (e.g., ~/.craft-agent/...) to absolute path
-      // This ensures all code using the loaded session gets an absolute path
+      // Expand portable paths (e.g., ~/.craft-agent/...) to absolute paths
+      // This ensures all code using the loaded session gets absolute paths
       session.workspaceRootPath = expandPath(session.workspaceRootPath);
+      if (session.workingDirectory) {
+        session.workingDirectory = expandPath(session.workingDirectory);
+      }
       return session;
     }
   } catch {

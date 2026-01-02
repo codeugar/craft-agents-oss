@@ -502,17 +502,6 @@ export function shouldAllowToolInMode(
     permissionsContext?: PermissionsContext;
   }
 ): ToolCheckResult {
-  // In 'allow-all' mode, everything is allowed
-  if (mode === 'allow-all') {
-    return { allowed: true };
-  }
-
-  // In 'ask' mode, most things are allowed (permission handled separately)
-  if (mode === 'ask') {
-    return { allowed: true };
-  }
-
-  // Safe mode: check against read-only allowlist
   // Get config: merged custom if context provided, otherwise defaults
   let config: ToolCheckConfig;
 
@@ -523,6 +512,30 @@ export function shouldAllowToolInMode(
   } else {
     config = SAFE_MODE_CONFIG;
   }
+
+  // In 'allow-all' mode, still check explicitly blocked tools from permissions.json
+  if (mode === 'allow-all') {
+    if (config.blockedTools.has(toolName)) {
+      return {
+        allowed: false,
+        reason: `Tool "${toolName}" is explicitly blocked in permissions.json`
+      };
+    }
+    return { allowed: true };
+  }
+
+  // In 'ask' mode, still check explicitly blocked tools from permissions.json
+  if (mode === 'ask') {
+    if (config.blockedTools.has(toolName)) {
+      return {
+        allowed: false,
+        reason: `Tool "${toolName}" is explicitly blocked in permissions.json`
+      };
+    }
+    return { allowed: true };
+  }
+
+  // Safe mode: check against read-only allowlist
 
   // Always-allowed tools (read-only by nature)
   if (ALWAYS_ALLOWED_TOOLS.has(toolName)) {
@@ -695,7 +708,7 @@ Craft Agent has three permission modes that control tool execution. The user can
 
 | Mode | Color | Description |
 |------|-------|-------------|
-| **${PERMISSION_MODE_CONFIG['safe'].displayName}** | Green | ${PERMISSION_MODE_CONFIG['safe'].description} |
+| **${PERMISSION_MODE_CONFIG['safe'].displayName}** | Grey | ${PERMISSION_MODE_CONFIG['safe'].description} |
 | **${PERMISSION_MODE_CONFIG['ask'].displayName}** | Amber | ${PERMISSION_MODE_CONFIG['ask'].description} |
 | **${PERMISSION_MODE_CONFIG['allow-all'].displayName}** | Purple | ${PERMISSION_MODE_CONFIG['allow-all'].description} |
 
@@ -728,17 +741,18 @@ Read-only exploration mode. You can read, search, and explore but cannot make ch
 
 ### ${PERMISSION_MODE_CONFIG['ask'].displayName} (permissionMode: ask)
 
-Default interactive mode. Most operations are allowed, but Bash commands prompt for user approval.
+Default interactive mode. Prompts before edits, but read-only operations run freely.
 
 | Operation | Allowed? | Notes |
 |-----------|----------|-------|
 | All file operations | ✅ | Write, Edit, Read, etc. |
 | All Craft operations | ✅ | blocks_add, blocks_update, etc. |
 | All API operations | ✅ | GET, POST, PUT, DELETE |
-| Bash commands | ⚠️ | Prompts for approval (can click "Always allow") |
+| Read-only Bash | ✅ | ls, git status, grep, etc. (same as ${PERMISSION_MODE_CONFIG['safe'].displayName}) |
+| Other Bash commands | ⚠️ | Prompts for approval (can click "Always allow") |
 | Dangerous Bash | ⚠️ | rm, sudo, git push - always prompts, no auto-allow |
 
-Bash commands prompt for permission. Non-dangerous commands show an "Always allow this session" option; dangerous commands (rm, sudo, git push) always require explicit approval with no auto-allow option.
+Read-only Bash commands (the same ones allowed in ${PERMISSION_MODE_CONFIG['safe'].displayName} mode) run without prompting. Other commands prompt for permission with an "Always allow this session" option. Dangerous commands always require explicit approval.
 
 ### ${PERMISSION_MODE_CONFIG['allow-all'].displayName} (permissionMode: allow-all)
 

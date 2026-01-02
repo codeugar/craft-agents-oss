@@ -1640,6 +1640,9 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
             this.generateTitle(managed, firstUserMsg.content, event.text)
           }
         }
+
+        // Persist session after complete message to prevent data loss on quit
+        this.persistSession(managed)
         break
       }
 
@@ -1833,6 +1836,9 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
             isError: event.isError,
           }, workspaceId)
         }
+
+        // Persist session after tool completes to prevent data loss on quit
+        this.persistSession(managed)
         break
       }
 

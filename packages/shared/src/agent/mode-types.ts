@@ -48,8 +48,8 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
     // Compass icon from Lucide
     svgPath: 'M16.24 7.76l-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
     colors: {
-      primary: '#10b981', // emerald-500
-      muted: '#059669',   // emerald-600 (darker for text)
+      primary: '#6b7280', // gray-500
+      muted: '#4b5563',   // gray-600 (darker for text)
     },
   },
   'ask': {

@@ -506,7 +506,6 @@ export function SessionList({
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null)
   const [renameName, setRenameName] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
-  const renameInputRef = useRef<HTMLInputElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Focus search input when search becomes active (with delay to let dropdown close)
@@ -694,7 +693,11 @@ export function SessionList({
   const handleRenameClick = (sessionId: string, currentName: string) => {
     setRenameSessionId(sessionId)
     setRenameName(currentName)
-    setRenameDialogOpen(true)
+    // Defer dialog open to next frame to let dropdown fully unmount first
+    // This prevents race condition between dropdown's modal cleanup and dialog's modal setup
+    requestAnimationFrame(() => {
+      setRenameDialogOpen(true)
+    })
   }
 
   const handleRenameSubmit = () => {
@@ -818,46 +821,73 @@ export function SessionList({
       </ScrollArea>
 
       {/* Rename Dialog */}
-      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
-        <DialogContent
-          className="sm:max-w-[400px]"
-          onOpenAutoFocus={(e) => {
-            // Prevent Radix default focus behavior which selects all text
-            e.preventDefault()
-            // Focus the input and place cursor at end
-            const input = renameInputRef.current
-            if (input) {
-              input.focus()
-              input.setSelectionRange(input.value.length, input.value.length)
-            }
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Rename conversation</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <Input
-              ref={renameInputRef}
-              value={renameName}
-              onChange={(e) => setRenameName(e.target.value)}
-              placeholder="Enter a name..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleRenameSubmit()
-                }
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleRenameSubmit}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RenameDialog
+        open={renameDialogOpen}
+        onOpenChange={setRenameDialogOpen}
+        name={renameName}
+        onNameChange={setRenameName}
+        onSubmit={handleRenameSubmit}
+      />
     </>
+  )
+}
+
+/**
+ * RenameDialog - Extracted dialog component for better lifecycle isolation
+ */
+interface RenameDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  name: string
+  onNameChange: (name: string) => void
+  onSubmit: () => void
+}
+
+function RenameDialog({ open, onOpenChange, name, onNameChange, onSubmit }: RenameDialogProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Focus input after dialog opens (avoids Radix Dialog focus race condition)
+  useEffect(() => {
+    if (open) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus()
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+  }, [open])
+
+  const handleSubmit = () => {
+    onSubmit()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>Rename conversation</DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <Input
+            ref={inputRef}
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            placeholder="Enter a name..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSubmit()
+              }
+            }}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

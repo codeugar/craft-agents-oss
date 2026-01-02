@@ -38,9 +38,11 @@ import {
   blockWithReason,
   type PermissionMode,
   PERMISSION_MODE_CONFIG,
+  SAFE_MODE_CONFIG,
 } from './mode-manager.ts';
 import type { PermissionsContext } from './permissions-config.ts';
 import { getSessionPlansPath } from '../sessions/storage.ts';
+import { expandPath } from '../utils/paths.ts';
 import {
   ConfigWatcher,
   createConfigWatcher,
@@ -1072,8 +1074,28 @@ export class CraftAgent {
               // - 'allow-all': Everything allowed, no prompts
               // ============================================================
 
-              // In 'allow-all' mode, skip all permission checks
+              // Build permissions context for loading custom permissions.json files
+              const permissionsContext: PermissionsContext = {
+                workspaceSlug: this.workspaceRootPath,
+                activeSourceSlugs: Array.from(this.activeSourceServerNames),
+              };
+
+              // In 'allow-all' mode, still check for explicitly blocked tools
               if (permissionMode === 'allow-all') {
+                const plansFolderPath = sessionId ? getSessionPlansPath(this.workspaceRootPath, sessionId) : undefined;
+                const result = shouldAllowToolInMode(
+                  input.tool_name,
+                  input.tool_input,
+                  'allow-all',
+                  { plansFolderPath, permissionsContext }
+                );
+
+                if (!result.allowed) {
+                  // Tool is explicitly blocked in permissions.json
+                  this.onDebug?.(`Allow-all mode: blocking explicitly blocked tool ${input.tool_name}`);
+                  return blockWithReason(result.reason);
+                }
+
                 this.onDebug?.(`Allow-all mode: allowing ${input.tool_name}`);
                 // Fall through to source blocking and other checks below
               }
@@ -1085,7 +1107,7 @@ export class CraftAgent {
                   input.tool_name,
                   input.tool_input,
                   'safe',
-                  { plansFolderPath }
+                  { plansFolderPath, permissionsContext }
                 );
 
                 if (!result.allowed) {
@@ -1130,6 +1152,48 @@ export class CraftAgent {
                       }
                     }
                   }
+                }
+              }
+
+              // ============================================================
+              // PATH EXPANSION: Expand ~ in file paths for SDK file tools
+              // Node.js fs doesn't expand ~ so we must do it ourselves
+              // ============================================================
+              const filePathTools = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep', 'NotebookEdit']);
+              if (filePathTools.has(input.tool_name)) {
+                const toolInput = input.tool_input as Record<string, unknown>;
+                let updatedInput: Record<string, unknown> | null = null;
+
+                // Expand file_path if present and starts with ~
+                if (typeof toolInput.file_path === 'string' && toolInput.file_path.startsWith('~')) {
+                  const expandedPath = expandPath(toolInput.file_path);
+                  this.onDebug?.(`Expanding path: ${toolInput.file_path} → ${expandedPath}`);
+                  updatedInput = { ...toolInput, file_path: expandedPath };
+                }
+
+                // Expand notebook_path if present and starts with ~
+                if (typeof toolInput.notebook_path === 'string' && toolInput.notebook_path.startsWith('~')) {
+                  const expandedPath = expandPath(toolInput.notebook_path);
+                  this.onDebug?.(`Expanding notebook path: ${toolInput.notebook_path} → ${expandedPath}`);
+                  updatedInput = { ...(updatedInput || toolInput), notebook_path: expandedPath };
+                }
+
+                // Expand path if present and starts with ~ (for Glob, Grep)
+                if (typeof toolInput.path === 'string' && toolInput.path.startsWith('~')) {
+                  const expandedPath = expandPath(toolInput.path);
+                  this.onDebug?.(`Expanding search path: ${toolInput.path} → ${expandedPath}`);
+                  updatedInput = { ...(updatedInput || toolInput), path: expandedPath };
+                }
+
+                // If any path was expanded, return updated input
+                if (updatedInput) {
+                  return {
+                    continue: true,
+                    hookSpecificOutput: {
+                      hookEventName: 'PreToolUse' as const,
+                      updatedInput,
+                    },
+                  };
                 }
               }
 
@@ -1324,6 +1388,13 @@ export class CraftAgent {
                   : JSON.stringify(input.tool_input);
                 const commandStr = String(command);
                 const baseCommand = this.getBaseCommand(commandStr);
+
+                // Auto-allow read-only commands (same ones allowed in Explore mode)
+                const isReadOnly = SAFE_MODE_CONFIG.readOnlyBashPatterns.some(pattern => pattern.test(commandStr.trim()));
+                if (isReadOnly) {
+                  this.onDebug?.(`Auto-allowing read-only command: ${baseCommand}`);
+                  return { continue: true };
+                }
 
                 // Check if this base command is already allowed (and not dangerous)
                 if (this.alwaysAllowedCommands.has(baseCommand) && !this.isDangerousCommand(baseCommand)) {

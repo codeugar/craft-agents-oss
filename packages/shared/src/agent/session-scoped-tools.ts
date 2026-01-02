@@ -860,7 +860,7 @@ export function createSourceTestTool(sessionId: string, workspaceId: string, act
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -1176,7 +1176,7 @@ A browser window will open for the user to complete authentication.
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -1351,7 +1351,7 @@ After successful authentication, the tokens are stored and the source is marked 
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -1510,7 +1510,7 @@ The cache is persisted between sessions and can be read from the guide.md file.`
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -1578,7 +1578,7 @@ If the section doesn't exist, it will be created.`,
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -1679,7 +1679,7 @@ user mappings, or other data discovered in previous sessions.
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
@@ -2342,7 +2342,7 @@ credential_prompt({
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' not found. Check that the folder exists in ~/.craft-agent/workspaces/${workspaceId}/sources/`,
+              text: `Source '${args.sourceSlug}' not found. Use source_list to see available sources.`,
             }],
             isError: true,
           };
