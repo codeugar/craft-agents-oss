@@ -47,7 +47,7 @@ import {
   type SourceWithContext,
 } from '../sources/storage.ts';
 import type { FolderSourceConfig, LoadedSource } from '../sources/types.ts';
-import { createSourceService } from '../sources/service.ts';
+import { getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential } from '../sources/index.ts';
 import { CraftOAuth, getMcpBaseUrl, type OAuthConfig, type OAuthCallbacks } from '../auth/oauth.ts';
 import { startGmailOAuth } from '../auth/gmail-oauth.ts';
 
@@ -613,8 +613,7 @@ export function createSourceTestTool(sessionId: string, workspaceId: string, act
               lines.push(`Credential: ${result.credentialType}`);
             }
 
-            // Verify the source can be built for session use
-            const sourceService = createSourceService();
+            // Verify the source has valid credentials for session use
             const loadedSource: LoadedSource = {
               config: source,
               guide: null,
@@ -622,12 +621,13 @@ export function createSourceTestTool(sessionId: string, workspaceId: string, act
               workspaceId,
               agentSlug: sourceContext.agentSlug,
             };
-            const apiServer = await sourceService.buildApiServer(loadedSource);
+            const credManager = getSourceCredentialManager();
+            const hasCredentials = await credManager.hasValidCredentials(loadedSource);
 
-            if (!apiServer) {
+            if (!hasCredentials && source.api?.authType !== 'none') {
               lines.push('');
-              lines.push('⚠️ **Warning**: API is reachable, but session credential lookup failed.');
-              lines.push('The source may not work in this session. Try re-authenticating with the correct auth type.');
+              lines.push('⚠️ **Warning**: API is reachable, but credentials not found.');
+              lines.push('The source may not work in this session. Try re-authenticating.');
               if (source.api?.authType) {
                 lines.push(`Current authType: ${source.api.authType}`);
               }
@@ -774,9 +774,7 @@ export function createSourceTestTool(sessionId: string, workspaceId: string, act
             }
           }
 
-          // Verify the source can be built for session use
-          // This checks if credentials are properly configured for the session's credential lookup
-          const sourceService = createSourceService();
+          // Verify the source has valid credentials for session use
           const loadedSource: LoadedSource = {
             config: source,
             guide: null,
@@ -784,12 +782,13 @@ export function createSourceTestTool(sessionId: string, workspaceId: string, act
             workspaceId,
             agentSlug: sourceContext.agentSlug,
           };
-          const mcpConfig = await sourceService.buildMcpServerConfig(loadedSource);
+          const credManager = getSourceCredentialManager();
+          const hasCredentials = await credManager.hasValidCredentials(loadedSource);
 
-          if (!mcpConfig) {
+          if (!hasCredentials && source.mcp?.authType !== 'none') {
             lines.push('');
-            lines.push('⚠️ **Warning**: MCP server is reachable, but session credential lookup failed.');
-            lines.push('The source may not work in this session. Try re-authenticating with the correct auth type.');
+            lines.push('⚠️ **Warning**: MCP server is reachable, but credentials not found.');
+            lines.push('The source may not work in this session. Try re-authenticating.');
             if (source.mcp?.authType) {
               lines.push(`Current authType: ${source.mcp.authType}`);
             }

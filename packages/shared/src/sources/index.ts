@@ -58,9 +58,6 @@ export {
 } from './storage.ts';
 export type { SourceWithContext } from './storage.ts';
 
-// Service (legacy - use SourceCredentialManager + SourceServerBuilder instead)
-export { SourceService, createSourceService } from './service.ts';
-
 // Credential Manager (unified credential operations)
 export {
   SourceCredentialManager,
