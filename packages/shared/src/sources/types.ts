@@ -41,12 +41,56 @@ export type KnownProvider =
   | 'exa'; // Exa search API
 
 /**
+ * MCP transport type for sources
+ * - 'http': HTTP-based MCP server (URL endpoint)
+ * - 'sse': Server-Sent Events MCP server (URL endpoint)
+ * - 'stdio': Local subprocess MCP server (spawned command)
+ */
+export type McpTransport = 'http' | 'sse' | 'stdio';
+
+/**
  * MCP-specific configuration
+ * Supports both HTTP-based and local stdio-based MCP servers.
  */
 export interface McpSourceConfig {
-  url: string;
-  authType: McpAuthType;
-  clientId?: string; // For OAuth - stored in config (not secret)
+  /**
+   * Transport type. Defaults to 'http' if not specified.
+   */
+  transport?: McpTransport;
+
+  // === HTTP/SSE transport fields ===
+  /**
+   * URL endpoint for HTTP or SSE transport.
+   * Required when transport is 'http' or 'sse' (or undefined).
+   */
+  url?: string;
+
+  /**
+   * Authentication type for HTTP/SSE servers.
+   */
+  authType?: McpAuthType;
+
+  /**
+   * OAuth client ID (stored in config, not secret).
+   */
+  clientId?: string;
+
+  // === Stdio transport fields ===
+  /**
+   * Command to spawn for stdio transport.
+   * Required when transport is 'stdio'.
+   */
+  command?: string;
+
+  /**
+   * Arguments to pass to the command.
+   */
+  args?: string[];
+
+  /**
+   * Environment variables for the spawned process.
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -82,8 +126,13 @@ export interface LocalSourceConfig {
 
 /**
  * Source connection status
+ * - 'connected': Source is connected and working
+ * - 'needs_auth': Source requires authentication
+ * - 'failed': Connection failed with error
+ * - 'untested': Connection has not been tested
+ * - 'local_disabled': Stdio source is disabled (local MCP servers off)
  */
-export type SourceConnectionStatus = 'connected' | 'needs_auth' | 'failed' | 'untested';
+export type SourceConnectionStatus = 'connected' | 'needs_auth' | 'failed' | 'untested' | 'local_disabled';
 
 /**
  * Main source configuration (stored in config.json)

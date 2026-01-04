@@ -680,11 +680,25 @@ export function Chat({
   
   // Sources state (workspace-scoped)
   const [sources, setSources] = React.useState<LoadedSource[]>([])
+  // Whether local MCP servers are enabled (affects stdio source status)
+  const [localMcpEnabled, setLocalMcpEnabled] = React.useState(true)
 
   // Agent-scoped sources, keyed by agent slug
   const [agentSources, setAgentSources] = React.useState<Map<string, LoadedSource[]>>(new Map())
   // Track which agents have their sources expanded
   const [expandedAgentSources, setExpandedAgentSources] = React.useState<Set<string>>(new Set())
+
+  // Load workspace settings (for localMcpEnabled) on workspace change
+  React.useEffect(() => {
+    if (!activeWorkspaceId) return
+    window.electronAPI.getWorkspaceSettings(activeWorkspaceId).then((settings) => {
+      if (settings) {
+        setLocalMcpEnabled(settings.localMcpEnabled ?? true)
+      }
+    }).catch((err) => {
+      console.error('[Chat] Failed to load workspace settings:', err)
+    })
+  }, [activeWorkspaceId])
 
   // Load sources from backend on mount
   React.useEffect(() => {
@@ -2246,6 +2260,7 @@ export function Chat({
                 onDeleteSource={handleDeleteSource}
                 onSourceClick={handleOpenWorkspaceSourceInfo}
                 selectedSourceSlug={selectedSourceSlug}
+                localMcpEnabled={localMcpEnabled}
               />
             ) : (
               /* Sessions List */

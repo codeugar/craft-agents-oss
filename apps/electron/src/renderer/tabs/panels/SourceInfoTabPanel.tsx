@@ -79,6 +79,7 @@ export default function SourceInfoTabPanel({ tab }: SourceInfoTabPanelProps) {
   const [mcpTools, setMcpTools] = useState<McpToolWithPermission[] | null>(null)
   const [mcpToolsLoading, setMcpToolsLoading] = useState(false)
   const [mcpToolsError, setMcpToolsError] = useState<string | null>(null)
+  const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
 
   // Load source data
   useEffect(() => {
@@ -159,6 +160,18 @@ export default function SourceInfoTabPanel({ tab }: SourceInfoTabPanelProps) {
       isMounted = false
     }
   }, [source, workspaceId, sourceSlug])
+
+  // Load workspace settings (for localMcpEnabled)
+  useEffect(() => {
+    if (!workspaceId) return
+    window.electronAPI.getWorkspaceSettings(workspaceId).then((settings) => {
+      if (settings) {
+        setLocalMcpEnabled(settings.localMcpEnabled ?? true)
+      }
+    }).catch((err) => {
+      console.error('[SourceInfoTabPanel] Failed to load workspace settings:', err)
+    })
+  }, [workspaceId])
 
   // Listen for source folder changes (config.json, guide.md, permissions.json)
   useEffect(() => {
@@ -321,6 +334,22 @@ export default function SourceInfoTabPanel({ tab }: SourceInfoTabPanelProps) {
               )}
             </div>
           </div>
+
+          {/* Disabled Warning - shown when source is stdio and local MCP is disabled */}
+          {source.config.mcp?.transport === 'stdio' && !localMcpEnabled && (
+            <div className="bg-foreground/5 border border-border/50 rounded-[8px] px-4 py-3">
+              <div className="flex items-start gap-2 text-sm">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+                <div>
+                  <span className="font-medium">Source Disabled</span>
+                  <p className="text-foreground/60 mt-0.5">
+                    Local MCP servers are disabled in Settings → Advanced.
+                    Enable them to use this source.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Connection */}
           <div>

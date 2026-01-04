@@ -996,7 +996,7 @@ export class CraftAgent {
       const disallowedTools: string[] = ['EnterPlanMode', 'ExitPlanMode'];
 
       // Build MCP servers config - always use HTTP (SDK handles sources efficiently)
-      // Filter out stdio servers if local MCP is disabled, and track skipped servers
+      // Filter out stdio servers if local MCP is disabled
       const agentMcpResult = this.getAgentMcpServersFiltered();
       const sourceMcpResult = this.getSourceMcpServersFiltered();
       const agentApiServers = this.getAgentApiServers();
@@ -1005,17 +1005,6 @@ export class CraftAgent {
       debug('[chat] agentApiServers:', agentApiServers);
       debug('[chat] sourceMcpServers:', sourceMcpResult.servers);
       debug('[chat] sourceApiServers:', this.sourceApiServers);
-
-      // Notify user if any MCP servers were skipped due to local MCP being disabled
-      const allSkipped = [...agentMcpResult.skipped, ...sourceMcpResult.skipped];
-      if (allSkipped.length > 0) {
-        const serverList = allSkipped.join(', ');
-        yield {
-          type: 'status',
-          message: `Local MCP servers disabled: ${serverList} (enable in Settings → Advanced)`,
-        };
-        debug(`[chat] Skipped ${allSkipped.length} stdio MCP servers: ${serverList}`);
-      }
 
       const hasActiveAgent = this.activeAgentDefinition !== null;
       const activeAgentSlug = this.activeAgentDefinition?.slug;

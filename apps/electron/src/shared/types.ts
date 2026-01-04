@@ -973,6 +973,8 @@ export interface WorkspaceSettings {
   permissionMode?: PermissionMode
   workingDirectory?: string
   credentialStrategy?: CredentialStrategy
+  /** Whether local (stdio) MCP servers are enabled */
+  localMcpEnabled?: boolean
 }
 
 /**

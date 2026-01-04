@@ -28,6 +28,8 @@ export interface SourcesListPanelProps {
   onDeleteSource: (sourceName: string) => void
   onSourceClick: (source: LoadedSource) => void
   selectedSourceSlug?: string | null
+  /** Whether local MCP servers are enabled (affects stdio source status) */
+  localMcpEnabled?: boolean
   className?: string
 }
 
@@ -37,6 +39,7 @@ export function SourcesListPanel({
   onDeleteSource,
   onSourceClick,
   selectedSourceSlug,
+  localMcpEnabled = true,
   className,
 }: SourcesListPanelProps) {
   return (
@@ -58,10 +61,11 @@ export function SourcesListPanel({
           <div className="pt-2">
             {sources.map((source, index) => (
               <SourceItem
-                key={`${source.config.slug}-${source.config.connectionStatus}-${source.config.isAuthenticated}`}
+                key={`${source.config.slug}-${source.config.connectionStatus}-${source.config.isAuthenticated}-${localMcpEnabled}`}
                 source={source}
                 isSelected={selectedSourceSlug === source.config.slug}
                 isFirst={index === 0}
+                localMcpEnabled={localMcpEnabled}
                 onClick={() => onSourceClick(source)}
                 onDelete={() => onDeleteSource(source.config.name)}
               />
@@ -77,6 +81,7 @@ interface SourceItemProps {
   source: LoadedSource
   isSelected: boolean
   isFirst: boolean
+  localMcpEnabled: boolean
   onClick: () => void
   onDelete: () => void
 }
@@ -127,20 +132,22 @@ function getStatusBadge(status: SourceConnectionStatus): { label: string; classe
       return { label: 'Failed', classes: 'bg-destructive/10 text-destructive' }
     case 'untested':
       return { label: 'Not Tested', classes: 'bg-foreground/10 text-foreground/50' }
+    case 'local_disabled':
+      return { label: 'Disabled', classes: 'bg-foreground/10 text-foreground/50' }
     default:
       return null
   }
 }
 
-function SourceItem({ source, isSelected, isFirst, onClick, onDelete }: SourceItemProps) {
+function SourceItem({ source, isSelected, isFirst, localMcpEnabled, onClick, onDelete }: SourceItemProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const { config } = source
 
   // Build subtitle text: provider or tagline
   const subtitle = config.tagline || config.provider || ''
 
-  // Get connection status and badge info
-  const connectionStatus = deriveConnectionStatus(source)
+  // Get connection status and badge info (pass localMcpEnabled for stdio sources)
+  const connectionStatus = deriveConnectionStatus(source, localMcpEnabled)
   const statusBadge = getStatusBadge(connectionStatus)
 
   return (

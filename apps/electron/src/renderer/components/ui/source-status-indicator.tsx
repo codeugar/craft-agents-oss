@@ -61,6 +61,12 @@ const STATUS_CONFIG: Record<SourceConnectionStatus, {
     label: 'Not Tested',
     description: 'Connection has not been tested',
   },
+  local_disabled: {
+    color: 'bg-foreground/30',
+    pulseColor: 'bg-foreground/20',
+    label: 'Disabled',
+    description: 'Local MCP servers are disabled in Settings',
+  },
 }
 
 // Size configurations
@@ -127,23 +133,31 @@ export function SourceStatusIndicator({
 /**
  * Derive connection status from source config
  * This is a convenience function to determine status from existing fields
+ *
+ * @param source - The source config
+ * @param localMcpEnabled - Whether local MCP servers are enabled (default: true)
  */
 export function deriveConnectionStatus(source: {
   config: {
     isAuthenticated?: boolean
     connectionStatus?: SourceConnectionStatus
     type?: string
-    mcp?: { authType?: string }
+    mcp?: { authType?: string; transport?: string }
     api?: { authType?: string }
   }
-}): SourceConnectionStatus {
+}, localMcpEnabled = true): SourceConnectionStatus {
+  // Check if this is a stdio source and local MCP is disabled
+  const mcp = source.config.mcp
+  if (mcp?.transport === 'stdio' && !localMcpEnabled) {
+    return 'local_disabled'
+  }
+
   // If explicit status is set, use it
   if (source.config.connectionStatus) {
     return source.config.connectionStatus
   }
 
   // Derive from auth state
-  const mcp = source.config.mcp
   const api = source.config.api
   const requiresAuth = (mcp?.authType && mcp.authType !== 'none') ||
                        (api?.authType && api.authType !== 'none')
