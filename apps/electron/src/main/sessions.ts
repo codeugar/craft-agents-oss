@@ -146,6 +146,14 @@ interface ManagedSession {
   sourcesNeedingAuth?: LoadedSource[]
   // Whether auto-setup context has been triggered (prevents multiple triggers)
   autoSetupTriggered?: boolean
+  // Message queue for handling new messages while processing
+  // When a message arrives during processing, we interrupt and queue
+  messageQueue: Array<{
+    message: string
+    attachments?: FileAttachment[]
+    storedAttachments?: StoredAttachment[]
+    options?: SendMessageOptions
+  }>
 }
 
 // Convert runtime Message to StoredMessage for persistence
@@ -727,6 +735,7 @@ export class SessionManager {
             lastReadMessageId: storedSession.lastReadMessageId,
             enabledSourceSlugs: storedSession.enabledSourceSlugs,
             workingDirectory: storedSession.workingDirectory ?? getDefaultWorkingDirectory(),
+            messageQueue: [],
           }
 
           this.sessions.set(storedSession.id, managed)
@@ -897,6 +906,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       // Auto-setup tracking
       sourcesNeedingAuth: sourcesNeedingAuth.length > 0 ? sourcesNeedingAuth : undefined,
       autoSetupTriggered: false,
+      messageQueue: [],
     }
 
     this.sessions.set(storedSession.id, managed)
@@ -1313,8 +1323,17 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       throw new Error(`Session ${sessionId} not found`)
     }
 
+    // If currently processing, interrupt and queue the new message
     if (managed.isProcessing) {
-      throw new Error('Session is already processing')
+      console.log(`[SessionManager] Session ${sessionId} is processing, interrupting and queueing message`)
+
+      // Interrupt current processing
+      managed.agent?.interrupt()
+      managed.abortController?.abort()
+
+      // Queue the new message
+      managed.messageQueue.push({ message, attachments, storedAttachments, options })
+      return
     }
 
     // Add user message with stored attachments for persistence
@@ -1513,7 +1532,22 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         managed.parentToolStack = []
         managed.toolToParentMap.clear()
         managed.pendingTextParent = undefined
-        this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+
+        // Check if there are queued messages to process
+        if (managed.messageQueue.length > 0) {
+          const next = managed.messageQueue.shift()!
+          console.log(`[SessionManager] Processing queued message for session ${sessionId}`)
+          // Process next message (don't await - let it run independently)
+          this.sendMessage(sessionId, next.message, next.attachments, next.storedAttachments, next.options)
+            .catch(err => {
+              console.error('[SessionManager] Error processing queued message:', err)
+              this.sendEvent({ type: 'error', sessionId, error: err instanceof Error ? err.message : 'Unknown error' }, managed.workspace.id)
+              this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+            })
+        } else {
+          // No queued messages - send complete event
+          this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+        }
       }
       // Always persist (for aborted messages)
       this.persistSession(managed)

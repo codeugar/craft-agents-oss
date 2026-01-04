@@ -125,14 +125,6 @@ export function FreeFormInput({
   const [input, setInput] = React.useState(inputValue ?? '')
   const [attachments, setAttachments] = React.useState<FileAttachment[]>([])
 
-  // Message queue for handling rapid stop+send sequences
-  // When user presses Enter while processing, we queue the message and stop
-  // Once processing stops, we auto-submit queued messages in order
-  const [messageQueue, setMessageQueue] = React.useState<Array<{
-    text: string
-    attachments?: FileAttachment[]
-  }>>([])
-
   // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
   const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
 
@@ -186,17 +178,6 @@ export function FreeFormInput({
       }
     }
   }, [onInputChange])
-
-  // Process message queue - submits when not processing
-  // All messages go through the queue for consistent handling
-  React.useEffect(() => {
-    if (!isProcessing && !disabled && messageQueue.length > 0) {
-      // Submit the first queued message
-      const [nextMessage, ...remaining] = messageQueue
-      setMessageQueue(remaining)
-      onSubmit(nextMessage.text, nextMessage.attachments)
-    }
-  }, [isProcessing, disabled, messageQueue, onSubmit])
 
   const [isDraggingOver, setIsDraggingOver] = React.useState(false)
   const [loadingCount, setLoadingCount] = React.useState(0)
@@ -507,15 +488,12 @@ export function FreeFormInput({
     }
   }
 
-  // Queue a message for submission - all messages go through the queue
-  const queueMessage = React.useCallback(() => {
+  // Submit message - backend handles queueing and interruption
+  const submitMessage = React.useCallback(() => {
     const hasContent = input.trim() || attachments.length > 0
     if (!hasContent || disabled) return false
 
-    setMessageQueue(prev => [...prev, {
-      text: input.trim(),
-      attachments: attachments.length > 0 ? attachments : undefined
-    }])
+    onSubmit(input.trim(), attachments.length > 0 ? attachments : undefined)
     setInput('')
     setAttachments([])
     // Clear draft immediately (cancel any pending debounced sync)
@@ -523,11 +501,11 @@ export function FreeFormInput({
     onInputChange?.('')
     prevInputValueRef.current = ''
     return true
-  }, [input, attachments, disabled, onInputChange])
+  }, [input, attachments, disabled, onInputChange, onSubmit])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    queueMessage()
+    submitMessage()
   }
 
   const handleStop = (silent = false) => {
@@ -560,23 +538,13 @@ export function FreeFormInput({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      // Queue message (will auto-send when not processing)
-      // Only stop if we actually queued content - empty Enter while processing does nothing
-      // Use silent=true to skip "Response interrupted" message (this is a redirect, not an interrupt)
-      const queued = queueMessage()
-      if (queued && isProcessing) {
-        handleStop(true)
-      }
+      // Submit message - backend handles interruption if processing
+      submitMessage()
     }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
-      // Queue message (will auto-send when not processing)
-      // Only stop if we actually queued content
-      // Use silent=true to skip "Response interrupted" message
-      const queued = queueMessage()
-      if (queued && isProcessing) {
-        handleStop(true)
-      }
+      // Submit message - backend handles interruption if processing
+      submitMessage()
     }
     if (e.key === 'Escape') {
       textareaRef.current?.blur()

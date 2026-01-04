@@ -375,17 +375,8 @@ export function ChatDisplay({
   }, [session?.id])
 
   // Handle message submission from InputContainer
-  const handleSubmit = async (message: string, attachments?: FileAttachment[]) => {
-    // If currently processing, stop the stream first
-    if (session?.isProcessing) {
-      try {
-        await window.electronAPI.cancelProcessing(session.id)
-        await new Promise(resolve => setTimeout(resolve, 100))
-      } catch (error) {
-        console.error('[ChatDisplay] Failed to cancel before send:', error)
-      }
-    }
-
+  // Backend handles interruption and queueing if currently processing
+  const handleSubmit = (message: string, attachments?: FileAttachment[]) => {
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
     onSendMessage(message, attachments)
