@@ -222,8 +222,8 @@ export function SourceAvatar(props: SourceAvatarProps) {
         localIconPath = `sources/${source.config.slug}/${iconFilename}`
       }
     } else {
-      // Use provider-based favicon resolution (handles canonical domain mapping)
-      // This is preferred over raw iconUrl which may be a website URL, not an image
+      // Always derive favicon from service URL via Google Favicon API
+      // Uses provider-based canonical domain mapping for better logo resolution
       remoteIconUrl = deriveServiceFavicon(source)
     }
 
