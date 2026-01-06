@@ -309,7 +309,8 @@ Craft Agent uses a unified `debug()` utility that auto-routes based on environme
 | Electron Main | ✓ | ✓ | `process.type === 'browser'` |
 | Electron Renderer | ✓ | - | `process.type === 'renderer'` |
 | TUI (Ink) | - | ✓ | `CRAFT_TUI=1` env var |
-| CLI/Scripts | ✓ | - | Default |
+| SDK Subprocess | ✓ | ✓ | `CRAFT_DEBUG=1` env var |
+| CLI/Scripts | ✓ | - | Default (no CRAFT_DEBUG) |
 
 ### Enabling Debug Mode
 
@@ -348,6 +349,7 @@ log.error('Failed to connect', error)
 | TUI | `/tmp/craft-debug.log` |
 | Electron Main | `~/Library/Logs/Craft Agents/main.log` |
 | Electron Renderer | Browser DevTools console |
+| SDK Subprocess | `/tmp/craft-debug.log` (when CRAFT_DEBUG=1) |
 | CLI | Terminal (stderr) |
 
 ### Log Format

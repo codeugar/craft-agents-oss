@@ -15,9 +15,17 @@ import { getWorkspaces } from '@craft-agent/shared/config'
 import { initializeDocs } from '@craft-agent/shared/docs'
 import { handleDeepLink } from './deep-link'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
+import { enableDebug } from '@craft-agent/shared/utils'
 
 // Initialize electron-log for renderer process support
 log.initialize()
+
+// Set CRAFT_DEBUG env var so SDK subprocess inherits debug mode
+// Also call enableDebug() since debug.ts module may already be loaded with debugEnabled=false
+if (isDebugMode) {
+  process.env.CRAFT_DEBUG = '1'
+  enableDebug()
+}
 
 // Custom URL scheme for deeplinks (e.g., craftagents://auth-complete)
 const DEEPLINK_SCHEME = 'craftagents'

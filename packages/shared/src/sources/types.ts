@@ -29,6 +29,25 @@ export type McpAuthType = 'oauth' | 'bearer' | 'none';
 export type ApiAuthType = 'bearer' | 'header' | 'query' | 'basic' | 'oauth' | 'none';
 
 /**
+ * Google service types for OAuth scope selection
+ */
+export type GoogleService = 'gmail' | 'calendar' | 'drive';
+
+/**
+ * Infer Google service from API baseUrl.
+ * Returns undefined if URL doesn't match a known Google API pattern.
+ */
+export function inferGoogleServiceFromUrl(baseUrl: string | undefined): GoogleService | undefined {
+  if (!baseUrl) return undefined;
+  const url = baseUrl.toLowerCase();
+
+  if (url.includes('calendar.googleapis.com') || url.includes('/calendar/')) return 'calendar';
+  if (url.includes('drive.googleapis.com') || url.includes('/drive/')) return 'drive';
+  if (url.includes('gmail.googleapis.com') || url.includes('/gmail/')) return 'gmail';
+  return undefined;
+}
+
+/**
  * Known providers for special handling (OAuth flows, icons, etc.)
  * These have well-known OAuth endpoints or special behavior.
  */
@@ -114,6 +133,10 @@ export interface ApiSourceConfig {
   authScheme?: string; // For 'bearer' auth (default: "Bearer", could be "Token")
   defaultHeaders?: Record<string, string>; // Headers to include with every request
   testEndpoint?: ApiTestEndpoint; // Endpoint to use for connection testing
+
+  // Google OAuth fields (used when authType is 'oauth' and provider is 'google')
+  googleService?: GoogleService; // Predefined service for scope selection
+  googleScopes?: string[]; // Custom scopes (overrides googleService)
 }
 
 /**
@@ -170,9 +193,9 @@ export interface FolderSourceConfig {
   connectionError?: string; // Error message if status is 'failed'
   lastTestedAt?: number;
 
-  // Metadata
-  createdAt: number;
-  updatedAt: number;
+  // Metadata (optional - manually created configs may not have them)
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 /**

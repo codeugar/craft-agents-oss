@@ -2,7 +2,8 @@ import { appendFileSync } from 'fs';
 
 const LOG_FILE = '/tmp/craft-debug.log';
 
-let debugEnabled = false;
+// Check CRAFT_DEBUG env var at module load (for SDK subprocess)
+let debugEnabled = process.env.CRAFT_DEBUG === '1';
 
 /**
  * Runtime environment detection
@@ -41,13 +42,34 @@ export function isDebugEnabled(): boolean {
 }
 
 /**
+ * Safely stringify an object, handling circular references.
+ */
+function safeStringify(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    // Handle circular references by using a replacer that tracks seen objects
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (_key, value) => {
+      if (typeof value === 'object' && value !== null) {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+  }
+}
+
+/**
  * Format a log message with timestamp and optional scope.
  */
 function formatMessage(scope: string | undefined, message: string, args: unknown[]): string {
   const timestamp = new Date().toISOString();
   const scopeStr = scope ? `[${scope}] ` : '';
   const argsStr = args.length > 0
-    ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
+    ? ' ' + args.map(a => typeof a === 'object' ? safeStringify(a) : String(a)).join(' ')
     : '';
   return `${timestamp} ${scopeStr}${message}${argsStr}\n`;
 }
@@ -60,7 +82,8 @@ function formatMessage(scope: string | undefined, message: string, args: unknown
  * | electron-main     | ✓       | ✓    |
  * | electron-renderer | ✓       | -    |
  * | tui               | -       | ✓    |
- * | cli               | ✓       | -    |
+ * | cli (CRAFT_DEBUG) | ✓       | ✓    |
+ * | cli (no debug)    | ✓       | -    |
  */
 function output(formatted: string): void {
   const env = detectEnvironment();
@@ -76,8 +99,9 @@ function output(formatted: string): void {
     }
   }
 
-  // File output (TUI and Electron main)
-  if (env === 'tui' || env === 'electron-main') {
+  // File output (TUI, Electron main, and CLI with CRAFT_DEBUG)
+  // CLI includes SDK subprocess - needs file output to aggregate logs with parent process
+  if (env === 'tui' || env === 'electron-main' || (env === 'cli' && debugEnabled)) {
     try {
       appendFileSync(LOG_FILE, formatted);
     } catch {
