@@ -2,7 +2,7 @@ import * as React from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
-import { cn } from '@/lib/utils'
+import { cn } from '../../lib/utils'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { preprocessLinks } from './linkify'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
@@ -23,7 +23,7 @@ import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
  */
 export type RenderMode = 'terminal' | 'minimal' | 'full'
 
-interface MarkdownProps {
+export interface MarkdownProps {
   children: string
   /**
    * Render mode controlling formatting level

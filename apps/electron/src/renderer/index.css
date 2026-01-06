@@ -3,6 +3,7 @@
 
 /* Tell Tailwind where to scan for utility classes */
 @source "../**/*.{tsx,ts,jsx,js}";
+@source "../../../../packages/ui/src/**/*.{tsx,ts,jsx,js}";
 
 /* =============================================================================
    CRAFT AGENT THEME - 6 Color System

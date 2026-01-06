@@ -11,7 +11,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { SourceAvatar } from '@/components/ui/source-avatar'
-import { Spinner } from '@/components/ui/loading-indicator'
+import { Spinner } from '@craft-agent/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Markdown } from '@/components/markdown'
 import { cn } from '@/lib/utils'

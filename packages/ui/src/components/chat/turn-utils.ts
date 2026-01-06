@@ -5,8 +5,45 @@
  * Converts the flat Message[] array into grouped turns for email-like display.
  */
 
-import type { Message } from '../../../shared/types'
+import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
+
+// Re-export ActivityItem for consumers
+export type { ActivityItem }
+
+/** Convert StoredMessage to Message format for turn processing */
+export function storedToMessage(stored: StoredMessage): Message {
+  return {
+    id: stored.id,
+    role: stored.type,
+    content: stored.content,
+    timestamp: stored.timestamp ?? Date.now(),
+    toolName: stored.toolName,
+    toolUseId: stored.toolUseId,
+    toolInput: stored.toolInput,
+    toolResult: stored.toolResult,
+    toolStatus: stored.toolStatus,
+    toolDuration: stored.toolDuration,
+    toolIntent: stored.toolIntent,
+    toolDisplayName: stored.toolDisplayName,
+    parentToolUseId: stored.parentToolUseId,
+    taskId: stored.taskId,
+    shellId: stored.shellId,
+    elapsedSeconds: stored.elapsedSeconds,
+    isBackground: stored.isBackground,
+    attachments: stored.attachments,
+    isError: stored.isError,
+    isIntermediate: stored.isIntermediate,
+    turnId: stored.turnId,
+    errorCode: stored.errorCode,
+    errorTitle: stored.errorTitle,
+    errorDetails: stored.errorDetails,
+    errorOriginal: stored.errorOriginal,
+    errorCanRetry: stored.errorCanRetry,
+    ultrathink: stored.ultrathink,
+    planPath: stored.planPath,
+  }
+}
 
 // ============================================================================
 // Types
@@ -150,15 +187,16 @@ function extractTodosFromActivities(activities: ActivityItem[]): TodoItem[] | un
     .filter(a => a.toolName === 'TodoWrite' && a.status === 'completed' && a.content)
     .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
 
-  if (todoWriteActivities.length === 0) return undefined
+  const latestActivity = todoWriteActivities[0]
+  if (!latestActivity) return undefined
 
-  const latestResult = todoWriteActivities[0].content
+  const latestResult = latestActivity.content
   if (!latestResult) return undefined
 
   try {
     // TodoWrite result is typically a success message, but the input contains the todos
     // We need to get the toolInput which has the todos array
-    const input = todoWriteActivities[0].toolInput
+    const input = latestActivity.toolInput
     if (input && Array.isArray(input.todos)) {
       return input.todos.map((todo: { content: string; status: string; activeForm?: string }) => ({
         content: todo.content,
@@ -281,9 +319,10 @@ export function groupMessagesByTurn(messages: Message[]): Turn[] {
         const statusIdx = currentTurn.activities.findIndex(
           a => a.type === 'status' && a.statusType === 'compacting'
         )
-        if (statusIdx !== -1) {
+        const existingActivity = currentTurn.activities[statusIdx]
+        if (statusIdx !== -1 && existingActivity) {
           currentTurn.activities[statusIdx] = {
-            ...currentTurn.activities[statusIdx],
+            ...existingActivity,
             status: 'completed',
             content: message.content,
           }
@@ -667,8 +706,9 @@ export function formatActivityAsMarkdown(activity: ActivityItem): string {
  */
 export function getLastAssistantTurn(turns: Turn[]): AssistantTurn | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {
-    if (turns[i].type === 'assistant') {
-      return turns[i] as AssistantTurn
+    const turn = turns[i]
+    if (turn?.type === 'assistant') {
+      return turn as AssistantTurn
     }
   }
   return undefined
@@ -680,8 +720,9 @@ export function getLastAssistantTurn(turns: Turn[]): AssistantTurn | undefined {
  */
 export function getLastUserMessageTime(turns: Turn[]): number | undefined {
   for (let i = turns.length - 1; i >= 0; i--) {
-    if (turns[i].type === 'user') {
-      return (turns[i] as UserTurn).timestamp
+    const turn = turns[i]
+    if (turn?.type === 'user') {
+      return (turn as UserTurn).timestamp
     }
   }
   return undefined
@@ -884,8 +925,9 @@ export function groupActivitiesByParent(
     if (activity.toolName === 'Task' && activity.status === 'completed' && activity.content) {
       // Parse agent ID from Task result - look for "agentId: xyz" pattern
       const agentIdMatch = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
-      if (agentIdMatch && activity.toolUseId) {
-        taskToAgentId.set(activity.toolUseId, agentIdMatch[1])
+      const capturedAgentId = agentIdMatch?.[1]
+      if (capturedAgentId && activity.toolUseId) {
+        taskToAgentId.set(activity.toolUseId, capturedAgentId)
       }
     }
   }

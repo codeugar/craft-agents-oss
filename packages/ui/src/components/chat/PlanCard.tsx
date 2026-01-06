@@ -3,17 +3,15 @@
  *
  * Displays a plan submitted by the agent for user review.
  * Uses the same markdown rendering and max height as TurnCard responses.
- * Includes an "Accept Plan" button that disables Safe Mode and submits
- * "Plan approved, please execute." to begin implementation.
+ * Platform-agnostic: accepts callbacks for all interactions.
  */
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
 import ReactDOM from 'react-dom'
 import { Check, ListTodo, Maximize2, ExternalLink, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Markdown } from '@/components/markdown'
-import type { Message } from '../../../shared/types'
+import { cn } from '../../lib/utils'
+import { Markdown } from '../markdown'
 
 // ============================================================================
 // Size Configuration (matches TurnCard)
@@ -29,15 +27,15 @@ const SIZE_CONFIG = {
 // ============================================================================
 
 export interface PlanCardProps {
-  /** The plan message */
-  message: Message
-  /** Session ID for scoping the approve-plan event */
-  sessionId?: string
+  /** The plan content (markdown) */
+  content: string
+  /** Callback when user accepts the plan */
+  onAccept?: () => void
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
-  /** Callback to open plan content in Monaco editor */
+  /** Callback to open plan content in external viewer */
   onPopOut?: (text: string) => void
   /** Whether a user message has been sent after this plan (hides the approve footer) */
   hasUserResponse?: boolean
@@ -48,8 +46,8 @@ export interface PlanCardProps {
 // ============================================================================
 
 export function PlanCard({
-  message,
-  sessionId,
+  content,
+  onAccept,
   onOpenFile,
   onOpenUrl,
   onPopOut,
@@ -57,14 +55,8 @@ export function PlanCard({
 }: PlanCardProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
-  // Accept the plan: disable safe mode and submit "Plan approved, please execute." message
-  // This uses the craft:approve-plan event which is handled by FreeFormInput
-  // The sessionId ensures only the correct session processes this event
-  const handleAcceptPlan = () => {
-    window.dispatchEvent(new CustomEvent('craft:approve-plan', {
-      detail: { text: 'Plan approved, please execute.', sessionId }
-    }))
-  }
+  // Accept the plan - calls the provided callback
+  const handleAcceptPlan = () => onAccept?.()
 
   // Handle escape key to close fullscreen
   useEffect(() => {
@@ -118,7 +110,7 @@ export function PlanCard({
             onUrlClick={onOpenUrl}
             onFileClick={onOpenFile}
           >
-            {message.content}
+            {content}
           </Markdown>
         </div>
 
@@ -131,7 +123,7 @@ export function PlanCard({
             {/* Left side - View as Markdown */}
             {onPopOut ? (
               <button
-                onClick={() => onPopOut(message.content)}
+                onClick={() => onPopOut(content)}
                 className={cn(
                   "flex items-center gap-1.5 transition-colors",
                   "text-muted-foreground hover:text-foreground",
@@ -183,7 +175,7 @@ export function PlanCard({
           </button>
 
           {/* Scrollable content wrapper */}
-          <div className="min-h-full bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
+          <div className="min-h-screen bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
             <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[848px]">
               <div className="px-12 pt-8 pb-8">
                 <div className="text-sm">
@@ -192,7 +184,7 @@ export function PlanCard({
                     onUrlClick={onOpenUrl}
                     onFileClick={onOpenFile}
                   >
-                    {message.content}
+                    {content}
                   </Markdown>
                 </div>
               </div>

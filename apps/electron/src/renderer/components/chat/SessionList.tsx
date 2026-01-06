@@ -4,7 +4,7 @@ import { Trash2, Pencil, MoreHorizontal, ExternalLink, Flag, FlagOff, MailOpen, 
 import { toast } from "sonner"
 
 import { cn, isHexColor } from "@/lib/utils"
-import { Spinner } from "@/components/ui/loading-indicator"
+import { Spinner } from "@craft-agent/ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"

@@ -19,7 +19,7 @@ import { useOnboarding } from '@/hooks/useOnboarding'
 import { useTabs } from '@/tabs'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
-import { Spinner } from '@/components/ui/loading-indicator'
+import { Spinner } from '@craft-agent/ui'
 import { DEFAULT_MODEL } from '@config/models'
 import {
   initializeSessionsAtom,

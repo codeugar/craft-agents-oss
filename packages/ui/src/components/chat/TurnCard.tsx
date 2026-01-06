@@ -1,6 +1,5 @@
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
-import { useAtom } from 'jotai'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   ChevronRight,
@@ -17,21 +16,46 @@ import {
   MoreHorizontal,
   X,
   Maximize2,
+  CircleCheck,
 } from 'lucide-react'
 import * as ReactDOM from 'react-dom'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-} from '@/components/ui/styled-dropdown'
-import { cn } from '@/lib/utils'
-import { Markdown } from '@/components/markdown'
-import { Spinner } from '@/components/ui/loading-indicator'
-import { stripMarkdown } from '@/utils/text'
-import { CircleCheckFilled } from '@/components/icons/TodoStateIcons'
+import { cn } from '../../lib/utils'
+import { Markdown } from '../markdown'
+import { Spinner } from '../ui/LoadingIndicator'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, type ActivityGroup } from './turn-utils'
-import { expandedTurnsAtomFamily, expandedActivityGroupsAtomFamily } from '@/atoms/sessions'
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+/**
+ * Simple markdown stripping for preview text.
+ * Removes common markdown syntax to show plain text preview.
+ */
+function stripMarkdown(text: string): string {
+  return text
+    // Remove code blocks
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]*`/g, '')
+    // Remove headers
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Remove links
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove images
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+    // Remove blockquotes
+    .replace(/^>\s+/gm, '')
+    // Remove horizontal rules
+    .replace(/^---+$/gm, '')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 // ============================================================================
 // Size Configuration
@@ -111,8 +135,8 @@ export interface ResponseContent {
 }
 
 export interface TurnCardProps {
-  /** Session ID for state persistence */
-  sessionId: string
+  /** Session ID for state persistence (optional in shared context) */
+  sessionId?: string
   /** Turn ID for state persistence */
   turnId: string
   /** All activities in this turn (tools, thinking, intermediate text) */
@@ -127,6 +151,14 @@ export interface TurnCardProps {
   isComplete: boolean
   /** Start in expanded state */
   defaultExpanded?: boolean
+  /** Controlled expansion state (overrides internal state) */
+  isExpanded?: boolean
+  /** Callback when expansion state changes */
+  onExpandedChange?: (expanded: boolean) => void
+  /** Controlled expansion state for activity groups */
+  expandedActivityGroups?: Set<string>
+  /** Callback when activity group expansion changes */
+  onExpandedActivityGroupsChange?: (groups: Set<string>) => void
   /** Callback when file path is clicked */
   onOpenFile?: (path: string) => void
   /** Callback when URL is clicked */
@@ -143,6 +175,8 @@ export interface TurnCardProps {
   hasEditOrWriteActivities?: boolean
   /** TodoWrite tool state - shown at bottom of turn */
   todos?: TodoItem[]
+  /** Optional render prop for actions menu (Electron provides dropdown) */
+  renderActionsMenu?: () => React.ReactNode
 }
 
 // ============================================================================
@@ -627,8 +661,10 @@ function ActivityRow({ activity, onOpenDetails, isLastChild }: ActivityRowProps)
 
 interface ActivityGroupRowProps {
   group: ActivityGroup
-  /** Session ID for persistent state */
-  sessionId: string
+  /** Controlled expansion state for activity groups */
+  expandedGroups?: Set<string>
+  /** Callback when expansion changes */
+  onExpandedGroupsChange?: (groups: Set<string>) => void
   /** Callback to open activity details in Monaco */
   onOpenActivityDetails?: (activity: ActivityItem) => void
   /** Animation index for staggered animation */
@@ -639,23 +675,24 @@ interface ActivityGroupRowProps {
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, sessionId, onOpenActivityDetails, animationIndex = 0 }: ActivityGroupRowProps) {
-  // Use per-session atom to persist expanded state - default is collapsed (not in set)
-  const [expandedGroups, setExpandedGroups] = useAtom(expandedActivityGroupsAtomFamily(sessionId))
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0 }: ActivityGroupRowProps) {
+  // Use local state if no controlled state provided
+  const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
+  const expandedGroups = externalExpandedGroups ?? localExpandedGroups
+  const setExpandedGroups = onExpandedGroupsChange ?? setLocalExpandedGroups
+
   const groupId = group.parent.id
   const isExpanded = expandedGroups.has(groupId)
 
   const toggleExpanded = useCallback(() => {
-    setExpandedGroups(prev => {
-      const next = new Set(prev)
-      if (next.has(groupId)) {
-        next.delete(groupId)
-      } else {
-        next.add(groupId)
-      }
-      return next
-    })
-  }, [groupId, setExpandedGroups])
+    const next = new Set(expandedGroups)
+    if (next.has(groupId)) {
+      next.delete(groupId)
+    } else {
+      next.add(groupId)
+    }
+    setExpandedGroups(next)
+  }, [groupId, expandedGroups, setExpandedGroups])
 
   const description = group.parent.toolInput?.description as string | undefined
   const subagentType = group.parent.toolInput?.subagent_type as string | undefined
@@ -992,7 +1029,7 @@ function StreamingResponsePreview({
             </button>
 
             {/* Scrollable content wrapper with min-height for short messages */}
-            <div className="min-h-full bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
+            <div className="min-h-screen bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
               {/* Content card with shadow */}
               <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[848px]">
                 {/* Content area */}
@@ -1060,7 +1097,7 @@ function TodoStatusIcon({ status }: { status: TodoStatus }) {
         </div>
       )
     case 'completed':
-      return <CircleCheckFilled className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent")} />
+      return <CircleCheck className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-accent fill-current")} />
     case 'interrupted':
       return <Ban className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-muted-foreground/50")} />
   }
@@ -1140,6 +1177,10 @@ export function TurnCard({
   isStreaming,
   isComplete,
   defaultExpanded = false,
+  isExpanded: externalIsExpanded,
+  onExpandedChange,
+  expandedActivityGroups: externalExpandedActivityGroups,
+  onExpandedActivityGroupsChange,
   onOpenFile,
   onOpenUrl,
   onPopOut,
@@ -1148,24 +1189,35 @@ export function TurnCard({
   onOpenMultiFileDiff,
   hasEditOrWriteActivities,
   todos,
+  renderActionsMenu,
 }: TurnCardProps) {
   const hasRunning = activities.some(a => a.status === 'running')
 
-  // Use per-session atom to persist expanded state across session switches
-  const [expandedTurns, setExpandedTurns] = useAtom(expandedTurnsAtomFamily(sessionId))
-  const isExpanded = expandedTurns.has(turnId)
+  // Use local state if no controlled state provided
+  const [localExpandedTurns, setLocalExpandedTurns] = useState<Set<string>>(() => defaultExpanded ? new Set([turnId]) : new Set())
+  const isExpanded = externalIsExpanded ?? localExpandedTurns.has(turnId)
 
   const toggleExpanded = useCallback(() => {
-    setExpandedTurns(prev => {
-      const next = new Set(prev)
-      if (next.has(turnId)) {
-        next.delete(turnId)
-      } else {
-        next.add(turnId)
-      }
-      return next
-    })
-  }, [turnId, setExpandedTurns])
+    const newExpanded = !isExpanded
+    if (onExpandedChange) {
+      onExpandedChange(newExpanded)
+    } else {
+      setLocalExpandedTurns(prev => {
+        const next = new Set(prev)
+        if (next.has(turnId)) {
+          next.delete(turnId)
+        } else {
+          next.add(turnId)
+        }
+        return next
+      })
+    }
+  }, [turnId, isExpanded, onExpandedChange])
+
+  // Use local state for activity groups if no controlled state provided
+  const [localExpandedActivityGroups, setLocalExpandedActivityGroups] = useState<Set<string>>(new Set())
+  const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
+  const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
   // Check if response is in buffering state
   // No polling needed - parent updates trigger re-evaluation naturally
@@ -1266,37 +1318,8 @@ export function TurnCard({
               </AnimatePresence>
             </span>
 
-            {/* Turn actions dropdown menu */}
-            {onOpenDetails && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => e.stopPropagation()}
-                    className={cn(
-                      "p-1 -m-1 rounded-[4px] opacity-0 group-hover:opacity-100 transition-opacity",
-                      "hover:bg-muted/80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                      "data-[state=open]:opacity-100 data-[state=open]:bg-muted/80"
-                    )}
-                  >
-                    <MoreHorizontal className={SIZE_CONFIG.iconSize} />
-                  </div>
-                </DropdownMenuTrigger>
-                <StyledDropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                  {onOpenMultiFileDiff && hasEditOrWriteActivities && (
-                    <StyledDropdownMenuItem onClick={onOpenMultiFileDiff}>
-                      <FileDiff />
-                      View file changes
-                    </StyledDropdownMenuItem>
-                  )}
-                  <StyledDropdownMenuItem onClick={onOpenDetails}>
-                    <ArrowUpRight />
-                    View turn details
-                  </StyledDropdownMenuItem>
-                </StyledDropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {/* Turn actions menu - provided by platform */}
+            {renderActionsMenu?.()}
           </button>
 
           {/* Expanded Activity List */}
@@ -1332,7 +1355,8 @@ export function TurnCard({
                         <ActivityGroupRow
                           key={item.parent.id}
                           group={item}
-                          sessionId={sessionId}
+                          expandedGroups={expandedActivityGroups}
+                          onExpandedGroupsChange={handleExpandedActivityGroupsChange}
                           onOpenActivityDetails={onOpenActivityDetails}
                           animationIndex={index}
                         />

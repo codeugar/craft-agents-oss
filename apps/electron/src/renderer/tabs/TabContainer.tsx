@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import {
   ExternalLink,
   Copy,
@@ -20,14 +20,7 @@ import {
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
+import { RenameDialog } from '@/components/ui/rename-dialog'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -50,14 +43,24 @@ interface TabContainerProps {
 }
 
 export function TabContainer({ className }: TabContainerProps) {
-  const { activeTab, isTabBarVisible } = useTabs()
-  const { sessions } = useChatContext()
+  const { activeTab, isTabBarVisible, updateChatTabLabel } = useTabs()
+  const { sessions, onRenameSession } = useChatContext()
   const { closeTab } = useCloseTab()
 
   // Rename dialog state
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameName, setRenameName] = useState('')
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null)
+
+  // Handle rename submit
+  const handleRenameSubmit = () => {
+    if (renameSessionId && renameName.trim()) {
+      onRenameSession(renameSessionId, renameName.trim())
+      updateChatTabLabel(renameSessionId, renameName.trim())
+    }
+    setRenameDialogOpen(false)
+    setRenameName('')
+  }
 
   // Get session for chat tab
   const getChatSession = (tab: Tab) => {
@@ -137,9 +140,10 @@ export function TabContainer({ className }: TabContainerProps) {
       <RenameDialog
         open={renameDialogOpen}
         onOpenChange={setRenameDialogOpen}
-        sessionId={renameSessionId}
-        name={renameName}
-        onNameChange={setRenameName}
+        title="Rename conversation"
+        value={renameName}
+        onValueChange={setRenameName}
+        onSubmit={handleRenameSubmit}
       />
     </div>
   )
@@ -357,69 +361,3 @@ function TabHeaderActions({ tab, onOpenRename }: TabHeaderActionsProps) {
   )
 }
 
-/**
- * Rename dialog component
- */
-interface RenameDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  sessionId: string | null
-  name: string
-  onNameChange: (name: string) => void
-}
-
-function RenameDialog({ open, onOpenChange, sessionId, name, onNameChange }: RenameDialogProps) {
-  const { onRenameSession } = useChatContext()
-  const { updateChatTabLabel } = useTabs()
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  // Focus input after dialog opens (avoids Radix Dialog focus race condition)
-  useEffect(() => {
-    if (open) {
-      const timer = setTimeout(() => {
-        inputRef.current?.focus()
-      }, 0)
-      return () => clearTimeout(timer)
-    }
-  }, [open])
-
-  const handleSubmit = () => {
-    if (sessionId && name.trim()) {
-      onRenameSession(sessionId, name.trim())
-      updateChatTabLabel(sessionId, name.trim())
-    }
-    onOpenChange(false)
-    onNameChange('')
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px]">
-        <DialogHeader>
-          <DialogTitle>Rename conversation</DialogTitle>
-        </DialogHeader>
-        <div className="py-4">
-          <Input
-            ref={inputRef}
-            value={name}
-            onChange={(e) => onNameChange(e.target.value)}
-            placeholder="Enter a name..."
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleSubmit()
-              }
-            }}
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit}>
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}

@@ -1,0 +1,28 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { resolve } from 'path'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  root: __dirname,
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+    dedupe: ['react', 'react-dom'],
+  },
+  build: {
+    outDir: 'dist',
+    emptyDirBeforeWrite: true,
+    sourcemap: true,
+  },
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+  },
+  server: {
+    port: 5174, // Different from Electron dev server
+    open: true,
+  },
+})

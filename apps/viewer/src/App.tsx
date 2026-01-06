@@ -1,0 +1,80 @@
+/**
+ * Craft Agent Session Viewer
+ *
+ * A minimal web app for viewing Craft Agent session transcripts.
+ * Users can upload session JSON files and view them in a clean, read-only interface.
+ */
+
+import { useState, useCallback, useEffect } from 'react'
+import type { StoredSession } from '@craft-agent/core'
+import { ChatView, type PlatformActions } from '@craft-agent/ui'
+import { SessionUpload } from './components/SessionUpload'
+import { Header } from './components/Header'
+
+export function App() {
+  const [session, setSession] = useState<StoredSession | null>(null)
+  const [isDark, setIsDark] = useState(() => {
+    // Check system preference on mount
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
+
+  // Apply dark mode class to html element
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [isDark])
+
+  // Listen for system theme changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches)
+    mediaQuery.addEventListener('change', handler)
+    return () => mediaQuery.removeEventListener('change', handler)
+  }, [])
+
+  const handleSessionLoad = useCallback((loadedSession: StoredSession) => {
+    setSession(loadedSession)
+  }, [])
+
+  const handleClear = useCallback(() => {
+    setSession(null)
+  }, [])
+
+  const toggleTheme = useCallback(() => {
+    setIsDark(prev => !prev)
+  }, [])
+
+  // Platform actions for the viewer (limited functionality)
+  const platformActions: PlatformActions = {
+    onOpenUrl: (url) => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
+    onCopyToClipboard: async (text) => {
+      await navigator.clipboard.writeText(text)
+    },
+  }
+
+  return (
+    <div className="h-full flex flex-col bg-background text-foreground">
+      <Header
+        hasSession={!!session}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
+        onClear={handleClear}
+      />
+
+      {session ? (
+        <ChatView
+          session={session}
+          mode="readonly"
+          platformActions={platformActions}
+          defaultExpanded={true}
+          className="flex-1 min-h-0"
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <SessionUpload onSessionLoad={handleSessionLoad} />
+        </div>
+      )}
+    </div>
+  )
+}

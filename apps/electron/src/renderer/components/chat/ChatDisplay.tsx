@@ -18,15 +18,13 @@ import { cn } from "@/lib/utils"
 import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import { FileTypeIcon, getFileTypeLabel } from "./AttachmentPreview"
-import { Spinner } from "@/components/ui/loading-indicator"
+import { Spinner } from "@craft-agent/ui"
 import { useFocusZone } from "@/hooks/keyboard"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, FileChange, MultiFileDiffData } from "../../../shared/types"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import { SetupAuthBanner, type BannerState } from "./SetupAuthBanner"
-import { TurnCard } from "./TurnCard"
-import { PlanCard } from "./PlanCard"
+import { TurnCard, PlanCard, groupMessagesByTurn, formatTurnAsMarkdown, formatActivityAsMarkdown, type Turn, type AssistantTurn, type UserTurn, type SystemTurn, type PlanTurn } from "@craft-agent/ui"
 import { ActiveOptionBadges } from "./ActiveOptionBadges"
-import { groupMessagesByTurn, formatTurnAsMarkdown, formatActivityAsMarkdown, type Turn, type AssistantTurn, type UserTurn, type SystemTurn, type PlanTurn } from "./turn-utils"
 import { InputContainer, type StructuredInputState, type StructuredResponse, type PermissionResponse } from "./input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
@@ -489,8 +487,12 @@ export function ChatDisplay({
                       return (
                         <PlanCard
                           key={`plan-${turn.message.id}`}
-                          message={turn.message}
-                          sessionId={session?.id}
+                          content={turn.message.content}
+                          onAccept={() => {
+                            window.dispatchEvent(new CustomEvent('craft:approve-plan', {
+                              detail: { text: 'Plan approved, please execute.', sessionId: session?.id }
+                            }))
+                          }}
                           onOpenFile={onOpenFile}
                           onOpenUrl={onOpenUrl}
                           onPopOut={(text) => {

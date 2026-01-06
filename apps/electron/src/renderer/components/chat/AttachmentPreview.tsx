@@ -1,6 +1,6 @@
 import * as React from "react"
 import { X, File, Image as ImageIcon } from "lucide-react"
-import { Spinner } from "@/components/ui/loading-indicator"
+import { Spinner } from "@craft-agent/ui"
 import { cn } from "@/lib/utils"
 import type { FileAttachment } from "../../../shared/types"
 

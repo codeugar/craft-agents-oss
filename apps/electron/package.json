@@ -23,6 +23,7 @@
   "dependencies": {
     "@craft-agent/core": "workspace:*",
     "@craft-agent/shared": "workspace:*",
+    "@craft-agent/ui": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
     "@paper-design/shaders-react": "^0.0.68",
     "@radix-ui/react-context-menu": "^2.2.16",

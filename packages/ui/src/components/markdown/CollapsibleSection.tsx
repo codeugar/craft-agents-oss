@@ -1,8 +1,28 @@
 import * as React from 'react'
 import { ChevronRight } from 'lucide-react'
-import { motion } from 'motion/react'
-import { AnimatedCollapsibleContent } from '@/components/ui/collapsible'
-import { cn } from '@/lib/utils'
+import { motion, AnimatePresence } from 'motion/react'
+import { cn } from '../../lib/utils'
+
+/**
+ * Simple animated collapsible content wrapper.
+ */
+function AnimatedCollapsibleContent({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) {
+  return (
+    <AnimatePresence initial={false}>
+      {isOpen && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeInOut' }}
+          className="overflow-hidden"
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
 
 interface CollapsibleSectionProps {
   sectionId: string

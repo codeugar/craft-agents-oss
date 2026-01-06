@@ -116,6 +116,8 @@ export function detectLinks(text: string): DetectedLink[] {
   let fileMatch
   while ((fileMatch = FILE_PATH_REGEX.exec(text)) !== null) {
     const path = fileMatch[1]
+    if (!path) continue // Skip if no capture group
+
     // Calculate actual start position (after any leading whitespace/punctuation)
     const fullMatch = fileMatch[0]
     const pathOffset = fullMatch.indexOf(path)
