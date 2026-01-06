@@ -85,7 +85,7 @@ export const StoredConfigSchema = z.object({
   showCost: z.boolean().optional(),
   cumulativeUsage: CumulativeUsageSchema.optional(),
   defaultPermissionMode: PermissionModeSchema.optional(),
-  defaultWorkingDirectory: z.string().optional(),
+  // Note: defaultWorkingDirectory is now per-workspace in workspace config.json
 });
 
 // --- preferences.json ---
@@ -182,15 +182,6 @@ export function validateConfig(): ValidationResult {
       }
     }
 
-    // Check if default working directory exists
-    if (config.defaultWorkingDirectory && !existsSync(config.defaultWorkingDirectory)) {
-      warnings.push({
-        file: 'config.json',
-        path: 'defaultWorkingDirectory',
-        message: `Default working directory '${config.defaultWorkingDirectory}' does not exist`,
-        severity: 'warning',
-      });
-    }
   }
 
   return {

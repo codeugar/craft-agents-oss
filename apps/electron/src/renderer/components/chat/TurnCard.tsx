@@ -15,7 +15,10 @@ import {
   Check,
   FileDiff,
   MoreHorizontal,
+  X,
+  Maximize2,
 } from 'lucide-react'
+import * as ReactDOM from 'react-dom'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -830,6 +833,8 @@ function StreamingResponsePreview({
   const lastUpdateRef = useRef(Date.now())
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const handleCopy = useCallback(async () => {
     try {
@@ -867,6 +872,18 @@ function StreamingResponsePreview({
     }
   }, [text, isStreaming])
 
+  // Handle Escape key to close fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsFullscreen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isFullscreen])
+
   // Calculate buffering decision based on current text (not displayed text)
   const bufferDecision = useMemo(() => {
     return shouldShowContent(text, isStreaming, streamStartTime)
@@ -885,63 +902,117 @@ function StreamingResponsePreview({
   // Completed response - show with max height and footer
   if (isCompleted) {
     return (
-      <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden relative">
-        {/* Copy button - top right corner */}
-        <button
-          onClick={handleCopy}
-          className={cn(
-            "absolute top-2 right-2 p-1.5 rounded-md transition-colors z-10",
-            copied
-              ? "text-success bg-success/10"
-              : "text-muted-foreground/50 hover:text-foreground hover:bg-foreground/5",
-            "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          )}
-          title={copied ? "Copied!" : "Copy to clipboard"}
-        >
-          {copied ? (
-            <Check className="w-4 h-4" />
-          ) : (
-            <Copy className="w-4 h-4" />
-          )}
-        </button>
-
-        <div
-          className="pl-[22px] pr-10 py-3 text-sm overflow-y-auto"
-          style={{ maxHeight: MAX_HEIGHT }}
-        >
-          <Markdown
-            mode="minimal"
-            onUrlClick={onOpenUrl}
-            onFileClick={onOpenFile}
-          >
-            {text}
-          </Markdown>
-        </div>
-
-        {/* Footer with actions */}
-        <div className={cn("px-4 py-2 border-t border-border/30 flex items-center justify-between bg-muted/20", SIZE_CONFIG.fontSize)}>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
-            <span>Completed</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {onPopOut && (
-              <button
-                onClick={onPopOut}
-                className={cn(
-                  "flex items-center gap-1.5 transition-colors",
-                  "text-muted-foreground hover:text-foreground",
-                  "focus:outline-none focus-visible:underline"
-                )}
-              >
-                <ExternalLink className={SIZE_CONFIG.iconSize} />
-                <span>View as Markdown</span>
-              </button>
+      <>
+        <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden relative group">
+          {/* Fullscreen button - top right corner, visible on hover */}
+          <button
+            onClick={() => setIsFullscreen(true)}
+            className={cn(
+              "absolute top-3 right-3 p-1 rounded-[6px] transition-all z-10",
+              "opacity-0 group-hover:opacity-100",
+              "bg-background shadow-minimal",
+              "text-muted-foreground/50 hover:text-foreground",
+              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
             )}
+            title="View Fullscreen"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
+
+          <div
+            className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto"
+            style={{ maxHeight: MAX_HEIGHT }}
+          >
+            <Markdown
+              mode="minimal"
+              onUrlClick={onOpenUrl}
+              onFileClick={onOpenFile}
+            >
+              {text}
+            </Markdown>
+          </div>
+
+          {/* Footer with actions */}
+          <div className={cn("px-4 py-2 border-t border-border/30 flex items-center justify-between bg-muted/20", SIZE_CONFIG.fontSize)}>
+            <button
+              onClick={handleCopy}
+              className={cn(
+                "flex items-center gap-1.5 transition-colors",
+                copied ? "text-success" : "text-muted-foreground hover:text-foreground",
+                "focus:outline-none focus-visible:underline"
+              )}
+            >
+              {copied ? (
+                <>
+                  <Check className={SIZE_CONFIG.iconSize} />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className={SIZE_CONFIG.iconSize} />
+                  <span>Copy</span>
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center gap-3">
+              {onPopOut && (
+                <button
+                  onClick={onPopOut}
+                  className={cn(
+                    "flex items-center gap-1.5 transition-colors",
+                    "text-muted-foreground hover:text-foreground",
+                    "focus:outline-none focus-visible:underline"
+                  )}
+                >
+                  <ExternalLink className={SIZE_CONFIG.iconSize} />
+                  <span>View as Markdown</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+
+        {/* Fullscreen overlay */}
+        {isFullscreen && ReactDOM.createPortal(
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            {/* Close button - top right, clickable over titlebar */}
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className={cn(
+                "fixed top-4 right-[18px] p-1 rounded-[6px] transition-all z-[60]",
+                "bg-background shadow-minimal",
+                "text-muted-foreground/50 hover:text-foreground",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "[-webkit-app-region:no-drag]"
+              )}
+              title="Close (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Scrollable content wrapper with min-height for short messages */}
+            <div className="min-h-full bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
+              {/* Content card with shadow */}
+              <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[848px]">
+                {/* Content area */}
+                <div className="px-12 pt-8 pb-8">
+                  <div className="text-sm">
+                    <Markdown
+                      mode="minimal"
+                      onUrlClick={onOpenUrl}
+                      onFileClick={onOpenFile}
+                    >
+                      {text}
+                    </Markdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      </>
     )
   }
 

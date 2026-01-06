@@ -70,7 +70,6 @@ See \`~/.craft-agent/docs/\` for schema documentation.
   "authType": "api_key" | "oauth_token" | "craft_credits",
   "model": "claude-opus-4-5-20251101",
   "defaultPermissionMode": "safe" | "ask" | "allow-all",
-  "defaultWorkingDirectory": "~/path",
   "workspaces": [{ "id": "...", "name": "...", "rootPath": "..." }],
   "activeWorkspaceId": "..."
 }

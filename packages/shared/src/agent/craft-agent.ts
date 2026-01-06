@@ -1299,62 +1299,7 @@ export class CraftAgent {
                 if (intent || displayName) {
                   const { _intent, _displayName, ...cleanInput } = toolInput;
 
-                // Safe Mode: Require permission for protected MCP operations
-                if (getSafeMode() && isSafeModeProtectedTool(input.tool_name)) {
-                  const description = getSafeModeDescription(input.tool_name, cleanInput);
-                  const requestId = `safe-${input.tool_use_id}`;
-                  this.onDebug?.(`[Safe Mode] Requesting permission for ${input.tool_name}: ${description}`);
-
-                  const permissionPromise = new Promise<boolean>((resolve) => {
-                    this.pendingPermissions.set(requestId, {
-                      resolve: (allowed) => resolve(allowed),
-                      toolName: input.tool_name,
-                      command: description,
-                      baseCommand: '',
-                      type: 'safe_mode',
-                      mcpInput: cleanInput,
-                    });
-                  });
-
-                  if (this.onPermissionRequest) {
-                    this.onPermissionRequest({
-                      requestId,
-                      toolName: input.tool_name,
-                      command: description,
-                      description: `Safe Mode: ${description}`,
-                      type: 'safe_mode',
-                      mcpInput: cleanInput,
-                    });
-                  } else {
-                    // No permission handler - block the operation
-                    this.pendingPermissions.delete(requestId);
-                    return {
-                      continue: false,
-                      hookSpecificOutput: {
-                        hookEventName: 'PreToolUse' as const,
-                        decision: 'block',
-                        reason: 'Safe Mode: No permission handler available',
-                      },
-                    };
-                  }
-
-                  const allowed = await permissionPromise;
-                  if (!allowed) {
-                    this.onDebug?.('[Safe Mode] User denied permission');
-                    return {
-                      continue: false,
-                      hookSpecificOutput: {
-                        hookEventName: 'PreToolUse' as const,
-                        decision: 'block',
-                        reason: 'Safe Mode: User denied permission for this operation',
-                      },
-                    };
-                  }
-                  this.onDebug?.('[Safe Mode] User approved operation');
-                }
-
-                // Return with updatedInput if we had _intent (or Safe Mode check passed)
-                if (intent) {
+                  // Return with updatedInput to strip metadata before forwarding to MCP
                   return {
                     continue: true,
                     hookSpecificOutput: {

@@ -500,6 +500,12 @@ export function FreeFormInput({
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
     onInputChange?.('')
     prevInputValueRef.current = ''
+
+    // Restore focus after state updates
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+
     return true
   }, [input, attachments, disabled, onInputChange, onSubmit])
 

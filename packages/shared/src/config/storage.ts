@@ -74,7 +74,7 @@ export interface StoredConfig {
   cumulativeUsage?: CumulativeUsage;  // Global cumulative cost across all workspaces
   // New session defaults
   defaultPermissionMode?: PermissionMode;  // Default permission mode for new sessions ('safe', 'ask', 'allow-all')
-  defaultWorkingDirectory?: string;  // Default working directory for new sessions
+  // Note: defaultWorkingDirectory is stored per-workspace in workspace config.json, not here
 }
 
 const CONFIG_DIR = join(homedir(), '.craft-agent');
@@ -104,9 +104,6 @@ export function loadStoredConfig(): StoredConfig | null {
     // Expand path variables (~ and ${HOME}) for portability
     for (const workspace of config.workspaces) {
       workspace.rootPath = expandPath(workspace.rootPath);
-    }
-    if (config.defaultWorkingDirectory) {
-      config.defaultWorkingDirectory = expandPath(config.defaultWorkingDirectory);
     }
 
     // Validate active workspace exists
@@ -181,9 +178,6 @@ export function saveConfig(config: StoredConfig): void {
       ...ws,
       rootPath: toPortablePath(ws.rootPath),
     })),
-    defaultWorkingDirectory: config.defaultWorkingDirectory
-      ? toPortablePath(config.defaultWorkingDirectory)
-      : undefined,
   };
 
   writeFileSync(CONFIG_FILE, JSON.stringify(storageConfig, null, 2), 'utf-8');
@@ -273,17 +267,8 @@ export function setDefaultPermissionMode(mode: PermissionMode): void {
   saveConfig(config);
 }
 
-export function getDefaultWorkingDirectory(): string {
-  const config = loadStoredConfig();
-  return config?.defaultWorkingDirectory ?? homedir();
-}
-
-export function setDefaultWorkingDirectory(path: string): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.defaultWorkingDirectory = path;
-  saveConfig(config);
-}
+// Note: getDefaultWorkingDirectory/setDefaultWorkingDirectory removed
+// Working directory is now stored per-workspace in workspace config.json (defaults.workingDirectory)
 
 export function getCumulativeUsage(): CumulativeUsage {
   const config = loadStoredConfig();

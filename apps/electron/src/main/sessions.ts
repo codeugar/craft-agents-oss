@@ -10,9 +10,9 @@ import {
   getWorkspaces,
   getWorkspaceByNameOrId,
   getDefaultPermissionMode,
-  getDefaultWorkingDirectory,
   type Workspace,
 } from '@craft-agent/shared/config'
+import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import {
   // Session persistence functions
   listSessions as listStoredSessions,
@@ -701,6 +701,9 @@ export class SessionManager {
       for (const workspace of workspaces) {
         const workspaceRootPath = workspace.rootPath
         const sessionMetadata = listStoredSessions(workspaceRootPath)
+        // Load workspace config once per workspace for default working directory
+        const wsConfig = loadWorkspaceConfig(workspaceRootPath)
+        const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
 
         for (const meta of sessionMetadata) {
           // Load full session data
@@ -736,7 +739,7 @@ export class SessionManager {
             todoState: storedSession.todoState,
             lastReadMessageId: storedSession.lastReadMessageId,
             enabledSourceSlugs: storedSession.enabledSourceSlugs,
-            workingDirectory: storedSession.workingDirectory ?? getDefaultWorkingDirectory(),
+            workingDirectory: storedSession.workingDirectory ?? wsDefaultWorkingDir,
             messageQueue: [],
           }
 
@@ -861,10 +864,11 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       throw new Error(`Workspace ${workspaceId} not found`)
     }
 
-    // Get new session defaults from settings
+    // Get new session defaults from workspace config (with global fallback)
     const defaultPermissionMode = getDefaultPermissionMode()
-    const defaultWorkingDir = getDefaultWorkingDirectory()
     const workspaceRootPath = workspace.rootPath
+    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
+    const defaultWorkingDir = wsConfig?.defaults?.workingDirectory || undefined
 
     // Check if agent's sources need authentication
     let sourcesNeedingAuth: LoadedSource[] = []

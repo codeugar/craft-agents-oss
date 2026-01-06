@@ -35,7 +35,8 @@
   --destructive: oklch(0.58 0.24 28);       /* red - errors, failed */
 
   /* === MIX VARIANTS (solid interpolation toward background) === */
-  /* Use -5, -10, -20, ..., -90, -95 for solid colors (e.g., separators, Explore mode) */
+  /* Use -3, -5, -10, -20, ..., -90, -95 for solid colors (e.g., separators, Explore mode) */
+  --foreground-3: color-mix(in oklch, var(--foreground) 3%, var(--background));
   --foreground-5: color-mix(in oklch, var(--foreground) 5%, var(--background));
   --foreground-10: color-mix(in oklch, var(--foreground) 10%, var(--background));
   --foreground-20: color-mix(in oklch, var(--foreground) 20%, var(--background));
@@ -105,6 +106,7 @@
   --destructive: oklch(0.70 0.19 22);        /* brighter red in dark */
 
   /* === MIX VARIANTS === */
+  --foreground-3: color-mix(in oklch, var(--foreground) 3%, var(--background));
   --foreground-5: color-mix(in oklch, var(--foreground) 5%, var(--background));
   --foreground-10: color-mix(in oklch, var(--foreground) 10%, var(--background));
   --foreground-20: color-mix(in oklch, var(--foreground) 20%, var(--background));
@@ -155,6 +157,7 @@ html[data-font="system"] {
   --color-destructive: var(--destructive);
 
   /* === MIX VARIANTS (solid interpolation) === */
+  --color-foreground-3: var(--foreground-3);
   --color-foreground-5: var(--foreground-5);
   --color-foreground-10: var(--foreground-10);
   --color-foreground-20: var(--foreground-20);
