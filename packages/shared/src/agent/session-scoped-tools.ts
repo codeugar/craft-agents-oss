@@ -10,7 +10,7 @@
  * - config_validate: Validate configuration files
  * - source_test: Validate schema, download icons, test connections
  * - source_oauth_trigger: Start OAuth authentication for MCP sources
- * - source_gmail_oauth_trigger: Start Gmail OAuth authentication
+ * - source_google_oauth_trigger: Start Google OAuth authentication (Gmail, Calendar, Drive)
  * - source_credential_prompt: Prompt user for API credentials
  * - agent_list, agent_create, agent_delete: Agent management
  *
@@ -36,6 +36,7 @@ import {
 import { PERMISSION_MODE_CONFIG } from './mode-types.ts';
 import {
   validateMcpConnection,
+  validateStdioMcpConnection,
   getValidationErrorMessage,
   type McpValidationResult,
 } from '../mcp/validation.ts';
@@ -54,7 +55,12 @@ import {
 import type { FolderSourceConfig, LoadedSource } from '../sources/types.ts';
 import { getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential } from '../sources/index.ts';
 import { CraftOAuth, getMcpBaseUrl, type OAuthConfig, type OAuthCallbacks } from '../auth/oauth.ts';
-import { startGmailOAuth } from '../auth/gmail-oauth.ts';
+import {
+  startGoogleOAuth,
+  type GoogleOAuthOptions,
+  type GoogleOAuthResult,
+} from '../auth/google-oauth.ts';
+import { inferGoogleServiceFromUrl, type GoogleService } from '../sources/types.ts';
 import { DOC_REFS } from '../docs/index.ts';
 
 // ============================================================
@@ -461,12 +467,63 @@ Returns structured validation results with errors, warnings, and suggestions.
 // ============================================================
 
 /**
+ * Test Google API source (Gmail, Calendar, Drive) by validating OAuth token exists and is not expired.
+ * Google APIs use OAuth tokens that can be refreshed automatically.
+ */
+async function testGoogleSource(
+  source: FolderSourceConfig,
+  workspaceId: string
+): Promise<{ success: boolean; status?: number; error?: string; credentialType?: string }> {
+  const credManager = getSourceCredentialManager();
+  const wsId = basename(workspaceId);
+
+  // Build LoadedSource from config for credential manager
+  const loadedSource: LoadedSource = {
+    config: source,
+    guide: null,
+    folderPath: '',
+    workspaceId: wsId,
+  };
+
+  // Check if we have valid credentials using getToken (handles expiry)
+  const token = await credManager.getToken(loadedSource);
+
+  if (token) {
+    // Token is valid (not expired)
+    return { success: true, credentialType: 'source_oauth' };
+  }
+
+  // No valid token - check if we have a refresh token
+  const cred = await credManager.load(loadedSource);
+  if (cred?.refreshToken) {
+    // Try to refresh the token
+    const refreshed = await credManager.refresh(loadedSource);
+    if (refreshed) {
+      return { success: true, credentialType: 'source_oauth' };
+    }
+  }
+
+  // No valid token and refresh failed or not available
+  const serviceName = source.api?.googleService || 'Google';
+  return {
+    success: false,
+    error: `${serviceName} OAuth token missing or expired. Use source_google_oauth_trigger to re-authenticate.`,
+    credentialType: 'source_oauth',
+  };
+}
+
+/**
  * Test an API source by making a simple HEAD/GET request.
  */
 async function testApiSource(
   source: FolderSourceConfig,
   workspaceId: string
 ): Promise<{ success: boolean; status?: number; error?: string; credentialType?: string }> {
+  // Google APIs (Gmail, Calendar, Drive) - use Google-specific test
+  if (source.provider === 'google') {
+    return testGoogleSource(source, workspaceId);
+  }
+
   if (!source.api?.baseUrl) {
     return { success: false, error: 'No API URL configured' };
   }
@@ -489,34 +546,60 @@ async function testApiSource(
     let credentialType: string | undefined;
     let credValue: string | undefined;
 
-    // Get credentials if needed - determine correct credential type based on authType
+    // Get credentials if needed
     if (requiresAuth) {
-      const credentialManager = getCredentialManager();
       // Extract workspace ID from root path for credential lookups
       const wsId = basename(workspaceId);
 
-      // Determine the correct credential type based on source.api.authType
-      // This matches the logic in SourceCredentialManager.getCredentialId()
-      let credType: 'source_oauth' | 'source_bearer' | 'source_apikey' | 'source_basic';
       if (source.api.authType === 'oauth') {
-        credType = 'source_oauth';
-      } else if (source.api.authType === 'bearer') {
-        credType = 'source_bearer';
-      } else if (source.api.authType === 'basic') {
-        credType = 'source_basic';
-      } else {
-        // 'header', 'query', or other → stored as apikey
-        credType = 'source_apikey';
-      }
+        // Use SourceCredentialManager for OAuth - handles expiry checking and refresh
+        const sourceCredManager = getSourceCredentialManager();
+        const loadedSource: LoadedSource = {
+          config: source,
+          guide: null,
+          folderPath: '',
+          workspaceId: wsId,
+        };
 
-      debug(`[testApiSource] Looking up credentials for source=${source.slug}, authType=${source.api.authType}, credType=${credType}`);
-      const cred = await credentialManager.get({ type: credType, workspaceId: wsId, sourceId: source.slug });
-      if (cred?.value) {
-        credValue = cred.value;
-        credentialType = credType;
-        debug(`[testApiSource] Found credential for ${source.slug}`);
+        // getToken() returns null if expired
+        let token = await sourceCredManager.getToken(loadedSource);
+
+        if (!token) {
+          // Try refresh if token is expired/missing
+          debug(`[testApiSource] OAuth token expired or missing for ${source.slug}, attempting refresh`);
+          token = await sourceCredManager.refresh(loadedSource);
+        }
+
+        if (token) {
+          credValue = token;
+          credentialType = 'source_oauth';
+          debug(`[testApiSource] Found valid OAuth token for ${source.slug}`);
+        } else {
+          debug(`[testApiSource] No valid OAuth token for ${source.slug}`);
+        }
       } else {
-        debug(`[testApiSource] No credential found for ${source.slug}`);
+        // For non-OAuth auth types, use direct credential lookup
+        const credentialManager = getCredentialManager();
+
+        let credType: 'source_bearer' | 'source_apikey' | 'source_basic';
+        if (source.api.authType === 'bearer') {
+          credType = 'source_bearer';
+        } else if (source.api.authType === 'basic') {
+          credType = 'source_basic';
+        } else {
+          // 'header', 'query', or other → stored as apikey
+          credType = 'source_apikey';
+        }
+
+        debug(`[testApiSource] Looking up credentials for source=${source.slug}, authType=${source.api.authType}, credType=${credType}`);
+        const cred = await credentialManager.get({ type: credType, workspaceId: wsId, sourceId: source.slug });
+        if (cred?.value) {
+          credValue = cred.value;
+          credentialType = credType;
+          debug(`[testApiSource] Found credential for ${source.slug}`);
+        } else {
+          debug(`[testApiSource] No credential found for ${source.slug}`);
+        }
       }
 
       if (credValue) {
@@ -701,7 +784,7 @@ After creating or editing a source's config.json, run this tool to:
                             source.type === 'mcp' ? source.mcp?.url : null;
           if (serviceUrl) {
             const { getHighQualityLogoUrl, cacheIcon } = await import('../utils/logo.ts');
-            const logoUrl = await getHighQualityLogoUrl(serviceUrl);
+            const logoUrl = await getHighQualityLogoUrl(serviceUrl, source.provider);
             if (logoUrl) {
               const cached = await cacheIcon(logoUrl, sourcePath);
               if (cached) {
@@ -831,21 +914,58 @@ After creating or editing a source's config.json, run this tool to:
               hasErrors = true;
               results.push('**❌ No command configured for stdio MCP source**');
             } else {
-              // For stdio sources, just verify the config is valid
-              // The actual server will be spawned when the source is used
-              source.lastTestedAt = Date.now();
-              source.connectionStatus = 'connected';
-              source.connectionError = undefined;
-              source.isAuthenticated = true; // Stdio sources don't need auth
-              saveSourceConfigWithContext(workspaceId, source, sourceContext);
-
-              results.push('**✓ Stdio MCP Source Configured**');
-              results.push(`  Command: ${source.mcp.command}`);
-              if (source.mcp.args?.length) {
-                results.push(`  Args: ${source.mcp.args.join(' ')}`);
-              }
+              // Actually spawn and test the stdio MCP server
+              results.push(`Testing stdio server: ${source.mcp.command} ${(source.mcp.args || []).join(' ')}`);
               results.push('');
-              results.push('Note: The MCP server will be spawned when the source is activated.');
+
+              const stdioResult = await validateStdioMcpConnection({
+                command: source.mcp.command,
+                args: source.mcp.args,
+                env: source.mcp.env,
+                timeout: 30000, // 30 second timeout for spawn + connect
+              });
+
+              source.lastTestedAt = Date.now();
+
+              if (stdioResult.success) {
+                source.connectionStatus = 'connected';
+                source.connectionError = undefined;
+                source.isAuthenticated = true; // Stdio sources don't need auth
+                saveSourceConfigWithContext(workspaceId, source, sourceContext);
+
+                results.push('**✓ Stdio MCP Server Connected**');
+                results.push(`  Command: ${source.mcp.command}`);
+                if (source.mcp.args?.length) {
+                  results.push(`  Args: ${source.mcp.args.join(' ')}`);
+                }
+                if (stdioResult.tools && stdioResult.tools.length > 0) {
+                  results.push(`  Tools: ${stdioResult.tools.length} available`);
+                  // Show first few tool names
+                  const toolPreview = stdioResult.tools.slice(0, 5).join(', ');
+                  const more = stdioResult.tools.length > 5 ? `, +${stdioResult.tools.length - 5} more` : '';
+                  results.push(`  Available: ${toolPreview}${more}`);
+                }
+              } else {
+                hasErrors = true;
+                source.connectionStatus = 'failed';
+                source.connectionError = stdioResult.error || 'Unknown error';
+                saveSourceConfigWithContext(workspaceId, source, sourceContext);
+
+                results.push('**❌ Stdio MCP Server Failed**');
+                results.push(`  Command: ${source.mcp.command}`);
+                results.push(`  Error: ${stdioResult.error}`);
+
+                // Show schema validation errors if present
+                if (stdioResult.errorType === 'invalid-schema' && stdioResult.invalidProperties) {
+                  results.push('  Invalid tool properties:');
+                  for (const prop of stdioResult.invalidProperties.slice(0, 5)) {
+                    results.push(`    - ${prop.toolName}: ${prop.propertyPath}`);
+                  }
+                  if (stdioResult.invalidProperties.length > 5) {
+                    results.push(`    ... and ${stdioResult.invalidProperties.length - 5} more`);
+                  }
+                }
+              }
             }
           }
           // Handle HTTP/SSE transport (remote MCP servers)
@@ -1157,30 +1277,33 @@ A browser window will open for the user to complete authentication.
 }
 
 /**
- * Create a session-scoped source_gmail_oauth_trigger tool.
- * Initiates Gmail OAuth authentication for a Gmail source.
+ * Create a session-scoped source_google_oauth_trigger tool.
+ * Initiates Google OAuth authentication for any Google API source (Gmail, Calendar, Drive, etc.).
  */
-export function createGmailOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createGoogleOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
   return tool(
-    'source_gmail_oauth_trigger',
-    `Trigger Gmail OAuth authentication flow.
+    'source_google_oauth_trigger',
+    `Trigger Google OAuth authentication flow for any Google API source.
 
-Opens a browser window for the user to sign in with their Google account and authorize Gmail access.
+Opens a browser window for the user to sign in with their Google account and authorize access to the specified Google service.
 After successful authentication, the tokens are stored and the source is marked as authenticated.
 
+**Supported services:**
+- Gmail: Read, compose, and manage emails
+- Calendar: Read and manage calendar events
+- Drive: Read and manage Google Drive files
+
 **Prerequisites:**
-- The source must be type 'api' with provider 'gmail'
-- Gmail OAuth must be configured in the build (GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET)
+- The source must have provider 'google'
+- Google OAuth must be configured in the build
 
 **Returns:**
 - Success message with the authenticated email address
 - Error message if OAuth flow fails or is not configured`,
     {
-      sourceSlug: z.string().describe('The slug of the Gmail source to authenticate'),
+      sourceSlug: z.string().describe('The slug of the Google API source to authenticate'),
     },
     async (args) => {
-      debug('[source_gmail_oauth_trigger] Starting Gmail OAuth for source:', args.sourceSlug);
-
       try {
         // Load the source config (checks agent folder first if activeAgentSlug set, then workspace)
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug, activeAgentSlug);
@@ -1196,12 +1319,15 @@ After successful authentication, the tokens are stored and the source is marked 
         const source = sourceResult.config;
         const sourceContext = { isAgentScoped: sourceResult.isAgentScoped, agentSlug: sourceResult.agentSlug };
 
-        // Verify this is a Gmail source
-        if (source.provider !== 'gmail') {
+        // Verify this is a Google source
+        if (source.provider !== 'google') {
+          const hint = !source.provider
+            ? `Add "provider": "google" to config.json and retry.`
+            : `This source has provider '${source.provider}'. Use source_oauth_trigger for MCP sources.`;
           return {
             content: [{
               type: 'text' as const,
-              text: `Source '${args.sourceSlug}' is provider '${source.provider}'. source_gmail_oauth_trigger is only for Gmail sources. Use source_oauth_trigger for MCP sources.`,
+              text: `Source '${args.sourceSlug}' is not configured as a Google API source. ${hint}\n\nCurrent config: ${JSON.stringify(source, null, 2)}`,
             }],
             isError: true,
           };
@@ -1217,8 +1343,40 @@ After successful authentication, the tokens are stored and the source is marked 
           };
         }
 
-        // Run the Gmail OAuth flow
-        const result = await startGmailOAuth('electron');
+        // Determine service/scopes from config
+        let service: GoogleService | undefined;
+        let scopes: string[] | undefined;
+        const api = source.api;
+
+        if (api?.googleScopes && api.googleScopes.length > 0) {
+          // Custom scopes take precedence
+          scopes = api.googleScopes;
+        } else if (api?.googleService) {
+          // Use predefined service scopes
+          service = api.googleService;
+        } else {
+          // Infer from baseUrl
+          service = inferGoogleServiceFromUrl(api?.baseUrl);
+          if (!service) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Cannot determine Google service for source '${args.sourceSlug}'. Set googleService ('gmail', 'calendar', or 'drive') in api config, or use a recognizable baseUrl like 'https://gmail.googleapis.com'.`,
+              }],
+              isError: true,
+            };
+          }
+        }
+
+        const serviceName = service || 'Google API';
+
+        // Run the Google OAuth flow
+        const options: GoogleOAuthOptions = {
+          service,
+          scopes,
+          appType: 'electron',
+        };
+        const result: GoogleOAuthResult = await startGoogleOAuth(options);
 
         if (!result.success) {
           const callbacks = getSessionScopedToolCallbacks(sessionId);
@@ -1227,7 +1385,7 @@ After successful authentication, the tokens are stored and the source is marked 
           return {
             content: [{
               type: 'text' as const,
-              text: `Gmail OAuth failed: ${result.error || 'Unknown error'}`,
+              text: `${serviceName} OAuth failed: ${result.error || 'Unknown error'}`,
             }],
             isError: true,
           };
@@ -1266,26 +1424,32 @@ After successful authentication, the tokens are stored and the source is marked 
         return {
           content: [{
             type: 'text' as const,
-            text: `**Gmail source '${args.sourceSlug}' authenticated successfully**\n\nConnected as: ${result.email}\n\nYou can now access Gmail tools for this source.`,
+            text: `**${serviceName} source '${args.sourceSlug}' authenticated successfully**\n\nConnected as: ${result.email}\n\nYou can now use the api_${args.sourceSlug} tool to access this Google API.`,
           }],
           isError: false,
         };
       } catch (error) {
-        debug('[source_gmail_oauth_trigger] Error:', error);
-
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onOAuthError?.(args.sourceSlug, error instanceof Error ? error.message : 'Unknown error');
 
         return {
           content: [{
             type: 'text' as const,
-            text: `Gmail OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            text: `Google OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           }],
           isError: true,
         };
       }
     }
   );
+}
+
+/**
+ * @deprecated Use createGoogleOAuthTriggerTool instead.
+ * Kept for backwards compatibility - delegates to createGoogleOAuthTriggerTool.
+ */
+export function createGmailOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+  return createGoogleOAuthTriggerTool(sessionId, workspaceId, activeAgentSlug);
 }
 
 // ============================================================
@@ -1674,7 +1838,7 @@ export function getSessionScopedTools(sessionId: string, workspaceId: string, ac
         // Source tools: test + auth only (CRUD via file editing)
         createSourceTestTool(sessionId, workspaceId, activeAgentSlug),
         createOAuthTriggerTool(sessionId, workspaceId, activeAgentSlug),
-        createGmailOAuthTriggerTool(sessionId, workspaceId, activeAgentSlug),
+        createGoogleOAuthTriggerTool(sessionId, workspaceId, activeAgentSlug),
         createCredentialPromptTool(sessionId, workspaceId, activeAgentSlug),
         // Agent tools
         createAgentListTool(sessionId, workspaceId),

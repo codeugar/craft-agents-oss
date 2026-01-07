@@ -13,13 +13,15 @@ import { getWorkspaces } from '@craft-agent/shared/config'
 import { initializeDocs } from '@craft-agent/shared/docs'
 import { handleDeepLink } from './deep-link'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
-import { setPerfEnabled } from '@craft-agent/shared/utils'
+import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 
 // Initialize electron-log for renderer process support
 log.initialize()
 
-// Enable performance tracking in debug mode (running from source)
+// Enable debug/perf in dev mode (running from source)
 if (isDebugMode) {
+  process.env.CRAFT_DEBUG = '1'
+  enableDebug()
   setPerfEnabled(true)
 }
 

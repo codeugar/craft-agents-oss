@@ -450,6 +450,7 @@ domains:
   - github.com
   - api.github.com
   - mcp.github.com
+  - api.githubcopilot.com
 providers:
   - github
 ---
@@ -482,6 +483,45 @@ GitHub organizes code and collaboration around:
 
 ## Setup Hints
 
+### CRITICAL - Do NOT Search for MCP URLs
+
+The MCP URL \`https://api.githubcopilot.com/mcp/\` is **CORRECT**. Do NOT use WebSearch or WebFetch to find alternative URLs. The URL works - the issue is authentication method only.
+
+### Authentication - OAuth Will Fail (Expected)
+
+GitHub's MCP server requires OAuth with a **pre-registered client app**. Craft Agent is NOT registered with GitHub, so OAuth authentication WILL fail. This is expected behavior - do NOT troubleshoot or search for solutions.
+
+**The ONLY solution is a Personal Access Token (PAT):**
+
+1. Ask the user to create a PAT at: GitHub Settings → Developer settings → Personal access tokens
+2. Required scopes: \`repo\`, \`read:org\` (optional)
+3. Set \`authType: "bearer"\` in config (NOT "oauth")
+4. Use \`source_credential_prompt\` to collect the PAT from the user
+
+**Required config.json:**
+\`\`\`json
+{
+  "type": "mcp",
+  "mcp": {
+    "url": "https://api.githubcopilot.com/mcp/",
+    "authType": "bearer"
+  }
+}
+\`\`\`
+
+**Alternative - Local MCP Server (if user prefers):**
+\`\`\`json
+{
+  "type": "mcp",
+  "mcp": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
+  }
+}
+\`\`\`
+
 ### Recommended Questions
 - Which repositories do you work with most?
 - Do you need access to issues, PRs, or code?
@@ -497,6 +537,435 @@ GitHub organizes code and collaboration around:
 - Search API has separate lower limits
 `;
 
+const GMAIL_GUIDE = `---
+domains:
+  - gmail.com
+  - api.gmail.com
+  - gmail.googleapis.com
+providers:
+  - google
+---
+
+# Gmail
+
+Access and manage your Gmail emails through the Gmail API.
+
+## API Reference
+
+This source provides a single flexible \`api_gmail\` tool that accepts:
+- \`path\`: API endpoint (e.g., "/gmail/v1/users/me/messages")
+- \`method\`: HTTP method (GET, POST, etc.)
+- \`params\`: Request body or query parameters
+
+### Common Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| /gmail/v1/users/me/messages | GET | List messages (use \`q\` param for search) |
+| /gmail/v1/users/me/messages/{id} | GET | Get message by ID |
+| /gmail/v1/users/me/drafts | POST | Create draft |
+| /gmail/v1/users/me/messages/{id}/trash | POST | Trash message |
+
+## Guidelines
+
+- **Privacy**: This source accesses personal email. All data remains local.
+- **IMPORTANT - Trashing**: ALWAYS ask for explicit user permission before trashing any emails.
+- **Drafts not sent**: Draft emails are saved but NOT sent automatically.
+
+## Gmail Search Syntax
+
+Common search operators:
+- \`from:sender@example.com\` - Messages from specific sender
+- \`to:recipient@example.com\` - Messages to specific recipient
+- \`subject:keyword\` - Messages with keyword in subject
+- \`is:unread\` - Unread messages
+- \`is:starred\` - Starred messages
+- \`has:attachment\` - Messages with attachments
+- \`after:2024/01/01\` - Messages after a date
+- \`before:2024/12/31\` - Messages before a date
+- \`label:important\` - Messages with specific label
+- \`in:inbox\` - Messages in inbox
+- \`in:sent\` - Sent messages
+
+Combine operators with spaces: \`from:john@example.com after:2024/01/01 has:attachment\`
+
+## Rate Limits
+
+- 250 quota units per user per second
+- Most read operations cost 1-5 units
+- Avoid rapid sequential requests
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Recommended config.json:**
+\`\`\`json
+{
+  "id": "src_gmail",
+  "name": "Gmail",
+  "slug": "gmail",
+  "enabled": true,
+  "provider": "google",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://gmail.googleapis.com",
+    "authType": "oauth",
+    "googleService": "gmail"
+  },
+  "iconUrl": "https://mail.google.com"
+}
+\`\`\`
+
+### Authentication
+Use \`source_google_oauth_trigger\` to start the Google OAuth flow.
+
+### Recommended Questions
+- What kinds of emails do you typically search for?
+- Do you need to filter by labels or folders?
+`;
+
+const GOOGLE_CALENDAR_GUIDE = `---
+domains:
+  - calendar.google.com
+  - www.googleapis.com
+providers:
+  - google-calendar
+  - google
+---
+
+# Google Calendar
+
+Access and manage Google Calendar events.
+
+## API Reference
+
+This source provides a single flexible \`api_google-calendar\` tool that accepts:
+- \`path\`: API endpoint (e.g., "/calendar/v3/calendars/primary/events")
+- \`method\`: HTTP method (GET, POST, PUT, DELETE)
+- \`params\`: Request body or query parameters
+
+### Common Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| /calendar/v3/calendars/primary/events | GET | List events |
+| /calendar/v3/calendars/primary/events | POST | Create event |
+| /calendar/v3/calendars/primary/events/{id} | GET | Get event by ID |
+| /calendar/v3/calendars/primary/events/{id} | PUT | Update event |
+| /calendar/v3/calendars/primary/events/{id} | DELETE | Delete event |
+
+### Query Parameters
+
+- \`timeMin\`: Start of time range (RFC3339)
+- \`timeMax\`: End of time range
+- \`q\`: Free text search
+- \`maxResults\`: Max events to return
+- \`singleEvents\`: Expand recurring events (true/false)
+- \`orderBy\`: Sort order ("startTime" or "updated")
+
+## Guidelines
+
+- **Privacy**: This source accesses personal calendar data.
+- **Time zones**: Always include timezone info in date/time parameters.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_google_calendar",
+  "name": "Google Calendar",
+  "slug": "google-calendar",
+  "enabled": true,
+  "provider": "google",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://www.googleapis.com/calendar/v3",
+    "authType": "oauth",
+    "googleService": "calendar"
+  },
+  "iconUrl": "https://calendar.google.com"
+}
+\`\`\`
+
+### Authentication
+Use \`source_google_oauth_trigger\` to start the Google OAuth flow.
+`;
+
+const GOOGLE_DRIVE_GUIDE = `---
+domains:
+  - drive.google.com
+  - www.googleapis.com
+providers:
+  - google-drive
+  - google
+---
+
+# Google Drive
+
+Access and manage Google Drive files.
+
+## API Reference
+
+This source provides a single flexible \`api_google-drive\` tool that accepts:
+- \`path\`: API endpoint (e.g., "/drive/v3/files")
+- \`method\`: HTTP method (GET, POST, PATCH, DELETE)
+- \`params\`: Request body or query parameters
+
+### Common Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| /drive/v3/files | GET | List files |
+| /drive/v3/files/{id} | GET | Get file metadata |
+| /drive/v3/files/{id}?alt=media | GET | Download file content |
+| /drive/v3/files | POST | Create file (metadata) |
+| /drive/v3/files/{id} | PATCH | Update file metadata |
+| /drive/v3/files/{id} | DELETE | Delete file |
+
+### Search Syntax
+
+Use the \`q\` parameter:
+- \`name contains 'keyword'\` - Name contains keyword
+- \`mimeType = 'application/pdf'\` - File type filter
+- \`'folderId' in parents\` - Files in folder
+- \`modifiedTime > '2024-01-01'\` - Modified after date
+
+## Guidelines
+
+- **Privacy**: This source accesses Google Drive files.
+- **File content**: Use \`alt=media\` query param to download actual file content.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_google_drive",
+  "name": "Google Drive",
+  "slug": "google-drive",
+  "enabled": true,
+  "provider": "google",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://www.googleapis.com/drive/v3",
+    "authType": "oauth",
+    "googleService": "drive"
+  },
+  "iconUrl": "https://drive.google.com"
+}
+\`\`\`
+
+### Authentication
+Use \`source_google_oauth_trigger\` to start the Google OAuth flow.
+`;
+
+const FILESYSTEM_GUIDE = `---
+providers:
+  - filesystem
+  - fs
+  - files
+  - local-files
+---
+
+# Filesystem
+
+Access and manage local filesystem directories through the MCP protocol.
+
+## Capabilities
+
+- **List directories** - Browse directory contents with filtering
+- **Read files** - Get file contents (text, code, documents)
+- **Write files** - Create or update files (if allowed)
+- **Search** - Find files by name patterns
+
+## Guidelines
+
+- Paths must be within the configured allowed directories
+- Respects OS file permissions
+- Best for exploring project structures and local codebases
+- Large files may be truncated
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+This is a **local stdio MCP server** - it runs on the user's machine via npx.
+
+**Required config.json:**
+\`\`\`json
+{
+  "type": "mcp",
+  "mcp": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/directory"]
+  }
+}
+\`\`\`
+
+**Important:** The last argument is the directory path the server will have access to. Ask the user which directory they want to access.
+
+### Recommended Questions
+- Which directory do you want to access? (e.g., ~/Documents, ~/Projects)
+- Do you need read-only or full file access?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedMcpPatterns": [
+    { "pattern": "list", "comment": "List directory contents" },
+    { "pattern": "read", "comment": "Read file contents" },
+    { "pattern": "search", "comment": "Search for files" }
+  ]
+}
+\`\`\`
+
+### No Authentication Required
+This is a local server - no API keys or OAuth needed.
+`;
+
+const BRAVE_SEARCH_GUIDE = `---
+providers:
+  - brave
+  - brave-search
+---
+
+# Brave Search
+
+Web and news search using the Brave Search API via MCP.
+
+## Capabilities
+
+- **Web search** - General web search with ranking
+- **News search** - Recent news articles
+- **Local search** - Location-based results (if enabled)
+
+## Guidelines
+
+- Results include titles, URLs, and descriptions
+- Rate limits apply based on API plan
+- Respects Brave Search's content policies
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+This is a **local stdio MCP server** that requires a Brave Search API key.
+
+**Required config.json:**
+\`\`\`json
+{
+  "type": "mcp",
+  "mcp": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+    "env": {
+      "BRAVE_API_KEY": "YOUR_API_KEY"
+    }
+  }
+}
+\`\`\`
+
+### Getting an API Key
+1. Go to https://brave.com/search/api/
+2. Sign up for an API account
+3. Create an API key
+4. Use \`source_credential_prompt\` to securely store the key
+
+### Recommended Questions
+- Do you have a Brave Search API key?
+- What types of searches will you perform? (web, news, local)
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedMcpPatterns": [
+    { "pattern": "search", "comment": "All search operations are read-only" }
+  ]
+}
+\`\`\`
+`;
+
+const MEMORY_GUIDE = `---
+providers:
+  - memory
+  - knowledge-graph
+---
+
+# Memory
+
+Persistent key-value storage and knowledge graph for maintaining context across sessions.
+
+## Capabilities
+
+- **Store entities** - Save named entities with observations
+- **Create relations** - Link entities together
+- **Query knowledge** - Retrieve stored information
+- **Persistent storage** - Data persists between sessions
+
+## Guidelines
+
+- Useful for remembering user preferences, project context
+- Entities have names and lists of observations
+- Relations connect entities (e.g., "project X uses technology Y")
+- Storage is local to the machine
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+This is a **local stdio MCP server** with no external dependencies.
+
+**Required config.json:**
+\`\`\`json
+{
+  "type": "mcp",
+  "mcp": {
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-memory"]
+  }
+}
+\`\`\`
+
+### Recommended Questions
+- What kind of information do you want to persist? (preferences, project notes, etc.)
+- Should this be shared across workspaces or specific to one?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedMcpPatterns": [
+    { "pattern": "read", "comment": "Read stored entities" },
+    { "pattern": "search", "comment": "Search knowledge graph" },
+    { "pattern": "open", "comment": "Open knowledge graph nodes" }
+  ]
+}
+\`\`\`
+
+### No Authentication Required
+This is a local server - no API keys or OAuth needed.
+`;
+
 /**
  * Map of bundled source guide files
  */
@@ -504,4 +973,10 @@ export const BUNDLED_SOURCE_GUIDES: Record<string, string> = {
   'craft.do.md': CRAFT_DO_GUIDE,
   'linear.app.md': LINEAR_APP_GUIDE,
   'github.com.md': GITHUB_COM_GUIDE,
+  'gmail.com.md': GMAIL_GUIDE,
+  'google-calendar.md': GOOGLE_CALENDAR_GUIDE,
+  'google-drive.md': GOOGLE_DRIVE_GUIDE,
+  'filesystem.md': FILESYSTEM_GUIDE,
+  'brave-search.md': BRAVE_SEARCH_GUIDE,
+  'memory.md': MEMORY_GUIDE,
 };

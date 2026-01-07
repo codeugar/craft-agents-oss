@@ -918,17 +918,7 @@ export class CraftAgent {
   ): Promise<{ allowed: boolean; updatedInput: Record<string, unknown> }> {
     // Bash commands require permission
     if (toolName === 'Bash') {
-      let command: string;
-      if (typeof input.command === 'string') {
-        command = input.command;
-      } else {
-        try {
-          command = JSON.stringify(input);
-        } catch (e) {
-          this.onDebug?.(`[CYCLIC STRUCTURE] in checkToolPermission Bash input, keys: ${Object.keys(input).join(', ')}, error: ${e}`);
-          command = '[non-serializable input]';
-        }
-      }
+      const command = typeof input.command === 'string' ? input.command : JSON.stringify(input);
       const baseCommand = command.trim().split(/\s+/)[0] || command;
       const requestId = `perm-${toolUseId}`;
 
@@ -1478,17 +1468,9 @@ export class CraftAgent {
               // For Bash in 'ask' mode, check if we need permission
               if (input.tool_name === 'Bash' && permissionMode === 'ask') {
                 // Extract command and base command
-                let command: unknown;
-                if (typeof input.tool_input === 'object' && input.tool_input !== null) {
-                  command = (input.tool_input as Record<string, unknown>).command;
-                } else {
-                  try {
-                    command = JSON.stringify(input.tool_input);
-                  } catch (e) {
-                    this.onDebug?.(`[CYCLIC STRUCTURE] in PreToolUse Bash tool_input, type: ${typeof input.tool_input}, error: ${e}`);
-                    command = '[non-serializable input]';
-                  }
-                }
+                const command = typeof input.tool_input === 'object' && input.tool_input !== null
+                  ? (input.tool_input as Record<string, unknown>).command
+                  : JSON.stringify(input.tool_input);
                 const commandStr = String(command);
                 const baseCommand = this.getBaseCommand(commandStr);
 
