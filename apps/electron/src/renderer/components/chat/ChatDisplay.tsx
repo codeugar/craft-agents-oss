@@ -307,10 +307,15 @@ export function ChatDisplay({
   // Pop-out handler - opens message in a new preview window (read-only)
   const handlePopOut = React.useCallback((message: Message) => {
     if (!session) return
-    window.electronAPI.openMarkdownPreview(`${session.id}:${message.id}`, {
-      mode: 'readOnly',
-      content: message.content,
-      title: 'Message Preview',
+    window.electronAPI.openPreview({
+      mode: 'markdown',
+      sessionId: session.id,
+      previewId: message.id,
+      markdown: {
+        mode: 'readOnly',
+        content: message.content,
+        title: 'Message Preview',
+      },
     })
   }, [session])
 
@@ -538,10 +543,15 @@ export function ChatDisplay({
                           onOpenUrl={onOpenUrl}
                           onPopOut={(text) => {
                             if (session) {
-                              window.electronAPI.openMarkdownPreview(`${session.id}:plan-${turn.message.id}`, {
-                                mode: 'readOnly',
-                                content: text,
-                                title: 'Plan Preview',
+                              window.electronAPI.openPreview({
+                                mode: 'markdown',
+                                sessionId: session.id,
+                                previewId: `plan-${turn.message.id}`,
+                                markdown: {
+                                  mode: 'readOnly',
+                                  content: text,
+                                  title: 'Plan Preview',
+                                },
                               })
                             }
                           }}
@@ -566,20 +576,30 @@ export function ChatDisplay({
                         onOpenUrl={onOpenUrl}
                         onPopOut={(text) => {
                           if (session) {
-                            window.electronAPI.openMarkdownPreview(`${session.id}:${turn.turnId}`, {
-                              mode: 'readOnly',
-                              content: text,
-                              title: 'Response Preview',
+                            window.electronAPI.openPreview({
+                              mode: 'markdown',
+                              sessionId: session.id,
+                              previewId: turn.turnId,
+                              markdown: {
+                                mode: 'readOnly',
+                                content: text,
+                                title: 'Response Preview',
+                              },
                             })
                           }
                         }}
                         onOpenDetails={() => {
                           if (session) {
                             const markdown = formatTurnAsMarkdown(turn)
-                            window.electronAPI.openMarkdownPreview(`${session.id}:details-${turn.turnId}`, {
-                              mode: 'readOnly',
-                              content: markdown,
-                              title: 'Turn Details',
+                            window.electronAPI.openPreview({
+                              mode: 'markdown',
+                              sessionId: session.id,
+                              previewId: `details-${turn.turnId}`,
+                              markdown: {
+                                mode: 'readOnly',
+                                content: markdown,
+                                title: 'Turn Details',
+                              },
                             })
                           }
                         }}

@@ -1,16 +1,37 @@
 import * as React from 'react'
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { BookOpen, PenLine, PencilLine, FilePlus, XCircle, ChevronDown, Check } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import {
+  Save,
+  BookOpen,
+  PenLine,
+  PencilLine,
+  FilePlus,
+  XCircle,
+  ChevronDown,
+  Check,
+  Terminal,
+  Copy,
+  Search,
+  FolderSearch,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/context/ThemeContext'
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Kbd } from '@/components/ui/kbd'
 import { DropdownMenu, DropdownMenuTrigger, StyledDropdownMenuContent, StyledDropdownMenuItem } from '@/components/ui/styled-dropdown'
-import { WindowHeader, WindowHeaderBadge } from '@/components/ui/window-header-badge'
+import { WindowHeader, WindowHeaderBadge, type BadgeVariant } from '@/components/ui/window-header-badge'
 import { formatFilePath } from '@/lib/file-utils'
-import { ShikiCodeViewer, ShikiDiffViewer } from '@/components/shiki'
-import type { FilePreviewData, FileChange } from '../../../shared/types'
+import { ShikiCodeEditor, ShikiCodeViewer, ShikiDiffViewer } from '@/components/shiki'
+import {
+  parseAnsi,
+  stripAnsi,
+  isGrepContentOutput,
+  parseGrepOutput,
+} from '@craft-agent/ui'
+import type { PreviewData, FileChange, MarkdownPreviewData } from '../../../shared/types'
 
-interface FilePreviewAppProps {
+interface UnifiedPreviewAppProps {
   sessionId: string
   previewId: string
 }
@@ -120,28 +141,45 @@ function Sidebar({ entries, selectedKey, onSelect }: SidebarProps) {
 }
 
 // ============================================
-// Main FilePreviewApp Component
+// Main UnifiedPreviewApp Component
 // ============================================
 
 /**
- * FilePreviewApp - Unified file preview component
+ * UnifiedPreviewApp - Single preview component for all content types
  *
- * Supports three modes:
+ * Supports five modes:
+ * - 'markdown': Markdown content with optional save (ShikiCodeEditor)
  * - 'view': Read/Write tool results (ShikiCodeViewer)
  * - 'diff': Single Edit tool result (ShikiDiffViewer)
  * - 'multi-diff': Multiple edits/writes with sidebar (ShikiDiffViewer)
+ * - 'terminal': Bash/Grep/Glob tool output (custom terminal renderer)
  */
-export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
+export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppProps) {
   const { resolvedMode } = useTheme()
-  const [data, setData] = useState<FilePreviewData | null>(null)
+  const [data, setData] = useState<PreviewData | null>(null)
   const [isEditorReady, setIsEditorReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Markdown-specific state
+  const [markdownContent, setMarkdownContent] = useState<string | null>(null)
+  const [markdownOriginalContent, setMarkdownOriginalContent] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   // Multi-diff specific state
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'snippet' | 'full'>('snippet')
   const [fullFileContent, setFullFileContent] = useState<{ original: string; modified: string } | null>(null)
   const [isLoadingFullFile, setIsLoadingFullFile] = useState(false)
+
+  // Terminal-specific state
+  const [copied, setCopied] = useState<'command' | 'output' | null>(null)
+  const outputRef = useRef<HTMLPreElement>(null)
+
+  // Computed values
+  const isMarkdownReadOnly = data?.mode === 'markdown' && data.markdown.mode === 'readOnly'
+  const hasUnsavedChanges = data?.mode === 'markdown' && !isMarkdownReadOnly &&
+    markdownContent !== null && markdownOriginalContent !== null &&
+    markdownContent !== markdownOriginalContent
 
   // Fetch data on mount
   useEffect(() => {
@@ -151,18 +189,39 @@ export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
         return
       }
 
-      if (!window.electronAPI?.getFilePreviewData) {
+      if (!window.electronAPI?.getPreviewData) {
         setError('API not available')
         return
       }
 
       try {
-        const result = await window.electronAPI.getFilePreviewData(sessionId, previewId)
+        const result = await window.electronAPI.getPreviewData(sessionId, previewId)
         if (!result) {
           setError('Preview data not found')
           return
         }
         setData(result)
+
+        // For markdown, fetch content separately
+        if (result.mode === 'markdown') {
+          // Content is stored in the main process, fetched via getPreviewData
+          // For unified API, we need to also get the markdown content
+          const md = result.markdown
+          if ('content' in md) {
+            setMarkdownContent(md.content)
+            setMarkdownOriginalContent(md.content)
+          } else {
+            // Content was read from file - need to fetch it
+            // This is handled by the main process, content comes with the data
+            // We'll need to add a separate content field or fetch it
+            // For now, let's assume the API returns it
+            const contentResult = await window.electronAPI?.readFileForPreview?.(md.filePath)
+            if (contentResult) {
+              setMarkdownContent(contentResult)
+              setMarkdownOriginalContent(contentResult)
+            }
+          }
+        }
 
         // For multi-diff, set initial selection
         if (result.mode === 'multi-diff') {
@@ -194,8 +253,56 @@ export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
     window.electronAPI?.openFile(filePath)
   }, [])
 
+  // Markdown save handler
+  const handleSave = useCallback(async () => {
+    if (!hasUnsavedChanges || isSaving || markdownContent === null) return
+
+    setIsSaving(true)
+    try {
+      await window.electronAPI?.savePreview(sessionId, previewId, markdownContent)
+      setMarkdownOriginalContent(markdownContent)
+    } catch (err) {
+      console.error('[UnifiedPreviewApp] Save failed:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [sessionId, previewId, markdownContent, hasUnsavedChanges, isSaving])
+
+  // Keyboard shortcut for save (only in markdown readWrite mode)
+  useEffect(() => {
+    if (data?.mode !== 'markdown' || isMarkdownReadOnly) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === 's') {
+        e.preventDefault()
+        handleSave()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleSave, data?.mode, isMarkdownReadOnly])
+
+  // Terminal copy to clipboard
+  const copyToClipboard = async (text: string, type: 'command' | 'output') => {
+    try {
+      await navigator.clipboard.writeText(stripAnsi(text))
+      setCopied(type)
+      setTimeout(() => setCopied(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
   // Theme colors
   const isDark = resolvedMode === 'dark'
+  const toolbarBorder = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'
+
+  // Terminal theme colors
+  const textColor = isDark ? '#e4e4e4' : '#1a1a1a'
+  const mutedColor = isDark ? '#888888' : '#666666'
+  const cmdColor = isDark ? '#60a5fa' : '#2563eb'
+  const codeBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'
+  const outputBg = isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.03)'
 
   // Create sidebar entries for multi-diff mode
   const sidebarEntries = useMemo(() => {
@@ -278,11 +385,47 @@ export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
     setIsEditorReady(false)
   }, [])
 
+  // Terminal ANSI parsing
+  const parsedOutput = useMemo(() => {
+    if (!data || data.mode !== 'terminal' || !data.terminal.output) return []
+    return parseAnsi(data.terminal.output)
+  }, [data])
+
+  const isGrepOutput = useMemo(() => {
+    if (!data || data.mode !== 'terminal' || !data.terminal.output) return false
+    return isGrepContentOutput(data.terminal.output)
+  }, [data])
+
+  const grepLines = useMemo(() => {
+    if (!isGrepOutput || !data || data.mode !== 'terminal' || !data.terminal.output) return []
+    return parseGrepOutput(data.terminal.output)
+  }, [isGrepOutput, data])
+
+  // Terminal tool config
+  const terminalToolConfig = useMemo((): { icon: typeof Terminal; label: string; variant: BadgeVariant } => {
+    if (!data || data.mode !== 'terminal') {
+      return { icon: Terminal, label: 'Bash', variant: 'bash' }
+    }
+    const toolType = data.terminal.toolType || 'bash'
+    switch (toolType) {
+      case 'grep':
+        return { icon: Search, label: 'Grep', variant: 'grep' }
+      case 'glob':
+        return { icon: FolderSearch, label: 'Glob', variant: 'glob' }
+      default:
+        return { icon: Terminal, label: 'Bash', variant: 'bash' }
+    }
+  }, [data])
+
   // Determine if we should show sidebar
   const showSidebar = data?.mode === 'multi-diff' && sidebarEntries.length > 1
 
   // Fade in when ready
-  const isReady = data !== null && (data.mode === 'multi-diff' || isEditorReady)
+  const isReady = data !== null && (
+    data.mode === 'multi-diff' ||
+    data.mode === 'terminal' ||
+    isEditorReady
+  )
 
   // ============================================
   // Render based on mode
@@ -296,6 +439,72 @@ export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
           <div className="flex-1 flex items-center justify-center text-destructive">
             Error: {error}
           </div>
+        </div>
+      </TooltipProvider>
+    )
+  }
+
+  // Markdown mode
+  if (data?.mode === 'markdown') {
+    return (
+      <TooltipProvider delayDuration={0}>
+        <div className="h-screen w-screen flex flex-col bg-background">
+          {/* Toolbar / Title bar */}
+          <div
+            className="titlebar-drag-region h-[52px] shrink-0 flex items-center justify-between px-4 bg-background"
+            style={{ borderBottom: `1px solid ${toolbarBorder}` }}
+          >
+            {/* Left side - space for traffic lights on macOS */}
+            <div className="w-[70px]" />
+
+            {/* Center - optional title or indicator */}
+            <div className="flex items-center gap-2">
+              {hasUnsavedChanges && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-foreground/10 text-foreground/60">
+                  Edited
+                </span>
+              )}
+            </div>
+
+            {/* Right side - actions (only show save in readWrite mode) */}
+            <div className="flex items-center gap-1 titlebar-no-drag">
+              {!isMarkdownReadOnly && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleSave}
+                      disabled={!hasUnsavedChanges || isSaving}
+                      className="h-7 w-7 rounded-[4px] hover:bg-foreground/10 disabled:opacity-30"
+                    >
+                      <Save className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <span>Save</span>
+                    <Kbd className="ml-2">⌘S</Kbd>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+
+          {/* Editor with fade-in */}
+          {markdownContent !== null && (
+            <div
+              className="flex-1 min-h-0 bg-background transition-opacity duration-200"
+              style={{ opacity: isEditorReady ? 1 : 0 }}
+            >
+              <ShikiCodeEditor
+                value={markdownContent}
+                language="markdown"
+                onChange={(value) => !isMarkdownReadOnly && setMarkdownContent(value)}
+                readOnly={isMarkdownReadOnly}
+                onReady={handleEditorReady}
+              />
+            </div>
+          )}
         </div>
       </TooltipProvider>
     )
@@ -512,6 +721,176 @@ export function FilePreviewApp({ sessionId, previewId }: FilePreviewAppProps) {
                   Select a file to view changes
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      </TooltipProvider>
+    )
+  }
+
+  // Terminal mode
+  if (data?.mode === 'terminal') {
+    const terminal = data.terminal
+
+    return (
+      <TooltipProvider delayDuration={0}>
+        <div
+          className="h-screen w-screen flex flex-col bg-background transition-opacity duration-200"
+          style={{ color: textColor, opacity: isReady ? 1 : 0 }}
+        >
+          <WindowHeader>
+            <WindowHeaderBadge
+              icon={terminalToolConfig.icon}
+              label={terminalToolConfig.label}
+              variant={terminalToolConfig.variant}
+            />
+            {terminal.description && (
+              <WindowHeaderBadge label={terminal.description} />
+            )}
+          </WindowHeader>
+
+          {/* Terminal content */}
+          <div className="flex-1 overflow-auto p-4 font-mono text-sm" style={{ fontFamily: '"JetBrains Mono", monospace' }}>
+            {/* Command section */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-xs" style={{ color: mutedColor }}>
+                  <Terminal className="w-3 h-3" />
+                  <span>Command</span>
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => copyToClipboard(terminal.command, 'command')}
+                      className={`h-6 w-6 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+                    >
+                      {copied === 'command' ? (
+                        <Check className="h-3.5 w-3.5 text-success" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" style={{ color: mutedColor }} />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    {copied === 'command' ? 'Copied!' : 'Copy command'}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div
+                className="p-3 rounded-lg overflow-x-auto"
+                style={{ backgroundColor: codeBg }}
+              >
+                <code style={{ color: cmdColor }}>{terminal.command}</code>
+              </div>
+            </div>
+
+            {/* Output section */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-xs" style={{ color: mutedColor }}>
+                  <Terminal className="w-3 h-3" />
+                  <span>Output</span>
+                  {terminal.exitCode !== undefined && (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[10px]"
+                      style={{
+                        backgroundColor: terminal.exitCode === 0 ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                        color: terminal.exitCode === 0 ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)',
+                      }}
+                    >
+                      exit {terminal.exitCode}
+                    </span>
+                  )}
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => copyToClipboard(terminal.output, 'output')}
+                      className={`h-6 w-6 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+                    >
+                      {copied === 'output' ? (
+                        <Check className="h-3.5 w-3.5 text-success" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" style={{ color: mutedColor }} />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">
+                    {copied === 'output' ? 'Copied!' : 'Copy output'}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <pre
+                ref={outputRef}
+                className="p-3 rounded-lg overflow-auto"
+                style={{
+                  backgroundColor: outputBg,
+                  color: textColor,
+                  maxHeight: 'calc(100vh - 200px)',
+                }}
+              >
+                {/* Grep output with line number highlighting */}
+                {isGrepOutput && grepLines.length > 0 ? (
+                  <div className="space-y-0">
+                    {grepLines.map((line, i) => (
+                      <div
+                        key={i}
+                        className="flex"
+                        style={{
+                          backgroundColor: line.isMatch ? 'rgba(34, 197, 94, 0.08)' : undefined,
+                        }}
+                      >
+                        {/* Line number */}
+                        {line.lineNum && (
+                          <span
+                            className="select-none pr-3 text-right shrink-0"
+                            style={{
+                              color: line.isMatch ? '#22c55e' : mutedColor,
+                              minWidth: '3rem',
+                            }}
+                          >
+                            {line.lineNum}
+                            <span style={{ color: line.isMatch ? '#22c55e' : (isDark ? '#444444' : '#cccccc') }}>
+                              {line.isMatch ? ':' : '-'}
+                            </span>
+                          </span>
+                        )}
+                        {/* Content */}
+                        <span
+                          className="whitespace-pre-wrap break-words"
+                          style={{ color: line.isMatch ? textColor : mutedColor }}
+                        >
+                          {line.content}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : parsedOutput.length > 0 ? (
+                  /* ANSI-colored output */
+                  <div className="whitespace-pre-wrap break-words">
+                    {parsedOutput.map((span, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          color: span.fg,
+                          backgroundColor: span.bg,
+                          fontWeight: span.bold ? 'bold' : undefined,
+                          padding: span.bg ? '0 2px' : undefined,
+                          borderRadius: span.bg ? '2px' : undefined,
+                        }}
+                      >
+                        {span.text}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span style={{ color: mutedColor }}>(no output)</span>
+                )}
+              </pre>
             </div>
           </div>
         </div>

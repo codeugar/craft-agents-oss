@@ -623,6 +623,13 @@ export const IPC_CHANNELS = {
   FILE_PREVIEW_GET_DATA: 'filePreview:getData',
   FILE_PREVIEW_READ_FILE: 'filePreview:readFile',
 
+  // Unified preview window (replaces markdown/file/terminal previews)
+  PREVIEW_OPEN: 'preview:open',
+  PREVIEW_GET_DATA: 'preview:getData',
+  PREVIEW_SAVE: 'preview:save',
+  PREVIEW_FILE_SAVED: 'preview:fileSaved', // Broadcast: { filePath: string }
+  PREVIEW_READ_FILE: 'preview:readFile',
+
   // Workspace settings (per-workspace configuration)
   WORKSPACE_SETTINGS_GET: 'workspaceSettings:get',
   WORKSPACE_SETTINGS_UPDATE: 'workspaceSettings:update',
@@ -817,6 +824,56 @@ export type MarkdownPreviewData =
       title?: string
     }
 
+// ============================================
+// Unified Preview Window Types
+// ============================================
+
+/**
+ * Unified preview data - supports all preview modes in a single window
+ * Uses discriminated union for type-safe mode handling
+ */
+export type PreviewData =
+  | {
+      /** Markdown preview - view or edit markdown content */
+      mode: 'markdown'
+      sessionId: string
+      previewId: string
+      markdown: MarkdownPreviewData
+    }
+  | {
+      /** Code view - Read/Write tool results */
+      mode: 'view'
+      sessionId: string
+      previewId: string
+      view: FilePreviewViewData
+    }
+  | {
+      /** Diff view - single Edit tool result */
+      mode: 'diff'
+      sessionId: string
+      previewId: string
+      diff: FilePreviewDiffData
+    }
+  | {
+      /** Multi-diff view - multiple edits/writes in a turn */
+      mode: 'multi-diff'
+      sessionId: string
+      previewId: string
+      multiDiff: FilePreviewMultiDiffData
+    }
+  | {
+      /** Terminal view - Bash/Grep/Glob tool output */
+      mode: 'terminal'
+      sessionId: string
+      previewId: string
+      terminal: TerminalPreviewData
+    }
+
+/**
+ * Preview mode type for discriminated union
+ */
+export type PreviewMode = PreviewData['mode']
+
 // Re-import types for ElectronAPI
 import type { Workspace, SessionMetadata, StoredAttachment as StoredAttachmentType } from '@craft-agent/core/types';
 import type { SubAgentMetadata } from '@craft-agent/core/types';
@@ -982,6 +1039,12 @@ export interface ElectronAPI {
   openFilePreview(data: FilePreviewData): Promise<void>
   getFilePreviewData(sessionId: string, previewId: string): Promise<FilePreviewData | null>
   readFileForPreview(filePath: string): Promise<string | null>
+
+  // Unified preview window (replaces markdown/file/terminal previews)
+  openPreview(data: PreviewData): Promise<void>
+  getPreviewData(sessionId: string, previewId: string): Promise<PreviewData | null>
+  savePreview(sessionId: string, previewId: string, content: string): Promise<void>
+  onPreviewFileSaved(callback: (data: { filePath: string }) => void): () => void
 
   // Session Drafts (persisted input text)
   getDraft(sessionId: string): Promise<string | null>

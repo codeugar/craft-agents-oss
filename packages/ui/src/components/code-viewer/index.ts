@@ -4,4 +4,4 @@
 
 export { ShikiCodeViewer, type ShikiCodeViewerProps } from './ShikiCodeViewer'
 export { ShikiDiffViewer, type ShikiDiffViewerProps } from './ShikiDiffViewer'
-export { LANGUAGE_MAP, getLanguageFromPath, formatFilePath } from './language-map'
+export { LANGUAGE_MAP, getLanguageFromPath, formatFilePath, truncateFilePath } from './language-map'

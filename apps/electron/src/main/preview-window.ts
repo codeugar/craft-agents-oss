@@ -1,9 +1,10 @@
-import { BrowserWindow, shell, nativeTheme, type BrowserWindowConstructorOptions } from 'electron'
+import { BrowserWindow, shell, nativeTheme } from 'electron'
 import { windowLog } from './logger'
 import { join, basename } from 'path'
 import { readFile, writeFile } from 'fs/promises'
 import { IPC_CHANNELS, type MarkdownPreviewData } from '../shared/types'
 import type { WindowManager } from './window-manager'
+import { getBackgroundColor } from '@config/theme'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -76,8 +77,7 @@ export class PreviewWindowManager {
       title = basename(data.filePath)
     }
 
-    // Solid background color matching CSS --background
-    const backgroundColor = nativeTheme.shouldUseDarkColors ? '#302f33' : '#faf9fb'
+    const backgroundColor = getBackgroundColor(nativeTheme.shouldUseDarkColors)
 
     const window = new BrowserWindow({
       width: 900,

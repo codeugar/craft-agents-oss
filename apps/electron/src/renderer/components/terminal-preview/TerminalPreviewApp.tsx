@@ -98,15 +98,15 @@ export function TerminalPreviewApp({ sessionId, previewId }: TerminalPreviewAppP
   const outputBg = isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.03)'
 
   // Tool type config
-  const toolConfig = useMemo((): { Icon: typeof Terminal; label: string; variant: BadgeVariant } => {
+  const toolConfig = useMemo((): { icon: typeof Terminal; label: string; variant: BadgeVariant } => {
     const toolType = data?.toolType || 'bash'
     switch (toolType) {
       case 'grep':
-        return { Icon: Search, label: 'Grep', variant: 'grep' }
+        return { icon: Search, label: 'Grep', variant: 'grep' }
       case 'glob':
-        return { Icon: FolderSearch, label: 'Glob', variant: 'glob' }
+        return { icon: FolderSearch, label: 'Glob', variant: 'glob' }
       default:
-        return { Icon: Terminal, label: 'Bash', variant: 'bash' }
+        return { icon: Terminal, label: 'Bash', variant: 'bash' }
     }
   }, [data?.toolType])
 
@@ -121,7 +121,7 @@ export function TerminalPreviewApp({ sessionId, previewId }: TerminalPreviewAppP
       >
         <WindowHeader>
           <WindowHeaderBadge
-            Icon={toolConfig.Icon}
+            icon={toolConfig.icon}
             label={toolConfig.label}
             variant={toolConfig.variant}
           />

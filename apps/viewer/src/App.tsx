@@ -13,7 +13,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import type { StoredSession } from '@craft-agent/core'
 import {
   ChatView,
-  CodeOverlay,
+  GenericOverlay,
   CodePreviewOverlay,
   DiffPreviewOverlay,
   TerminalPreviewOverlay,
@@ -235,7 +235,7 @@ export function App() {
 
       {/* Generic overlay for unknown tools */}
       {overlayData?.type === 'generic' && (
-        <CodeOverlay
+        <GenericOverlay
           isOpen={!!overlayActivity}
           onClose={handleCloseOverlay}
           content={overlayData.content}

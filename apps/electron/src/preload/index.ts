@@ -247,6 +247,21 @@ const api: ElectronAPI = {
   readFileForPreview: (filePath: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_PREVIEW_READ_FILE, filePath),
 
+  // Unified preview window (replaces markdown/file/terminal previews)
+  openPreview: (data: import('../shared/types').PreviewData) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_OPEN, data),
+  getPreviewData: (sessionId: string, previewId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_GET_DATA, sessionId, previewId),
+  savePreview: (sessionId: string, previewId: string, content: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_SAVE, sessionId, previewId, content),
+  onPreviewFileSaved: (callback: (data: { filePath: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { filePath: string }) => {
+      callback(data)
+    }
+    ipcRenderer.on(IPC_CHANNELS.PREVIEW_FILE_SAVED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.PREVIEW_FILE_SAVED, handler)
+  },
+
   // Session Drafts (persisted input text)
   getDraft: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET, sessionId),
   setDraft: (sessionId: string, text: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_SET, sessionId, text),

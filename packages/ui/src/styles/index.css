@@ -299,6 +299,17 @@ html[data-font="inter"] {
       rgba(0, 0, 0, 0.04) 0px 24px 24px -12px;
   }
 
+  /* Smooth corners (iOS-style superellipse)
+   * Uses CSS continuous corners when supported, falls back to standard border-radius.
+   * The border-radius value should be set on the element using this class.
+   */
+  .smooth-corners {
+    /* Standard property (future CSS spec) */
+    corner-shape: superellipse;
+    /* WebKit prefix for Safari */
+    -webkit-corner-shape: superellipse;
+  }
+
   /* Unified popover styling */
   .popover-styled {
     background: var(--background);

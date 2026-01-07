@@ -8,6 +8,7 @@ import { WindowManager } from './window-manager'
 import { PreviewWindowManager } from './preview-window'
 import { TerminalPreviewWindowManager } from './terminal-preview-window'
 import { FilePreviewWindowManager } from './file-preview-window'
+import { UnifiedPreviewWindowManager } from './unified-preview-window'
 import { loadWindowState, saveWindowState } from './window-state'
 import { getWorkspaces } from '@craft-agent/shared/config'
 import { initializeDocs } from '@craft-agent/shared/docs'
@@ -33,6 +34,7 @@ let sessionManager: SessionManager | null = null
 let previewWindowManager: PreviewWindowManager | null = null
 let terminalPreviewWindowManager: TerminalPreviewWindowManager | null = null
 let filePreviewWindowManager: FilePreviewWindowManager | null = null
+let unifiedPreviewWindowManager: UnifiedPreviewWindowManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -156,12 +158,16 @@ app.whenReady().then(async () => {
     // Initialize unified file preview window manager (view, diff, multi-diff)
     filePreviewWindowManager = new FilePreviewWindowManager()
 
+    // Initialize unified preview window manager (all preview types)
+    unifiedPreviewWindowManager = new UnifiedPreviewWindowManager()
+    unifiedPreviewWindowManager.setWindowManager(windowManager)
+
     // Initialize session manager
     sessionManager = new SessionManager()
     sessionManager.setWindowManager(windowManager)
 
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager, previewWindowManager, terminalPreviewWindowManager, filePreviewWindowManager)
+    registerIpcHandlers(sessionManager, windowManager, previewWindowManager, terminalPreviewWindowManager, filePreviewWindowManager, unifiedPreviewWindowManager)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()

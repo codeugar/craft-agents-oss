@@ -60,9 +60,15 @@ export {
   Spinner,
   SimpleDropdown,
   SimpleDropdownItem,
+  PreviewHeader,
+  PreviewHeaderBadge,
+  PREVIEW_BADGE_VARIANTS,
   type SpinnerProps,
   type SimpleDropdownProps,
   type SimpleDropdownItemProps,
+  type PreviewHeaderProps,
+  type PreviewHeaderBadgeProps,
+  type PreviewBadgeVariant,
 } from './components/ui'
 
 // Code viewer components
@@ -72,6 +78,7 @@ export {
   LANGUAGE_MAP,
   getLanguageFromPath,
   formatFilePath,
+  truncateFilePath,
   type ShikiCodeViewerProps,
   type ShikiDiffViewerProps,
 } from './components/code-viewer'
@@ -92,15 +99,22 @@ export {
 
 // Overlay components
 export {
-  CodeOverlay,
-  detectLanguageFromPath,
+  // Base overlay
+  PreviewOverlay,
+  CopyButton,
+  type PreviewOverlayProps,
+  type BadgeVariant,
+  type CopyButtonProps,
+  // Specialized overlays
   CodePreviewOverlay,
   DiffPreviewOverlay,
   TerminalPreviewOverlay,
-  type CodeOverlayProps,
+  GenericOverlay,
+  detectLanguageFromPath,
   type CodePreviewOverlayProps,
   type DiffPreviewOverlayProps,
   type TerminalPreviewOverlayProps,
+  type GenericOverlayProps,
 } from './components/overlay'
 
 // Utilities

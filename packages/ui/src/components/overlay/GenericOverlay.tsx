@@ -1,25 +1,19 @@
 /**
- * CodeOverlay - Fullscreen overlay for viewing code/activity content
+ * GenericOverlay - Fallback overlay for unknown tool content
  *
- * A lightweight alternative to Monaco for the web viewer.
- * Uses Shiki-based CodeBlock for syntax highlighting.
- *
- * Features:
- * - Full-viewport overlay via ReactDOM.createPortal
- * - Syntax highlighted code with Shiki
- * - Light/dark theme detection
- * - Escape key to close
- * - Copy button
- * - Optional diff mode (side-by-side text comparison)
+ * Uses PreviewOverlay for presentation and CodeBlock for syntax highlighting.
+ * Auto-detects language from content patterns or file path.
+ * Supports optional diff mode for side-by-side comparison.
  */
 
 import * as React from 'react'
-import { useCallback, useEffect, useState, useMemo } from 'react'
-import * as ReactDOM from 'react-dom'
-import { cn } from '../../lib/utils'
+import { useMemo } from 'react'
+import { FileCode } from 'lucide-react'
+import { PreviewOverlay } from './PreviewOverlay'
+import { CopyButton } from './CopyButton'
 import { CodeBlock } from '../markdown/CodeBlock'
 
-export interface CodeOverlayProps {
+export interface GenericOverlayProps {
   /** Content to display (used when not in diff mode) */
   content: string
   /** Language for syntax highlighting (auto-detected if not provided) */
@@ -97,7 +91,7 @@ function detectLanguage(content: string): string {
 /**
  * Detect language from file path extension.
  */
-function detectLanguageFromPath(filePath: string): string {
+export function detectLanguageFromPath(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase()
   const langMap: Record<string, string> = {
     ts: 'typescript',
@@ -144,7 +138,7 @@ function detectLanguageFromPath(filePath: string): string {
   return langMap[ext || ''] || 'text'
 }
 
-export function CodeOverlay({
+export function GenericOverlay({
   content,
   language,
   isOpen,
@@ -153,9 +147,7 @@ export function CodeOverlay({
   diffMode = false,
   originalContent = '',
   modifiedContent = '',
-}: CodeOverlayProps) {
-  const [copied, setCopied] = useState(false)
-
+}: GenericOverlayProps) {
   // Auto-detect language if not provided
   const detectedLanguage = useMemo(() => {
     if (language) return language
@@ -167,95 +159,21 @@ export function CodeOverlay({
     return detectLanguage(diffMode ? modifiedContent : content)
   }, [language, title, diffMode, modifiedContent, content])
 
-  // Handle copy - in diff mode, copy the modified content
-  const handleCopy = useCallback(async () => {
-    try {
-      const textToCopy = diffMode ? modifiedContent : content
-      await navigator.clipboard.writeText(textToCopy)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }, [content, diffMode, modifiedContent])
+  // Content to copy - in diff mode, copy the modified content
+  const copyContent = diffMode ? modifiedContent : content
 
-  // Handle Escape key
-  useEffect(() => {
-    if (!isOpen) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
-
-  // Don't render if not open
-  if (!isOpen) return null
-
-  return ReactDOM.createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      {/* Header */}
-      <div className="h-12 shrink-0 flex items-center justify-between px-4 border-b border-border">
-        <div className="flex items-center gap-3">
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className={cn(
-              "p-1 rounded-[6px] transition-colors",
-              "text-muted-foreground hover:text-foreground",
-              "hover:bg-foreground/5",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            )}
-            title="Close (Esc)"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-
-          {/* Title */}
-          <span className="text-sm font-medium">{title}</span>
-          <span className="text-xs text-muted-foreground px-1.5 py-0.5 rounded bg-muted">
-            {detectedLanguage}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Copy button */}
-          <button
-            onClick={handleCopy}
-            className={cn(
-              "flex items-center gap-1.5 px-2 py-1 rounded-[6px] text-xs transition-colors",
-              copied
-                ? "text-success"
-                : "text-muted-foreground hover:text-foreground hover:bg-foreground/5",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            )}
-          >
-            {copied ? (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Copied!</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Content */}
+  return (
+    <PreviewOverlay
+      isOpen={isOpen}
+      onClose={onClose}
+      badge={{
+        icon: FileCode,
+        label: detectedLanguage,
+        variant: 'gray',
+      }}
+      title={title}
+      headerActions={<CopyButton content={copyContent} />}
+    >
       <div className="flex-1 min-h-0 overflow-auto p-4">
         {diffMode ? (
           // Side-by-side diff view
@@ -280,9 +198,6 @@ export function CodeOverlay({
           </div>
         )}
       </div>
-    </div>,
-    document.body
+    </PreviewOverlay>
   )
 }
-
-export { detectLanguageFromPath }

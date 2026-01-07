@@ -63,3 +63,57 @@ export function formatFilePath(filePath: string): string {
   }
   return filePath
 }
+
+/**
+ * Truncate a file path for display, keeping the filename visible.
+ * Truncation priority: middle > start > end
+ *
+ * @param filePath - The file path to truncate
+ * @param maxLength - Maximum character length (default: 60)
+ * @returns Truncated path with ellipsis in middle if needed
+ *
+ * Examples:
+ * - ~/very/long/path/to/some/file.ts → ~/very/…/some/file.ts
+ * - /extremely/long/path/file.ts → …/long/path/file.ts
+ */
+export function truncateFilePath(filePath: string, maxLength = 60): string {
+  // First format the path (replace home dir with ~)
+  const formatted = formatFilePath(filePath)
+
+  if (formatted.length <= maxLength) {
+    return formatted
+  }
+
+  const parts = formatted.split('/')
+  const filename = parts.pop() || ''
+
+  // If filename alone is too long, truncate at end
+  if (filename.length >= maxLength - 3) {
+    return filename.slice(0, maxLength - 3) + '…'
+  }
+
+  // Reserve space for filename + ellipsis + separator
+  const availableForPath = maxLength - filename.length - 4 // "…/" + "/" before filename
+
+  if (availableForPath <= 0) {
+    return '…/' + filename
+  }
+
+  // Try to keep first and last directory parts
+  const dirPath = parts.join('/')
+
+  if (dirPath.length <= availableForPath) {
+    return formatted // Shouldn't happen but safety check
+  }
+
+  // Middle truncation: keep start and end of directory path
+  const halfAvailable = Math.floor(availableForPath / 2)
+  const startPart = dirPath.slice(0, halfAvailable)
+  const endPart = dirPath.slice(-(availableForPath - halfAvailable))
+
+  // Clean up partial directory names at truncation points
+  const cleanStart = startPart.includes('/') ? startPart.slice(0, startPart.lastIndexOf('/')) : startPart
+  const cleanEnd = endPart.includes('/') ? endPart.slice(endPart.indexOf('/')) : '/' + endPart
+
+  return cleanStart + '/…' + cleanEnd + '/' + filename
+}

@@ -10,9 +10,10 @@ import { WindowManager } from './window-manager'
 import { PreviewWindowManager } from './preview-window'
 import { TerminalPreviewWindowManager } from './terminal-preview-window'
 import { FilePreviewWindowManager } from './file-preview-window'
+import { UnifiedPreviewWindowManager } from './unified-preview-window'
 import { agentService } from './agent-service'
 import { registerOnboardingHandlers } from './onboarding'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type TerminalPreviewData, type FilePreviewData } from '../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type TerminalPreviewData, type FilePreviewData, type PreviewData } from '../shared/types'
 import { readFileAttachment, perf } from '@craft-agent/shared/utils'
 import { getAiCreditTopUpUrl } from '@craft-agent/shared/auth'
 import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultPermissionMode, setDefaultPermissionMode, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config'
@@ -116,7 +117,7 @@ async function validateFilePath(filePath: string): Promise<string> {
   return realPath
 }
 
-export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager, previewWindowManager: PreviewWindowManager, terminalPreviewWindowManager: TerminalPreviewWindowManager, filePreviewWindowManager: FilePreviewWindowManager): void {
+export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager, previewWindowManager: PreviewWindowManager, terminalPreviewWindowManager: TerminalPreviewWindowManager, filePreviewWindowManager: FilePreviewWindowManager, unifiedPreviewWindowManager: UnifiedPreviewWindowManager): void {
   // Get all sessions
   ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async () => {
     const end = perf.start('ipc.getSessions')
@@ -1071,6 +1072,38 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Read a file for full-context view
   ipcMain.handle(IPC_CHANNELS.FILE_PREVIEW_READ_FILE, async (_event, filePath: string) => {
+    try {
+      const absolutePath = resolve(filePath)
+      const validPath = await validateFilePath(absolutePath)
+      const content = await readFile(validPath, 'utf-8')
+      return content
+    } catch (err) {
+      ipcLog.error('Error reading file for preview:', err)
+      return null
+    }
+  })
+
+  // ============================================================
+  // Unified Preview Window (markdown, view, diff, multi-diff, terminal)
+  // ============================================================
+
+  // Open unified preview window
+  ipcMain.handle(IPC_CHANNELS.PREVIEW_OPEN, async (_event, data: PreviewData) => {
+    await unifiedPreviewWindowManager.openPreview(data)
+  })
+
+  // Get data for preview (called from preview window on mount)
+  ipcMain.handle(IPC_CHANNELS.PREVIEW_GET_DATA, async (_event, sessionId: string, previewId: string) => {
+    return unifiedPreviewWindowManager.getData(sessionId, previewId)
+  })
+
+  // Save content (for markdown readWrite mode)
+  ipcMain.handle(IPC_CHANNELS.PREVIEW_SAVE, async (_event, sessionId: string, previewId: string, content: string) => {
+    await unifiedPreviewWindowManager.save(sessionId, previewId, content)
+  })
+
+  // Read a file for preview (full file view)
+  ipcMain.handle(IPC_CHANNELS.PREVIEW_READ_FILE, async (_event, filePath: string) => {
     try {
       const absolutePath = resolve(filePath)
       const validPath = await validateFilePath(absolutePath)

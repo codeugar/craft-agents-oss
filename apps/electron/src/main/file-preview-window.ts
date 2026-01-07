@@ -1,8 +1,9 @@
-import { BrowserWindow, shell, nativeTheme, type BrowserWindowConstructorOptions } from 'electron'
+import { BrowserWindow, shell, nativeTheme } from 'electron'
 import { readFile } from 'fs/promises'
 import { windowLog } from './logger'
 import { join } from 'path'
 import { IPC_CHANNELS, type FilePreviewData } from '../shared/types'
+import { getBackgroundColor } from '@config/theme'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -84,7 +85,7 @@ export class FilePreviewWindowManager {
     }
 
     // Get window configuration based on mode
-    const backgroundColor = nativeTheme.shouldUseDarkColors ? '#302f33' : '#faf9fb'
+    const backgroundColor = getBackgroundColor(nativeTheme.shouldUseDarkColors)
     const title = getWindowTitle(data)
     const dimensions = getWindowDimensions(data)
 

@@ -9,3 +9,11 @@ export {
   type SimpleDropdownProps,
   type SimpleDropdownItemProps,
 } from './SimpleDropdown'
+export {
+  PreviewHeader,
+  PreviewHeaderBadge,
+  PREVIEW_BADGE_VARIANTS,
+  type PreviewHeaderProps,
+  type PreviewHeaderBadgeProps,
+  type PreviewBadgeVariant,
+} from './PreviewHeader'
