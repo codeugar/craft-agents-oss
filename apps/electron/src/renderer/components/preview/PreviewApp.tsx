@@ -1,25 +1,19 @@
 import * as React from 'react'
 import { useState, useEffect, useCallback } from 'react'
-import Editor from '@monaco-editor/react'
-import loader from '@monaco-editor/loader'
-import * as monaco from 'monaco-editor'
 import { Save } from 'lucide-react'
 import { useTheme } from '@/context/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Kbd } from '@/components/ui/kbd'
+import { ShikiCodeEditor } from '@/components/shiki'
 import type { MarkdownPreviewData } from '../../../shared/types'
-
-// Configure loader to use local monaco-editor package (not CDN)
-// This is required because CSP blocks external scripts from cdn.jsdelivr.net
-loader.config({ monaco })
 
 interface PreviewAppProps {
   previewId: string
 }
 
 /**
- * PreviewApp - Monaco markdown editor with toolbar
+ * PreviewApp - Shiki-based markdown editor with toolbar
  *
  * Supports two modes:
  * - readOnly: View-only mode, no save button
@@ -67,11 +61,9 @@ export function PreviewApp({ previewId }: PreviewAppProps) {
     fetchData()
   }, [previewId])
 
-  // Monaco mounted callback
-  const handleEditorMount = useCallback(() => {
-    requestAnimationFrame(() => {
-      setIsEditorReady(true)
-    })
+  // Editor ready callback
+  const handleEditorReady = useCallback(() => {
+    setIsEditorReady(true)
   }, [])
 
   // Save handler
@@ -103,16 +95,15 @@ export function PreviewApp({ previewId }: PreviewAppProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSave, isReadOnly])
 
-  // Monaco theme backgrounds
-  const monacoBackground = resolvedMode === 'dark' ? '#1e1e1e' : '#ffffff'
+  // Theme colors
   const toolbarBorder = resolvedMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="h-screen w-screen flex flex-col" style={{ backgroundColor: monacoBackground }}>
+      <div className="h-screen w-screen flex flex-col bg-background">
         {/* Toolbar / Title bar */}
         <div
-          className="titlebar-drag-region h-[52px] shrink-0 flex items-center justify-between px-4"
+          className="titlebar-drag-region h-[52px] shrink-0 flex items-center justify-between px-4 bg-background"
           style={{ borderBottom: `1px solid ${toolbarBorder}` }}
         >
           {/* Left side - space for traffic lights on macOS */}
@@ -121,13 +112,7 @@ export function PreviewApp({ previewId }: PreviewAppProps) {
           {/* Center - optional title or indicator */}
           <div className="flex items-center gap-2">
             {hasUnsavedChanges && (
-              <span
-                className="text-xs px-2 py-0.5 rounded-full"
-                style={{
-                  backgroundColor: resolvedMode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
-                  color: resolvedMode === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
-                }}
-              >
+              <span className="text-xs px-2 py-0.5 rounded-full bg-foreground/10 text-foreground/60">
                 Edited
               </span>
             )}
@@ -167,72 +152,15 @@ export function PreviewApp({ previewId }: PreviewAppProps) {
         {/* Editor with fade-in */}
         {content !== null && !error && (
           <div
-            className="flex-1 min-h-0 transition-opacity duration-200 pl-6"
-            style={{ opacity: isEditorReady ? 1 : 0, backgroundColor: monacoBackground }}
+            className="flex-1 min-h-0 bg-background transition-opacity duration-200"
+            style={{ opacity: isEditorReady ? 1 : 0 }}
           >
-            <Editor
-              height="100%"
-              language="markdown"
-              theme={resolvedMode === 'dark' ? 'vs-dark' : 'vs'}
+            <ShikiCodeEditor
               value={content}
-              onChange={(value) => !isReadOnly && setContent(value ?? '')}
-              onMount={handleEditorMount}
-              loading={null}
-              options={{
-                // Typography
-                fontFamily: '"JetBrains Mono", monospace',
-                fontSize: 14,
-                lineHeight: 1.6,
-                wordWrap: 'on',
-
-                // Read-only mode
-                readOnly: isReadOnly,
-                domReadOnly: isReadOnly,
-
-                // Clean layout
-                minimap: { enabled: false },
-                lineNumbers: 'off',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                padding: { top: 24, bottom: 24 },
-
-                // Hide right-side indicators
-                overviewRulerLanes: 0,
-                overviewRulerBorder: false,
-                hideCursorInOverviewRuler: true,
-                renderLineHighlight: 'none',
-
-                // Clean scrollbar
-                scrollbar: {
-                  vertical: 'auto',
-                  horizontal: 'hidden',
-                  verticalScrollbarSize: 8,
-                  useShadows: false,
-                },
-
-                // Disable gutter decorations
-                glyphMargin: false,
-                folding: false,
-                lineDecorationsWidth: 0,
-                lineNumbersMinChars: 0,
-
-                // Disable code-editor features (markdown-focused)
-                occurrencesHighlight: 'off',
-                selectionHighlight: false,
-                renderWhitespace: 'none',
-                matchBrackets: 'never',
-
-                // Editing behavior
-                tabSize: 2,
-                insertSpaces: true,
-                autoClosingBrackets: 'never',
-                autoClosingQuotes: 'never',
-                autoSurround: 'never',
-                quickSuggestions: false,
-                suggestOnTriggerCharacters: false,
-                acceptSuggestionOnEnter: 'off',
-                wordBasedSuggestions: 'off',
-              }}
+              language="markdown"
+              onChange={(value) => !isReadOnly && setContent(value)}
+              readOnly={isReadOnly}
+              onReady={handleEditorReady}
             />
           </div>
         )}

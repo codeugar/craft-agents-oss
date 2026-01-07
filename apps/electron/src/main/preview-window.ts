@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, nativeTheme } from 'electron'
+import { BrowserWindow, shell, nativeTheme, type BrowserWindowConstructorOptions } from 'electron'
 import { windowLog } from './logger'
 import { join, basename } from 'path'
 import { readFile, writeFile } from 'fs/promises'
@@ -76,8 +76,8 @@ export class PreviewWindowManager {
       title = basename(data.filePath)
     }
 
-    // Create new preview window (solid background, no vibrancy)
-    const backgroundColor = nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff'
+    // Solid background color matching CSS --background
+    const backgroundColor = nativeTheme.shouldUseDarkColors ? '#302f33' : '#faf9fb'
 
     const window = new BrowserWindow({
       width: 900,

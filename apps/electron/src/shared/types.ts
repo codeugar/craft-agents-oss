@@ -510,6 +510,7 @@ export const IPC_CHANNELS = {
   // System
   GET_VERSIONS: 'system:versions',
   GET_HOME_DIR: 'system:homeDir',
+  IS_DEBUG_MODE: 'system:isDebugMode',
 
   // Shell operations (open external URLs/files)
   OPEN_URL: 'shell:openUrl',
@@ -617,6 +618,11 @@ export const IPC_CHANNELS = {
   MULTI_FILE_DIFF_GET_DATA: 'multiFileDiff:getData',
   MULTI_FILE_DIFF_READ_FILE: 'multiFileDiff:readFile',
 
+  // Unified file preview window (replaces code/diff/multi-file diff)
+  FILE_PREVIEW_OPEN: 'filePreview:open',
+  FILE_PREVIEW_GET_DATA: 'filePreview:getData',
+  FILE_PREVIEW_READ_FILE: 'filePreview:readFile',
+
   // Workspace settings (per-workspace configuration)
   WORKSPACE_SETTINGS_GET: 'workspaceSettings:get',
   WORKSPACE_SETTINGS_UPDATE: 'workspaceSettings:update',
@@ -705,6 +711,80 @@ export interface MultiFileDiffData {
   /** ID of the change to auto-focus (only used when consolidated=false) */
   focusedChangeId?: string
 }
+
+// ============================================
+// Unified File Preview Types
+// ============================================
+
+/**
+ * File preview mode - determines which viewer to show
+ */
+export type FilePreviewMode = 'view' | 'diff' | 'multi-diff'
+
+/**
+ * View mode data - for Read/Write tool results
+ */
+export interface FilePreviewViewData {
+  filePath: string
+  content: string
+  language?: string
+  /** 'read' for Read tool, 'write' for Write tool */
+  toolType: 'read' | 'write'
+  /** File metadata from Read tool */
+  startLine?: number
+  numLines?: number
+  totalLines?: number
+  /** Error message if the operation failed */
+  error?: string
+}
+
+/**
+ * Diff mode data - for single Edit tool result
+ */
+export interface FilePreviewDiffData {
+  filePath: string
+  original: string
+  modified: string
+  language?: string
+  /** Error message if the edit failed */
+  error?: string
+}
+
+/**
+ * Multi-diff mode data - for multiple edits/writes in a turn
+ */
+export interface FilePreviewMultiDiffData {
+  turnId: string
+  changes: FileChange[]
+  /** If true (default), group changes by file. If false, show each change separately */
+  consolidated?: boolean
+  /** ID of the change to auto-focus (only used when consolidated=false) */
+  focusedChangeId?: string
+}
+
+/**
+ * Unified file preview data - supports view, diff, and multi-diff modes
+ * Uses discriminated union for type-safe mode handling
+ */
+export type FilePreviewData =
+  | {
+      mode: 'view'
+      sessionId: string
+      previewId: string
+      view: FilePreviewViewData
+    }
+  | {
+      mode: 'diff'
+      sessionId: string
+      previewId: string
+      diff: FilePreviewDiffData
+    }
+  | {
+      mode: 'multi-diff'
+      sessionId: string
+      previewId: string
+      multiDiff: FilePreviewMultiDiffData
+    }
 
 /**
  * Data for markdown preview window
@@ -814,6 +894,7 @@ export interface ElectronAPI {
   // System
   getVersions(): { node: string; chrome: string; electron: string }
   getHomeDir(): Promise<string>
+  isDebugMode(): Promise<boolean>
 
   // Shell operations
   openUrl(url: string): Promise<void>
@@ -896,6 +977,11 @@ export interface ElectronAPI {
   openMultiFileDiff(sessionId: string, turnId: string, data: MultiFileDiffData): Promise<void>
   getMultiFileDiffData(sessionId: string, turnId: string): Promise<MultiFileDiffData | null>
   readFileForDiff(filePath: string): Promise<string | null>
+
+  // Unified file preview window (replaces code/diff/multi-file diff)
+  openFilePreview(data: FilePreviewData): Promise<void>
+  getFilePreviewData(sessionId: string, previewId: string): Promise<FilePreviewData | null>
+  readFileForPreview(filePath: string): Promise<string | null>
 
   // Session Drafts (persisted input text)
   getDraft(sessionId: string): Promise<string | null>

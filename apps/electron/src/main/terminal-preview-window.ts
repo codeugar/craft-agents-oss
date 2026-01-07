@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, nativeTheme } from 'electron'
+import { BrowserWindow, shell, nativeTheme, type BrowserWindowConstructorOptions } from 'electron'
 import { windowLog } from './logger'
 import { join } from 'path'
 import { IPC_CHANNELS, type TerminalPreviewData } from '../shared/types'
@@ -46,8 +46,8 @@ export class TerminalPreviewWindowManager {
       return existing.window
     }
 
-    // Terminal windows use dark background
-    const backgroundColor = '#1a1a1a'
+    // Solid background color matching CSS --background
+    const backgroundColor = nativeTheme.shouldUseDarkColors ? '#302f33' : '#faf9fb'
 
     // Truncate command for title
     const cmdPreview = data.command.length > 50

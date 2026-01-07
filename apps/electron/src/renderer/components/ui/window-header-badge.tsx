@@ -1,65 +1,34 @@
 import * as React from 'react'
 import type { LucideIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 /**
- * Pre-defined badge configs for common tool types
+ * Badge variants using the 6-color design system
  */
-export const BADGE_CONFIGS = {
-  read: {
-    bgColor: 'rgba(59, 130, 246, 0.12)',
-    textColor: 'rgb(59, 130, 246)',
-  },
-  write: {
-    bgColor: 'rgba(34, 197, 94, 0.12)',
-    textColor: 'rgb(34, 197, 94)',
-  },
-  edit: {
-    bgColor: 'rgba(249, 115, 22, 0.12)',
-    textColor: 'rgb(249, 115, 22)',
-  },
-  bash: {
-    bgColor: 'rgba(255, 255, 255, 0.1)',
-    textColor: 'rgb(228, 228, 228)',
-  },
-  grep: {
-    bgColor: 'rgba(168, 85, 247, 0.15)',
-    textColor: 'rgb(168, 85, 247)',
-  },
-  glob: {
-    bgColor: 'rgba(6, 182, 212, 0.15)',
-    textColor: 'rgb(6, 182, 212)',
-  },
-  // Neutral badges for paths, info, etc.
-  neutralDark: {
-    bgColor: 'rgba(255, 255, 255, 0.08)',
-    textColor: 'rgba(255, 255, 255, 0.7)',
-  },
-  neutralLight: {
-    bgColor: 'rgba(0, 0, 0, 0.05)',
-    textColor: 'rgba(0, 0, 0, 0.6)',
-  },
-  // Dimmed neutral for secondary info
-  dimmedDark: {
-    bgColor: 'rgba(255, 255, 255, 0.05)',
-    textColor: 'rgba(255, 255, 255, 0.4)',
-  },
-  dimmedLight: {
-    bgColor: 'rgba(0, 0, 0, 0.03)',
-    textColor: 'rgba(0, 0, 0, 0.4)',
-  },
+export const BADGE_VARIANTS = {
+  // Tool badges with semantic colors (modifications)
+  edit: 'bg-info/15 text-info',              // amber - modification
+  write: 'bg-success/15 text-success',        // green - creation
+
+  // Tool badges with white background (non-modifying)
+  read: 'bg-background text-foreground/70',   // white - passive
+  bash: 'bg-background text-foreground/70',   // white - passive
+  grep: 'bg-background text-foreground/70',   // white - search
+  glob: 'bg-background text-foreground/70',   // white - search
+
+  // Default - white background (for file paths, metadata)
+  default: 'bg-background text-foreground/70',
 } as const
 
-export type BadgeType = keyof typeof BADGE_CONFIGS
+export type BadgeVariant = keyof typeof BADGE_VARIANTS
 
 interface WindowHeaderBadgeProps {
   /** Icon component to display */
   Icon?: LucideIcon
   /** Badge label text */
   label: string
-  /** Background color */
-  bgColor: string
-  /** Text color */
-  textColor: string
+  /** Badge variant (default: 'default') */
+  variant?: BadgeVariant
   /** Click handler (makes it a clickable link-style button) */
   onClick?: () => void
   /** Title for tooltip */
@@ -83,24 +52,23 @@ interface WindowHeaderBadgeProps {
 export function WindowHeaderBadge({
   Icon,
   label,
-  bgColor,
-  textColor,
+  variant = 'default',
   onClick,
   title,
-  className = '',
+  className,
 }: WindowHeaderBadgeProps) {
-  const baseClasses = `flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] font-sans text-[13px] font-medium shadow-minimal ${className}`
-  const style = {
-    backgroundColor: bgColor,
-    color: textColor,
-  } as React.CSSProperties
+  const variantClasses = BADGE_VARIANTS[variant]
+  const baseClasses = cn(
+    'flex items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] font-sans text-[13px] font-medium shadow-minimal',
+    variantClasses,
+    className
+  )
 
   if (onClick) {
     return (
       <button
         onClick={onClick}
-        className={`${baseClasses} min-w-0 cursor-pointer group titlebar-no-drag`}
-        style={style}
+        className={cn(baseClasses, 'min-w-0 cursor-pointer group titlebar-no-drag')}
         title={title || label}
       >
         {Icon && <Icon className="w-3.5 h-3.5 shrink-0" />}
@@ -110,7 +78,7 @@ export function WindowHeaderBadge({
   }
 
   return (
-    <div className={`${baseClasses} shrink-0`} style={style} title={title}>
+    <div className={cn(baseClasses, 'shrink-0')} title={title}>
       {Icon && <Icon className="w-3.5 h-3.5 shrink-0" />}
       <span className="truncate">{label}</span>
     </div>
@@ -119,11 +87,11 @@ export function WindowHeaderBadge({
 
 interface WindowHeaderProps {
   /** Badge elements to render in center */
-  children: React.ReactNode
-  /** Border color for toolbar */
-  borderColor?: string
+  children?: React.ReactNode
   /** Additional className for the toolbar */
   className?: string
+  /** Inline styles (e.g., for background color) */
+  style?: React.CSSProperties
 }
 
 /**
@@ -131,13 +99,18 @@ interface WindowHeaderProps {
  */
 export function WindowHeader({
   children,
-  borderColor = 'rgba(255,255,255,0.1)',
-  className = '',
+  className,
+  style,
 }: WindowHeaderProps) {
   return (
     <div
-      className={`titlebar-drag-region h-[52px] shrink-0 flex items-center justify-between px-4 ${className}`}
-      style={{ borderBottom: `1px solid ${borderColor}` }}
+      className={cn(
+        'titlebar-drag-region h-[50px] shrink-0 flex items-center justify-between px-4 border-b border-foreground/5',
+        'sticky top-0 z-10 backdrop-blur-xl backdrop-saturate-150',
+        'bg-white dark:bg-[#302f33]',
+        className
+      )}
+      style={style}
     >
       {/* Left side - space for traffic lights on macOS */}
       <div className="w-[70px] shrink-0" />
