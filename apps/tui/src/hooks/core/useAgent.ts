@@ -1088,7 +1088,7 @@ export function useAgent(config: CraftAgentConfig): UseAgentResult {
     interruptedRef.current = true;
 
     if (agentRef.current) {
-      agentRef.current.interrupt();
+      agentRef.current.forceAbort();
     }
     setIsProcessing(false);
     setStreamingText('');
