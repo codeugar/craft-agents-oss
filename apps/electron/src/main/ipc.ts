@@ -1308,6 +1308,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         tools = (result.tools || []).map(name => ({ name }))
       } else {
         // HTTP/SSE transport - use HTTP client
+        if (!source.config.mcp.url) {
+          return { success: false, error: 'MCP source URL is required for HTTP/SSE transport' }
+        }
+
         let accessToken: string | undefined
         if (source.config.mcp.authType === 'oauth' || source.config.mcp.authType === 'bearer') {
           const credentialManager = getCredentialManager()
