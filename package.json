@@ -27,6 +27,7 @@
     "electron:build": "bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources",
     "electron:start": "bun run electron:build && electron apps/electron",
     "electron:dev": "bun run electron:clean:vite && bun run electron:build:resources && bun run electron:dev:logs & concurrently -k \"bun run electron:dev:vite\" \"bun run electron:dev:main\" \"bun run electron:dev:preload\" \"bun run electron:dev:electron\"",
+    "electron:dev:menu": "bash scripts/electron-dev.sh",
     "electron:dev:logs": "pgrep -f 'tail -f.*Craft Agents/main.log' > /dev/null || osascript -e \"tell application \\\"Terminal\\\" to do script \\\"$PWD/scripts/tail-electron-logs.sh\\\"\"",
     "sync-secrets": "bash scripts/sync-secrets.sh",
     "electron:dev:vite": "vite dev --config apps/electron/vite.config.ts",
@@ -37,7 +38,7 @@
     "electron:dist:mac": "bun run electron:build && electron-builder --config electron-builder.yml --project apps/electron --mac",
     "electron:dist:win": "bun run electron:build && electron-builder --config electron-builder.yml --project apps/electron --win",
     "electron:dist:linux": "bun run electron:build && electron-builder --config electron-builder.yml --project apps/electron --linux",
-    "viewer:dev": "vite dev --config apps/viewer/vite.config.ts",
+    "viewer:dev": "lsof -ti:5174 | xargs kill -9 2>/dev/null; vite dev --config apps/viewer/vite.config.ts --open /s/tz5-13I84pwK_he",
     "viewer:build": "vite build --config apps/viewer/vite.config.ts",
     "viewer:preview": "vite preview --config apps/viewer/vite.config.ts"
   },

@@ -27,5 +27,13 @@ export default defineConfig({
   server: {
     port: 5174, // Different from Electron dev server
     open: true,
+    proxy: {
+      // Proxy API requests to production R2 during local dev
+      '/s/api': {
+        target: 'https://agents.craft.do',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
 })

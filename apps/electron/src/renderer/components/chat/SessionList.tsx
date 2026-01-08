@@ -326,7 +326,9 @@ function SessionItem({
                 <Spinner className="text-[8px] text-foreground shrink-0" />
               )}
               {!item.isProcessing && hasUnreadMessages(item) && (
-                <div className="w-2 h-2 rounded-full bg-accent shrink-0" />
+                <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-accent text-background">
+                  {countUnreadMessages(item)} new
+                </span>
               )}
               {item.isFlagged && (
                 <Flag className="h-[10px] w-[10px] text-info fill-info shrink-0" />
@@ -346,13 +348,9 @@ function SessionItem({
                 </span>
               )}
               <span className="truncate">
-                {searchQuery && item.agentName ? highlightMatch(item.agentName, searchQuery) : item.agentName || (
-                  !item.isProcessing && hasUnreadMessages(item) ? (
-                    <>{countUnreadMessages(item)} new</>
-                  ) : null
-                )}
+                {searchQuery && item.agentName ? highlightMatch(item.agentName, searchQuery) : item.agentName}
                 {item.lastMessageAt && (
-                  <>{item.agentName || hasUnreadMessages(item) ? ' · ' : ''}{formatDistanceToNow(new Date(item.lastMessageAt), { addSuffix: true })}</>
+                  <>{item.agentName ? ' · ' : ''}{formatDistanceToNow(new Date(item.lastMessageAt), { addSuffix: true })}</>
                 )}
               </span>
             </div>

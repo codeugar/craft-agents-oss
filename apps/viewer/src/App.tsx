@@ -25,11 +25,22 @@ import {
 import { SessionUpload } from './components/SessionUpload'
 import { Header } from './components/Header'
 
+/** Default session ID for development */
+const DEV_SESSION_ID = 'tz5-13I84pwK_he'
+
 /** Extract session ID from URL path /s/{id} */
 function getSessionIdFromUrl(): string | null {
   const path = window.location.pathname
   const match = path.match(/^\/s\/([a-zA-Z0-9_-]+)$/)
-  return match ? match[1] : null
+  if (match) return match[1]
+
+  // In development, redirect root to default session
+  if (import.meta.env.DEV && path === '/') {
+    window.history.replaceState({}, '', `/s/${DEV_SESSION_ID}`)
+    return DEV_SESSION_ID
+  }
+
+  return null
 }
 
 export function App() {
@@ -169,7 +180,7 @@ export function App() {
             <div className="text-destructive mb-4">{error}</div>
             <button
               onClick={handleClear}
-              className="px-4 py-2 rounded-md bg-accent text-accent-foreground hover:opacity-90 transition-opacity"
+              className="px-4 py-2 rounded-md bg-background text-foreground shadow-sm border border-border hover:bg-accent transition-colors"
             >
               Go back
             </button>
@@ -180,7 +191,7 @@ export function App() {
           session={session}
           mode="readonly"
           platformActions={platformActions}
-          defaultExpanded={true}
+          defaultExpanded={false}
           className="flex-1 min-h-0"
           onActivityClick={handleActivityClick}
         />

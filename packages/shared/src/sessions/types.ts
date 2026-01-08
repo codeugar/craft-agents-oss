@@ -2,7 +2,11 @@
  * Session Types
  *
  * Types for workspace-scoped sessions.
- * Sessions are stored at {workspaceRootPath}/sessions/{id}/session.json
+ * Sessions are stored at {workspaceRootPath}/sessions/{id}/session.jsonl
+ *
+ * JSONL Format:
+ * - Line 1: SessionHeader (metadata + pre-computed fields for fast list loading)
+ * - Lines 2+: StoredMessage (one message per line)
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
@@ -114,6 +118,47 @@ export interface SessionConfig {
  */
 export interface StoredSession extends SessionConfig {
   messages: StoredMessage[];
+  tokenUsage: SessionTokenUsage;
+}
+
+/**
+ * Session header - line 1 of session.jsonl
+ *
+ * Contains all metadata needed for list views (pre-computed at save time).
+ * This enables fast session listing without parsing message content.
+ */
+export interface SessionHeader {
+  id: string;
+  /** SDK session ID (captured after first message) */
+  sdkSessionId?: string;
+  /** Workspace root path (stored as portable path, e.g., ~/.craft-agent/...) */
+  workspaceRootPath: string;
+  /** Optional user-defined name */
+  name?: string;
+  createdAt: number;
+  lastUsedAt: number;
+  /** Assigned agent slug (for filtering) */
+  agentSlug?: string;
+  /** Cached agent name for display */
+  agentName?: string;
+  /** Whether this session is flagged */
+  isFlagged?: boolean;
+  /** Permission mode for this session ('safe', 'ask', 'allow-all') */
+  permissionMode?: PermissionMode;
+  /** User-controlled todo state - determines inbox vs completed */
+  todoState?: TodoState;
+  /** ID of last message user has read */
+  lastReadMessageId?: string;
+  /** Per-session source selection (source slugs) */
+  enabledSourceSlugs?: string[];
+  /** Working directory for this session (used by agent for bash commands) */
+  workingDirectory?: string;
+  // Pre-computed fields for fast list loading
+  /** Number of messages in session */
+  messageCount: number;
+  /** Preview of first user message (first 150 chars) */
+  preview?: string;
+  /** Token usage statistics */
   tokenUsage: SessionTokenUsage;
 }
 

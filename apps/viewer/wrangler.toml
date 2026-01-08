@@ -3,6 +3,10 @@ name = "craft-agents-session-viewer"
 compatibility_date = "2024-01-01"
 pages_build_output_dir = "dist"
 
+# Use remote R2 bucket in dev
+[dev]
+remote = true
+
 # R2 bucket binding for session storage
 [[r2_buckets]]
 binding = "SESSIONS"

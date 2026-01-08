@@ -1,0 +1,122 @@
+/**
+ * JSONL Session Storage
+ *
+ * Helpers for reading/writing sessions in JSONL format.
+ * Format: Line 1 = SessionHeader, Lines 2+ = StoredMessage (one per line)
+ */
+
+import { openSync, readSync, closeSync, readFileSync, writeFileSync } from 'fs';
+import type { SessionHeader, StoredSession, StoredMessage, SessionTokenUsage } from './types.ts';
+import { toPortablePath, expandPath } from '../utils/paths.ts';
+
+/**
+ * Read only the header (first line) from a session.jsonl file.
+ * Uses low-level fs to read minimal bytes for fast list loading.
+ */
+export function readSessionHeader(sessionFile: string): SessionHeader | null {
+  try {
+    const fd = openSync(sessionFile, 'r');
+    const buffer = Buffer.alloc(8192); // 8KB is plenty for metadata header
+    const bytesRead = readSync(fd, buffer, 0, 8192, 0);
+    closeSync(fd);
+
+    const content = buffer.toString('utf-8', 0, bytesRead);
+    const firstNewline = content.indexOf('\n');
+    const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
+
+    return JSON.parse(firstLine) as SessionHeader;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read full session from JSONL file.
+ * Parses header and all message lines.
+ */
+export function readSessionJsonl(sessionFile: string): StoredSession | null {
+  try {
+    const content = readFileSync(sessionFile, 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+
+    const firstLine = lines[0];
+    if (!firstLine) return null;
+
+    const header = JSON.parse(firstLine) as SessionHeader;
+    const messages = lines.slice(1).map(line => JSON.parse(line) as StoredMessage);
+
+    return {
+      id: header.id,
+      workspaceRootPath: expandPath(header.workspaceRootPath),
+      createdAt: header.createdAt,
+      lastUsedAt: header.lastUsedAt,
+      name: header.name,
+      sdkSessionId: header.sdkSessionId,
+      agentSlug: header.agentSlug,
+      agentName: header.agentName,
+      isFlagged: header.isFlagged,
+      todoState: header.todoState,
+      permissionMode: header.permissionMode,
+      lastReadMessageId: header.lastReadMessageId,
+      enabledSourceSlugs: header.enabledSourceSlugs,
+      workingDirectory: header.workingDirectory,
+      messages,
+      tokenUsage: header.tokenUsage,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write session to JSONL format.
+ * Line 1: Header with pre-computed metadata
+ * Lines 2+: Messages (one per line)
+ */
+export function writeSessionJsonl(sessionFile: string, session: StoredSession): void {
+  const header = createSessionHeader(session);
+
+  const lines = [
+    JSON.stringify(header),
+    ...session.messages.map(m => JSON.stringify(m)),
+  ];
+
+  writeFileSync(sessionFile, lines.join('\n') + '\n');
+}
+
+/**
+ * Create a SessionHeader from a StoredSession.
+ * Pre-computes messageCount and preview for fast list loading.
+ */
+export function createSessionHeader(session: StoredSession): SessionHeader {
+  return {
+    id: session.id,
+    workspaceRootPath: toPortablePath(session.workspaceRootPath),
+    createdAt: session.createdAt,
+    lastUsedAt: Date.now(),
+    name: session.name,
+    sdkSessionId: session.sdkSessionId,
+    agentSlug: session.agentSlug,
+    agentName: session.agentName,
+    isFlagged: session.isFlagged,
+    todoState: session.todoState,
+    permissionMode: session.permissionMode,
+    lastReadMessageId: session.lastReadMessageId,
+    enabledSourceSlugs: session.enabledSourceSlugs,
+    workingDirectory: session.workingDirectory,
+    // Pre-computed fields
+    messageCount: session.messages.length,
+    preview: extractPreview(session.messages),
+    tokenUsage: session.tokenUsage,
+  };
+}
+
+/**
+ * Extract preview from first user message.
+ * Returns first 150 chars with newlines replaced by spaces.
+ */
+function extractPreview(messages: StoredMessage[]): string | undefined {
+  const firstUserMessage = messages.find(m => m.type === 'user');
+  if (!firstUserMessage?.content) return undefined;
+  return firstUserMessage.content.replace(/\n/g, ' ').substring(0, 150);
+}

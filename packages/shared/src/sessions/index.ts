@@ -2,6 +2,10 @@
  * Sessions Module
  *
  * Public exports for workspace-scoped session management.
+ *
+ * Sessions are stored in JSONL format:
+ * - Line 1: SessionHeader (metadata for fast list loading)
+ * - Lines 2+: StoredMessage (one message per line)
  */
 
 // Types
@@ -12,6 +16,7 @@ export type {
   SessionConfig,
   StoredSession,
   SessionMetadata,
+  SessionHeader,
 } from './types.ts';
 
 // Storage functions
@@ -58,3 +63,11 @@ export {
   // Async persistence queue
   sessionPersistenceQueue,
 } from './storage.ts';
+
+// JSONL helpers (for direct access if needed)
+export {
+  readSessionHeader,
+  readSessionJsonl,
+  writeSessionJsonl,
+  createSessionHeader,
+} from './jsonl.ts';

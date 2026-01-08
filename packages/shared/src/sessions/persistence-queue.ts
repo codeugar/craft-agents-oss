@@ -1,7 +1,8 @@
 import { writeFile } from 'fs/promises'
-import type { StoredSession } from './types.js'
+import type { StoredSession, SessionHeader } from './types.js'
 import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
 import { toPortablePath } from '../utils/paths.js'
+import { createSessionHeader } from './jsonl.js'
 
 interface PendingWrite {
   data: StoredSession
@@ -39,7 +40,7 @@ class SessionPersistenceQueue {
   }
 
   /**
-   * Write a session to disk immediately.
+   * Write a session to disk immediately in JSONL format.
    */
   private async write(sessionId: string): Promise<void> {
     const entry = this.pending.get(sessionId)
@@ -54,7 +55,7 @@ class SessionPersistenceQueue {
 
       const filePath = getSessionFilePath(data.workspaceRootPath, sessionId)
 
-      // Store with portable paths for cross-machine compatibility
+      // Prepare session with portable paths for cross-machine compatibility
       const storageSession: StoredSession = {
         ...data,
         workspaceRootPath: toPortablePath(data.workspaceRootPath),
@@ -62,7 +63,14 @@ class SessionPersistenceQueue {
         lastUsedAt: Date.now(),
       }
 
-      await writeFile(filePath, JSON.stringify(storageSession, null, 2), 'utf-8')
+      // Create JSONL content: header + messages (one per line)
+      const header = createSessionHeader(storageSession)
+      const lines = [
+        JSON.stringify(header),
+        ...storageSession.messages.map(m => JSON.stringify(m)),
+      ]
+
+      await writeFile(filePath, lines.join('\n') + '\n', 'utf-8')
       console.log(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {
       console.error(`[PersistenceQueue] Failed to write session ${sessionId}:`, error)
