@@ -58,7 +58,7 @@ export const MICROSOFT_SERVICE_SCOPES: Record<MicrosoftService, string[]> = {
     'https://graph.microsoft.com/User.Read',
     'offline_access',
   ],
-  calendar: [
+  'microsoft-calendar': [
     'https://graph.microsoft.com/Calendars.ReadWrite',
     'https://graph.microsoft.com/User.Read',
     'offline_access',

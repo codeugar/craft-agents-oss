@@ -41,7 +41,7 @@ export type SlackService = 'messaging' | 'channels' | 'users' | 'files' | 'full'
 /**
  * Microsoft service types for OAuth scope selection
  */
-export type MicrosoftService = 'outlook' | 'calendar' | 'onedrive' | 'teams' | 'sharepoint';
+export type MicrosoftService = 'outlook' | 'microsoft-calendar' | 'onedrive' | 'teams' | 'sharepoint';
 
 /**
  * Infer Google service from API baseUrl.
@@ -129,7 +129,7 @@ export function inferMicrosoftServiceFromUrl(baseUrl: string | undefined): Micro
       return 'outlook';
     }
     if (pathname.includes('/me/calendar') || pathname.includes('/me/events')) {
-      return 'calendar';
+      return 'microsoft-calendar';
     }
     if (pathname.includes('/me/drive') || pathname.includes('/drives')) {
       return 'onedrive';
