@@ -331,6 +331,8 @@ export interface Session {
   workspaceId: string
   workspaceName: string
   name?: string  // User-defined or AI-generated session name
+  /** Preview of first user message (from JSONL header, for lazy-loaded sessions) */
+  preview?: string
   lastMessageAt: number
   messages: Message[]
   isProcessing: boolean
@@ -407,8 +409,9 @@ export type SessionEvent =
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   // Background task/shell events
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string }
-  | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; turnId?: string }
+  | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
   | { type: 'task_progress'; sessionId: string; toolUseId: string; elapsedSeconds: number; turnId?: string }
+  | { type: 'shell_killed'; sessionId: string; shellId: string }
   // User message events (for optimistic UI with backend as source of truth)
   | { type: 'user_message'; sessionId: string; message: Message; status: 'accepted' | 'queued' | 'processing' }
 
@@ -458,6 +461,7 @@ export const IPC_CHANNELS = {
   GET_SESSIONS: 'sessions:get',
   CREATE_SESSION: 'sessions:create',
   DELETE_SESSION: 'sessions:delete',
+  GET_SESSION_MESSAGES: 'sessions:getMessages',
   SEND_MESSAGE: 'sessions:sendMessage',
   CANCEL_PROCESSING: 'sessions:cancel',
   KILL_SHELL: 'sessions:killShell',
@@ -610,29 +614,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_READ_IMAGE: 'workspace:readImage',
   WORKSPACE_WRITE_IMAGE: 'workspace:writeImage',
 
-  // Diff preview window
-  DIFF_PREVIEW_OPEN: 'diffPreview:open',
-  DIFF_PREVIEW_GET_DATA: 'diffPreview:getData',
-
-  // Code preview window (Read/Write tools)
-  CODE_PREVIEW_OPEN: 'codePreview:open',
-  CODE_PREVIEW_GET_DATA: 'codePreview:getData',
-
-  // Terminal preview window (Bash tools)
-  TERMINAL_PREVIEW_OPEN: 'terminalPreview:open',
-  TERMINAL_PREVIEW_GET_DATA: 'terminalPreview:getData',
-
-  // Multi-file diff window (all edits/writes in a turn)
-  MULTI_FILE_DIFF_OPEN: 'multiFileDiff:open',
-  MULTI_FILE_DIFF_GET_DATA: 'multiFileDiff:getData',
-  MULTI_FILE_DIFF_READ_FILE: 'multiFileDiff:readFile',
-
-  // Unified file preview window (replaces code/diff/multi-file diff)
-  FILE_PREVIEW_OPEN: 'filePreview:open',
-  FILE_PREVIEW_GET_DATA: 'filePreview:getData',
-  FILE_PREVIEW_READ_FILE: 'filePreview:readFile',
-
-  // Unified preview window (replaces markdown/file/terminal previews)
+  // Unified preview window (all modes: markdown, view, diff, multi-diff, terminal)
   PREVIEW_OPEN: 'preview:open',
   PREVIEW_GET_DATA: 'preview:getData',
   PREVIEW_SAVE: 'preview:save',
@@ -655,36 +637,7 @@ export const IPC_CHANNELS = {
 } as const
 
 /**
- * Data for diff preview window
- */
-export interface DiffPreviewData {
-  filePath: string
-  original: string
-  modified: string
-  language?: string
-  /** Error message if the edit failed */
-  error?: string
-}
-
-/**
- * Data for code preview window (Read/Write tools)
- */
-export interface CodePreviewData {
-  filePath: string
-  content: string
-  language?: string
-  /** 'read' for Read tool, 'write' for Write tool */
-  mode: 'read' | 'write'
-  /** File metadata from Read tool */
-  numLines?: number
-  startLine?: number
-  totalLines?: number
-  /** Error message if the write failed */
-  error?: string
-}
-
-/**
- * Data for terminal preview window (Bash/Grep/Glob tools)
+ * Data for terminal preview (Bash/Grep/Glob tools)
  */
 export interface TerminalPreviewData {
   command: string
@@ -715,30 +668,9 @@ export interface FileChange {
   error?: string
 }
 
-/**
- * Data for multi-file diff window - shows all edits/writes in a turn
- */
-export interface MultiFileDiffData {
-  /** Session ID for context */
-  sessionId: string
-  /** Turn ID for context */
-  turnId: string
-  /** All file changes in this turn */
-  changes: FileChange[]
-  /** If true (default), group changes by file. If false, show each change separately */
-  consolidated?: boolean
-  /** ID of the change to auto-focus (only used when consolidated=false) */
-  focusedChangeId?: string
-}
-
 // ============================================
-// Unified File Preview Types
+// Unified Preview Types
 // ============================================
-
-/**
- * File preview mode - determines which viewer to show
- */
-export type FilePreviewMode = 'view' | 'diff' | 'multi-diff'
 
 /**
  * View mode data - for Read/Write tool results
@@ -780,30 +712,6 @@ export interface FilePreviewMultiDiffData {
   /** ID of the change to auto-focus (only used when consolidated=false) */
   focusedChangeId?: string
 }
-
-/**
- * Unified file preview data - supports view, diff, and multi-diff modes
- * Uses discriminated union for type-safe mode handling
- */
-export type FilePreviewData =
-  | {
-      mode: 'view'
-      sessionId: string
-      previewId: string
-      view: FilePreviewViewData
-    }
-  | {
-      mode: 'diff'
-      sessionId: string
-      previewId: string
-      diff: FilePreviewDiffData
-    }
-  | {
-      mode: 'multi-diff'
-      sessionId: string
-      previewId: string
-      multiDiff: FilePreviewMultiDiffData
-    }
 
 /**
  * Data for markdown preview window
@@ -894,6 +802,7 @@ import type { SubAgentMetadata } from '@craft-agent/core/types';
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
+  getSessionMessages(sessionId: string): Promise<Session | null>
   createSession(workspaceId: string, agentId?: string, agentName?: string): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
@@ -1024,33 +933,12 @@ export interface ElectronAPI {
   readPreferences(): Promise<{ content: string; exists: boolean }>
   writePreferences(content: string): Promise<{ success: boolean; error?: string }>
 
-  // Diff preview window
-  openDiffPreview(sessionId: string, diffId: string, data: DiffPreviewData): Promise<void>
-  getDiffPreviewData(sessionId: string, diffId: string): Promise<DiffPreviewData | null>
-
-  // Code preview window (Read/Write tools)
-  openCodePreview(sessionId: string, previewId: string, data: CodePreviewData): Promise<void>
-  getCodePreviewData(sessionId: string, previewId: string): Promise<CodePreviewData | null>
-
-  // Terminal preview window (Bash tools)
-  openTerminalPreview(sessionId: string, previewId: string, data: TerminalPreviewData): Promise<void>
-  getTerminalPreviewData(sessionId: string, previewId: string): Promise<TerminalPreviewData | null>
-
-  // Multi-file diff window (all edits/writes in a turn)
-  openMultiFileDiff(sessionId: string, turnId: string, data: MultiFileDiffData): Promise<void>
-  getMultiFileDiffData(sessionId: string, turnId: string): Promise<MultiFileDiffData | null>
-  readFileForDiff(filePath: string): Promise<string | null>
-
-  // Unified file preview window (replaces code/diff/multi-file diff)
-  openFilePreview(data: FilePreviewData): Promise<void>
-  getFilePreviewData(sessionId: string, previewId: string): Promise<FilePreviewData | null>
-  readFileForPreview(filePath: string): Promise<string | null>
-
-  // Unified preview window (replaces markdown/file/terminal previews)
+  // Unified preview window (all modes: markdown, view, diff, multi-diff, terminal)
   openPreview(data: PreviewData): Promise<void>
   getPreviewData(sessionId: string, previewId: string): Promise<PreviewData | null>
   savePreview(sessionId: string, previewId: string, content: string): Promise<void>
   onPreviewFileSaved(callback: (data: { filePath: string }) => void): () => void
+  readFileForPreview(filePath: string): Promise<string | null>
 
   // Session Drafts (persisted input text)
   getDraft(sessionId: string): Promise<string | null>

@@ -6,8 +6,10 @@
  */
 
 import { openSync, readSync, closeSync, readFileSync, writeFileSync } from 'fs';
+import { open, readFile } from 'fs/promises';
 import type { SessionHeader, StoredSession, StoredMessage, SessionTokenUsage } from './types.ts';
 import { toPortablePath, expandPath } from '../utils/paths.ts';
+import { debug } from '../utils/debug.ts';
 
 /**
  * Read only the header (first line) from a session.jsonl file.
@@ -25,7 +27,8 @@ export function readSessionHeader(sessionFile: string): SessionHeader | null {
     const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
 
     return JSON.parse(firstLine) as SessionHeader;
-  } catch {
+  } catch (error) {
+    debug('[jsonl] Failed to read session header:', sessionFile, error);
     return null;
   }
 }
@@ -63,7 +66,8 @@ export function readSessionJsonl(sessionFile: string): StoredSession | null {
       messages,
       tokenUsage: header.tokenUsage,
     };
-  } catch {
+  } catch (error) {
+    debug('[jsonl] Failed to read session:', sessionFile, error);
     return null;
   }
 }
@@ -119,4 +123,43 @@ function extractPreview(messages: StoredMessage[]): string | undefined {
   const firstUserMessage = messages.find(m => m.type === 'user');
   if (!firstUserMessage?.content) return undefined;
   return firstUserMessage.content.replace(/\n/g, ' ').substring(0, 150);
+}
+
+/**
+ * Async version of readSessionHeader for parallel I/O.
+ * Uses fs/promises for non-blocking reads.
+ */
+export async function readSessionHeaderAsync(sessionFile: string): Promise<SessionHeader | null> {
+  try {
+    const handle = await open(sessionFile, 'r');
+    try {
+      const buffer = Buffer.alloc(8192);
+      const { bytesRead } = await handle.read(buffer, 0, 8192, 0);
+      const content = buffer.toString('utf-8', 0, bytesRead);
+      const firstNewline = content.indexOf('\n');
+      const firstLine = firstNewline > 0 ? content.slice(0, firstNewline) : content;
+      return JSON.parse(firstLine) as SessionHeader;
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    debug('[jsonl] Failed to read session header async:', sessionFile, error);
+    return null;
+  }
+}
+
+/**
+ * Read only messages from a JSONL file (skips header).
+ * Used for lazy loading when session is selected.
+ */
+export function readSessionMessages(sessionFile: string): StoredMessage[] {
+  try {
+    const content = readFileSync(sessionFile, 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+    // Skip first line (header), parse rest as messages
+    return lines.slice(1).map(line => JSON.parse(line) as StoredMessage);
+  } catch (error) {
+    debug('[jsonl] Failed to read session messages:', sessionFile, error);
+    return [];
+  }
 }

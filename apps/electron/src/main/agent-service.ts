@@ -216,11 +216,14 @@ export class AgentService {
       }
 
       // For now, return servers/apis with their auth status based on requiresAuth
-      const mcpServers = (definition.mcpServers || []).map((s: McpServerConfig) => ({
-        name: s.name,
-        url: s.url,
-        hasAuth: !s.requiresAuth, // If it doesn't require auth, we consider it authed
-      }))
+      // Filter out servers without URLs (stdio-only servers)
+      const mcpServers = (definition.mcpServers || [])
+        .filter((s: McpServerConfig) => s.url)
+        .map((s: McpServerConfig) => ({
+          name: s.name,
+          url: s.url!,
+          hasAuth: !s.requiresAuth, // If it doesn't require auth, we consider it authed
+        }))
 
       const apis = (definition.apis || []).map((a: ApiConfig) => ({
         name: a.name,
@@ -282,11 +285,13 @@ export class AgentService {
         return { mcpServers: [], apis: [] }
       }
 
-      const mcpServers = (definition.mcpServers || []).filter((s: McpServerConfig) => s.requiresAuth)
+      // Filter servers that require auth and have URLs
+      const mcpServers = (definition.mcpServers || [])
+        .filter((s: McpServerConfig) => s.requiresAuth && s.url)
       const apis = (definition.apis || []).filter((a: ApiConfig) => a.auth && a.auth.type !== 'none')
 
       return {
-        mcpServers: mcpServers.map((s: McpServerConfig) => ({ name: s.name, url: s.url, requiresAuth: s.requiresAuth })),
+        mcpServers: mcpServers.map((s: McpServerConfig) => ({ name: s.name, url: s.url!, requiresAuth: s.requiresAuth })),
         apis: apis.map((a: ApiConfig) => ({ name: a.name, auth: a.auth }))
       }
     } catch (error) {

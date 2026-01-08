@@ -19,6 +19,8 @@ import type { Session, Message } from '../../shared/types'
 export interface SessionMeta {
   id: string
   name?: string
+  /** Preview of first user message (for title fallback) */
+  preview?: string
   agentId?: string
   agentName?: string
   workspaceId: string
@@ -37,6 +39,7 @@ export function extractSessionMeta(session: Session): SessionMeta {
   return {
     id: session.id,
     name: session.name,
+    preview: session.preview,
     agentId: session.agentId,
     agentName: session.agentName,
     workspaceId: session.workspaceId,
@@ -199,6 +202,12 @@ export const addSessionAtom = atom(
     // Add to beginning of IDs list
     const ids = get(sessionIdsAtom)
     set(sessionIdsAtom, [session.id, ...ids])
+
+    // Mark as loaded (new sessions are complete - no lazy loading needed)
+    const loadedSessions = get(loadedSessionsAtom)
+    const newLoadedSessions = new Set(loadedSessions)
+    newLoadedSessions.add(session.id)
+    set(loadedSessionsAtom, newLoadedSessions)
   }
 )
 
@@ -220,6 +229,12 @@ export const removeSessionAtom = atom(
     // Remove from IDs list
     const ids = get(sessionIdsAtom)
     set(sessionIdsAtom, ids.filter(id => id !== sessionId))
+
+    // Remove from loaded sessions tracking
+    const loadedSessions = get(loadedSessionsAtom)
+    const newLoadedSessions = new Set(loadedSessions)
+    newLoadedSessions.delete(sessionId)
+    set(loadedSessionsAtom, newLoadedSessions)
   }
 )
 
@@ -242,6 +257,8 @@ export const removeSessionAtom = atom(
 export const syncSessionsToAtomsAtom = atom(
   null,
   (get, set, sessions: Session[]) => {
+    const loadedSessions = get(loadedSessionsAtom)
+
     // Update each session atom
     for (const session of sessions) {
       const sessionAtom = sessionAtomFamily(session.id)
@@ -252,6 +269,18 @@ export const syncSessionsToAtomsAtom = atom(
       // source of truth during streaming. The handoff event will reconcile.
       if (atomSession?.isProcessing) {
         continue
+      }
+
+      // CRITICAL: If session messages were lazy-loaded, atom has full messages
+      // but React state may have empty array. Only skip if React would lose messages.
+      // Allow sync when React has MORE messages (e.g., user just sent a message).
+      if (loadedSessions.has(session.id) && atomSession) {
+        const atomMessageCount = atomSession.messages?.length ?? 0
+        const reactMessageCount = session.messages?.length ?? 0
+        // Skip sync only if React has fewer messages (would lose data)
+        if (reactMessageCount < atomMessageCount) {
+          continue
+        }
       }
 
       // Only update if the session object is different (referential check)
@@ -272,6 +301,50 @@ export const syncSessionsToAtomsAtom = atom(
 
     // Update ordered IDs (preserve order from React state)
     set(sessionIdsAtom, sessions.map(s => s.id))
+  }
+)
+
+/**
+ * Track which sessions have had their messages loaded (for lazy loading)
+ * Sessions are loaded with empty messages initially, messages are fetched on-demand
+ */
+export const loadedSessionsAtom = atom<Set<string>>(new Set<string>())
+
+/**
+ * Action atom: Load session messages if not already loaded
+ * Returns the loaded session or current session if already loaded
+ */
+export const ensureSessionMessagesLoadedAtom = atom(
+  null,
+  async (get, set, sessionId: string): Promise<Session | null> => {
+    const loadedSessions = get(loadedSessionsAtom)
+
+    // Already loaded, return current session
+    if (loadedSessions.has(sessionId)) {
+      return get(sessionAtomFamily(sessionId))
+    }
+
+    // Fetch messages from main process
+    const loadedSession = await window.electronAPI.getSessionMessages(sessionId)
+    if (!loadedSession) {
+      return get(sessionAtomFamily(sessionId))
+    }
+
+    // Update the atom with the full session (including messages)
+    set(sessionAtomFamily(sessionId), loadedSession)
+
+    // Update metadata
+    const metaMap = get(sessionMetaMapAtom)
+    const newMetaMap = new Map(metaMap)
+    newMetaMap.set(sessionId, extractSessionMeta(loadedSession))
+    set(sessionMetaMapAtom, newMetaMap)
+
+    // Mark as loaded
+    const newLoadedSessions = new Set(loadedSessions)
+    newLoadedSessions.add(sessionId)
+    set(loadedSessionsAtom, newLoadedSessions)
+
+    return loadedSession
   }
 )
 

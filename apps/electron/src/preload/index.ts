@@ -4,6 +4,7 @@ import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment,
 const api: ElectronAPI = {
   // Session management
   getSessions: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSIONS),
+  getSessionMessages: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_MESSAGES, sessionId),
   createSession: (workspaceId: string, agentId?: string, agentName?: string) => ipcRenderer.invoke(IPC_CHANNELS.CREATE_SESSION, workspaceId, agentId, agentName),
   deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_SESSION, sessionId),
   sendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: import('../shared/types').StoredAttachment[], options?: import('../shared/types').SendMessageOptions) => ipcRenderer.invoke(IPC_CHANNELS.SEND_MESSAGE, sessionId, message, attachments, storedAttachments, options),
@@ -198,41 +199,7 @@ const api: ElectronAPI = {
   readPreferences: () => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_READ),
   writePreferences: (content: string) => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_WRITE, content),
 
-  // Diff preview window
-  openDiffPreview: (sessionId: string, diffId: string, data: import('../shared/types').DiffPreviewData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DIFF_PREVIEW_OPEN, sessionId, diffId, data),
-  getDiffPreviewData: (sessionId: string, diffId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.DIFF_PREVIEW_GET_DATA, sessionId, diffId),
-
-  // Code preview window (Read/Write tools)
-  openCodePreview: (sessionId: string, previewId: string, data: import('../shared/types').CodePreviewData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CODE_PREVIEW_OPEN, sessionId, previewId, data),
-  getCodePreviewData: (sessionId: string, previewId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CODE_PREVIEW_GET_DATA, sessionId, previewId),
-
-  // Terminal preview window (Bash tools)
-  openTerminalPreview: (sessionId: string, previewId: string, data: import('../shared/types').TerminalPreviewData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_PREVIEW_OPEN, sessionId, previewId, data),
-  getTerminalPreviewData: (sessionId: string, previewId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_PREVIEW_GET_DATA, sessionId, previewId),
-
-  // Multi-file diff window (all edits/writes in a turn)
-  openMultiFileDiff: (sessionId: string, turnId: string, data: import('../shared/types').MultiFileDiffData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MULTI_FILE_DIFF_OPEN, sessionId, turnId, data),
-  getMultiFileDiffData: (sessionId: string, turnId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MULTI_FILE_DIFF_GET_DATA, sessionId, turnId),
-  readFileForDiff: (filePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.MULTI_FILE_DIFF_READ_FILE, filePath),
-
-  // Unified file preview window (replaces code/diff/multi-file diff)
-  openFilePreview: (data: import('../shared/types').FilePreviewData) =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_PREVIEW_OPEN, data),
-  getFilePreviewData: (sessionId: string, previewId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_PREVIEW_GET_DATA, sessionId, previewId),
-  readFileForPreview: (filePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_PREVIEW_READ_FILE, filePath),
-
-  // Unified preview window (replaces markdown/file/terminal previews)
+  // Unified preview window (all modes: markdown, view, diff, multi-diff, terminal)
   openPreview: (data: import('../shared/types').PreviewData) =>
     ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_OPEN, data),
   getPreviewData: (sessionId: string, previewId: string) =>
@@ -246,6 +213,8 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.PREVIEW_FILE_SAVED, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.PREVIEW_FILE_SAVED, handler)
   },
+  readFileForPreview: (filePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_READ_FILE, filePath),
 
   // Session Drafts (persisted input text)
   getDraft: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET, sessionId),

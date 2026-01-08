@@ -304,7 +304,7 @@ function SessionItem({
               ? "bg-foreground/5 hover:bg-foreground/7"
               : "hover:bg-foreground/2"
           )}
-          onClick={handleClick}
+          onMouseDown={handleClick}
           onKeyDown={(e) => {
             itemProps.onKeyDown(e)
             onKeyDown(e, item)

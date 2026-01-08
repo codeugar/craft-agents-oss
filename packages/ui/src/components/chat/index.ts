@@ -14,3 +14,6 @@ export { UserMessageBubble, type UserMessageBubbleProps } from './UserMessageBub
 
 // Attachment helpers
 export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attachment-helpers'
+
+// Fullscreen overlay
+export { FullscreenOverlay, type FullscreenOverlayProps } from './fullscreen'

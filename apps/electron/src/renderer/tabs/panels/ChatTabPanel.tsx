@@ -6,13 +6,14 @@
  */
 
 import * as React from 'react'
-import { AlertCircle, Bot } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { ChatDisplay } from '@/components/chat/ChatDisplay'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@craft-agent/ui'
 import { useChatContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession } from '@/context/ChatContext'
 import { useAgentState } from '../../hooks/useAgentState'
 import { rendererPerf } from '@/lib/perf'
+import { ensureSessionMessagesLoadedAtom, loadedSessionsAtom, sessionMetaMapAtom } from '../../atoms/sessions'
 import type { Tab, ChatTab } from '../types'
 import { useTabs } from '../useTabs'
 
@@ -58,9 +59,28 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
   // Only re-renders when THIS session changes, not when other sessions stream
   const session = useSession(chatTab.sessionId)
 
+  // Track if messages are loaded for this session (for lazy loading)
+  const loadedSessions = useAtomValue(loadedSessionsAtom)
+  const messagesLoaded = loadedSessions.has(chatTab.sessionId)
+
+  // Check if session exists in metadata (for loading state detection)
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
+  const sessionMeta = sessionMetaMap.get(chatTab.sessionId)
+
+  // Fallback: ensure messages are loaded when tab is viewed
+  // Messages are typically preloaded by openChatTab before the tab switch,
+  // but this handles edge cases (e.g., direct URL navigation, tab restoration)
+  const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
+  React.useEffect(() => {
+    ensureMessagesLoaded(chatTab.sessionId)
+  }, [chatTab.sessionId, ensureMessagesLoaded])
+
   // Perf: Mark when session data is available (useLayoutEffect to fire before end)
+  // Use a ref to ensure we only mark once per session switch
+  const sessionLoadedMarkedRef = React.useRef<string | null>(null)
   React.useLayoutEffect(() => {
-    if (session) {
+    if (session && sessionLoadedMarkedRef.current !== chatTab.sessionId) {
+      sessionLoadedMarkedRef.current = chatTab.sessionId
       rendererPerf.markSessionSwitch(chatTab.sessionId, 'session.loaded')
     }
   }, [chatTab.sessionId, session])
@@ -82,8 +102,12 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
   )
 
   // Perf: Mark when agent state resolves (useLayoutEffect to fire before end)
+  // Use a ref to ensure we only mark once per session switch
+  const agentStatusMarkedRef = React.useRef<string | null>(null)
   React.useLayoutEffect(() => {
-    if (agentState.status.status !== 'idle' || !agentState.isLoading) {
+    if ((agentState.status.status !== 'idle' || !agentState.isLoading) &&
+        agentStatusMarkedRef.current !== chatTab.sessionId) {
+      agentStatusMarkedRef.current = chatTab.sessionId
       rendererPerf.markSessionSwitch(chatTab.sessionId, 'agent.status')
     }
   }, [chatTab.sessionId, agentState.status.status, agentState.isLoading])
@@ -206,6 +230,16 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
     }
   }, [session?.agentId, session?.agentName, agentState.bannerState, agentState.bannerReason, agentState.agentName, agentState.reload])
 
+  // Perf: Mark when data is ready (before rendering ChatDisplay)
+  // Use a ref to track if we've already marked for this session switch
+  const dataReadyMarkedRef = React.useRef<string | null>(null)
+  React.useLayoutEffect(() => {
+    if (messagesLoaded && session && dataReadyMarkedRef.current !== chatTab.sessionId) {
+      dataReadyMarkedRef.current = chatTab.sessionId
+      rendererPerf.markSessionSwitch(chatTab.sessionId, 'data.ready')
+    }
+  }, [chatTab.sessionId, messagesLoaded, session])
+
   // Perf: Mark render complete after paint
   // Using useEffect + rAF to fire after DOM is painted and visible to user
   React.useEffect(() => {
@@ -218,8 +252,58 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
     }
   }, [chatTab.sessionId, session])
 
-  // Handle missing session (deleted while tab was open)
+  // Handle missing session
+  // Two cases: (1) session truly deleted, (2) session not yet loaded (exists in meta map)
   if (!session) {
+    // If session exists in metadata, it's just not loaded yet - show loading state
+    if (sessionMeta) {
+      // Create a skeleton session from metadata for the loading state
+      const skeletonSession = {
+        id: sessionMeta.id,
+        workspaceId: sessionMeta.workspaceId,
+        workspaceName: '', // Not needed for loading state
+        name: sessionMeta.name,
+        preview: sessionMeta.preview,
+        lastMessageAt: sessionMeta.lastMessageAt || 0,
+        messages: [],
+        isProcessing: sessionMeta.isProcessing || false,
+        agentId: sessionMeta.agentId,
+        agentName: sessionMeta.agentName,
+        isFlagged: sessionMeta.isFlagged,
+        workingDirectory: sessionMeta.workingDirectory,
+        enabledSourceSlugs: sessionMeta.enabledSourceSlugs,
+      }
+
+      return (
+        <ChatDisplay
+          session={skeletonSession}
+          onSendMessage={() => {}} // Disabled during loading
+          onOpenFile={handleOpenFile}
+          onOpenUrl={handleOpenUrl}
+          currentModel={currentModel}
+          onModelChange={onModelChange}
+          textareaRef={textareaRef}
+          pendingPermission={undefined}
+          onRespondToPermission={onRespondToPermission}
+          pendingCredential={undefined}
+          onRespondToCredential={onRespondToCredential}
+          agentSetupState={undefined}
+          ultrathinkEnabled={sessionOpts.ultrathinkEnabled}
+          onUltrathinkChange={(enabled) => setOption('ultrathinkEnabled', enabled)}
+          permissionMode={sessionOpts.permissionMode}
+          onPermissionModeChange={setPermissionMode}
+          inputValue={inputValue}
+          onInputChange={handleInputChange}
+          sources={enabledSources}
+          onSourcesChange={(slugs) => onSessionSourcesChange?.(chatTab.sessionId, slugs)}
+          workingDirectory={sessionMeta.workingDirectory}
+          onWorkingDirectoryChange={handleWorkingDirectoryChange}
+          messagesLoading={true}
+        />
+      )
+    }
+
+    // Session truly doesn't exist (deleted while tab was open)
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
         <AlertCircle className="h-10 w-10" />
@@ -234,9 +318,6 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
       </div>
     )
   }
-
-  // Perf: Mark that all data is ready and we're about to render ChatDisplay
-  rendererPerf.markSessionSwitch(chatTab.sessionId, 'data.ready')
 
   return (
     <ChatDisplay
@@ -270,6 +351,8 @@ export default React.memo(function ChatTabPanel({ tab }: ChatTabPanelProps) {
       // Working directory (per session)
       workingDirectory={workingDirectory}
       onWorkingDirectoryChange={handleWorkingDirectoryChange}
+      // Lazy loading - show spinner in messages area while loading
+      messagesLoading={!messagesLoaded}
     />
   )
 })

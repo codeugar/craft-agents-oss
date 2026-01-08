@@ -182,7 +182,7 @@ export function ChatView({
             {turns.map((turn) => {
               if (turn.type === 'user') {
                 return (
-                  <div key={turn.message.id} className={CHAT_LAYOUT.userMessageTopPadding}>
+                  <div key={turn.message.id} className={CHAT_LAYOUT.userMessagePadding}>
                     <UserMessageBubble
                       content={turn.message.content}
                       attachments={turn.message.attachments}

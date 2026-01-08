@@ -1,6 +1,6 @@
 import type { ComponentEntry } from './types'
 import { useState, useEffect, type ReactNode } from 'react'
-import { TurnCard, type ActivityItem, type ResponseContent, type TodoItem } from '@craft-agent/ui'
+import { TurnCard, FullscreenOverlay, type ActivityItem, type ResponseContent, type TodoItem } from '@craft-agent/ui'
 
 /** Wrapper with padding for playground preview */
 function PaddedWrapper({ children }: { children: ReactNode }) {
@@ -951,6 +951,297 @@ export const turnCardComponents: ComponentEntry[] = [
         completedGrepActivity,
         completedReadActivity1,
       ],
+    }),
+  },
+]
+
+// ============================================================================
+// Fullscreen Overlay Components
+// ============================================================================
+
+/** Sample markdown content for fullscreen testing */
+const sampleMarkdownContent = `# Authentication System Analysis
+
+I've completed my analysis of the authentication system. Here's what I found:
+
+## Overview
+
+The authentication system is built around three main components that work together to provide secure user authentication.
+
+### 1. AuthHandler (\`src/auth/index.ts\`)
+
+This is the main entry point for all authentication operations:
+
+- Manages the OAuth 2.0 flow
+- Handles token validation and refresh
+- Provides session management
+- Supports multiple identity providers (Google, GitHub, Microsoft)
+
+\`\`\`typescript
+export class AuthHandler {
+  private oauth: OAuthClient;
+  private tokenManager: TokenManager;
+  private sessionStore: SessionStore;
+
+  async authenticate(credentials: Credentials): Promise<Session> {
+    // Validate credentials format
+    this.validateCredentials(credentials);
+
+    // Get OAuth token from provider
+    const token = await this.oauth.getToken(credentials);
+
+    // Create and store session
+    return this.createSession(token);
+  }
+
+  async refreshToken(session: Session): Promise<Session> {
+    const newToken = await this.oauth.refresh(session.refreshToken);
+    return this.updateSession(session.id, newToken);
+  }
+}
+\`\`\`
+
+### 2. TokenManager (\`src/auth/tokens.ts\`)
+
+Handles secure token storage and lifecycle:
+
+- Stores tokens securely using AES-256 encryption
+- Handles automatic token refresh before expiry (5 minute buffer)
+- Provides token revocation and cleanup
+- Supports both access tokens and refresh tokens
+
+### 3. SessionStore (\`src/auth/sessions.ts\`)
+
+Maintains active user sessions with the following features:
+
+- In-memory session cache for fast lookups
+- Persistent storage backed by Redis
+- Automatic session timeout and cleanup
+- Session restoration on app restart
+
+## Security Considerations
+
+The current implementation has several security strengths:
+
+1. **Token encryption** - All tokens are encrypted at rest
+2. **Short-lived tokens** - Access tokens expire in 15 minutes
+3. **Secure refresh** - Refresh tokens are rotated on each use
+4. **Session binding** - Sessions are bound to device fingerprint
+
+However, I noticed a few areas that could be improved:
+
+- **PKCE support** - Not currently implemented for public clients
+- **Rate limiting** - Auth endpoints lack rate limiting
+- **Audit logging** - Authentication events aren't logged
+
+## Recommendations
+
+Based on my analysis, here are my recommendations:
+
+1. **Implement PKCE** for all OAuth flows to prevent authorization code interception
+2. **Add rate limiting** to prevent brute force attacks (suggest: 5 attempts per minute)
+3. **Enable audit logging** for security monitoring and compliance
+4. **Add MFA support** for sensitive operations
+
+Would you like me to implement any of these improvements?`
+
+/** Plan-style content for testing plan variant */
+const samplePlanContent = `# Implement Authentication Improvements
+
+## Summary
+
+This plan outlines the implementation of security improvements to the authentication system based on the analysis findings.
+
+## Steps
+
+### 1. Implement PKCE Support
+
+Add PKCE (Proof Key for Code Exchange) to all OAuth flows:
+
+- Generate code verifier and challenge on auth start
+- Include code_challenge in authorization request
+- Verify code_verifier on token exchange
+
+**Files to modify:**
+- \`src/auth/oauth.ts\`
+- \`src/auth/index.ts\`
+
+### 2. Add Rate Limiting
+
+Implement rate limiting on authentication endpoints:
+
+- Configure limits: 5 attempts per minute per IP
+- Use sliding window algorithm
+- Add Redis-backed rate limiter
+
+**New files:**
+- \`src/middleware/rate-limiter.ts\`
+
+### 3. Enable Audit Logging
+
+Add comprehensive audit logging for auth events:
+
+- Log successful/failed login attempts
+- Track token refresh and revocation
+- Include metadata (IP, user agent, timestamp)
+
+**Files to modify:**
+- \`src/auth/index.ts\`
+- \`src/lib/logger.ts\`
+
+### 4. Add MFA Support
+
+Implement multi-factor authentication:
+
+- Support TOTP (Google Authenticator, Authy)
+- Add SMS fallback option
+- Implement backup codes
+
+**New files:**
+- \`src/auth/mfa.ts\`
+- \`src/auth/totp.ts\`
+
+## Testing
+
+After implementation, we'll need to:
+
+1. Update existing auth tests
+2. Add PKCE verification tests
+3. Add rate limiting tests
+4. Add MFA enrollment/verification tests
+
+## Timeline
+
+Estimated completion: 3-4 days`
+
+/** Wrapper that provides controlled open state for playground */
+function FullscreenOverlayPlayground({
+  content,
+  variant,
+}: {
+  content: string
+  variant?: 'response' | 'plan'
+}) {
+  const [isOpen, setIsOpen] = useState(true)
+
+  return (
+    <div className="p-8">
+      <button
+        onClick={() => setIsOpen(true)}
+        className="px-4 py-2 bg-accent text-accent-foreground rounded-lg text-sm font-medium hover:bg-accent/90"
+      >
+        Open Fullscreen Overlay
+      </button>
+      <FullscreenOverlay
+        content={content}
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        variant={variant}
+        onOpenUrl={(url) => console.log('[Playground] Open URL:', url)}
+        onOpenFile={(path) => console.log('[Playground] Open file:', path)}
+        onSendFeedback={(feedback) => {
+          console.log('[Playground] Feedback sent:', feedback)
+          alert('Feedback sent! Check console for details.')
+        }}
+      />
+    </div>
+  )
+}
+
+/** Export fullscreen overlay components */
+export const fullscreenOverlayComponents: ComponentEntry[] = [
+  {
+    id: 'fullscreen-overlay',
+    name: 'FullscreenOverlay',
+    category: 'Fullscreen',
+    description: 'Fullscreen view with inline commenting support for responses and plans',
+    component: FullscreenOverlayPlayground,
+    layout: 'top',
+    props: [
+      {
+        name: 'variant',
+        description: 'Style variant: response (default) or plan (shows header)',
+        control: {
+          type: 'select',
+          options: [
+            { label: 'Response', value: 'response' },
+            { label: 'Plan', value: 'plan' },
+          ],
+        },
+        defaultValue: 'response',
+      },
+    ],
+    variants: [
+      {
+        name: 'Response (Default)',
+        description: 'Standard response view with commenting support',
+        props: {
+          content: sampleMarkdownContent,
+          variant: 'response',
+        },
+      },
+      {
+        name: 'Plan Variant',
+        description: 'Plan view with green header badge',
+        props: {
+          content: samplePlanContent,
+          variant: 'plan',
+        },
+      },
+      {
+        name: 'Short Content',
+        description: 'Minimal content to test layout',
+        props: {
+          content: '# Quick Response\n\nThis is a short response to test the layout with minimal content.\n\nLooks good!',
+          variant: 'response',
+        },
+      },
+      {
+        name: 'Code Heavy',
+        description: 'Content with lots of code blocks',
+        props: {
+          content: `# Code Examples
+
+Here are some code examples:
+
+\`\`\`typescript
+// TypeScript example
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+async function getUser(id: string): Promise<User> {
+  const response = await fetch(\`/api/users/\${id}\`);
+  return response.json();
+}
+\`\`\`
+
+\`\`\`python
+# Python example
+def fibonacci(n: int) -> int:
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+\`\`\`
+
+\`\`\`rust
+// Rust example
+fn main() {
+    let numbers: Vec<i32> = (1..=10).collect();
+    let sum: i32 = numbers.iter().sum();
+    println!("Sum: {}", sum);
+}
+\`\`\`
+
+These examples demonstrate different syntax highlighting.`,
+          variant: 'response',
+        },
+      },
+    ],
+    mockData: () => ({
+      content: sampleMarkdownContent,
     }),
   },
 ]

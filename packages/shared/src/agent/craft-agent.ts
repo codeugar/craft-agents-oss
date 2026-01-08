@@ -1988,7 +1988,7 @@ export class CraftAgent {
             this.pinnedPreferencesPrompt = null;
             this.pinnedAgentDefinition = null;
             // Use 'info' instead of 'status' to show message without spinner
-            yield { type: 'info', message: 'Session expired, starting fresh...' };
+            yield { type: 'info', message: 'Session expired, restoring context...' };
             // Recursively call with isRetry=true (yield* delegates all events)
             yield* this.chat(userMessage, attachments, true);
             return;
@@ -2809,21 +2809,29 @@ export class CraftAgent {
                 const intentValue = (typeof toolUse.input._intent === 'string' && toolUse.input._intent)
                   || (typeof toolUse.input.description === 'string' && toolUse.input.description)
                   || undefined;
-                const event: AgentEvent = intentValue
-                  ? {
-                      type: 'shell_backgrounded',
-                      toolUseId,
-                      shellId,
-                      intent: intentValue,
-                      turnId: turnId || undefined,
-                    }
-                  : {
-                      type: 'shell_backgrounded',
-                      toolUseId,
-                      shellId,
-                      turnId: turnId || undefined,
-                    };
+                // Extract command for process killing
+                const commandValue = typeof toolUse.input.command === 'string' ? toolUse.input.command : undefined;
+                const event: AgentEvent = {
+                  type: 'shell_backgrounded',
+                  toolUseId,
+                  shellId,
+                  turnId: turnId || undefined,
+                  ...(intentValue && { intent: intentValue }),
+                  ...(commandValue && { command: commandValue }),
+                };
                 events.push(event);
+              }
+            }
+
+            // Detect shell killed - KillShell tool was called (success or "not found" both mean shell is gone)
+            if (toolUse?.name === 'KillShell') {
+              const shellId = toolUse.input.shell_id as string;
+              if (shellId) {
+                events.push({
+                  type: 'shell_killed',
+                  shellId,
+                  turnId: turnId || undefined,
+                });
               }
             }
 

@@ -142,7 +142,7 @@ function TabItem({ tab, label, isActive, isLast, hideSeparator, onActivate, onCl
   return (
     <button
       data-tab-id={tab.id}
-      onClick={onActivate}
+      onMouseDown={onActivate}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       className={cn(

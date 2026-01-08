@@ -92,6 +92,10 @@ function handleBackgroundTaskEvent(
         ? { ...t, elapsedSeconds: evt.elapsedSeconds as number }
         : t
     ))
+  } else if (event.type === 'shell_killed' && 'shellId' in evt) {
+    // Remove shell task when KillShell succeeds
+    const currentTasks = store.get(backgroundTasksAtom)
+    store.set(backgroundTasksAtom, currentTasks.filter(t => t.id !== evt.shellId))
   } else if (event.type === 'tool_result' && 'toolUseId' in evt) {
     // Remove task when it completes - but NOT if this is the initial backgrounding result
     // Background tasks return immediately with agentId/shell_id/backgroundTaskId,
@@ -111,7 +115,7 @@ function handleBackgroundTaskEvent(
   // Background tasks should persist and keep running after the turn ends
   // They are only removed when:
   // 1. Their tool_result comes back (task finished)
-  // 2. User manually kills them
+  // 2. KillShell succeeds (shell_killed event)
 }
 
 export default function App() {

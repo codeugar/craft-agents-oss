@@ -111,6 +111,10 @@ export interface SessionConfig {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands) */
   workingDirectory?: string;
+  /** Shared viewer URL (if shared via viewer) */
+  sharedUrl?: string;
+  /** Shared session ID in viewer (for revoke) */
+  sharedId?: string;
 }
 
 /**
@@ -153,6 +157,10 @@ export interface SessionHeader {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands) */
   workingDirectory?: string;
+  /** Shared viewer URL (if shared via viewer) */
+  sharedUrl?: string;
+  /** Shared session ID in viewer (for revoke) */
+  sharedId?: string;
   // Pre-computed fields for fast list loading
   /** Number of messages in session */
   messageCount: number;
@@ -183,6 +191,8 @@ export interface SessionMetadata {
   isFlagged?: boolean;
   /** User-controlled todo state */
   todoState?: TodoState;
+  /** Permission mode for this session */
+  permissionMode?: PermissionMode;
   /** Distinct agent names used in this session */
   agents?: string[];
   /** Number of plan files for this session */
@@ -191,4 +201,6 @@ export interface SessionMetadata {
   sharedUrl?: string;
   /** Shared session ID in viewer (for revoke) */
   sharedId?: string;
+  /** Working directory for this session */
+  workingDirectory?: string;
 }

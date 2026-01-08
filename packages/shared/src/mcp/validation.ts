@@ -270,9 +270,10 @@ export async function validateMcpConnection(
         }
       }
 
+      // Use SDK's error field if available (new in v0.2.0), fallback to generic message
       return {
         success: false,
-        error: getValidationErrorMessage({
+        error: status.error || getValidationErrorMessage({
           success: false,
           errorType: status.status,
         }),

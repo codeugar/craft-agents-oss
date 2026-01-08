@@ -7,13 +7,15 @@
  */
 
 import * as React from 'react'
-import { Suspense, lazy, useState, useEffect, Component, type ReactNode, type ErrorInfo } from 'react'
+import { Suspense, lazy, Component, type ReactNode, type ErrorInfo } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useTabs } from './useTabs'
-import type { Tab, TabType } from './types'
+import type { Tab, TabType, ChatTab } from './types'
+// Eagerly loaded - chat tabs are the most common, needs instant switching
+import ChatTabPanel from './panels/ChatTabPanel'
 
 /**
  * Error boundary to catch and display errors in tab panels
@@ -68,9 +70,8 @@ class TabErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
 }
 
 /**
- * Lazy-loaded panel components
+ * Lazy-loaded panel components (less common, ok to have initial load delay)
  */
-const ChatTabPanel = lazy(() => import('./panels/ChatTabPanel'))
 const SettingsTabPanel = lazy(() => import('./panels/SettingsTabPanel'))
 const ShortcutsTabPanel = lazy(() => import('./panels/ShortcutsTabPanel'))
 const AgentInfoTabPanel = lazy(() => import('./panels/AgentInfoTabPanel'))
@@ -80,10 +81,9 @@ const PreferencesTabPanel = lazy(() => import('./panels/PreferencesTabPanel'))
 const SourceInfoTabPanel = lazy(() => import('./panels/SourceInfoTabPanel'))
 
 /**
- * Map tab types to their panel components
+ * Map tab types to their panel components (excludes chat - handled separately)
  */
-const TAB_PANELS: Record<TabType, React.LazyExoticComponent<React.ComponentType<{ tab: Tab }>>> = {
-  chat: ChatTabPanel,
+const TAB_PANELS: Partial<Record<TabType, React.LazyExoticComponent<React.ComponentType<{ tab: Tab }>>>> = {
   settings: SettingsTabPanel,
   shortcuts: ShortcutsTabPanel,
   'agent-info': AgentInfoTabPanel,
@@ -100,32 +100,51 @@ interface TabContentProps {
 export function TabContent({ className }: TabContentProps) {
   const { tabs, activeTab, activeTabId, closeTab } = useTabs()
 
-  // Track which tabs have been rendered (for keeping them in memory)
-  const [renderedTabIds, setRenderedTabIds] = useState<Set<string>>(new Set())
+  // Track which session IDs have been rendered (for chat tabs - keeps panels alive across tab switches)
+  // Use ref to persist across renders without causing re-renders
+  const renderedSessionIdsRef = React.useRef<Set<string>>(new Set())
 
-  // Synchronously update rendered tabs when tabs change
-  // This is critical to prevent rendering deleted tabs
+  // Track which non-chat tab IDs have been rendered
+  const renderedTabIdsRef = React.useRef<Set<string>>(new Set())
+
+  // Synchronously update rendered sets
+  // This is critical for instant tab switching - must happen before render, not in useEffect
   const currentTabIds = new Set(tabs.map(t => t.id))
 
-  // Add active tab to rendered set
-  useEffect(() => {
-    if (activeTabId && !renderedTabIds.has(activeTabId)) {
-      setRenderedTabIds(prev => new Set([...prev, activeTabId]))
-    }
-  }, [activeTabId, renderedTabIds])
+  // Get all current session IDs from chat tabs
+  const chatTabs = tabs.filter((t): t is ChatTab => t.type === 'chat')
+  const currentSessionIds = new Set(chatTabs.map(t => t.sessionId))
 
-  // Clean up rendered tabs that no longer exist
-  useEffect(() => {
-    setRenderedTabIds(prev => {
-      const newSet = new Set<string>()
-      prev.forEach(id => {
-        if (currentTabIds.has(id)) {
-          newSet.add(id)
-        }
-      })
-      return newSet
-    })
-  }, [tabs]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Get active session ID if current tab is a chat tab
+  const activeSessionId = activeTab?.type === 'chat' ? (activeTab as ChatTab).sessionId : null
+
+  // Add active session to rendered set (synchronous, before render)
+  if (activeSessionId && !renderedSessionIdsRef.current.has(activeSessionId)) {
+    renderedSessionIdsRef.current = new Set([...renderedSessionIdsRef.current, activeSessionId])
+  }
+
+  // Add active non-chat tab to rendered set
+  if (activeTabId && activeTab?.type !== 'chat' && !renderedTabIdsRef.current.has(activeTabId)) {
+    renderedTabIdsRef.current = new Set([...renderedTabIdsRef.current, activeTabId])
+  }
+
+  // Clean up sessions that are no longer in any tab (synchronous)
+  for (const sessionId of renderedSessionIdsRef.current) {
+    if (!currentSessionIds.has(sessionId)) {
+      renderedSessionIdsRef.current = new Set([...renderedSessionIdsRef.current].filter(x => x !== sessionId))
+    }
+  }
+
+  // Clean up non-chat tabs that no longer exist (synchronous)
+  for (const id of renderedTabIdsRef.current) {
+    if (!currentTabIds.has(id)) {
+      renderedTabIdsRef.current = new Set([...renderedTabIdsRef.current].filter(x => x !== id))
+    }
+  }
+
+  // Copy to local variables for render
+  const renderedSessionIds = renderedSessionIdsRef.current
+  const renderedTabIds = renderedTabIdsRef.current
 
   if (!activeTab) {
     return (
@@ -135,13 +154,54 @@ export function TabContent({ className }: TabContentProps) {
     )
   }
 
+  // Get the current chat tab (if any) for rendering chat panels
+  const activeChatTab = activeTab?.type === 'chat' ? (activeTab as ChatTab) : null
+
+  // Build list of session panels to render (keyed by sessionId for stability)
+  // Each session that's been visited gets its own panel that stays mounted
+  const sessionPanelsToRender = Array.from(renderedSessionIds)
+    .filter(sessionId => currentSessionIds.has(sessionId))
+    .map(sessionId => {
+      // Find the chat tab for this session to get its full data
+      const chatTab = chatTabs.find(t => t.sessionId === sessionId)
+      return chatTab
+    })
+    .filter((tab): tab is ChatTab => tab !== undefined)
+
+  // Get non-chat tabs to render
+  const nonChatTabs = tabs.filter(tab => tab.type !== 'chat')
+  const nonChatTabsToRender = nonChatTabs.filter(tab =>
+    renderedTabIds.has(tab.id) && currentTabIds.has(tab.id)
+  )
+
   return (
     <div className={cn('relative', className)}>
-      {/* Render all tabs that have been visited, hide inactive ones */}
-      {/* Use currentTabIds for extra safety - ensures we never render deleted tabs */}
-      {tabs.filter(tab => renderedTabIds.has(tab.id) && currentTabIds.has(tab.id)).map(tab => {
+      {/* Render chat session panels - keyed by sessionId for stability */}
+      {/* This keeps panels mounted when switching between sessions */}
+      {sessionPanelsToRender.map(chatTab => {
+        const isActive = activeSessionId === chatTab.sessionId
+
+        return (
+          <div
+            key={`session:${chatTab.sessionId}`}
+            className={cn(
+              'h-full',
+              !isActive && 'invisible absolute inset-0 -z-10'
+            )}
+          >
+            <TabErrorBoundary tabId={chatTab.id} onClose={() => closeTab(chatTab.id)}>
+              <Suspense fallback={<TabLoadingFallback />}>
+                <ChatTabPanel tab={chatTab} />
+              </Suspense>
+            </TabErrorBoundary>
+          </div>
+        )
+      })}
+
+      {/* Render non-chat tabs - keyed by tab.id */}
+      {nonChatTabsToRender.map(tab => {
         const PanelComponent = TAB_PANELS[tab.type]
-        if (!PanelComponent) return null // Guard against missing panel types
+        if (!PanelComponent) return null
         const isActive = tab.id === activeTabId
 
         return (

@@ -36,7 +36,7 @@ import { TabBar } from './TabBar'
 import { TabContent } from './TabContent'
 import { useTabs } from './useTabs'
 import type { Tab, FileTab, BrowserTab, ChatTab } from './types'
-import type { FileChange, FilePreviewData } from '../../shared/types'
+import type { FileChange } from '../../shared/types'
 
 interface TabContainerProps {
   className?: string
@@ -259,7 +259,7 @@ function TabHeaderActions({ tab, onOpenRename }: TabHeaderActionsProps) {
     }
 
     if (changes.length > 0) {
-      const previewData: FilePreviewData = {
+      window.electronAPI.openPreview({
         mode: 'multi-diff',
         sessionId: session.id,
         previewId: 'session', // Use 'session' as a special previewId for session-level view
@@ -267,8 +267,7 @@ function TabHeaderActions({ tab, onOpenRename }: TabHeaderActionsProps) {
           turnId: 'session',
           changes,
         },
-      }
-      window.electronAPI.openFilePreview(previewData)
+      })
     }
   }, [session])
 

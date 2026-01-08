@@ -20,6 +20,7 @@ import { join, dirname, basename, relative } from 'path';
 import { homedir } from 'os';
 import type { FSWatcher } from 'fs';
 import { debug } from '../utils/debug.ts';
+import { perf } from '../utils/perf.ts';
 import { loadStoredConfig, type StoredConfig } from './storage.ts';
 import {
   validateConfig,
@@ -196,6 +197,8 @@ export class ConfigWatcher {
       return;
     }
 
+    const span = perf.span('configWatcher.start', { workspaceId: this.workspaceId });
+
     this.isRunning = true;
     debug('[ConfigWatcher] Starting for workspace:', this.workspaceId);
 
@@ -203,18 +206,24 @@ export class ConfigWatcher {
     if (!existsSync(this.workspaceDir)) {
       mkdirSync(this.workspaceDir, { recursive: true });
     }
+    span.mark('ensureDir');
 
     // Watch global config files
     this.watchGlobalConfigs();
+    span.mark('watchGlobalConfigs');
 
     // Watch workspace directory recursively
     this.watchWorkspaceDir();
+    span.mark('watchWorkspaceDir');
 
     // Initial scan to populate known sources/agents
     this.scanSources();
+    span.mark('scanSources');
     this.scanAgents();
+    span.mark('scanAgents');
 
     debug('[ConfigWatcher] Started watching files');
+    span.end();
   }
 
   /**

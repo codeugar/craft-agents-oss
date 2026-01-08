@@ -5,8 +5,6 @@ import { SessionManager } from './sessions'
 import { registerIpcHandlers } from './ipc'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
-import { TerminalPreviewWindowManager } from './terminal-preview-window'
-import { FilePreviewWindowManager } from './file-preview-window'
 import { UnifiedPreviewWindowManager } from './unified-preview-window'
 import { loadWindowState, saveWindowState } from './window-state'
 import { getWorkspaces } from '@craft-agent/shared/config'
@@ -30,8 +28,6 @@ const DEEPLINK_SCHEME = 'craftagents'
 
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
-let terminalPreviewWindowManager: TerminalPreviewWindowManager | null = null
-let filePreviewWindowManager: FilePreviewWindowManager | null = null
 let unifiedPreviewWindowManager: UnifiedPreviewWindowManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
@@ -146,12 +142,6 @@ app.whenReady().then(async () => {
     // Initialize window manager
     windowManager = new WindowManager()
 
-    // Initialize terminal preview window manager
-    terminalPreviewWindowManager = new TerminalPreviewWindowManager()
-
-    // Initialize unified file preview window manager (view, diff, multi-diff)
-    filePreviewWindowManager = new FilePreviewWindowManager()
-
     // Initialize unified preview window manager (all preview types)
     unifiedPreviewWindowManager = new UnifiedPreviewWindowManager()
     unifiedPreviewWindowManager.setWindowManager(windowManager)
@@ -161,7 +151,7 @@ app.whenReady().then(async () => {
     sessionManager.setWindowManager(windowManager)
 
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager, terminalPreviewWindowManager, filePreviewWindowManager, unifiedPreviewWindowManager)
+    registerIpcHandlers(sessionManager, windowManager, unifiedPreviewWindowManager)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()

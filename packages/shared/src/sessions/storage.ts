@@ -549,6 +549,8 @@ export function updateSessionMetadata(
     | 'enabledSourceSlugs'
     | 'workingDirectory'
     | 'permissionMode'
+    | 'sharedUrl'
+    | 'sharedId'
   >>
 ): void {
   const session = loadSession(workspaceRootPath, sessionId);
@@ -563,6 +565,8 @@ export function updateSessionMetadata(
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
   if (updates.permissionMode !== undefined) session.permissionMode = updates.permissionMode;
   if ('lastReadMessageId' in updates) session.lastReadMessageId = updates.lastReadMessageId;
+  if ('sharedUrl' in updates) session.sharedUrl = updates.sharedUrl;
+  if ('sharedId' in updates) session.sharedId = updates.sharedId;
 
   saveSession(session);
 }

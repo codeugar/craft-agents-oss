@@ -81,16 +81,17 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, c
       const output = await window.electronAPI.getTaskOutput(task.id)
 
       // Open terminal preview window
-      window.electronAPI.openTerminalPreview(
+      window.electronAPI.openPreview({
+        mode: 'terminal',
         sessionId,
-        `task-${task.id}`,
-        {
+        previewId: `task-${task.id}`,
+        terminal: {
           command: task.intent || `${task.type} task`,
           output: output || 'No output available yet',
           description: task.intent,
           toolType: 'bash', // Use 'bash' for both shell and agent tasks
-        }
-      )
+        },
+      })
       setOpen(false)
     } catch (err) {
       toast.error('Failed to load task output')

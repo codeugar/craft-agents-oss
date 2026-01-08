@@ -22,6 +22,7 @@ import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, type ActivityGroup } from './turn-utils'
+import { FullscreenOverlay } from './fullscreen'
 
 // ============================================================================
 // Utilities
@@ -836,6 +837,8 @@ interface StreamingResponsePreviewProps {
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: () => void
+  /** Callback when user sends feedback via fullscreen commenting */
+  onSendFeedback?: (feedback: string) => void
 }
 
 /**
@@ -863,6 +866,7 @@ function StreamingResponsePreview({
   onOpenFile,
   onOpenUrl,
   onPopOut,
+  onSendFeedback,
 }: StreamingResponsePreviewProps) {
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(text)
@@ -907,18 +911,6 @@ function StreamingResponsePreview({
       return () => clearTimeout(timeout)
     }
   }, [text, isStreaming])
-
-  // Handle Escape key to close fullscreen
-  useEffect(() => {
-    if (!isFullscreen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsFullscreen(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isFullscreen])
 
   // Calculate buffering decision based on current text (not displayed text)
   const bufferDecision = useMemo(() => {
@@ -1009,45 +1001,15 @@ function StreamingResponsePreview({
           </div>
         </div>
 
-        {/* Fullscreen overlay */}
-        {isFullscreen && ReactDOM.createPortal(
-          <div className="fixed inset-0 z-50 overflow-y-auto">
-            {/* Close button - top right, clickable over titlebar */}
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className={cn(
-                "fixed top-4 right-[18px] p-1 rounded-[6px] transition-all z-[60]",
-                "bg-background shadow-minimal",
-                "text-muted-foreground/50 hover:text-foreground",
-                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                "[-webkit-app-region:no-drag]"
-              )}
-              title="Close (Esc)"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Scrollable content wrapper with min-height for short messages */}
-            <div className="min-h-screen bg-foreground-3 flex items-start justify-center pt-16 px-6 pb-12">
-              {/* Content card with shadow */}
-              <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[848px]">
-                {/* Content area */}
-                <div className="px-12 pt-8 pb-8">
-                  <div className="text-sm">
-                    <Markdown
-                      mode="minimal"
-                      onUrlClick={onOpenUrl}
-                      onFileClick={onOpenFile}
-                    >
-                      {text}
-                    </Markdown>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+        {/* Fullscreen overlay with commenting */}
+        <FullscreenOverlay
+          content={text}
+          isOpen={isFullscreen}
+          onClose={() => setIsFullscreen(false)}
+          onOpenUrl={onOpenUrl}
+          onOpenFile={onOpenFile}
+          onSendFeedback={onSendFeedback}
+        />
       </>
     )
   }

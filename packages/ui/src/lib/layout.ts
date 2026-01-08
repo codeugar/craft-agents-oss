@@ -41,8 +41,8 @@ export const CHAT_LAYOUT = {
   /** Vertical spacing between messages/turns */
   messageSpacing: 'space-y-2.5',
 
-  /** Extra top padding for user messages (visual separation after AI responses) */
-  userMessageTopPadding: 'pt-3',
+  /** Extra padding for user messages (visual separation from AI responses) */
+  userMessagePadding: 'pt-4 pb-2',
 
   /** Bottom branding area padding */
   brandingPadding: 'pt-16 pb-24',
@@ -55,8 +55,8 @@ export const CHAT_CLASSES = {
   /** Main message container: max-width + centered + padding + spacing */
   messageContainer: `${CHAT_LAYOUT.maxWidth} mx-auto ${CHAT_LAYOUT.containerPadding} ${CHAT_LAYOUT.messageSpacing}`,
 
-  /** User message wrapper with extra top padding */
-  userMessageWrapper: CHAT_LAYOUT.userMessageTopPadding,
+  /** User message wrapper with padding */
+  userMessageWrapper: CHAT_LAYOUT.userMessagePadding,
 
   /** Bottom branding container */
   brandingContainer: `flex justify-center ${CHAT_LAYOUT.brandingPadding}`,

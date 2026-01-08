@@ -22,6 +22,7 @@ import {
   validateTabsAtom,
   replaceTabAtom,
 } from './atoms'
+import { ensureSessionMessagesLoadedAtom } from '../atoms/sessions'
 import { rendererPerf } from '@/lib/perf'
 import type {
   Tab,
@@ -50,11 +51,16 @@ export function useTabs() {
   const closeOtherTabs = useSetAtom(closeOtherTabsAtom)
   const validateTabs = useSetAtom(validateTabsAtom)
   const replaceTab = useSetAtom(replaceTabAtom)
+  const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
 
   /**
    * Open a chat tab for a session
    * - Default: switches existing tab to session (if one exists)
    * - forceNew: always creates a new tab
+   *
+   * Messages are preloaded in the background (fire-and-forget) so the tab
+   * opens immediately. ChatTabPanel handles the loading state if messages
+   * aren't ready yet.
    */
   const openChatTab = useCallback(
     (
@@ -68,6 +74,11 @@ export function useTabs() {
 
       // Perf: Mark tab lookup start
       rendererPerf.markSessionSwitch(sessionId, 'tab.lookup')
+
+      // Fire-and-forget: preload messages in background
+      // Tab opens immediately; ChatTabPanel shows loading state if needed
+      rendererPerf.markSessionSwitch(sessionId, 'messages.preload')
+      ensureMessagesLoaded(sessionId)
 
       // Check if a chat tab for this session already exists
       const existingTab = state.tabs.find(
@@ -119,7 +130,7 @@ export function useTabs() {
       rendererPerf.markSessionSwitch(sessionId, 'tab.create-new')
       openTab(tab)
     },
-    [state.tabs, state.activeTabId, openTab, setActiveTab, replaceTab]
+    [state.tabs, state.activeTabId, openTab, setActiveTab, replaceTab, ensureMessagesLoaded]
   )
 
   /**

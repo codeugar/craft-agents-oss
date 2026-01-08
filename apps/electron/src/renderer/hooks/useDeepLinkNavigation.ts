@@ -125,7 +125,7 @@ export function useDeepLinkNavigation({
 
           // Rename session if name provided
           if (nav.actionParams?.name) {
-            await window.electronAPI.renameSession(session.id, nav.actionParams.name)
+            await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: nav.actionParams.name })
           }
 
           openChatTab(

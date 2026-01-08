@@ -49,9 +49,9 @@ function formatRelativeTime(timestamp?: number): string {
 function getSourceUrl(source: LoadedSource): string | null {
   const { type, mcp, api, local } = source.config
 
-  if (type === 'mcp' && mcp) return mcp.url
-  if (type === 'api' && api) return api.baseUrl
-  if (type === 'local' && local) return local.path
+  if (type === 'mcp' && mcp?.url) return mcp.url
+  if (type === 'api' && api?.baseUrl) return api.baseUrl
+  if (type === 'local' && local?.path) return local.path
 
   return null
 }

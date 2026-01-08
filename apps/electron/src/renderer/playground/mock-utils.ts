@@ -30,9 +30,13 @@ export const mockElectronAPI = {
     return `Output for task ${taskId}:\n\nThis is a mock output in the playground.\nIn the real app, this would show the actual task output.`
   },
 
-  openTerminalPreview: async (sessionId: string, previewId: string, data: any) => {
-    console.log('[Playground] openTerminalPreview called:', { sessionId, previewId, data })
-    alert(`Terminal Preview:\n\nCommand: ${data.command}\n\nOutput:\n${data.output}`)
+  openPreview: async (data: any) => {
+    console.log('[Playground] openPreview called:', data)
+    if (data.mode === 'terminal') {
+      alert(`Terminal Preview:\n\nCommand: ${data.terminal.command}\n\nOutput:\n${data.terminal.output}`)
+    } else {
+      alert(`Preview: ${data.mode}\nSessionId: ${data.sessionId}\nPreviewId: ${data.previewId}`)
+    }
   },
 }
 

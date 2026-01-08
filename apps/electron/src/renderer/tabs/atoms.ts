@@ -91,12 +91,16 @@ export const openTabAtom = atom(null, (get, set, tab: Tab) => {
 /**
  * Action atom: replace a tab atomically (for hybrid tab replacement)
  * This avoids race conditions from sequential closeTab + openTab calls
+ * Also filters out any existing tab with newTab.id to prevent duplicates
  */
 export const replaceTabAtom = atom(
   null,
   (get, set, { oldTabId, newTab }: { oldTabId: string; newTab: Tab }) => {
     const state = get(tabStateAtom)
-    const newTabs = state.tabs.filter((t) => t.id !== oldTabId).concat(newTab)
+    // Filter out BOTH the old tab AND any existing tab with new ID (prevents duplicates)
+    const newTabs = state.tabs
+      .filter((t) => t.id !== oldTabId && t.id !== newTab.id)
+      .concat(newTab)
     set(tabStateAtom, { tabs: newTabs, activeTabId: newTab.id })
   }
 )

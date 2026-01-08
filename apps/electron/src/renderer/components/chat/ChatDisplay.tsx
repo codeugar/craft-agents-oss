@@ -19,7 +19,7 @@ import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMo
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import { Spinner, parseReadResult, parseBashResult, parseGrepResult, parseGlobResult } from "@craft-agent/ui"
 import { useFocusZone } from "@/hooks/keyboard"
-import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, FileChange, MultiFileDiffData, FilePreviewData } from "../../../shared/types"
+import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, FileChange } from "../../../shared/types"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import { SetupAuthBanner, type BannerState } from "./SetupAuthBanner"
 import { TurnCard, PlanCard, UserMessageBubble, groupMessagesByTurn, formatTurnAsMarkdown, formatActivityAsMarkdown, type Turn, type AssistantTurn, type UserTurn, type SystemTurn, type PlanTurn } from "@craft-agent/ui"
@@ -85,6 +85,9 @@ interface ChatDisplayProps {
   workingDirectory?: string
   /** Callback when working directory changes */
   onWorkingDirectoryChange?: (path: string) => void
+  // Lazy loading
+  /** When true, messages are still loading - show spinner in messages area */
+  messagesLoading?: boolean
 }
 
 /**
@@ -269,6 +272,8 @@ export function ChatDisplay({
   // Working directory
   workingDirectory,
   onWorkingDirectoryChange,
+  // Lazy loading
+  messagesLoading = false,
 }: ChatDisplayProps) {
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -279,6 +284,10 @@ export function ChatDisplay({
   // Reverse pagination: show last N turns initially, load more on scroll up
   const TURNS_PER_PAGE = 20
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
+  // Track if messages were lazy-loaded (for fade-in animation)
+  // We use a counter that increments when messages finish loading, which forces motion.div to remount
+  const [fadeInKey, setFadeInKey] = React.useState(0)
+  const [shouldFadeIn, setShouldFadeIn] = React.useState(false)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
   const internalTextareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -363,6 +372,9 @@ export function ChatDisplay({
     return () => viewport.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
 
+  // Track previous messagesLoading state to detect when loading completes
+  const prevMessagesLoadingRef = React.useRef(messagesLoading)
+
   // Auto-scroll using ResizeObserver - fires AFTER layout is complete
   // Debounced to wait for layout to settle before scrolling
   React.useEffect(() => {
@@ -372,8 +384,23 @@ export function ChatDisplay({
     const isSessionSwitch = prevSessionIdRef.current !== session?.id
     prevSessionIdRef.current = session?.id ?? null
 
-    // On session switch: scroll immediately, re-stick to bottom, reset pagination
+    // Detect when messages finish loading (transition from loading to loaded)
+    const justFinishedLoading = prevMessagesLoadingRef.current && !messagesLoading
+    prevMessagesLoadingRef.current = messagesLoading
+
+    // On session switch: reset fade-in state, scroll immediately
     if (isSessionSwitch) {
+      setShouldFadeIn(false)
+      isStickToBottomRef.current = true
+      setVisibleTurnCount(TURNS_PER_PAGE)
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
+    }
+
+    // Messages just finished lazy loading: trigger fade-in animation, scroll immediately
+    // Increment fadeInKey to force motion.div remount so initial animation plays
+    if (justFinishedLoading) {
+      setShouldFadeIn(true)
+      setFadeInKey(k => k + 1)
       isStickToBottomRef.current = true
       setVisibleTurnCount(TURNS_PER_PAGE)
       messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
@@ -402,7 +429,7 @@ export function ChatDisplay({
       resizeObserver.disconnect()
       if (debounceTimer) clearTimeout(debounceTimer)
     }
-  }, [session?.id])
+  }, [session?.id, messagesLoading])
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
@@ -482,7 +509,12 @@ export function ChatDisplay({
             <div className="absolute top-0 left-0 right-2 h-8 z-10 bg-gradient-to-b from-foreground-2 to-transparent pointer-events-none" />
             <ScrollArea className="h-full min-w-0" viewportRef={scrollViewportRef}>
             <div className={cn(CHAT_LAYOUT.maxWidth, "mx-auto", CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing, "min-w-0")}>
-              {session.messages.length === 0 ? (
+              {messagesLoading ? (
+                /* Loading State: Show spinner while messages are being lazy loaded */
+                <div className="flex items-center justify-center h-64">
+                  <Spinner className="text-foreground/30" />
+                </div>
+              ) : session.messages.length === 0 ? (
                 /* Empty State: Welcome message for new sessions */
                 <div className="flex flex-col items-center justify-center h-64 text-muted-foreground px-8">
                   <p className="text-sm font-medium">
@@ -492,7 +524,15 @@ export function ChatDisplay({
                 </div>
               ) : (
                 /* Turn-based Message Display - memoized to avoid re-grouping on every render */
-                <>
+                /* Fade in when messages were lazy-loaded (not immediately available) */
+                /* key={fadeInKey} forces remount when messages finish loading, so initial animation plays */
+                <motion.div
+                  key={fadeInKey}
+                  initial={shouldFadeIn ? { opacity: 0 } : { opacity: 1 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  onAnimationComplete={() => shouldFadeIn && setShouldFadeIn(false)}
+                >
                   {/* Load more indicator - shown when there are older messages */}
                   {hasMoreAbove && (
                     <div className="text-center text-muted-foreground/60 text-xs py-3 select-none">
@@ -501,10 +541,10 @@ export function ChatDisplay({
                   )}
                   {turns.map((turn, index) => {
                     // User turns - render with MemoizedMessageBubble
-                    // Extra top margin creates visual separation after AI responses
+                    // Extra padding creates visual separation from AI responses
                     if (turn.type === 'user') {
                       return (
-                        <div key={`user-${turn.message.id}`} className={CHAT_LAYOUT.userMessageTopPadding}>
+                        <div key={`user-${turn.message.id}`} className={CHAT_LAYOUT.userMessagePadding}>
                           <MemoizedMessageBubble
                             message={turn.message}
                             onOpenFile={onOpenFile}
@@ -649,7 +689,7 @@ export function ChatDisplay({
                               }
 
                               if (changes.length > 0) {
-                                const previewData: FilePreviewData = {
+                                window.electronAPI.openPreview({
                                   mode: 'multi-diff',
                                   sessionId: session.id,
                                   previewId: `multi-${turn.turnId}-${activity.id}`,
@@ -659,8 +699,7 @@ export function ChatDisplay({
                                     consolidated: false, // Ungrouped mode
                                     focusedChangeId: activity.id, // Focus on clicked activity
                                   },
-                                }
-                                window.electronAPI.openFilePreview(previewData)
+                                })
                               }
                             }
                             // Read tool → Code preview (read mode)
@@ -669,7 +708,7 @@ export function ChatDisplay({
                               const filePath = (input.file_path as string) || 'unknown'
                               const parsed = parseReadResult(activity.content || '')
 
-                              const previewData: FilePreviewData = {
+                              window.electronAPI.openPreview({
                                 mode: 'view',
                                 sessionId: session.id,
                                 previewId: `code-${activity.id}`,
@@ -681,8 +720,7 @@ export function ChatDisplay({
                                   startLine: parsed.startLine,
                                   totalLines: parsed.totalLines,
                                 },
-                              }
-                              window.electronAPI.openFilePreview(previewData)
+                              })
                             }
                             // Bash tool → Terminal preview
                             else if (activity.toolName === 'Bash' && input) {
@@ -690,12 +728,17 @@ export function ChatDisplay({
                               const description = (input.description as string) || undefined
                               const parsed = parseBashResult(activity.content || '')
 
-                              window.electronAPI.openTerminalPreview(session.id, `terminal-${activity.id}`, {
-                                command,
-                                output: parsed.output,
-                                description,
-                                exitCode: parsed.exitCode,
-                                toolType: 'bash',
+                              window.electronAPI.openPreview({
+                                mode: 'terminal',
+                                sessionId: session.id,
+                                previewId: `terminal-${activity.id}`,
+                                terminal: {
+                                  command,
+                                  output: parsed.output,
+                                  description,
+                                  exitCode: parsed.exitCode,
+                                  toolType: 'bash',
+                                },
                               })
                             }
                             // Grep tool → Terminal preview (search results)
@@ -705,11 +748,16 @@ export function ChatDisplay({
                               const outputMode = (input.output_mode as string) || 'files_with_matches'
                               const parsed = parseGrepResult(activity.content || '', pattern, searchPath, outputMode)
 
-                              window.electronAPI.openTerminalPreview(session.id, `terminal-${activity.id}`, {
-                                command: parsed.command,
-                                output: parsed.output,
-                                description: parsed.description,
-                                toolType: 'grep',
+                              window.electronAPI.openPreview({
+                                mode: 'terminal',
+                                sessionId: session.id,
+                                previewId: `terminal-${activity.id}`,
+                                terminal: {
+                                  command: parsed.command,
+                                  output: parsed.output,
+                                  description: parsed.description,
+                                  toolType: 'grep',
+                                },
                               })
                             }
                             // Glob tool → Terminal preview (file list)
@@ -718,11 +766,16 @@ export function ChatDisplay({
                               const searchPath = (input.path as string) || '.'
                               const parsed = parseGlobResult(activity.content || '', pattern, searchPath)
 
-                              window.electronAPI.openTerminalPreview(session.id, `terminal-${activity.id}`, {
-                                command: parsed.command,
-                                output: parsed.output,
-                                description: parsed.description,
-                                toolType: 'glob',
+                              window.electronAPI.openPreview({
+                                mode: 'terminal',
+                                sessionId: session.id,
+                                previewId: `terminal-${activity.id}`,
+                                terminal: {
+                                  command: parsed.command,
+                                  output: parsed.output,
+                                  description: parsed.description,
+                                  toolType: 'glob',
+                                },
                               })
                             }
                             // Default → Markdown preview
@@ -772,7 +825,7 @@ export function ChatDisplay({
                             }
 
                             if (changes.length > 0) {
-                              const previewData: FilePreviewData = {
+                              window.electronAPI.openPreview({
                                 mode: 'multi-diff',
                                 sessionId: session.id,
                                 previewId: `multi-${turn.turnId}`,
@@ -780,15 +833,14 @@ export function ChatDisplay({
                                   turnId: turn.turnId,
                                   changes,
                                 },
-                              }
-                              window.electronAPI.openFilePreview(previewData)
+                              })
                             }
                           }
                         }}
                       />
                     )
                   })}
-                </>
+                </motion.div>
               )}
               {/* Processing Indicator - always visible while processing */}
               {session.isProcessing && (() => {
