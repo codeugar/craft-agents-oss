@@ -1286,6 +1286,7 @@ Check \`Retry-After\` header when rate limited.
 }
 \`\`\`
 
+**IMPORTANT**: For testEndpoint, use \`api.test\` with method POST to verify the connection. And have a trailing slash in the baseUrl.
 ### Authentication
 Use \`source_oauth_trigger\` with provider "slack" to start the Slack OAuth flow.
 
@@ -1316,6 +1317,218 @@ Common scopes needed:
     { "method": "POST", "path": "users\\\\.list", "comment": "List users" },
     { "method": "POST", "path": "users\\\\.info", "comment": "User info" },
     { "method": "POST", "path": "api\\\\.test", "comment": "Test connection" }
+  ]
+}
+\`\`\`
+`;
+
+const OUTLOOK_GUIDE = `---
+domains:
+  - outlook.live.com
+  - outlook.office.com
+  - graph.microsoft.com
+providers:
+  - microsoft
+  - outlook
+---
+
+# Outlook
+
+Access to Microsoft Outlook email via the Microsoft Graph API.
+
+## Scope
+
+- Read, send, and manage emails
+- Access mail folders (Inbox, Sent, Drafts, etc.)
+- Search messages
+- Manage attachments
+
+## Guidelines
+
+- Use the \`api_outlook\` tool with \`path\`, \`method\`, and optional \`params\`
+- Base URL: \`https://graph.microsoft.com/v1.0\`
+- All paths are relative to the base URL
+
+## Common Endpoints
+
+### List Messages
+\`\`\`
+GET /me/messages
+\`\`\`
+Query params: \`$top\`, \`$skip\`, \`$filter\`, \`$orderby\`, \`$select\`
+
+### Get a Message
+\`\`\`
+GET /me/messages/{id}
+\`\`\`
+
+### Search Messages
+\`\`\`
+GET /me/messages?$search="keyword"
+\`\`\`
+
+### List Mail Folders
+\`\`\`
+GET /me/mailFolders
+\`\`\`
+
+### Send Email
+\`\`\`
+POST /me/sendMail
+Body: { "message": { "subject": "...", "body": { "contentType": "Text", "content": "..." }, "toRecipients": [{ "emailAddress": { "address": "..." } }] } }
+\`\`\`
+
+## Rate Limits
+
+Microsoft Graph has throttling limits. If you receive 429 errors, wait before retrying.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_outlook",
+  "name": "Outlook",
+  "slug": "outlook",
+  "enabled": true,
+  "provider": "microsoft",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://graph.microsoft.com/v1.0/",
+    "authType": "bearer",
+    "microsoftService": "outlook",
+    "testEndpoint": {
+      "method": "GET",
+      "path": "me/mailFolders?$top=1"
+    }
+  },
+  "iconUrl": "https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/brand-icons/product/svg/outlook_48x1.svg"
+}
+\`\`\`
+
+### Authentication
+Use \`source_microsoft_oauth_trigger\` to start the Microsoft OAuth flow.
+
+### Recommended Questions
+- What kinds of emails do you typically search for?
+- Do you need to send emails or just read?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedApiEndpoints": [
+    { "method": "GET", "path": ".*", "comment": "All GET requests are read-only" }
+  ]
+}
+\`\`\`
+`;
+
+const TEAMS_GUIDE = `---
+providers:
+  - microsoft
+  - teams
+---
+
+# Microsoft Teams
+
+Access to Microsoft Teams via the Microsoft Graph API.
+
+## Scope
+
+- List joined teams and channels
+- Read and send channel messages
+- Access chat messages
+- View team members
+
+## Guidelines
+
+- Use the \`api_teams\` tool with \`path\`, \`method\`, and optional \`params\`
+- Base URL: \`https://graph.microsoft.com/v1.0\`
+- All paths are relative to the base URL
+
+## Common Endpoints
+
+### List Joined Teams
+\`\`\`
+GET /me/joinedTeams
+\`\`\`
+Returns all teams the user is a member of.
+
+### List Channels
+\`\`\`
+GET /teams/{team-id}/channels
+\`\`\`
+
+### Get Channel Messages
+\`\`\`
+GET /teams/{team-id}/channels/{channel-id}/messages
+\`\`\`
+Query params: \`$top\`, \`$skip\`
+
+### Send Channel Message
+\`\`\`
+POST /teams/{team-id}/channels/{channel-id}/messages
+Body: { "body": { "content": "Hello!" } }
+\`\`\`
+
+### List Chats
+\`\`\`
+GET /me/chats
+\`\`\`
+
+### Get Chat Messages
+\`\`\`
+GET /me/chats/{chat-id}/messages
+\`\`\`
+
+## Rate Limits
+
+Microsoft Graph has throttling limits. If you receive 429 errors, wait before retrying.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_teams",
+  "name": "Microsoft Teams",
+  "slug": "teams",
+  "enabled": true,
+  "provider": "microsoft",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://graph.microsoft.com/v1.0/",
+    "authType": "bearer",
+    "microsoftService": "teams",
+    "testEndpoint": {
+      "method": "GET",
+      "path": "me/chats?$top=1"
+    }
+  },
+  "iconUrl": "https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/brand-icons/product/svg/teams_48x1.svg"
+}
+\`\`\`
+
+### Authentication
+Use \`source_microsoft_oauth_trigger\` to start the Microsoft OAuth flow.
+
+### Recommended Questions
+- Which teams or channels do you primarily work with?
+- Do you need to send messages or just read?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedApiEndpoints": [
+    { "method": "GET", "path": ".*", "comment": "All GET requests are read-only" }
   ]
 }
 \`\`\`
@@ -1384,6 +1597,279 @@ This is a **local stdio MCP server** with no external dependencies.
 This is a local server - no API keys or OAuth needed.
 `;
 
+const MICROSOFT_CALENDAR_GUIDE = `---
+domains:
+  - outlook.live.com
+  - outlook.office.com
+  - graph.microsoft.com
+providers:
+  - microsoft
+  - microsoft-calendar
+---
+
+# Microsoft Calendar
+
+Access to Microsoft Outlook Calendar via the Microsoft Graph API.
+
+## Scope
+
+- List and manage calendar events
+- Access multiple calendars
+- Create, update, and delete events
+- View free/busy information
+
+## Guidelines
+
+- Use the \`api_microsoft-calendar\` tool with \`path\`, \`method\`, and optional \`params\`
+- Base URL: \`https://graph.microsoft.com/v1.0\`
+- All paths are relative to the base URL
+
+## Common Endpoints
+
+### List Calendars
+\`\`\`
+GET /me/calendars
+\`\`\`
+Returns all calendars for the user.
+
+### List Events
+\`\`\`
+GET /me/events
+\`\`\`
+Query params: \`$top\`, \`$skip\`, \`$filter\`, \`$orderby\`, \`$select\`
+
+### List Events in Date Range
+\`\`\`
+GET /me/calendarView?startDateTime={start}&endDateTime={end}
+\`\`\`
+Use ISO 8601 format for dates (e.g., 2024-01-01T00:00:00Z)
+
+### Get Event
+\`\`\`
+GET /me/events/{id}
+\`\`\`
+
+### Create Event
+\`\`\`
+POST /me/events
+Body: { "subject": "...", "start": { "dateTime": "...", "timeZone": "..." }, "end": { "dateTime": "...", "timeZone": "..." } }
+\`\`\`
+
+### Update Event
+\`\`\`
+PATCH /me/events/{id}
+Body: { fields to update }
+\`\`\`
+
+### Delete Event
+\`\`\`
+DELETE /me/events/{id}
+\`\`\`
+
+## Rate Limits
+
+Microsoft Graph has throttling limits. If you receive 429 errors, wait before retrying.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_microsoft_calendar",
+  "name": "Microsoft Calendar",
+  "slug": "microsoft-calendar",
+  "enabled": true,
+  "provider": "microsoft",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://graph.microsoft.com/v1.0/",
+    "authType": "bearer",
+    "microsoftService": "microsoft-calendar",
+    "testEndpoint": {
+      "method": "GET",
+      "path": "me/calendars?$top=1"
+    }
+  },
+  "iconUrl": "https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/brand-icons/product/svg/outlook_48x1.svg"
+}
+\`\`\`
+
+### Authentication
+Use \`source_microsoft_oauth_trigger\` to start the Microsoft OAuth flow.
+
+### Recommended Questions
+- What types of calendar events do you typically work with?
+- Do you need to create/modify events or just view them?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedApiEndpoints": [
+    { "method": "GET", "path": ".*", "comment": "All GET requests are read-only" }
+  ]
+}
+\`\`\`
+`;
+
+const SHAREPOINT_GUIDE = `---
+domains:
+  - sharepoint.com
+  - graph.microsoft.com
+providers:
+  - microsoft
+  - sharepoint
+---
+
+# SharePoint
+
+Access to Microsoft SharePoint sites, document libraries, and files via the Microsoft Graph API.
+
+## Scope
+
+- List and search SharePoint sites
+- Access document libraries and folders
+- Read, upload, and manage files
+- Access site lists and list items
+
+## Guidelines
+
+- Use the \`api_sharepoint\` tool with \`path\`, \`method\`, and optional \`params\`
+- Base URL: \`https://graph.microsoft.com/v1.0\`
+- All paths are relative to the base URL
+
+## Common Endpoints
+
+### List All Sites
+\`\`\`
+GET /sites?search=*
+\`\`\`
+Returns all SharePoint sites the user has access to.
+
+### Get Root Site
+\`\`\`
+GET /sites/root
+\`\`\`
+
+### Get Site by ID
+\`\`\`
+GET /sites/{site-id}
+\`\`\`
+
+### Search Sites
+\`\`\`
+GET /sites?search={query}
+\`\`\`
+
+### List Document Libraries (Drives)
+\`\`\`
+GET /sites/{site-id}/drives
+\`\`\`
+
+### List Files in Drive Root
+\`\`\`
+GET /sites/{site-id}/drive/root/children
+\`\`\`
+
+### List Files in Folder
+\`\`\`
+GET /sites/{site-id}/drive/root:/{folder-path}:/children
+\`\`\`
+
+### Get File Metadata
+\`\`\`
+GET /sites/{site-id}/drive/items/{item-id}
+\`\`\`
+
+### Download File Content
+\`\`\`
+GET /sites/{site-id}/drive/items/{item-id}/content
+\`\`\`
+
+### Search Files in Site
+\`\`\`
+GET /sites/{site-id}/drive/root/search(q='{query}')
+\`\`\`
+
+### List Site Lists
+\`\`\`
+GET /sites/{site-id}/lists
+\`\`\`
+
+### Get List Items
+\`\`\`
+GET /sites/{site-id}/lists/{list-id}/items
+\`\`\`
+
+### Upload File
+\`\`\`
+PUT /sites/{site-id}/drive/root:/{filename}:/content
+Body: [file content]
+\`\`\`
+
+## Query Parameters
+
+Common OData query parameters:
+- \`$select\`: Choose specific fields
+- \`$expand\`: Include related entities
+- \`$filter\`: Filter results
+- \`$orderby\`: Sort results
+- \`$top\`: Limit number of results
+- \`$skip\`: Skip results for pagination
+
+## Rate Limits
+
+Microsoft Graph has throttling limits. If you receive 429 errors, wait before retrying.
+
+<!-- SETUP: This section is ONLY for the setup agent -->
+
+## Setup Hints
+
+### Configuration
+
+**Required config.json:**
+\`\`\`json
+{
+  "id": "src_sharepoint",
+  "name": "SharePoint",
+  "slug": "sharepoint",
+  "enabled": true,
+  "provider": "microsoft",
+  "type": "api",
+  "api": {
+    "baseUrl": "https://graph.microsoft.com/v1.0/",
+    "authType": "bearer",
+    "microsoftService": "sharepoint",
+    "testEndpoint": {
+      "method": "GET",
+      "path": "sites?search=*"
+    }
+  },
+  "iconUrl": "https://res.cdn.office.net/files/fabric-cdn-prod_20241209.001/assets/brand-icons/product/svg/sharepoint_48x1.svg"
+}
+\`\`\`
+
+### Authentication
+Use \`source_microsoft_oauth_trigger\` to start the Microsoft OAuth flow.
+
+### Recommended Questions
+- Which SharePoint sites do you primarily work with?
+- Do you need to upload files or just read/browse?
+- Are there specific document libraries you frequently access?
+
+### Permissions for Explore Mode
+\`\`\`json
+{
+  "allowedApiEndpoints": [
+    { "method": "GET", "path": ".*", "comment": "All GET requests are read-only" }
+  ]
+}
+\`\`\`
+`;
+
 /**
  * Map of bundled source guide files
  */
@@ -1397,6 +1883,10 @@ export const BUNDLED_SOURCE_GUIDES: Record<string, string> = {
   'google-docs.md': GOOGLE_DOCS_GUIDE,
   'google-sheets.md': GOOGLE_SHEETS_GUIDE,
   'slack.com.md': SLACK_GUIDE,
+  'outlook.com.md': OUTLOOK_GUIDE,
+  'microsoft-calendar.md': MICROSOFT_CALENDAR_GUIDE,
+  'teams.microsoft.com.md': TEAMS_GUIDE,
+  'sharepoint.com.md': SHAREPOINT_GUIDE,
   'filesystem.md': FILESYSTEM_GUIDE,
   'brave-search.md': BRAVE_SEARCH_GUIDE,
   'memory.md': MEMORY_GUIDE,
