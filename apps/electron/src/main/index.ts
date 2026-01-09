@@ -12,6 +12,7 @@ import { initializeDocs } from '@craft-agent/shared/docs'
 import { handleDeepLink } from './deep-link'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
 import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
+import { initNotificationService, clearBadgeCount } from './notifications'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -149,6 +150,9 @@ app.whenReady().then(async () => {
     // Initialize session manager
     sessionManager = new SessionManager()
     sessionManager.setWindowManager(windowManager)
+
+    // Initialize notification service
+    initNotificationService(windowManager)
 
     // Register IPC handlers (must happen before window creation)
     registerIpcHandlers(sessionManager, windowManager, unifiedPreviewWindowManager)

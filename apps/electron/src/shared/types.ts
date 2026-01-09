@@ -634,6 +634,14 @@ export const IPC_CHANNELS = {
 
   // Logo URL resolution (uses Node.js filesystem cache)
   LOGO_GET_URL: 'logo:getUrl',
+
+  // Notifications
+  NOTIFICATION_SHOW: 'notification:show',
+  NOTIFICATION_NAVIGATE: 'notification:navigate',  // Broadcast: { workspaceId, sessionId }
+  BADGE_UPDATE: 'badge:update',
+  BADGE_CLEAR: 'badge:clear',
+  WINDOW_FOCUS_STATE: 'window:focusState',  // Broadcast: boolean (isFocused)
+  WINDOW_GET_FOCUS_STATE: 'window:getFocusState',
 } as const
 
 /**
@@ -984,6 +992,14 @@ export interface ElectronAPI {
 
   // Logo URL resolution (uses Node.js filesystem cache for provider domains)
   getLogoUrl(serviceUrl: string, provider?: string): Promise<string | null>
+
+  // Notifications
+  showNotification(title: string, body: string, workspaceId: string, sessionId: string): Promise<void>
+  updateBadgeCount(count: number): Promise<void>
+  clearBadgeCount(): Promise<void>
+  getWindowFocusState(): Promise<boolean>
+  onWindowFocusChange(callback: (isFocused: boolean) => void): () => void
+  onNotificationNavigate(callback: (data: { workspaceId: string; sessionId: string }) => void): () => void
 }
 
 /**

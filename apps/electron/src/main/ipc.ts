@@ -1515,4 +1515,32 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     console.log(`[logo] getLogoUrl("${serviceUrl}", "${provider}") => "${result}"`)
     return result
   })
+
+  // ============================================================
+  // Notifications and Badge
+  // ============================================================
+
+  // Show a notification
+  ipcMain.handle(IPC_CHANNELS.NOTIFICATION_SHOW, async (_event, title: string, body: string, workspaceId: string, sessionId: string) => {
+    const { showNotification } = await import('./notifications')
+    showNotification(title, body, workspaceId, sessionId)
+  })
+
+  // Update app badge count
+  ipcMain.handle(IPC_CHANNELS.BADGE_UPDATE, async (_event, count: number) => {
+    const { updateBadgeCount } = await import('./notifications')
+    updateBadgeCount(count)
+  })
+
+  // Clear app badge
+  ipcMain.handle(IPC_CHANNELS.BADGE_CLEAR, async () => {
+    const { clearBadgeCount } = await import('./notifications')
+    clearBadgeCount()
+  })
+
+  // Get window focus state
+  ipcMain.handle(IPC_CHANNELS.WINDOW_GET_FOCUS_STATE, () => {
+    const { isAnyWindowFocused } = require('./notifications')
+    return isAnyWindowFocused()
+  })
 }

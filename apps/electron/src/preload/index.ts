@@ -324,6 +324,34 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener(IPC_CHANNELS.THEME_AGENT_CHANGED, handler)
     }
   },
+
+  // Notifications
+  showNotification: (title: string, body: string, workspaceId: string, sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_SHOW, title, body, workspaceId, sessionId),
+  updateBadgeCount: (count: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.BADGE_UPDATE, count),
+  clearBadgeCount: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.BADGE_CLEAR),
+  getWindowFocusState: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_GET_FOCUS_STATE),
+  onWindowFocusChange: (callback: (isFocused: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, isFocused: boolean) => {
+      callback(isFocused)
+    }
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_FOCUS_STATE, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_FOCUS_STATE, handler)
+    }
+  },
+  onNotificationNavigate: (callback: (data: { workspaceId: string; sessionId: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { workspaceId: string; sessionId: string }) => {
+      callback(data)
+    }
+    ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_NAVIGATE, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_NAVIGATE, handler)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)

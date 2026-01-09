@@ -46,6 +46,7 @@ export class WindowManager {
       height: 900,
       minWidth: 800,
       minHeight: 600,
+      show: false, // Don't show until ready-to-show event (faster perceived startup)
       title: '',
       icon: iconExists ? iconPath : undefined,
       titleBarStyle: 'hiddenInset',
@@ -64,6 +65,11 @@ export class WindowManager {
         sandbox: false,
         webviewTag: true // Enable webview for browser panel
       }
+    })
+
+    // Show window when first paint is ready (faster perceived startup)
+    window.once('ready-to-show', () => {
+      window.show()
     })
 
     // Open external links in default browser
@@ -121,6 +127,18 @@ export class WindowManager {
       }
     }
     nativeTheme.on('updated', themeHandler)
+
+    // Handle focus/blur to broadcast window focus state
+    window.on('focus', () => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, true)
+      }
+    })
+    window.on('blur', () => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, false)
+      }
+    })
 
     // Handle window close - clean up theme listener first, then internal state
     window.on('closed', () => {

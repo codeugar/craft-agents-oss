@@ -530,6 +530,7 @@ export function FreeFormInput({
     // Shift+Tab cycles through permission modes
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault()
+      e.stopPropagation()
       const currentIndex = PERMISSION_MODE_ORDER.indexOf(permissionMode)
       const nextIndex = (currentIndex + 1) % PERMISSION_MODE_ORDER.length
       const nextMode = PERMISSION_MODE_ORDER[nextIndex]

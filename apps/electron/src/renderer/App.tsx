@@ -17,6 +17,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { FocusProvider } from '@/context/FocusContext'
 import { useGlobalShortcuts } from '@/hooks/keyboard'
 import { useOnboarding } from '@/hooks/useOnboarding'
+import { useNotifications } from '@/hooks/useNotifications'
 import { useTabs } from '@/tabs'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
@@ -190,20 +191,11 @@ export default function App() {
 
   // Splash screen state - tracks when app is fully ready (all data loaded)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
-  const [splashMinTimeElapsed, setSplashMinTimeElapsed] = useState(false)
   const [splashExiting, setSplashExiting] = useState(false)
   const [splashHidden, setSplashHidden] = useState(false)
 
-  // Start minimum splash timer on mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSplashMinTimeElapsed(true)
-    }, 800) // Minimum 800ms to prevent flash on fast loads
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Compute if app is fully ready (all data loaded + minimum time elapsed)
-  const isFullyReady = appState === 'ready' && sessionsLoaded && !isLoadingAgents && splashMinTimeElapsed
+  // Compute if app is fully ready (all data loaded)
+  const isFullyReady = appState === 'ready' && sessionsLoaded && !isLoadingAgents
 
   // Trigger splash exit animation when fully ready
   useEffect(() => {
@@ -309,7 +301,19 @@ export default function App() {
   }, [])
 
   // Tab system - closeChatTabBySession for deletion, openChatTab for new chat
-  const { closeChatTabBySession, openChatTab } = useTabs()
+  const { closeChatTabBySession, openChatTab, setActiveTab } = useTabs()
+
+  // Notification system - shows native OS notifications and badge count
+  const handleNavigateToSession = useCallback((sessionId: string) => {
+    // Navigate to the session by switching to its tab
+    setActiveTab(`chat:${sessionId}`)
+  }, [setActiveTab])
+
+  const { isWindowFocused, showSessionNotification } = useNotifications({
+    workspaceId: windowWorkspaceId,
+    sessions,
+    onNavigateToSession: handleNavigateToSession,
+  })
 
   // Load workspaces, sessions, model, and drafts when app is ready
   useEffect(() => {
@@ -514,6 +518,16 @@ export default function App() {
             }
             return prev.map(s => s.id === sessionId ? updatedSession : s)
           })
+
+          // Show notification on complete (when window is not focused)
+          if (event.type === 'complete') {
+            // Get the last assistant message as preview
+            const lastMessage = updatedSession.messages.findLast(
+              m => m.role === 'assistant' && !m.isIntermediate
+            )
+            const preview = lastMessage?.content?.substring(0, 100) || undefined
+            showSessionNotification(updatedSession, preview)
+          }
         }
 
         return
@@ -546,7 +560,7 @@ export default function App() {
     })
 
     return cleanup
-  }, [processAgentEvent, windowWorkspaceId, store, updateSessionDirect])
+  }, [processAgentEvent, windowWorkspaceId, store, updateSessionDirect, showSessionNotification])
 
   // Listen for menu bar events
   useEffect(() => {
