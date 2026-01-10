@@ -128,7 +128,7 @@ export class WindowManager {
 
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.SYSTEM_THEME_CHANGED, nativeTheme.shouldUseDarkColors)
       }
     }
@@ -136,12 +136,12 @@ export class WindowManager {
 
     // Handle focus/blur to broadcast window focus state
     window.on('focus', () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, true)
       }
     })
     window.on('blur', () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, false)
       }
     })
@@ -332,7 +332,7 @@ export class WindowManager {
    */
   broadcastToAll(channel: string, ...args: unknown[]): void {
     for (const managed of this.getAllWindows()) {
-      if (!managed.window.isDestroyed()) {
+      if (!managed.window.isDestroyed() && !managed.window.webContents.isDestroyed()) {
         managed.window.webContents.send(channel, ...args)
       }
     }

@@ -119,7 +119,7 @@ export function createApplicationMenu(): void {
  */
 function sendToRenderer(channel: string): void {
   const win = BrowserWindow.getFocusedWindow()
-  if (win) {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
     win.webContents.send(channel)
   }
 }

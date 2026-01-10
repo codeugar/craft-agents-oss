@@ -63,6 +63,8 @@ export function readSessionJsonl(sessionFile: string): StoredSession | null {
       lastReadMessageId: header.lastReadMessageId,
       enabledSourceSlugs: header.enabledSourceSlugs,
       workingDirectory: header.workingDirectory,
+      sharedUrl: header.sharedUrl,
+      sharedId: header.sharedId,
       messages,
       tokenUsage: header.tokenUsage,
     };
@@ -108,6 +110,8 @@ export function createSessionHeader(session: StoredSession): SessionHeader {
     lastReadMessageId: session.lastReadMessageId,
     enabledSourceSlugs: session.enabledSourceSlugs,
     workingDirectory: session.workingDirectory,
+    sharedUrl: session.sharedUrl,
+    sharedId: session.sharedId,
     // Pre-computed fields
     messageCount: session.messages.length,
     preview: extractPreview(session.messages),

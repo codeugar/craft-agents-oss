@@ -295,8 +295,10 @@ export async function handleDeepLink(
       sidebar: target.sidebar,
       sidebarParams: target.sidebarParams,
     }
-    window.webContents.send(IPC_CHANNELS.DEEP_LINK_NAVIGATE, navigation)
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(IPC_CHANNELS.DEEP_LINK_NAVIGATE, navigation)
+    }
   }
 
-  return { success: true, windowId: window.webContents.id }
+  return { success: true, windowId: window.isDestroyed() ? -1 : window.webContents.id }
 }

@@ -860,6 +860,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         lastReadMessageId: m.lastReadMessageId,
         workingDirectory: m.workingDirectory,
         enabledSourceSlugs: m.enabledSourceSlugs,
+        sharedUrl: m.sharedUrl,
+        sharedId: m.sharedId,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -887,6 +889,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       lastReadMessageId: m.lastReadMessageId,
       workingDirectory: m.workingDirectory,
       enabledSourceSlugs: m.enabledSourceSlugs,
+      sharedUrl: m.sharedUrl,
+      sharedId: m.sharedId,
     }
   }
 
@@ -2517,11 +2521,12 @@ To view this task's output:
 
     // Send event to all windows for this workspace
     for (const window of windows) {
-      if (!window.isDestroyed()) {
+      // Check both window and webContents to avoid race condition during window closure
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
         try {
           window.webContents.send(IPC_CHANNELS.SESSION_EVENT, event)
-        } catch (error) {
-          sessionLog.error(`Failed to send ${event.type} event to window:`, error)
+        } catch {
+          // Silently ignore - this is expected during window closure race conditions
         }
       }
     }

@@ -567,9 +567,9 @@ export function Chat({
   const [sidebarWidth, setSidebarWidth] = React.useState(() => {
     return storage.get(storage.KEYS.sidebarWidth, 220)
   })
-  // Session list width in pixels (min 280, max 500)
+  // Session list width in pixels (min 240, max 480)
   const [sessionListWidth, setSessionListWidth] = React.useState(() => {
-    return storage.get(storage.KEYS.sessionListWidth, 340)
+    return storage.get(storage.KEYS.sessionListWidth, 300)
   })
   const [isResizing, setIsResizing] = React.useState<'sidebar' | 'session-list' | null>(null)
   const [sidebarHandleY, setSidebarHandleY] = React.useState<number | null>(null)
@@ -969,7 +969,7 @@ export function Chat({
         }
       } else if (isResizing === 'session-list') {
         const offset = isSidebarVisible ? sidebarWidth : 0
-        const newWidth = Math.min(Math.max(e.clientX - offset, 280), 500)
+        const newWidth = Math.min(Math.max(e.clientX - offset, 240), 480)
         setSessionListWidth(newWidth)
         if (sessionListHandleRef.current) {
           const rect = sessionListHandleRef.current.getBoundingClientRect()

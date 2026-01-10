@@ -236,7 +236,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       const window = callingWorkspaceId
         ? windowManager.getWindowByWorkspace(callingWorkspaceId)
         : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-      if (window && !window.isDestroyed()) {
+      if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.SESSION_EVENT, {
           type: 'error',
           sessionId,

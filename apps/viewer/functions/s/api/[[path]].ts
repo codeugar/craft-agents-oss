@@ -3,6 +3,7 @@
  *
  * Routes:
  * - POST /s/api - Create new session, upload JSON
+ * - PUT /s/api/{id} - Update existing session
  * - GET /s/api/{id} - Fetch session JSON
  * - DELETE /s/api/{id} - Delete session
  */
@@ -30,7 +31,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // CORS headers
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   }
 
@@ -65,6 +66,31 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         },
         { headers: corsHeaders }
       )
+    }
+
+    // PUT /s/api/{id} - Update existing session
+    if (method === 'PUT' && pathParts.length === 1) {
+      const id = pathParts[0]
+      const key = `${id}.json`
+
+      // Check if exists first
+      const existing = await env.SESSIONS.head(key)
+      if (!existing) {
+        return Response.json({ error: 'Session not found' }, { status: 404, headers: corsHeaders })
+      }
+
+      const body = await request.json()
+
+      // Validate it's a session object
+      if (!body || typeof body !== 'object') {
+        return Response.json({ error: 'Invalid session data' }, { status: 400, headers: corsHeaders })
+      }
+
+      await env.SESSIONS.put(key, JSON.stringify(body), {
+        httpMetadata: { contentType: 'application/json' },
+      })
+
+      return Response.json({ success: true }, { headers: corsHeaders })
     }
 
     // GET /s/api/{id} - Fetch session

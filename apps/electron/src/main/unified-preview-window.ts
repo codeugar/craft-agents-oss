@@ -183,7 +183,7 @@ export class UnifiedPreviewWindowManager {
 
     // Listen for system theme changes
     const themeHandler = () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
         window.webContents.send(IPC_CHANNELS.SYSTEM_THEME_CHANGED, nativeTheme.shouldUseDarkColors)
       }
     }

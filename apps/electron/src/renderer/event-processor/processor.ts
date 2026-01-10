@@ -32,6 +32,8 @@ import {
   handleAskQuestionRequest,
   handleUserMessage,
   handleAgentStatus,
+  handleSessionShared,
+  handleSessionUnshared,
 } from './handlers/session'
 
 /**
@@ -136,6 +138,12 @@ export function processEvent(
 
     case 'agent_status':
       return handleAgentStatus(state, event)
+
+    case 'session_shared':
+      return handleSessionShared(state, event)
+
+    case 'session_unshared':
+      return handleSessionUnshared(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

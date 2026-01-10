@@ -122,9 +122,8 @@ export function ChatView({
 
   // Track expanded turns (for controlled state)
   const [expandedTurns, setExpandedTurns] = useState<Set<string>>(() => {
-    // Default: expand all in readonly mode, collapse in interactive
-    const shouldExpandAll = defaultExpanded ?? (mode === 'readonly')
-    if (shouldExpandAll) {
+    // Default: all turns collapsed, can override with defaultExpanded prop
+    if (defaultExpanded) {
       return new Set(turns.filter(t => t.type === 'assistant').map(t => (t as AssistantTurn).turnId))
     }
     return new Set()

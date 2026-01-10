@@ -278,6 +278,23 @@ export interface AgentStatusEvent {
 }
 
 /**
+ * Session shared event - session was shared to viewer
+ */
+export interface SessionSharedEvent {
+  type: 'session_shared'
+  sessionId: string
+  sharedUrl: string
+}
+
+/**
+ * Session unshared event - session share was revoked
+ */
+export interface SessionUnsharedEvent {
+  type: 'session_unshared'
+  sessionId: string
+}
+
+/**
  * Union of all agent events
  */
 export type AgentEvent =
@@ -305,6 +322,8 @@ export type AgentEvent =
   | TaskProgressEvent
   | UserMessageEvent
   | AgentStatusEvent
+  | SessionSharedEvent
+  | SessionUnsharedEvent
 
 /**
  * Side effects that need to be handled outside the pure processor

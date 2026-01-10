@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { formatDistanceToNow, isToday, isYesterday, format, startOfDay } from "date-fns"
-import { Trash2, Pencil, MoreHorizontal, Flag, FlagOff, MailOpen, Search, X, FolderOpen, Share2, Copy, Link2Off, AppWindow } from "lucide-react"
+import { Trash2, Pencil, MoreHorizontal, Flag, FlagOff, MailOpen, Search, X, FolderOpen, Copy, Link2Off, AppWindow, Globe, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn, isHexColor } from "@/lib/utils"
@@ -345,6 +345,54 @@ function SessionItem({
                   {PERMISSION_MODE_CONFIG[permissionMode].shortName}
                 </span>
               )}
+              {item.sharedUrl && (
+                <DropdownMenu modal={true}>
+                  <DropdownMenuTrigger asChild>
+                    <span
+                      className="shrink-0 px-1.5 py-0.5 h-[18px] text-[10px] font-medium rounded flex items-center bg-foreground/10 text-foreground/70 cursor-pointer hover:bg-foreground/15"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Globe className="h-[10px] w-[10px]" />
+                    </span>
+                  </DropdownMenuTrigger>
+                  <StyledDropdownMenuContent align="start">
+                    <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(item.sharedUrl!)}>
+                      <Globe />
+                      Open in Browser
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuItem onClick={async () => {
+                      await navigator.clipboard.writeText(item.sharedUrl!)
+                      toast.success('Link copied to clipboard')
+                    }}>
+                      <Copy />
+                      Copy Link
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuItem onClick={async () => {
+                      const result = await window.electronAPI.sessionCommand(item.id, { type: 'updateShare' })
+                      if (result?.success) {
+                        toast.success('Share updated')
+                      } else {
+                        toast.error('Failed to update share', { description: result?.error })
+                      }
+                    }}>
+                      <RefreshCw />
+                      Update Share
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuSeparator />
+                    <StyledDropdownMenuItem onClick={async () => {
+                      const result = await window.electronAPI.sessionCommand(item.id, { type: 'revokeShare' })
+                      if (result?.success) {
+                        toast.success('Sharing stopped')
+                      } else {
+                        toast.error('Failed to stop sharing', { description: result?.error })
+                      }
+                    }} variant="destructive">
+                      <Link2Off />
+                      Stop Sharing
+                    </StyledDropdownMenuItem>
+                  </StyledDropdownMenuContent>
+                </DropdownMenu>
+              )}
               <span className="truncate">
                 {searchQuery && item.agentName ? highlightMatch(item.agentName, searchQuery) : item.agentName}
                 {item.lastMessageAt && (
@@ -387,36 +435,51 @@ function SessionItem({
                     toast.error('Failed to share', { description: result?.error || 'Unknown error' })
                   }
                 }}>
-                  <Share2 />
+                  <Globe />
                   Share
                 </StyledDropdownMenuItem>
               ) : (
-                <>
-                  <StyledDropdownMenuItem onClick={async () => {
-                    await navigator.clipboard.writeText(item.sharedUrl!)
-                    toast.success('Link copied to clipboard', {
-                      description: item.sharedUrl,
-                      action: {
-                        label: 'Open',
-                        onClick: () => window.electronAPI.openUrl(item.sharedUrl!),
-                      },
-                    })
-                  }}>
-                    <Copy />
-                    Copy Share Link
-                  </StyledDropdownMenuItem>
-                  <StyledDropdownMenuItem onClick={async () => {
-                    const result = await window.electronAPI.sessionCommand(item.id, { type: 'revokeShare' })
-                    if (result?.success) {
-                      toast.success('Share link revoked')
-                    } else {
-                      toast.error('Failed to revoke', { description: result?.error || 'Unknown error' })
-                    }
-                  }} variant="destructive">
-                    <Link2Off />
-                    Revoke Share
-                  </StyledDropdownMenuItem>
-                </>
+                <DropdownMenuSub>
+                  <StyledDropdownMenuSubTrigger>
+                    <Globe />
+                    Shared
+                  </StyledDropdownMenuSubTrigger>
+                  <StyledDropdownMenuSubContent>
+                    <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(item.sharedUrl!)}>
+                      <Globe />
+                      Open in Browser
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuItem onClick={async () => {
+                      await navigator.clipboard.writeText(item.sharedUrl!)
+                      toast.success('Link copied to clipboard')
+                    }}>
+                      <Copy />
+                      Copy Link
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuItem onClick={async () => {
+                      const result = await window.electronAPI.sessionCommand(item.id, { type: 'updateShare' })
+                      if (result?.success) {
+                        toast.success('Share updated')
+                      } else {
+                        toast.error('Failed to update share', { description: result?.error })
+                      }
+                    }}>
+                      <RefreshCw />
+                      Update Share
+                    </StyledDropdownMenuItem>
+                    <StyledDropdownMenuItem onClick={async () => {
+                      const result = await window.electronAPI.sessionCommand(item.id, { type: 'revokeShare' })
+                      if (result?.success) {
+                        toast.success('Sharing stopped')
+                      } else {
+                        toast.error('Failed to stop sharing', { description: result?.error })
+                      }
+                    }} variant="destructive">
+                      <Link2Off />
+                      Stop Sharing
+                    </StyledDropdownMenuItem>
+                  </StyledDropdownMenuSubContent>
+                </DropdownMenuSub>
               )}
               <StyledDropdownMenuSeparator />
               <DropdownMenuSub>

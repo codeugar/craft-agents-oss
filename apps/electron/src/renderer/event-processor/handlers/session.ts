@@ -24,6 +24,8 @@ import type {
   AskQuestionRequestEvent,
   UserMessageEvent,
   AgentStatusEvent,
+  SessionSharedEvent,
+  SessionUnsharedEvent,
 } from '../types'
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
@@ -497,6 +499,49 @@ export function handleAgentStatus(
       session: {
         ...session,
         agentStatus: event.status,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle session_shared - session was shared to viewer
+ */
+export function handleSessionShared(
+  state: SessionState,
+  event: SessionSharedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        sharedUrl: event.sharedUrl,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle session_unshared - session share was revoked
+ */
+export function handleSessionUnshared(
+  state: SessionState,
+  _event: SessionUnsharedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        sharedUrl: undefined,
+        sharedId: undefined,
       },
       streaming,
     },
