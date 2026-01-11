@@ -19,7 +19,6 @@ export {
   getDefaultWorkspacesDir,
   ensureDefaultWorkspacesDir,
   getWorkspaceSourcesPath,
-  getWorkspaceAgentsPath,
   getWorkspaceSessionsPath,
   // Config operations
   loadWorkspaceConfig,

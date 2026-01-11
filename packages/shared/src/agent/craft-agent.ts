@@ -61,7 +61,7 @@ export {
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
 } from './mode-manager.ts';
-// Documentation is now served via external HTTP MCP at agents.craft.do/docs/mcp
+// Documentation is served via local files at ~/.craft-agent/docs/
 
 // Import and re-export AgentEvent from core (single source of truth)
 import type { AgentEvent } from '@craft-agent/core/types';
@@ -159,25 +159,6 @@ function isInternalSDKError(message: string): boolean {
   return internalErrorPatterns.some((pattern) => lowerMsg.includes(pattern));
 }
 
-// AskUserQuestion types
-export interface QuestionOption {
-  label: string;
-  description: string;
-}
-
-export interface Question {
-  question: string;
-  header: string;
-  options: QuestionOption[];
-  multiSelect: boolean;
-}
-
-interface PendingQuestion {
-  resolve: (answers: Record<string, string>) => void;
-  questions: Question[];
-}
-
-
 // ============================================================
 // Global Tool Permission System
 // Used by both bash commands (via agent instance) and MCP tools (via global functions)
@@ -247,19 +228,6 @@ export function resolveGlobalPermission(requestId: string, allowed: boolean): vo
  */
 export function clearGlobalPermissions(): void {
   globalPendingPermissions.clear();
-}
-
-// Callback for agent instructions reload (set by TUI when agent is active)
-let reloadAgentInstructionsCallback: (() => Promise<boolean>) | null = null;
-
-export function setReloadAgentInstructionsCallback(
-  callback: (() => Promise<boolean>) | null
-): void {
-  reloadAgentInstructionsCallback = callback;
-}
-
-export function getReloadAgentInstructionsCallback(): (() => Promise<boolean>) | null {
-  return reloadAgentInstructionsCallback;
 }
 
 // Handle preferences update (extracted for use in MCP tool)
@@ -375,7 +343,6 @@ export class CraftAgent {
   private sessionId: string | null = null;
   private isHeadless: boolean = false;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
-  private pendingQuestions: Map<string, PendingQuestion> = new Map();
   private alwaysAllowedCommands: Set<string> = new Set(); // Base commands allowed for this session (e.g., "ls", "cat")
   private alwaysAllowedDomains: Set<string> = new Set(); // Domains allowed for curl/wget (session-scoped)
   // Pre-built source server configs (user-defined sources, separate from agent)
@@ -430,9 +397,6 @@ export class CraftAgent {
 
   // Debug callback for status messages
   public onDebug: ((message: string) => void) | null = null;
-
-  // Callback for AskUserQuestion tool - set by TUI to receive question prompts
-  public onAskUserQuestion: ((request: { requestId: string; questions: Question[] }) => void) | null = null;
 
   /** Callback when permission mode changes */
   public onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
@@ -647,16 +611,6 @@ export class CraftAgent {
     }
   }
 
-  /**
-   * Respond to a pending AskUserQuestion request
-   */
-  respondToQuestion(requestId: string, answers: Record<string, string>): void {
-    const pending = this.pendingQuestions.get(requestId);
-    if (pending) {
-      pending.resolve(answers);
-      this.pendingQuestions.delete(requestId);
-    }
-  }
   // ============================================
   // Safe Mode Methods
   // ============================================
@@ -809,12 +763,6 @@ export class CraftAgent {
         preferences: getPreferencesServer(false),
         // Session-scoped tools (SubmitPlan, source_test, etc.)
         session: getSessionScopedTools(sessionId, this.workspaceRootPath),
-        // External docs MCP server (public, no auth required)
-        // Provides Craft Agent documentation for MCP servers, APIs, and setup
-        docs: {
-          type: 'http',
-          url: 'https://agents.craft.do/docs/mcp',
-        },
         // Add user-defined source servers (MCP and API, filtered by local MCP setting)
         // Note: Craft MCP server is now added via sources system
         ...sourceMcpResult.servers,
@@ -872,7 +820,7 @@ export class CraftAgent {
         },
         cwd: this.config.session?.workingDirectory ?? process.cwd(),
         includePartialMessages: true,
-        // Enable the full Claude Code toolset (includes AskUserQuestion)
+        // Enable the full Claude Code toolset
         tools: { type: 'preset', preset: 'claude_code' },
         // Bypass SDK's built-in permission system - we handle all permissions via PreToolUse hook
         // This allows Safe Mode to properly allow read-only bash commands without SDK interference
@@ -973,7 +921,7 @@ export class CraftAgent {
                 const serverName = parts[1];
                 if (parts.length >= 3 && serverName) {
                   // Built-in MCP servers that are always available (session-scoped tools)
-                  const builtInMcpServers = new Set(['preferences', 'session', 'docs']);
+                  const builtInMcpServers = new Set(['preferences', 'session']);
 
                   // Check if this is a source server (not built-in)
                   if (!builtInMcpServers.has(serverName)) {
@@ -1036,7 +984,7 @@ export class CraftAgent {
               // Built-in SDK tools (don't extract _intent from these)
               const builtInTools = new Set([
                 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-                'WebFetch', 'WebSearch', 'Task', 'TaskOutput', 'AskUserQuestion',
+                'WebFetch', 'WebSearch', 'Task', 'TaskOutput',
                 'TodoWrite', 'MultiEdit', 'NotebookEdit', 'KillShell',
                 'SubmitPlan', 'Skill', 'SlashCommand',
               ]);
@@ -1309,15 +1257,14 @@ export class CraftAgent {
               // Skip built-in SDK tools (they have their own context management)
               const builtInTools = new Set([
                 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-                'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion',
+                'WebFetch', 'WebSearch', 'Task',
                 'TodoWrite', 'MultiEdit', 'NotebookEdit', 'KillShell',
                 'SubmitPlan', 'Skill', 'SlashCommand',
               ]);
 
-              // Skip in-process MCP tools (preferences, agent management)
+              // Skip in-process MCP tools (preferences)
               const inProcessTools = new Set([
-                'update_user_preferences', 'reload_agent_instructions',
-                'update_agent_instructions',
+                'update_user_preferences',
               ]);
 
               // Skip API tools - they already handle summarization internally
@@ -1410,52 +1357,10 @@ export class CraftAgent {
         // Skip resume on retry (after session expiry) to start fresh
         ...(!_isRetry && this.sessionId ? { resume: this.sessionId } : {}),
         mcpServers,
-        // Custom permission handler for Bash commands and AskUserQuestion
+        // Custom permission handler for Bash commands
         canUseTool: async (toolName, input, toolOptions) => {
           // Debug: show what tools are being called
           this.onDebug?.(`canUseTool: ${toolName}`);
-
-          // Handle AskUserQuestion tool - needs user input
-          if (toolName === 'AskUserQuestion') {
-            const typedInput = input as { questions?: unknown[] };
-            if (typedInput.questions && Array.isArray(typedInput.questions)) {
-              const requestId = `ask-${toolOptions.toolUseID}`;
-
-              // Parse questions from input
-              const questions: Question[] = typedInput.questions.map((q: unknown) => {
-                const qObj = q as Record<string, unknown>;
-                return {
-                  question: String(qObj.question || ''),
-                  header: String(qObj.header || ''),
-                  options: Array.isArray(qObj.options)
-                    ? (qObj.options as Array<Record<string, unknown>>).map(o => ({
-                        label: String(o.label || ''),
-                        description: String(o.description || ''),
-                      }))
-                    : [],
-                  multiSelect: Boolean(qObj.multiSelect),
-                };
-              });
-
-              // Create promise for user response
-              const answerPromise = new Promise<Record<string, string>>((resolve) => {
-                this.pendingQuestions.set(requestId, { resolve, questions });
-              });
-
-              // Notify TUI
-              if (this.onAskUserQuestion) {
-                this.onAskUserQuestion({ requestId, questions });
-              } else {
-                // No handler - return empty answers
-                this.pendingQuestions.delete(requestId);
-                return { behavior: 'allow' as const, updatedInput: { ...input, answers: {} } };
-              }
-
-              // Wait for user to answer
-              const answers = await answerPromise;
-              return { behavior: 'allow' as const, updatedInput: { ...input, answers } };
-            }
-          }
 
           // Bash commands require user permission
           if (toolName === 'Bash') {
@@ -2932,7 +2837,6 @@ export class CraftAgent {
 
     // Clear pending operations
     this.pendingPermissions.clear();
-    this.pendingQuestions.clear();
 
     // Clear security whitelists
     this.alwaysAllowedCommands.clear();
@@ -2944,7 +2848,6 @@ export class CraftAgent {
     // Clear callbacks
     this.onPermissionRequest = null;
     this.onDebug = null;
-    this.onAskUserQuestion = null;
     this.onPlanSubmitted = null;
     this.onAuthRequest = null;
     this.onSourceChange = null;

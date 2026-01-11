@@ -601,14 +601,16 @@ export function ChatDisplay({
                     }
 
                     // Auth-request turns - render inline auth UI
+                    // mt-2 matches ResponseCard spacing for visual consistency
                     if (turn.type === 'auth-request') {
                       return (
-                        <MemoizedAuthRequestCard
-                          key={`auth-${turn.message.id}`}
-                          message={turn.message}
-                          sessionId={session.id}
-                          onRespondToCredential={onRespondToCredential}
-                        />
+                        <div key={`auth-${turn.message.id}`} className="mt-2">
+                          <MemoizedAuthRequestCard
+                            message={turn.message}
+                            sessionId={session.id}
+                            onRespondToCredential={onRespondToCredential}
+                          />
+                        </div>
                       )
                     }
 

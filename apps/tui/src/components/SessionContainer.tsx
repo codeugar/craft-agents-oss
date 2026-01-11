@@ -10,7 +10,6 @@ import { WorkspaceRename } from './WorkspaceRename.tsx';
 import { ApiKeyChange } from './ApiKeyChange.tsx';
 import { ClaudeMaxAuth } from './ClaudeMaxAuth.tsx';
 import { CraftCreditsAuth } from './CraftCreditsAuth.tsx';
-import { AskUserQuestion } from './AskUserQuestion.tsx';
 import { TodoList } from './TodoList.tsx';
 import { PlanSelector, type PlanFile } from './PlanSelector.tsx';
 import { SessionMenu } from './SessionMenu.tsx';
@@ -27,7 +26,6 @@ import {
   useModalState,
   useCommands,
   useWorkspaceHandlers,
-  useMentionHandler,
   useSettingsHandlers,
 } from '../hooks/index.ts';
 import { isShiftTab, isClearScreen, isExit, isSafeModeToggle } from '../keyboard/index.ts';
@@ -130,26 +128,13 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     typedError,
     dismissTypedError,
     pendingPermission,
-    pendingQuestion,
     hasExecutingTool,
     sendMessage,
     interrupt,
     respondToPermission,
-    respondToQuestion,
-    // Agent-related
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activeAgentMcpServers,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
     resetAgentInstance,
-    refreshAgents,
     fetchTools,
-    agentsLoading,
-    // MCP auth for sub-agent servers
+    // MCP auth for sources
     pendingMcpAuth,
     completeMcpAuth,
     cancelMcpAuth,
@@ -313,14 +298,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
     safeMode: permissionMode === 'safe',
     approvePlan,
@@ -339,14 +316,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     addMessage: addLocalMessage,
   });
 
-  // Mention handler hook - handles @mentions
-  const { handleMention } = useMentionHandler({
-    availableAgents,
-    activateAgent,
-    deactivateAgent,
-    sendMessage,
-  });
-
   const handleModelSelect = useCallback((modelId: string) => {
     closeModal();
     setModel(modelId);
@@ -356,7 +325,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     closeModal();
   }, [closeModal]);
 
-  // Agent menu handlers (removed - no agent system)
 
   // Settings handlers hook
   const settingsHandlers = useSettingsHandlers({
@@ -538,17 +506,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     async (input: string) => {
       addToHistory(input);
 
-      // Handle @mentions using hook
-      if (input.startsWith('@')) {
-        const result = await handleMention(input);
-        if (result.handled) {
-          if (result.message) {
-            addLocalMessage(result.message.content, result.message.type);
-          }
-          return;
-        }
-      }
-
       // Handle slash commands using hook
       if (input.startsWith('/')) {
         const result = await handleCommand(input);
@@ -578,7 +535,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
 
       await sendMessage(text || input, allAttachments.length > 0 ? allAttachments : undefined);
     },
-    [addToHistory, handleMention, handleCommand, addLocalMessage, pendingAttachments, sendMessage]
+    [addToHistory, handleCommand, addLocalMessage, pendingAttachments, sendMessage]
   );
 
   // Handle Ctrl+C to interrupt or exit, and permission responses
@@ -645,7 +602,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     }
 
     if (input === '\x03' || (key.ctrl && input === 'c')) {
-      debug('[SessionContainer] main useInput Ctrl+C detected:', { pendingPermission: !!pendingPermission, isProcessing, hasOpenModal, pendingQuestion: !!pendingQuestion, pendingMcpAuth: !!pendingMcpAuth });
+      debug('[SessionContainer] main useInput Ctrl+C detected:', { pendingPermission: !!pendingPermission, isProcessing, hasOpenModal, pendingMcpAuth: !!pendingMcpAuth });
       if (pendingPermission) {
         debug('[SessionContainer] Denying permission');
         respondToPermission(false, false);
@@ -654,7 +611,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         interrupt();
       } else {
         // Only handle if Input is not rendered (Input handles its own Ctrl+C)
-        const inputIsRendered = !hasOpenModal && !pendingPermission && !pendingQuestion && !pendingMcpAuth;
+        const inputIsRendered = !hasOpenModal && !pendingPermission && !pendingMcpAuth;
         debug('[SessionContainer] inputIsRendered:', inputIsRendered);
         if (!inputIsRendered) {
           // Double-press logic for modals/overlays
@@ -681,9 +638,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         setStaticResetKey(k => k + 1);
       } else if (pendingPermission) {
         respondToPermission(false, false);
-      } else if (pendingQuestion) {
-        // AskUserQuestion handles Escape itself - don't also interrupt
-        return;
       } else if (isProcessing) {
         interrupt();
       }
@@ -734,14 +688,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           setStaticResetKey(k => k + 1);
         }} />
       )}
-
-      {/* Agent menu overlay - REMOVED (no agent system) */}
-
-      {/* Credentials viewer overlay - REMOVED (no agent system) */}
-
-      {/* Reauth selector overlay - REMOVED (no agent system) */}
-
-      {/* Plan menu overlay - REMOVED (simplified plan handling) */}
 
       {/* Plan selector overlay */}
       {isOpen('planSelector') && (
@@ -858,8 +804,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         </Box>
       )}
 
-      {/* API key authentication - REMOVED (no agent-scoped API auth) */}
-
       {/* Input + Status bar + Header together at bottom */}
       <Box flexDirection="column" width="100%" paddingX={1}>
         {/* Typed error banner */}
@@ -889,17 +833,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           </Box>
         )}
 
-        {/* AskUserQuestion prompt (SDK built-in) */}
-        {pendingQuestion && (
-          <Box marginBottom={1}>
-            <AskUserQuestion
-              questions={pendingQuestion.questions}
-              onSubmit={respondToQuestion}
-            />
-          </Box>
-        )}
-
-        {!hasOpenModal && !pendingPermission && !pendingQuestion && !pendingMcpAuth && (
+        {!hasOpenModal && !pendingPermission && !pendingMcpAuth && (
           <Input
             onSubmit={handleSubmit}
             onPaste={handlePaste}
@@ -911,8 +845,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
             history={history}
             attachmentCount={pendingAttachments.length}
             attachmentLabel={attachmentLabel}
-            availableAgents={availableAgents}
-            activeAgentName={activeAgentName ?? undefined}
             columns={terminalColumns}
           />
         )}
@@ -925,8 +857,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           outputTokens={tokenUsage.outputTokens}
           costUsd={tokenUsage.costUsd}
           authType={getAuthType()}
-          activeAgentName={activeAgentName ?? undefined}
-          agentsLoading={agentsLoading}
           tokenDisplay={tokenDisplayMode}
           showCost={showCostSetting}
           showClock={showClockSetting}

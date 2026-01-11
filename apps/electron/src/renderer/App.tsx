@@ -409,7 +409,7 @@ export default function App() {
   useEffect(() => {
     // Handoff events signal end of streaming - need to sync back to React state
     // Also includes todo_state_changed so status updates immediately reflect in sidebar
-    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed'])
+    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed', 'title_generated'])
 
     // Helper to handle side effects (same logic for both paths)
     const handleEffects = (effects: Effect[], sessionId: string, eventType: string) => {
@@ -432,10 +432,6 @@ export default function App() {
               next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
               return next
             })
-            break
-          }
-          case 'ask_question_request': {
-            console.log('[App] ask_question_request:', effect.sessionId, effect.request)
             break
           }
           case 'credential_request': {

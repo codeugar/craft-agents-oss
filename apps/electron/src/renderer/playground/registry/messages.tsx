@@ -864,23 +864,25 @@ export const messagesComponents: ComponentEntry[] = [
     category: 'Chat Messages',
     description: 'Inline authentication request card for credentials or OAuth flows',
     component: ({ authType, authStatus, sourceName, mode, description, hint, error, email }) => (
-      <AuthRequestCard
-        sessionId="playground-session"
-        message={createAuthMessage({
-          type: authType,
-          status: authStatus,
-          sourceSlug: sourceName.toLowerCase().replace(/\s+/g, '-'),
-          sourceName,
-          mode,
-          description,
-          hint,
-          error,
-          email,
-        })}
-        onRespondToCredential={(sessionId, requestId, response) =>
-          console.log('Credential response:', { sessionId, requestId, response })
-        }
-      />
+      <div className="w-[80%]">
+        <AuthRequestCard
+          sessionId="playground-session"
+          message={createAuthMessage({
+            type: authType,
+            status: authStatus,
+            sourceSlug: sourceName.toLowerCase().replace(/\s+/g, '-'),
+            sourceName,
+            mode,
+            description,
+            hint,
+            error,
+            email,
+          })}
+          onRespondToCredential={(sessionId, requestId, response) =>
+            console.log('Credential response:', { sessionId, requestId, response })
+          }
+        />
+      </div>
     ),
     props: [
       {

@@ -20,8 +20,7 @@ packages/core/
 │   │   ├── index.ts       # Type re-exports
 │   │   ├── workspace.ts   # Workspace, auth, config types
 │   │   ├── session.ts     # Session, metadata types
-│   │   ├── message.ts     # Message, token, event types
-│   │   └── agent.ts       # Sub-agent, API config types
+│   │   └── message.ts     # Message, token, event types
 │   └── utils/
 │       ├── index.ts       # Utility re-exports
 │       └── debug.ts       # Debug logging stub
@@ -63,18 +62,6 @@ packages/core/
 | `TypedError` | Structured error with code, title, canRetry |
 | `Question` | AskUserQuestion tool format |
 
-### Agent Types (`types/agent.ts`)
-
-| Type | Description |
-|------|-------------|
-| `SubAgentMetadata` | Agent discovery info (id, name, documentId) |
-| `SubAgentDefinition` | Full agent definition with instructions |
-| `McpServerConfig` | MCP server URL and auth config |
-| `ApiConfig` | REST API configuration with auth |
-| `Concern` | Extraction concerns requiring user input |
-| `ActiveAgentState` | Currently active agent state |
-| `AgentRegistry` | Per-workspace agent cache |
-
 ## Usage
 
 ```typescript
@@ -83,7 +70,6 @@ import type {
   Workspace,
   Session,
   Message,
-  SubAgentMetadata,
   AgentEvent,
 } from '@craft-agent/core';
 
@@ -102,7 +88,7 @@ Sessions are the primary isolation boundary, not workspaces. Each session:
 - Has a unique `id` (our UUID, known immediately)
 - Maps 1:1 with an SDK session (`sdkSessionId`)
 - Belongs to exactly one workspace
-- Can be archived, named, and assigned to agents
+- Can be archived and named
 
 ### MCP Auth Separation
 

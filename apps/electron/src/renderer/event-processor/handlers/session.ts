@@ -21,7 +21,6 @@ import type {
   TitleGeneratedEvent,
   WorkingDirectoryChangedEvent,
   PermissionModeChangedEvent,
-  AskQuestionRequestEvent,
   UserMessageEvent,
   SessionSharedEvent,
   SessionUnsharedEvent,
@@ -329,23 +328,6 @@ export function handlePermissionModeChanged(
       type: 'permission_mode_changed',
       sessionId: event.sessionId,
       permissionMode: event.permissionMode,
-    }],
-  }
-}
-
-/**
- * Handle ask_question_request - return effect for parent to handle
- */
-export function handleAskQuestionRequest(
-  state: SessionState,
-  event: AskQuestionRequestEvent
-): ProcessResult {
-  return {
-    state,
-    effects: [{
-      type: 'ask_question_request',
-      sessionId: event.sessionId,
-      request: event.request,
     }],
   }
 }

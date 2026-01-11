@@ -272,7 +272,7 @@ export function AppShell({
     })
   }, [activeWorkspaceId])
 
-  // Subscribe to live source updates (when sources are added/removed via agent)
+  // Subscribe to live source updates (when sources are added/removed dynamically)
   React.useEffect(() => {
     const cleanup = window.electronAPI.onSourcesChanged((updatedSources) => {
       console.log('[Chat] Sources changed, updating sidebar:', updatedSources.length)
@@ -364,7 +364,7 @@ export function AppShell({
       }, when: () => !document.querySelector('[role="dialog"]') && document.activeElement?.tagName !== 'TEXTAREA' },
       // Sidebar toggle
       { key: 'b', cmd: true, action: () => setIsSidebarVisible(v => !v) },
-      // New chat (context-aware: uses selected agent if in agent view)
+      // New chat
       { key: 'n', cmd: true, action: () => handleNewChat(true) },
       // Settings
       { key: ',', cmd: true, action: onOpenSettings },

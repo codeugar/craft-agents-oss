@@ -298,8 +298,6 @@ export const SAFE_MODE_CONFIG: ModeConfig = {
     /list/,
     /get/,
     /read/,
-    // Docs MCP - all operations are read-only
-    /^mcp__docs__/,
   ],
   allowedApiEndpoints: [], // Use permissions.json to add endpoint-specific rules
   displayName: 'Safe Mode',
@@ -799,7 +797,6 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   'Task', 'TaskOutput',             // Agent orchestration
   'WebFetch', 'WebSearch',          // Web research
   'TodoWrite',                       // Task tracking
-  'AskUserQuestion',                // User interaction
   'SubmitPlan',                     // Plan submission
   'LSP',                            // Language server (read-only)
 ]);
@@ -942,7 +939,6 @@ export function shouldAllowToolInMode(
         'mcp__session__SubmitPlan',
         'mcp__session__config_validate',
         'mcp__session__source_test',
-        'mcp__session__agent_list',
       ];
       if (readOnlySessionTools.includes(toolName)) {
         return { allowed: true };

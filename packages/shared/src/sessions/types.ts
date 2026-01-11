@@ -147,8 +147,6 @@ export interface SessionMetadata {
   todoState?: TodoState;
   /** Permission mode for this session */
   permissionMode?: PermissionMode;
-  /** Distinct agent names used in this session */
-  agents?: string[];
   /** Number of plan files for this session */
   planCount?: number;
   /** Shared viewer URL (if shared via viewer) */

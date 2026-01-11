@@ -1,14 +1,13 @@
 /**
  * Workspace Types
  *
- * Workspaces are the top-level organizational unit. Everything (sources, agents, sessions)
+ * Workspaces are the top-level organizational unit. Everything (sources, sessions)
  * is scoped to a workspace.
  *
  * Directory structure:
  * ~/.craft-agent/workspaces/{slug}/
  *   ├── config.json      - Workspace settings
  *   ├── sources/         - Data sources (MCP, API, local)
- *   ├── agents/          - Agent definitions
  *   └── sessions/        - Conversation sessions
  */
 

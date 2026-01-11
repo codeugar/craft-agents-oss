@@ -3,8 +3,8 @@
  *
  * Organized by UI area:
  * - modals/: Modal state and handler hooks
- * - input/: Input handling hooks (commands, mentions, history)
- * - core/: Core functionality hooks (agent, resize, elapsed time)
+ * - input/: Input handling hooks (commands, history)
+ * - core/: Core functionality hooks (resize, elapsed time)
  */
 
 // Modal hooks
@@ -20,9 +20,6 @@ export type { UseSettingsHandlersProps, UseSettingsHandlersResult } from './moda
 // Input hooks
 export { useCommands } from './input/useCommands.ts';
 export type { UseCommandsProps, CommandResult } from './input/useCommands.ts';
-
-export { useMentionHandler } from './input/useMentionHandler.ts';
-export type { UseMentionHandlerProps, MentionResult } from './input/useMentionHandler.ts';
 
 export { useHistory } from './input/useHistory.ts';
 

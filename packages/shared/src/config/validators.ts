@@ -8,7 +8,6 @@
  * - config.json: Main app configuration
  * - preferences.json: User preferences
  * - sources/{slug}/config.json: Workspace-scoped source configs
- * - agents/{slug}/config.json: Workspace-scoped agent configs
  */
 
 import { z } from 'zod';
@@ -278,7 +277,6 @@ export function validateAll(workspaceId?: string): ValidationResult {
   // Include workspace-scoped validations if workspaceId is provided
   if (workspaceId) {
     results.push(validateAllSources(workspaceId));
-    results.push(validateAllAgents(workspaceId));
   }
 
   const allErrors = results.flatMap(r => r.errors);
@@ -295,7 +293,7 @@ export function validateAll(workspaceId?: string): ValidationResult {
 // Source & Agent Validators (Folder-Based Architecture)
 // ============================================================
 
-import { getWorkspaceSourcesPath, getWorkspaceAgentsPath } from '../workspaces/storage.ts';
+import { getWorkspaceSourcesPath } from '../workspaces/storage.ts';
 
 // --- sources/{slug}/config.json ---
 
@@ -380,46 +378,11 @@ export const FolderSourceConfigSchema = z.object({
   { message: 'Config must include type-specific configuration (mcp, api, or local)' }
 );
 
-// --- agents/{slug}/config.json ---
-
-const AgentSourceRefSchema = z.object({
-  type: z.enum(['url', 'local']),
-  url: z.string().url().optional(),
-  lastSynced: z.number().int().min(0).optional(),
-});
-
-export const FolderAgentConfigSchema = z.object({
-  name: z.string().min(1),
-  slug: z.string().regex(/^\.?[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens (optional leading dot for builtins)'),
-  enabled: z.boolean(),
-  source: AgentSourceRefSchema.optional(),
-  useSources: z.array(z.string()).optional(),
-  createdAt: z.number().int().min(0),
-  updatedAt: z.number().int().min(0),
-});
-
 /**
  * Validate a source config object
  */
 export function validateSourceConfig(config: unknown): ValidationResult {
   const result = FolderSourceConfigSchema.safeParse(config);
-
-  if (result.success) {
-    return { valid: true, errors: [], warnings: [] };
-  }
-
-  return {
-    valid: false,
-    errors: zodErrorToIssues(result.error, 'config.json'),
-    warnings: [],
-  };
-}
-
-/**
- * Validate an agent config object
- */
-export function validateAgentConfig(config: unknown): ValidationResult {
-  const result = FolderAgentConfigSchema.safeParse(config);
 
   if (result.success) {
     return { valid: true, errors: [], warnings: [] };
@@ -501,82 +464,6 @@ export function validateSource(workspaceId: string, slug: string): ValidationRes
 }
 
 /**
- * Validate an agent folder (workspace-scoped)
- */
-export function validateAgent(workspaceId: string, slug: string): ValidationResult {
-  const agentsDir = getWorkspaceAgentsPath(workspaceId);
-  const errors: ValidationIssue[] = [];
-  const warnings: ValidationIssue[] = [];
-  const file = `agents/${slug}/config.json`;
-  const dir = join(agentsDir, slug);
-  const configPath = join(dir, 'config.json');
-  const instructionsPath = join(dir, 'instructions.md');
-
-  if (!existsSync(dir)) {
-    return {
-      valid: false,
-      errors: [{
-        file,
-        path: '',
-        message: `Agent folder '${slug}' does not exist`,
-        severity: 'error',
-      }],
-      warnings: [],
-    };
-  }
-
-  // Check config.json
-  if (!existsSync(configPath)) {
-    errors.push({
-      file,
-      path: '',
-      message: 'config.json not found',
-      severity: 'error',
-      suggestion: 'Create a config.json file in the agent folder',
-    });
-  } else {
-    try {
-      const raw = readFileSync(configPath, 'utf-8');
-      const content = JSON.parse(raw);
-      const configResult = validateAgentConfig(content);
-      errors.push(...configResult.errors);
-      warnings.push(...configResult.warnings);
-
-      // Check if slug matches folder name
-      if (content.slug && content.slug !== slug) {
-        warnings.push({
-          file,
-          path: 'slug',
-          message: `Slug '${content.slug}' does not match folder name '${slug}'`,
-          severity: 'warning',
-          suggestion: `Update slug to '${slug}' or rename the folder`,
-        });
-      }
-    } catch (e) {
-      errors.push({
-        file,
-        path: '',
-        message: `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`,
-        severity: 'error',
-      });
-    }
-  }
-
-  // Check instructions.md
-  if (!existsSync(instructionsPath)) {
-    warnings.push({
-      file: `agents/${slug}/instructions.md`,
-      path: '',
-      message: 'instructions.md not found',
-      severity: 'warning',
-      suggestion: 'Create an instructions.md file with agent behavior instructions',
-    });
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
-}
-
-/**
  * Validate all sources in a workspace
  */
 export function validateAllSources(workspaceId: string): ValidationResult {
@@ -618,59 +505,6 @@ export function validateAllSources(workspaceId: string): ValidationResult {
 
   for (const folder of sourceFolders) {
     const result = validateSource(workspaceId, folder);
-    errors.push(...result.errors);
-    warnings.push(...result.warnings);
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
-  };
-}
-
-/**
- * Validate all agents in a workspace
- */
-export function validateAllAgents(workspaceId: string): ValidationResult {
-  const agentsDir = getWorkspaceAgentsPath(workspaceId);
-  const errors: ValidationIssue[] = [];
-  const warnings: ValidationIssue[] = [];
-
-  if (!existsSync(agentsDir)) {
-    return {
-      valid: true,
-      errors: [],
-      warnings: [{
-        file: 'agents/',
-        path: '',
-        message: 'Agents directory does not exist (no agents configured)',
-        severity: 'warning',
-      }],
-    };
-  }
-
-  const entries = readdirSync(agentsDir);
-  const agentFolders = entries.filter((entry) => {
-    const entryPath = join(agentsDir, entry);
-    return statSync(entryPath).isDirectory();
-  });
-
-  if (agentFolders.length === 0) {
-    return {
-      valid: true,
-      errors: [],
-      warnings: [{
-        file: 'agents/',
-        path: '',
-        message: 'No agents configured',
-        severity: 'warning',
-      }],
-    };
-  }
-
-  for (const folder of agentFolders) {
-    const result = validateAgent(workspaceId, folder);
     errors.push(...result.errors);
     warnings.push(...result.warnings);
   }

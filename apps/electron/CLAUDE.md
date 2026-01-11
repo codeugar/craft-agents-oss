@@ -71,7 +71,7 @@ The spinner is based on [SpinKit Grid](https://github.com/tobiasahlin/SpinKit):
 ```tsx
 import { SourceAvatar } from "@/components/ui/source-avatar"
 
-// Pattern 1: Direct props - for subagent MCP servers and APIs
+// Pattern 1: Direct props - for MCP servers and APIs
 <SourceAvatar
   type="mcp"           // 'mcp' | 'api' | 'gmail' | 'local'
   name="My Server"     // Alt text
@@ -529,14 +529,8 @@ The app uses Electron's IPC for main ↔ renderer communication:
 | **Shell** | | |
 | `shell:openUrl` | renderer → main | Open URL in external browser |
 | `shell:openFile` | renderer → main | Open file in default application |
-| **Agents** | | |
-| `agents:list` | renderer → main | List available agents |
-| `agents:refresh` | renderer → main | Refresh agent list |
-| `agents:checkAuth` | renderer → main | Check if agent needs auth |
-| `agents:getDefinition` | renderer → main | Get full agent definition |
-| `agents:changed` | main → renderer | Broadcast agent list changes |
 | **Sources** | | |
-| `sources:get` | renderer → main | Get sources for workspace/agent |
+| `sources:get` | renderer → main | Get sources for workspace |
 | `sources:create` | renderer → main | Create new source |
 | `sources:delete` | renderer → main | Delete source |
 | `sources:startOAuth` | renderer → main | Start OAuth flow for source |
@@ -695,8 +689,6 @@ craftagents://workspace/{workspaceId}/{compoundRoute}
 - Processes `AgentEvent` stream and forwards to renderer
 - Tracks `toolUseId → toolName` mapping (since `tool_result` events only have `toolUseId`)
 - AI-generated session titles on first exchange (via `generateSessionTitle`)
-- Subagent integration: loads agent definitions and applies MCP/API configs
-- Caches `SubAgentManager` per workspace for reuse across sessions
 
 **Event type mappings:**
 | AgentEvent field | Renderer expects |
@@ -1004,28 +996,6 @@ import { Markdown } from '@/components/markdown'
 <Markdown content={message.content} onOpenFile={handleOpenFile} onOpenUrl={handleOpenUrl} />
 ```
 
-## Subagent Integration
-
-Sessions can be associated with subagents defined in Craft documents:
-
-**How it works:**
-1. User creates session with agent: `createSession(workspaceId, agentId)`
-2. `SessionManager` loads agent definition via `SubAgentManager.getDefinition()`
-3. When agent is created, definition is applied with MCP servers and API configs
-4. `CraftAgent.setActiveAgentDefinition()` configures custom instructions and tools
-
-**Auth checking:**
-```typescript
-// Check if agent needs authentication before activation
-const { needsAuth, reason } = await window.electronAPI.checkAgentAuth(workspaceId, agentId)
-if (needsAuth) {
-  // Show auth dialog to user
-  console.log(reason) // "Requires authentication: MCP Server, API"
-}
-```
-
-**Caching:** `SubAgentManager` is cached per workspace to avoid re-connecting to MCP servers for each session.
-
 ## Session State Architecture
 
 The app uses a **hybrid React/Jotai state management** approach for session data:
@@ -1148,44 +1118,6 @@ The app supports attaching files to messages (images, PDFs, code files):
 - Images: PNG, JPG, JPEG, GIF, WebP (displayed as thumbnails)
 - Documents: PDF, TXT, MD
 - Code: JS, TS, TSX, JSX, PY, JSON, CSS, HTML, XML, YAML
-
-## Agent State Management
-
-The `useAgentState` hook manages agent activation flow via IPC with the main process:
-
-**State Machine:**
-```
-idle → extracting → [needs_mcp_auth] → [needs_api_auth] → ready → active
-                          ↓                  ↓
-                        error              error
-```
-
-**Hook API:**
-```typescript
-const agentState = useAgentState(workspaceId, agentId)
-
-// Status checks
-agentState.isIdle           // No agent selected
-agentState.isExtracting     // Loading agent definition
-agentState.isNeedsMcpAuth   // Waiting for MCP server OAuth
-agentState.isNeedsApiAuth   // Waiting for API key entry
-agentState.isReady          // Auth complete, ready to activate
-agentState.isActive         // Agent fully activated
-
-// Actions
-await agentState.activate(agentId)           // Start activation
-await agentState.continueAfterMcpAuth()      // After MCP OAuth complete
-await agentState.continueAfterApiAuth()      // After API key entered
-agentState.deactivate()                      // Return to idle
-
-// Derived state
-agentState.activeDefinition   // SubAgentDefinition when active
-agentState.agentName          // Display name
-agentState.pendingMcpServers  // MCP servers needing auth
-agentState.pendingApis        // APIs needing credentials
-```
-
-**IPC Communication:** The hook communicates with `AgentStateManager` in the main process via `window.electronAPI` calls, keeping the renderer stateless.
 
 ## Application Menu
 

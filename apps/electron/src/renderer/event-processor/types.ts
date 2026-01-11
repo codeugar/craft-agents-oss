@@ -5,7 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, AskQuestionRequest, TodoState, AuthRequest } from '../../shared/types'
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, TodoState, AuthRequest } from '../../shared/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -204,15 +204,6 @@ export interface PermissionModeChangedEvent {
 }
 
 /**
- * Ask question request event
- */
-export interface AskQuestionRequestEvent {
-  type: 'ask_question_request'
-  sessionId: string
-  request: AskQuestionRequest
-}
-
-/**
  * Credential request event - prompts user for credentials
  */
 export interface CredentialRequestEvent {
@@ -331,7 +322,6 @@ export type AgentEvent =
   | TitleGeneratedEvent
   | WorkingDirectoryChangedEvent
   | PermissionModeChangedEvent
-  | AskQuestionRequestEvent
   | TaskBackgroundedEvent
   | ShellBackgroundedEvent
   | TaskProgressEvent
@@ -349,7 +339,6 @@ export type Effect =
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
-  | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
 
 /**
  * Result of processing an event

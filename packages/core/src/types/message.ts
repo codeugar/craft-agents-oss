@@ -290,19 +290,6 @@ export interface TypedError {
 }
 
 /**
- * Question for AskUserQuestion tool
- */
-export interface Question {
-  question: string;
-  header: string;
-  options: Array<{
-    label: string;
-    description: string;
-  }>;
-  multiSelect: boolean;
-}
-
-/**
  * Permission request from agent (e.g., bash command approval)
  */
 export interface PermissionRequest {
@@ -338,7 +325,6 @@ export type AgentEvent =
   | { type: 'tool_result'; toolUseId: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | { type: 'parent_update'; toolUseId: string; parentToolUseId: string }
   | { type: 'permission_request'; requestId: string; toolName: string; command: string; description: string }
-  | { type: 'ask_user'; requestId: string; questions: Question[] }
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
   | { type: 'complete'; usage?: AgentEventUsage }

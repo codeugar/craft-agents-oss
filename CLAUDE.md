@@ -33,7 +33,6 @@ bun link                     # Create global 'craft' command
 
 **CLI Flags:**
 - `--workspace/-w <name>` - Select workspace by name, ID, or URL
-- `--agent/-a <name>` - Activate agent (with or without @ prefix)
 - `--model/-m <model>` - Claude model to use
 - `--debug` - Log to `/tmp/craft-debug.log`
 - `--new` - Start fresh session
@@ -62,7 +61,7 @@ Core `CraftAgent` wrapping `@anthropic-ai/claude-agent-sdk`:
 - `formatSourceState()` injects `<sources>` context into user messages
 - Session continuity via `resume` option
 
-**AgentEvent types:** `status`, `text_delta`, `text_complete`, `tool_start`, `tool_result`, `permission_request`, `ask_user`, `error`, `complete`, `task_backgrounded`, `shell_backgrounded`, `task_progress`
+**AgentEvent types:** `status`, `text_delta`, `text_complete`, `tool_start`, `tool_result`, `permission_request`, `error`, `complete`, `task_backgrounded`, `shell_backgrounded`, `task_progress`
 
 ### Configuration (`packages/shared/src/config/storage.ts`)
 
@@ -182,9 +181,9 @@ Three-level permission system (SHIFT+TAB cycles through modes):
 
 **In Explore mode:**
 - **Blocked:** `api_*`, Bash, Write, Edit, MCP write tools
-- **Allowed:** Read, Glob, Grep, Task, WebFetch, WebSearch, MCP read tools, TodoWrite, AskUserQuestion, SubmitPlan, LSP
+- **Allowed:** Read, Glob, Grep, Task, WebFetch, WebSearch, MCP read tools, TodoWrite, SubmitPlan, LSP
 
-**Customizable permissions:** Each workspace, source, and agent can have a `permissions.json` file with custom rules:
+**Customizable permissions:** Each workspace and source can have a `permissions.json` file with custom rules:
 - `blockedTools` - Additional tools to block
 - `allowedBashPatterns` - Regex patterns for safe bash commands
 - `allowedMcpPatterns` - Regex patterns for allowed MCP tools

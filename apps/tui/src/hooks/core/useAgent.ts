@@ -9,7 +9,6 @@
 import { useState, useCallback } from 'react';
 import type { Message } from '../../components/Messages.tsx';
 import type { TodoItem } from '../../components/TodoList.tsx';
-import type { Question } from '../../components/AskUserQuestion.tsx';
 import type { FileAttachment } from '@craft-agent/shared/utils';
 import type { PermissionMode } from '@craft-agent/shared/agent';
 
@@ -64,10 +63,6 @@ export function useAgent(_config: UseAgentConfig) {
   const [pendingPermission] = useState<PermissionRequest | null>(null);
   const respondToPermission = useCallback((_allowed: boolean, _alwaysAllow: boolean) => {}, []);
 
-  // Question state - stubbed
-  const [pendingQuestion] = useState<{ questions: Question[] } | null>(null);
-  const respondToQuestion = useCallback((_answers: Record<string, string>) => {}, []);
-
   // Tool execution state - stubbed
   const hasExecutingTool = false;
 
@@ -94,18 +89,8 @@ export function useAgent(_config: UseAgentConfig) {
   const interrupt = useCallback(() => {}, []);
   const resetAgentInstance = useCallback(() => {}, []);
 
-  // Agent stubs
-  const availableAgents: string[] = [];
-  const activeAgentName: string | null = null;
-  const activeAgentDefinition = null;
-  const activeAgentMcpServers: unknown[] = [];
-  const activateAgent = useCallback(async (_name: string) => false, []);
-  const deactivateAgent = useCallback(() => {}, []);
-  const reloadAgent = useCallback(async () => {}, []);
-  const resetAgent = useCallback(async () => {}, []);
-  const refreshAgents = useCallback(async () => {}, []);
+  // Tools fetch stub
   const fetchTools = useCallback(async () => [] as { name: string; tools: { name: string; description?: string }[] }[], []);
-  const agentsLoading = false;
 
   // MCP auth stubs
   const pendingMcpAuth = null;
@@ -135,30 +120,14 @@ export function useAgent(_config: UseAgentConfig) {
     pendingPermission,
     respondToPermission,
 
-    // Question handling
-    pendingQuestion,
-    respondToQuestion,
-
     // Tool state
     hasExecutingTool,
 
     // Actions
     sendMessage,
     interrupt,
-
-    // Agent stubs
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activeAgentMcpServers,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
     resetAgentInstance,
-    refreshAgents,
     fetchTools,
-    agentsLoading,
 
     // MCP auth stubs
     pendingMcpAuth,

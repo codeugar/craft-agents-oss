@@ -110,7 +110,7 @@ export function ChatView({
   className,
   onTurnClick,
   onActivityClick,
-  defaultExpanded,
+  defaultExpanded = false,
   header,
   footer,
 }: ChatViewProps) {

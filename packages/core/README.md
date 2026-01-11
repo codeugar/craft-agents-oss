@@ -28,7 +28,6 @@ import type {
   Message,
   TokenUsage,
   AgentEvent,
-  SubAgentMetadata,
 } from '@craft-agent/core';
 
 // Import utilities
@@ -59,14 +58,6 @@ import { generateMessageId, debug } from '@craft-agent/core';
 - `TypedError` - Structured error info
 - `Question` - AskUserQuestion format
 
-### Agents
-- `SubAgentMetadata` - Agent discovery info
-- `SubAgentDefinition` - Full agent definition
-- `McpServerConfig` - MCP server configuration
-- `ApiConfig` - REST API configuration
-- `Concern` - Extraction concerns
-- `AgentRegistry` - Per-workspace agent cache
-
 ## Utilities
 
 ### `generateMessageId()`
@@ -92,8 +83,7 @@ src/
 ├── types/
 │   ├── workspace.ts  # Workspace, auth types
 │   ├── session.ts    # Session types
-│   ├── message.ts    # Message, event types
-│   └── agent.ts      # Sub-agent types
+│   └── message.ts    # Message, event types
 └── utils/
     └── debug.ts      # Debug utility
 ```

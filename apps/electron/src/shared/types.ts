@@ -275,24 +275,6 @@ export interface CreateSessionOptions {
   onboarding?: 'add-source' | 'connect-sources' | 'welcome'
 }
 
-// AskUserQuestion types (matches shared/agent/craft-agent.ts)
-export interface QuestionOption {
-  label: string;
-  description: string;
-}
-
-export interface Question {
-  question: string;
-  header: string;
-  options: QuestionOption[];
-  multiSelect: boolean;
-}
-
-export interface AskQuestionRequest {
-  requestId: string;
-  questions: Question[];
-}
-
 // Events sent from main to renderer
 // turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
 export type SessionEvent =
@@ -314,7 +296,6 @@ export type SessionEvent =
   // Permission mode events
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
   | { type: 'plan_submitted'; sessionId: string; message: CoreMessage }
-  | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
   // Source events
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   // Background task/shell events

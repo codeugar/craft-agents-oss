@@ -41,14 +41,14 @@ const containerVariants: Variants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.05,
-      delayChildren: 0.02,
+      staggerChildren: 0.025,
+      delayChildren: 0.01,
     },
   },
   exit: {
     opacity: 0,
     transition: {
-      staggerChildren: 0.03,
+      staggerChildren: 0.015,
       staggerDirection: -1,
     },
   },

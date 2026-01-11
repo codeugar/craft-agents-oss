@@ -108,7 +108,6 @@ export const SessionMenu: React.FC<SessionMenuProps> = ({
               <Text dimColor>
                 {session.messageCount} messages · {formatLastActive(session.lastUsedAt)}
                 {session.planCount ? ` · ${session.planCount} plan${session.planCount > 1 ? 's' : ''}` : ''}
-                {session.agents && session.agents.length > 0 ? ` · @${session.agents.join(', @')}` : ''}
               </Text>
             </Box>
           </Box>

@@ -31,7 +31,7 @@ export interface AppProps {
  * │  │  ┌─────────────────────────────────────────────────────────┐  │  │
  * │  │  │  ALL session-scoped state lives here                   │  │  │
  * │  │  │  • messages, tokenUsage, streamingText                 │  │  │
- * │  │  │  • pendingPermission, pendingQuestion                  │  │  │
+ * │  │  │  • pendingPermission                                   │  │  │
  * │  │  │  • CraftAgent instance (1:1 with session)              │  │  │
  * │  │  │  • All refs reset automatically                        │  │  │
  * │  │  └─────────────────────────────────────────────────────────┘  │  │

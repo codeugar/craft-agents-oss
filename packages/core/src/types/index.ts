@@ -34,7 +34,6 @@ export type {
   AgentEventUsage,
   RecoveryAction,
   TypedError,
-  Question,
   PermissionRequest,
   AgentEvent,
   // Auth-related types

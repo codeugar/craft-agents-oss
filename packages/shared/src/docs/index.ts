@@ -40,7 +40,6 @@ export function getDocPath(filename: string): string {
  */
 export const DOC_REFS = {
   sources: '~/.craft-agent/docs/sources.md',
-  agents: '~/.craft-agent/docs/agents.md',
   permissions: '~/.craft-agent/docs/permissions.md',
   sourceGuides: '~/.craft-agent/docs/source-guides/',
   docsDir: '~/.craft-agent/docs/',
@@ -350,8 +349,7 @@ Would you like me to show you what issues are currently open?
 ## Overview
 
 Sources are stored as folders under:
-- Workspace sources: \`~/.craft-agent/workspaces/{workspaceId}/sources/{sourceSlug}/\`
-- Agent-scoped sources: \`~/.craft-agent/workspaces/{workspaceId}/agents/{agentSlug}/sources/{sourceSlug}/\`
+- \`~/.craft-agent/workspaces/{workspaceId}/sources/{sourceSlug}/\`
 
 Each source folder contains:
 - \`config.json\` - Source configuration (required)
@@ -808,123 +806,6 @@ Use \`source_test\` with the source slug:
 - Check file exists in source folder
 `;
 
-const AGENTS_MD = `# Agents Configuration Guide
-
-This guide explains how to configure agents in Craft Agent.
-
-## Overview
-
-Agents are stored at:
-\`~/.craft-agent/workspaces/{workspaceId}/agents/{agentSlug}/\`
-
-Each agent folder contains:
-- \`config.json\` - Agent configuration (required)
-- \`instructions.md\` - Agent instructions/system prompt (required)
-- \`theme.json\` - Agent-specific theme overrides (optional)
-- \`sources/\` - Agent-scoped sources (optional)
-
-## config.json Schema
-
-\`\`\`json
-{
-  "name": "Research Assistant",
-  "slug": "research-assistant",
-  "enabled": true,
-  "useSources": ["exa", "web-archive"],
-  "source": {
-    "type": "local"
-  },
-  "createdAt": 1704067200000,
-  "updatedAt": 1704067200000
-}
-\`\`\`
-
-### Fields
-
-- **name** (string, required): Display name
-- **slug** (string, required): URL-safe identifier
-- **enabled** (boolean): Whether agent is active (default: true)
-- **useSources** (string[]): Workspace source slugs to attach
-- **source**: Origin tracking for synced agents
-
-## instructions.md
-
-The instructions file contains the agent's system prompt in markdown:
-
-\`\`\`markdown
-# Research Assistant
-
-You are a research assistant specialized in deep research tasks.
-
-## Capabilities
-
-- Search the web using Exa
-- Access archived web pages
-- Synthesize information from multiple sources
-
-## Guidelines
-
-- Always cite sources
-- Prefer recent information
-- Cross-reference claims across sources
-\`\`\`
-
-## Agent-Scoped Sources
-
-Agents can have their own sources at:
-\`~/.craft-agent/workspaces/{ws}/agents/{agent}/sources/{source}/\`
-
-These sources are only available when the agent is active.
-
-## Source Attachment
-
-Agents can use workspace sources via \`useSources\`:
-
-\`\`\`json
-{
-  "useSources": ["exa", "linear", "github"]
-}
-\`\`\`
-
-These sources are loaded when the agent activates.
-
-## Theme Customization
-
-Agents can override the UI theme:
-
-\`\`\`json
-{
-  "accent": "#6366f1"
-}
-\`\`\`
-
-## Workflow
-
-### Creating an Agent
-
-1. Create the agent folder:
-   \`\`\`bash
-   mkdir -p ~/.craft-agent/workspaces/{ws}/agents/my-agent
-   \`\`\`
-
-2. Write config.json:
-   \`\`\`json
-   {
-     "name": "My Agent",
-     "slug": "my-agent",
-     "enabled": true
-   }
-   \`\`\`
-
-3. Write instructions.md with the agent's behavior
-
-4. Optionally add agent-scoped sources
-
-### Activating an Agent
-
-Use \`@agent-name\` in a message or \`--agent\` CLI flag.
-`;
-
 const PERMISSIONS_MD = `# Permissions Configuration Guide
 
 This guide explains how to configure custom permission rules for Explore mode.
@@ -937,7 +818,6 @@ Custom permission rules let you allow specific operations that would otherwise b
 Permission files are located at:
 - Workspace: \`~/.craft-agent/workspaces/{slug}/permissions.json\`
 - Source: \`~/.craft-agent/workspaces/{slug}/sources/{source}/permissions.json\`
-- Agent: \`~/.craft-agent/workspaces/{slug}/agents/{agent}/permissions.json\`
 
 ## Auto-Scoping for Source Permissions
 
@@ -1068,7 +948,7 @@ Glob patterns for directories where writes are allowed.
 **Allowed by default:**
 - Read, Glob, Grep
 - WebFetch, WebSearch
-- TodoWrite, AskUserQuestion
+- TodoWrite
 - MCP tools with read semantics (list, get, search)
 
 ## Cascading Rules
@@ -1123,7 +1003,6 @@ Rules are additive - they can only allow more operations, not restrict further.
  */
 const BUNDLED_DOCS: Record<string, string> = {
   'sources.md': SOURCES_MD,
-  'agents.md': AGENTS_MD,
   'permissions.md': PERMISSIONS_MD,
 };
 

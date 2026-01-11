@@ -692,17 +692,12 @@ export const chatComponents: ComponentEntry[] = [
           type: 'select',
           options: [
             { label: 'Hidden', value: 'hidden' },
-            { label: 'Setup', value: 'setup' },
-            { label: 'Auth', value: 'auth' },
+            { label: 'MCP Auth', value: 'mcp_auth' },
+            { label: 'API Auth', value: 'api_auth' },
+            { label: 'Error', value: 'error' },
           ],
         },
-        defaultValue: 'setup',
-      },
-      {
-        name: 'agentName',
-        description: 'Name of the agent',
-        control: { type: 'string', placeholder: 'Agent name' },
-        defaultValue: 'GitHub Copilot',
+        defaultValue: 'mcp_auth',
       },
       {
         name: 'reason',
@@ -712,9 +707,10 @@ export const chatComponents: ComponentEntry[] = [
       },
     ],
     variants: [
-      { name: 'Setup Needed', props: { state: 'setup', agentName: 'GitHub Copilot' } },
-      { name: 'Auth Needed', props: { state: 'auth', agentName: 'Linear' } },
-      { name: 'Custom Reason', props: { state: 'auth', agentName: 'Slack', reason: 'Your OAuth token has expired. Please re-authenticate to continue.' } },
+      { name: 'MCP Auth', props: { state: 'mcp_auth' } },
+      { name: 'API Auth', props: { state: 'api_auth' } },
+      { name: 'Custom Reason', props: { state: 'api_auth', reason: 'Your OAuth token has expired. Please re-authenticate to continue.' } },
+      { name: 'Error', props: { state: 'error' } },
       { name: 'Hidden', props: { state: 'hidden' } },
     ],
     mockData: () => ({

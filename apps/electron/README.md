@@ -257,11 +257,10 @@ See `CLAUDE.md` for complete route reference.
 | File | Purpose |
 |------|---------|
 | `main/index.ts` | App entry, window creation |
-| `main/sessions.ts` | CraftAgent wrapper, event processing, subagent integration |
+| `main/sessions.ts` | CraftAgent wrapper, event processing, source integration |
 | `main/ipc.ts` | IPC channel handlers (sessions, files, shell) |
 | `main/menu.ts` | Application menu (File, Edit, View, Help) |
 | `main/deep-link.ts` | Deep link URL parsing and handling |
-| `main/agent-service.ts` | Agent listing, caching, auth checking |
 | `main/sources-service.ts` | Source loading and authentication service |
 | `preload/index.ts` | Context bridge API |
 | `renderer/App.tsx` | React root, state management |

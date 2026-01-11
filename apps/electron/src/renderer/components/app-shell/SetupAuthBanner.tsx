@@ -8,7 +8,6 @@ export type BannerState =
 
 interface SetupAuthBannerProps {
   state: BannerState
-  agentName?: string
   reason?: string
   onAction: () => void
   /** Variant: 'banner' for chat list, 'inputAreaCover' matches chat input styling */
@@ -16,17 +15,16 @@ interface SetupAuthBannerProps {
 }
 
 /**
- * SetupAuthBanner - Shows when an agent's sources need authentication
+ * SetupAuthBanner - Shows when sources need authentication
  *
  * States:
- * - 'hidden': No banner shown (folder-based agents are ready immediately)
- * - 'mcp_auth': Agent's MCP sources need authentication
- * - 'api_auth': Agent's API sources need credentials
+ * - 'hidden': No banner shown
+ * - 'mcp_auth': MCP sources need authentication
+ * - 'api_auth': API sources need credentials
  * - 'error': Something went wrong (allows retry)
  */
 export function SetupAuthBanner({
   state,
-  agentName,
   reason,
   onAction,
   variant = 'banner'
@@ -52,9 +50,9 @@ export function SetupAuthBanner({
     if (reason) return reason
     switch (state) {
       case 'mcp_auth':
-        return 'Connect to required services to use this agent.'
+        return 'Connect to required services to continue.'
       case 'api_auth':
-        return 'Enter API credentials to use this agent.'
+        return 'Enter API credentials to continue.'
       case 'error':
         return 'Something went wrong. Tap to retry.'
       default:

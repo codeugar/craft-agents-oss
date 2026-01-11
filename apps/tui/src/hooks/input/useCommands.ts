@@ -53,15 +53,7 @@ export interface UseCommandsProps {
   pendingAttachments: FileAttachment[];
   setPendingAttachments: React.Dispatch<React.SetStateAction<FileAttachment[]>>;
 
-  // Agent operations (stubs - agent system removed)
-  availableAgents: string[];
-  activeAgentName: string | null;
-  activeAgentDefinition: unknown | null;
-  activateAgent: (name: string) => Promise<boolean>;
-  deactivateAgent: () => void;
-  reloadAgent: () => Promise<void>;
-  resetAgent: () => Promise<void>;
-  refreshAgents: () => Promise<void>;
+  // Tools
   fetchTools: () => Promise<ToolGroup[]>;
 
   // Safe mode operations (read-only exploration)
@@ -112,14 +104,6 @@ export function useCommands(props: UseCommandsProps) {
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
     safeMode,
     approvePlan,
@@ -684,89 +668,6 @@ export function useCommands(props: UseCommandsProps) {
       }
 
       // ============================================
-      // Agent Commands
-      // ============================================
-      case '/agent': {
-        const subCommand = parts[1] ?? '';
-
-        if (subCommand === 'list') {
-          const agentList = availableAgents.length > 0
-            ? availableAgents.map(a => `- @${a}`).join('\n')
-            : '(No agents found. Create an "Agents" folder in Craft.)';
-          return {
-            handled: true,
-            message: { content: `**Available Sub-Agents**\n\n${agentList}`, type: 'assistant' },
-          };
-        }
-
-        if (subCommand === 'clear' || subCommand === 'dismiss') {
-          deactivateAgent();
-          return {
-            handled: true,
-            message: { content: 'Returned to main assistant', type: 'system' },
-          };
-        }
-
-        if (subCommand === 'refresh') {
-          return {
-            handled: true,
-            message: { content: 'Agent commands not available in TUI. Use /sources to view data sources.', type: 'info' },
-          };
-        }
-
-        if (subCommand === 'info') {
-          return {
-            handled: true,
-            message: { content: 'Agent commands not available in TUI. Use /sources to view data sources.', type: 'info' },
-          };
-        }
-
-        if (subCommand === 'reload') {
-          return {
-            handled: true,
-            message: { content: 'Agent commands not available in TUI.', type: 'info' },
-          };
-        }
-
-        if (subCommand === 'reset') {
-          return {
-            handled: true,
-            message: { content: 'Agent commands not available in TUI.', type: 'info' },
-          };
-        }
-
-        if (subCommand === 'create') {
-          return {
-            handled: true,
-            message: {
-              content: 'Agent creation not yet implemented. Create a document in your "Agents" folder manually.',
-              type: 'system',
-            },
-          };
-        }
-
-        if (subCommand) {
-          const activated = await activateAgent(subCommand);
-          if (!activated) {
-            return {
-              handled: true,
-              message: { content: `Agent not found: ${subCommand}`, type: 'error' },
-            };
-          }
-          return { handled: true };
-        }
-
-        // No subcommand - list available agents
-        const agentList = availableAgents.length > 0
-          ? availableAgents.map(a => `- @${a}`).join('\n')
-          : '(No agents found)';
-        return {
-          handled: true,
-          message: { content: `**Available Agents**\n\n${agentList}\n\nUse \`/agent <name>\` to activate.`, type: 'assistant' },
-        };
-      }
-
-      // ============================================
       // Unknown Command
       // ============================================
       default:
@@ -790,14 +691,6 @@ export function useCommands(props: UseCommandsProps) {
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
     safeMode,
     approvePlan,

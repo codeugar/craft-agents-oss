@@ -231,12 +231,6 @@ ${this.config.prompt}
       this.agent!.respondToPermission(request.requestId, false, false);
     };
 
-    // Wire up question handler - return empty answers in headless mode
-    this.agent.onAskUserQuestion = (request) => {
-      debug('[HeadlessRunner] Question request, returning empty answers');
-      this.agent!.respondToQuestion(request.requestId, {});
-    };
-
     // Set session ID based on flags
     // Default: fresh session (don't set any - SDK will create new)
     if (this.config.sessionId && this.workspaceRootPath) {

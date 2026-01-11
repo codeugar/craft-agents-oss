@@ -6,7 +6,6 @@ import { COMMANDS, SUBCOMMANDS, CATEGORY_ORDER, getCommandsByCategory, type Comm
 const STATIC_CONTENT: Partial<Record<CommandCategory | 'Chat', string[]>> = {
   'Chat': [
     'Just type your message and press Enter to chat.',
-    'Use @agentname to activate a sub-agent (e.g., @writer).',
   ],
   'Attaching Files': [
     'Drag & drop   Drag file into terminal window',

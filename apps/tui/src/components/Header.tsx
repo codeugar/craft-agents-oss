@@ -2,7 +2,6 @@ import React, { memo, useMemo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { formatTokens } from '../utils/markdown.ts';
 import type { AuthType, TokenDisplayMode } from '@craft-agent/shared/config';
-import { AnimatedSpinner } from './Spinner.tsx';
 import { DEFAULT_MODEL, getModelDisplayName } from '@craft-agent/shared/config';
 import { CRAFT_LOGO } from '@craft-agent/shared/branding';
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent';
@@ -16,8 +15,6 @@ export interface HeaderProps {
   outputTokens?: number;
   costUsd?: number;
   authType?: AuthType;
-  activeAgentName?: string;
-  agentsLoading?: boolean;
   tokenDisplay?: TokenDisplayMode;
   showCost?: boolean;
   showClock?: boolean;
@@ -39,8 +36,6 @@ export const Header: React.FC<HeaderProps> = memo(({
   outputTokens = 0,
   costUsd = 0,
   authType = 'api_key',
-  activeAgentName,
-  agentsLoading = false,
   tokenDisplay = 'hidden',
   showCost = true,
   showClock = false,
@@ -109,18 +104,7 @@ export const Header: React.FC<HeaderProps> = memo(({
     <Box justifyContent="space-between">
       {/* Left side: craft | ● mcp | auth | version */}
       <Box>
-        {/* Agent name or "craft" */}
-        {agentsLoading && (
-          <>
-            <AnimatedSpinner color="magenta" />
-            <Text dimColor> </Text>
-          </>
-        )}
-        {activeAgentName ? (
-          <Text color="magenta" bold>@{activeAgentName.length > 12 ? activeAgentName.slice(0, 12) + '…' : activeAgentName}</Text>
-        ) : (
-          <Text color="magenta" bold>craft</Text>
-        )}
+        <Text color="magenta" bold>craft</Text>
         <Text dimColor> </Text>
         <Text backgroundColor={modeBackgroundColor} color="white" bold> {modeConfig.shortName.toUpperCase()} </Text>
         <Text dimColor> | </Text>

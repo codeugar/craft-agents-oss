@@ -1,6 +1,6 @@
 import React, { useState, useCallback, memo, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { getCommandHint, getAgentHint, getTabCompletion, getHintDescription, type HintData } from '../utils/filtering.ts';
+import { getCommandHint, getTabCompletion, getHintDescription, type HintData } from '../utils/filtering.ts';
 import { TextInput } from './TextInput.tsx';
 import { isHistorySearch, isAbort } from '../keyboard/index.ts';
 import { debug } from '@craft-agent/shared/utils';
@@ -18,10 +18,6 @@ export interface InputProps {
   placeholder?: string;
   attachmentCount?: number;
   attachmentLabel?: string;
-  /** Available sub-agent names for @mention autocomplete */
-  availableAgents?: string[];
-  /** Currently active agent name (for dynamic placeholder) */
-  activeAgentName?: string;
   /** Terminal width in columns (for separator lines) */
   columns?: number;
 }
@@ -47,8 +43,6 @@ export const Input: React.FC<InputProps> = ({
   placeholder,
   attachmentCount = 0,
   attachmentLabel,
-  availableAgents = [],
-  activeAgentName,
   columns = 80,
 }) => {
   const [value, setValueRaw] = useState('');
@@ -148,19 +142,15 @@ export const Input: React.FC<InputProps> = ({
     return { total: matchingIndices.length, current };
   }, [searchQuery, history, searchMatchIndex]);
 
-  // Memoize command/mention hint to avoid recalculation
+  // Memoize command hint to avoid recalculation
   // Defined early so it can be used in useInput handler
   const hintData = useMemo((): HintData | null => {
-    // @mention hints
-    if (value.startsWith('@')) {
-      return getAgentHint(value.slice(1), availableAgents);
-    }
     // Slash command hints
     if (value.startsWith('/')) {
       return getCommandHint(value);
     }
     return null;
-  }, [value, availableAgents]);
+  }, [value]);
 
   // Combine all hints into a single navigable list
   const allHints = useMemo((): string[] => {
@@ -260,13 +250,13 @@ export const Input: React.FC<InputProps> = ({
           const idx = Math.min(hintIndex, allHints.length - 1);
           const completion = allHints[idx];
           if (completion) {
-            // Add space after completion for commands/mentions
+            // Add space after completion for commands
             setValue(completion + ' ');
             setHistoryIndex(-1);
           }
         } else {
           // Fallback to original tab completion (for partial matches without hints)
-          const completion = getTabCompletion(value, availableAgents);
+          const completion = getTabCompletion(value);
           if (completion) {
             setValue(completion);
             setHistoryIndex(-1);
@@ -333,15 +323,13 @@ export const Input: React.FC<InputProps> = ({
     { isActive: !disabled }
   );
 
-  // Determine placeholder text - dynamic based on active agent
+  // Determine placeholder text
   // Don't show "Thinking..." when disabled - the Messages component has its own ThinkingIndicator
   const placeholderText = disabled
     ? ''
     : placeholder
       ? placeholder
-      : activeAgentName
-        ? `Message @${activeAgentName}...`
-        : 'Message Craft...';
+      : 'Message Craft...';
 
   // Check if we have any hint to show
   const hasHint = hintData && (hintData.selected || hintData.others.length > 0);
@@ -436,7 +424,7 @@ export const Input: React.FC<InputProps> = ({
       </Box>
       {/* Bottom separator - exact terminal width */}
       <Text color={borderColor}>{'─'.repeat(separatorWidth)}</Text>
-      {/* Command/mention hints dropdown (only when not searching) */}
+      {/* Command hints dropdown (only when not searching) */}
       {!isSearching && !disabled && hasHint && allHints.length > 0 && (() => {
         // Calculate max hint width for alignment
         const maxHintWidth = Math.max(...visibleHints.map(h => h.length));

@@ -1,7 +1,7 @@
 /**
  * SourceAvatar - Unified avatar component for sources
  *
- * Provides consistent styling for all source icons (global sources and subagent sources).
+ * Provides consistent styling for all source icons.
  * Uses CrossfadeAvatar internally for smooth image loading with fallback support.
  *
  * Two usage patterns:

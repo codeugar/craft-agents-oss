@@ -135,8 +135,7 @@ function buildToolDescription(config: ApiConfig): string {
 
   // Check for old cache format (no documentation field)
   if (!config.documentation) {
-    desc += `⚠️ This API was cached with an older format. Run "/agent refresh" to get full API documentation.\n\n`;
-    desc += `Until then, you can still make requests but you'll need to figure out the endpoints yourself.`;
+    desc += `⚠️ This API was cached with an older format. You can still make requests but you'll need to figure out the endpoints yourself.`;
     return desc;
   }
 

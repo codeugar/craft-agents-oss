@@ -11,9 +11,8 @@
  * - source_oauth_trigger: Start OAuth authentication for MCP sources
  * - source_google_oauth_trigger: Start Google OAuth authentication (Gmail, Calendar, Drive)
  * - source_credential_prompt: Prompt user for API credentials
- * - agent_list, agent_create, agent_delete: Agent management
  *
- * Source/agent CRUD is done via standard file editing tools (Read/Write/Edit).
+ * Source CRUD is done via standard file editing tools (Read/Write/Edit).
  * See ~/.craft-agent/docs/ for config format documentation.
  */
 
@@ -1072,7 +1071,7 @@ After creating or editing a source's config.json, run this tool to:
  * After calling onAuthRequest, the session manager will forceAbort the agent.
  * The OAuth flow runs in the background, and the result comes back as a new message.
  */
-export function createOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createOAuthTriggerTool(sessionId: string, workspaceId: string) {
   return tool(
     'source_oauth_trigger',
     `Start OAuth authentication for an MCP source.
@@ -1101,7 +1100,7 @@ A browser window will open for the user to complete authentication.
       debug('[source_oauth_trigger] Starting OAuth for source:', args.sourceSlug);
 
       try {
-        // Load the source config (checks agent folder first if activeAgentSlug set, then workspace)
+        // Load the source config
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug);
         if (!sourceResult) {
           return {
@@ -1201,7 +1200,7 @@ A browser window will open for the user to complete authentication.
  * After calling onAuthRequest, the session manager will forceAbort the agent.
  * The OAuth flow runs in the background, and the result comes back as a new message.
  */
-export function createGoogleOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createGoogleOAuthTriggerTool(sessionId: string, workspaceId: string) {
   return tool(
     'source_google_oauth_trigger',
     `Trigger Google OAuth authentication flow for any Google API source.
@@ -1232,7 +1231,7 @@ After successful authentication, the tokens are stored and the source is marked 
     },
     async (args) => {
       try {
-        // Load the source config (checks agent folder first if activeAgentSlug set, then workspace)
+        // Load the source config
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug);
         if (!sourceResult) {
           return {
@@ -1335,7 +1334,7 @@ After successful authentication, the tokens are stored and the source is marked 
  * After calling onAuthRequest, the session manager will forceAbort the agent.
  * The OAuth flow runs in the background, and the result comes back as a new message.
  */
-export function createSlackOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createSlackOAuthTriggerTool(sessionId: string, workspaceId: string) {
   return tool(
     'source_slack_oauth_trigger',
     `Trigger Slack OAuth authentication flow for a Slack API source.
@@ -1368,7 +1367,7 @@ After successful authentication, the tokens are stored and the source is marked 
     },
     async (args) => {
       try {
-        // Load the source config (checks agent folder first if activeAgentSlug set, then workspace)
+        // Load the source config
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug);
         if (!sourceResult) {
           return {
@@ -1486,7 +1485,7 @@ After successful authentication, the tokens are stored and the source is marked 
  * After calling onAuthRequest, the session manager will forceAbort the agent.
  * The OAuth flow runs in the background, and the result comes back as a new message.
  */
-export function createMicrosoftOAuthTriggerTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createMicrosoftOAuthTriggerTool(sessionId: string, workspaceId: string) {
   return tool(
     'source_microsoft_oauth_trigger',
     `Trigger Microsoft OAuth authentication flow for a Microsoft API source.
@@ -1519,7 +1518,7 @@ After successful authentication, the tokens are stored and the source is marked 
     },
     async (args) => {
       try {
-        // Load the source config (checks agent folder first if activeAgentSlug set, then workspace)
+        // Load the source config
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug);
         if (!sourceResult) {
           return {
@@ -1626,7 +1625,7 @@ After successful authentication, the tokens are stored and the source is marked 
  * After calling onAuthRequest, the session manager will forceAbort the agent.
  * The user completes auth in the UI, and the result comes back as a new message.
  */
-export function createCredentialPromptTool(sessionId: string, workspaceId: string, activeAgentSlug?: string) {
+export function createCredentialPromptTool(sessionId: string, workspaceId: string) {
   return tool(
     'source_credential_prompt',
     `Prompt the user to enter credentials for a source.
@@ -1670,7 +1669,7 @@ source_credential_prompt({
       debug('[source_credential_prompt] Requesting credentials:', args.sourceSlug, args.mode);
 
       try {
-        // Load source to get name and validate (checks agent folder first if activeAgentSlug set, then workspace)
+        // Load source to get name and validate
         const sourceResult = loadSourceConfigWithFallback(workspaceId, args.sourceSlug);
         if (!sourceResult) {
           return {

@@ -645,49 +645,6 @@ export function NavigationProvider({
     }
   }, [navigate])
 
-  // REACTIVE VALIDATION: Clean up stale details when sessions/sources are deleted
-  // This ensures the navigation state stays consistent with actual data
-  useEffect(() => {
-    // Validate chat details
-    if (isChatsNavigation(navigationState) && navigationState.details) {
-      const sessionId = navigationState.details.sessionId
-      const sessionExists = sessionMetaMap.has(sessionId)
-
-      if (!sessionExists) {
-        // Session was deleted - auto-select first matching filter or clear details
-        const firstSessionId = getFirstSessionId(navigationState.filter)
-        if (firstSessionId) {
-          setSession({ selected: firstSessionId })
-          setNavigationState({
-            ...navigationState,
-            details: { type: 'chat', sessionId: firstSessionId },
-          })
-        } else {
-          setSession({ selected: null })
-          setNavigationState({
-            ...navigationState,
-            details: null,
-          })
-        }
-      }
-    }
-
-    // Validate source details
-    if (isSourcesNavigation(navigationState) && navigationState.details) {
-      const sourceSlug = navigationState.details.sourceSlug
-      const sourceExists = sources.some(s => s.config.slug === sourceSlug)
-
-      if (!sourceExists) {
-        // Source was deleted - auto-select first or clear details
-        const firstSourceSlug = getFirstSourceSlug(navigationState.category)
-        setNavigationState({
-          ...navigationState,
-          details: firstSourceSlug ? { type: 'source', sourceSlug: firstSourceSlug } : null,
-        })
-      }
-    }
-  }, [sessionMetaMap, sources, navigationState, getFirstSessionId, getFirstSourceSlug, setSession])
-
   return (
     <NavigationContext.Provider value={{ navigate, isReady, navigationState, canGoBack, canGoForward, goBack, goForward }}>
       {children}

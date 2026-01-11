@@ -68,14 +68,6 @@ export function getWorkspaceSourcesPath(rootPath: string): string {
 }
 
 /**
- * Get path to workspace agents directory
- * @param rootPath - Absolute path to workspace root folder
- */
-export function getWorkspaceAgentsPath(rootPath: string): string {
-  return join(rootPath, 'agents');
-}
-
-/**
  * Get path to workspace sessions directory
  * @param rootPath - Absolute path to workspace root folder
  */
@@ -251,7 +243,6 @@ export function createWorkspaceAtPath(
   // Create workspace directory structure
   mkdirSync(rootPath, { recursive: true });
   mkdirSync(getWorkspaceSourcesPath(rootPath), { recursive: true });
-  mkdirSync(getWorkspaceAgentsPath(rootPath), { recursive: true });
   mkdirSync(getWorkspaceSessionsPath(rootPath), { recursive: true });
 
   // Save config

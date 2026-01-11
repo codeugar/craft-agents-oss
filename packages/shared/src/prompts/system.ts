@@ -5,16 +5,15 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { DOC_REFS } from '../docs/index.ts';
 
-/** Maximum size of CLAUDE.md/agents.md file to include (10KB) */
+/** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
 
 /** Files to look for in working directory (in priority order) */
-const CONTEXT_FILES = ['CLAUDE.md', 'agents.md'];
+const CONTEXT_FILES = ['CLAUDE.md'];
 
 /**
- * Read the project context file (CLAUDE.md or agents.md) from a directory.
+ * Read the project context file (CLAUDE.md) from a directory.
  * Returns the content if found, null otherwise.
- * CLAUDE.md takes precedence over agents.md.
  */
 export function readProjectContextFile(directory: string): { filename: string; content: string } | null {
   for (const filename of CONTEXT_FILES) {
@@ -43,7 +42,7 @@ export function readProjectContextFile(directory: string): { filename: string; c
 
 /**
  * Get the working directory context string for injection into user messages.
- * Includes the working directory path and any CLAUDE.md/agents.md content.
+ * Includes the working directory path and any CLAUDE.md content.
  * Returns empty string if no working directory is set.
  */
 export function getWorkingDirectoryContext(workingDirectory?: string): string {
@@ -220,7 +219,7 @@ Each source has:
 
 6. **Use Available Tools**: Only call tools that exist. Check the tool list and use exact names.
 
-7. **Craft Agent Documentation**: When users ask questions like "How to...", "How can I...", "How do I...", "Can I...", or "Is it possible to..." about installing, creating, setting up, configuring, or connecting anything related to Craft Agent - use the tools from the \`docs\` MCP server. This includes questions about MCP servers, APIs, connectivity, setup and installation flow. Do NOT/textCODE instructions for these topics. Craft Agent has its own approach.
+7. **Craft Agent Documentation**: When users ask questions like "How to...", "How can I...", "How do I...", "Can I...", or "Is it possible to..." about installing, creating, setting up, configuring, or connecting anything related to Craft Agent - use the tools from the \`docs\` MCP server. This includes questions about MCP servers, APIs, connectivity, setup and installation flow. Do NOT make up instructions for these topics. Craft Agent has its own approach.
 
 8. **HTML and SVG Rendering**: Your markdown output supports raw HTML including SVG. Use this for:
    - Inline SVG diagrams, icons, or visualizations
