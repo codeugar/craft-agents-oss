@@ -2,15 +2,14 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, SubAgentMetadata, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, TabContentWindowParams } from '../shared/types'
-import type { Tab, TabType, ChatTab, AgentInfoTab, FileTab, BrowserTab, SourceInfoTab } from './tabs/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
-import { Chat } from '@/components/chat/Chat'
-import type { ChatContextType } from '@/context/ChatContext'
+import { AppShell } from '@/components/app-shell/AppShell'
+import type { AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
 import { SplashScreen } from '@/components/SplashScreen'
@@ -19,7 +18,7 @@ import { FocusProvider } from '@/context/FocusContext'
 import { useGlobalShortcuts } from '@/hooks/keyboard'
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { useNotifications } from '@/hooks/useNotifications'
-import { useTabs } from '@/tabs'
+import { useSession } from '@/hooks/useSession'
 import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { initRendererPerf } from './lib/perf'
@@ -28,133 +27,16 @@ import {
   initializeSessionsAtom,
   addSessionAtom,
   removeSessionAtom,
-  syncSessionsToAtomsAtom,
   updateSessionAtom,
   sessionAtomFamily,
+  sessionMetaMapAtom,
   backgroundTasksAtomFamily,
+  extractSessionMeta,
+  type SessionMeta,
 } from '@/atoms/sessions'
 import { getDefaultStore } from 'jotai'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'ready'
-
-/** Window mode - 'main' for full app, 'tab-content' for standalone tab windows */
-type WindowMode = 'main' | 'tab-content'
-
-/**
- * Check if this is a tab content window and get the initial tab config
- */
-function getWindowModeConfig(): { mode: WindowMode; initialTab: Tab | null } {
-  const params = new URLSearchParams(window.location.search)
-  const mode = params.get('mode')
-
-  if (mode !== 'tab-content') {
-    return { mode: 'main', initialTab: null }
-  }
-
-  const workspaceId = params.get('workspaceId') || ''
-  const tabType = (params.get('tabType') || 'settings') as TabType
-
-  // Extract tab-specific params
-  const tabParams: Record<string, string> = {}
-  params.forEach((value, key) => {
-    if (!['workspaceId', 'mode', 'tabType'].includes(key)) {
-      tabParams[key] = value
-    }
-  })
-
-  // Build the initial tab
-  const initialTab = buildInitialTab(tabType, tabParams, workspaceId)
-  return { mode: 'tab-content', initialTab }
-}
-
-/**
- * Build a Tab object from URL params for tab-content windows
- */
-function buildInitialTab(tabType: TabType, tabParams: Record<string, string>, workspaceId: string): Tab {
-  const base = {
-    label: getInitialTabLabel(tabType, tabParams),
-    closable: true,
-  }
-
-  switch (tabType) {
-    case 'chat':
-      return {
-        ...base,
-        id: `chat:${tabParams.sessionId}`,
-        type: 'chat',
-        sessionId: tabParams.sessionId || '',
-        workspaceId,
-        agentId: tabParams.agentId,
-      } as ChatTab
-
-    case 'agent-info':
-      return {
-        ...base,
-        id: `agent-info:${tabParams.agentId}`,
-        type: 'agent-info',
-        agentId: tabParams.agentId || '',
-        workspaceId,
-      } as AgentInfoTab
-
-    case 'file':
-      return {
-        ...base,
-        id: `file:${tabParams.path}`,
-        type: 'file',
-        path: tabParams.path || '',
-      } as FileTab
-
-    case 'browser':
-      return {
-        ...base,
-        id: `browser:${tabParams.url}`,
-        type: 'browser',
-        url: tabParams.url || '',
-      } as BrowserTab
-
-    case 'source-info':
-      const sourceId = tabParams.agentSlug
-        ? `source-info:${tabParams.agentSlug}:${tabParams.sourceSlug}`
-        : `source-info:${tabParams.sourceSlug}`
-      return {
-        ...base,
-        id: sourceId,
-        type: 'source-info',
-        sourceSlug: tabParams.sourceSlug || '',
-        workspaceId,
-        agentSlug: tabParams.agentSlug,
-      } as SourceInfoTab
-
-    case 'settings':
-      return { ...base, id: 'settings', type: 'settings' }
-
-    case 'shortcuts':
-      return { ...base, id: 'shortcuts', type: 'shortcuts' }
-
-    case 'preferences':
-      return { ...base, id: 'preferences', type: 'preferences' }
-
-    default:
-      return { ...base, id: 'settings', type: 'settings' }
-  }
-}
-
-/**
- * Get a human-readable label for the initial tab
- */
-function getInitialTabLabel(tabType: TabType, tabParams: Record<string, string>): string {
-  switch (tabType) {
-    case 'chat': return 'Chat'
-    case 'settings': return 'Settings'
-    case 'shortcuts': return 'Keyboard Shortcuts'
-    case 'agent-info': return tabParams.agentId || 'Agent'
-    case 'file': return tabParams.path?.split('/').pop() || 'File'
-    case 'browser': return 'Browser'
-    case 'preferences': return 'User Preferences'
-    case 'source-info': return tabParams.sourceSlug || 'Source'
-    default: return 'Tab'
-  }
-}
 
 /** Type for the Jotai store returned by useStore() */
 type JotaiStore = ReturnType<typeof getDefaultStore>
@@ -248,54 +130,39 @@ export default function App() {
     })
   }, [])
 
-  // Window mode: 'main' for full app, 'tab-content' for standalone tab windows
-  // Computed once on mount from URL params
-  const [windowModeConfig] = useState(() => getWindowModeConfig())
-  const { mode: windowMode, initialTab } = windowModeConfig
-
   // App state: loading -> check auth -> onboarding or ready
   const [appState, setAppState] = useState<AppState>('loading')
   const [setupNeeds, setSetupNeeds] = useState<SetupNeeds | null>(null)
 
-  const [sessions, setSessions] = useState<Session[]>([])
-
   // Per-session Jotai atom setters for isolated updates
-  // These update individual session atoms without triggering re-renders in other sessions
+  // NOTE: No sessionsAtom - we don't store a Session[] array anywhere to prevent memory leaks
+  // Instead we use:
+  // - sessionMetaMapAtom for lightweight listing
+  // - sessionAtomFamily(id) for individual session data
   const initializeSessions = useSetAtom(initializeSessionsAtom)
   const addSession = useSetAtom(addSessionAtom)
   const removeSession = useSetAtom(removeSessionAtom)
-  const syncSessionsToAtoms = useSetAtom(syncSessionsToAtomsAtom)
   const updateSessionDirect = useSetAtom(updateSessionAtom)
   const store = useStore()
 
-  // Auto-sync React state to per-session atoms
-  // This enables components using useSession(id) to get isolated updates
-  // while keeping React state as the single source of truth
-  useEffect(() => {
-    syncSessionsToAtoms(sessions)
-  }, [sessions, syncSessionsToAtoms])
-
   // Helper to update a session by ID with partial fields
-  // Reduces boilerplate: setSessions(prev => prev.map(s => s.id === id ? {...s, field: value} : s))
+  // Uses per-session atom directly instead of updating an array
   const updateSessionById = useCallback((
     sessionId: string,
     updates: Partial<Session> | ((session: Session) => Partial<Session>)
   ) => {
-    setSessions(prev => prev.map(s => {
-      if (s.id !== sessionId) return s
-      const partialUpdates = typeof updates === 'function' ? updates(s) : updates
-      return { ...s, ...partialUpdates }
-    }))
-  }, [])
+    updateSessionDirect(sessionId, (prev) => {
+      if (!prev) return prev
+      const partialUpdates = typeof updates === 'function' ? updates(prev) : updates
+      return { ...prev, ...partialUpdates }
+    })
+  }, [updateSessionDirect])
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  const [agents, setAgents] = useState<SubAgentMetadata[]>([])
-  const [isLoadingAgents, setIsLoadingAgents] = useState(false)
   // Window's workspace ID - fixed for this window (multi-window architecture)
   const [windowWorkspaceId, setWindowWorkspaceId] = useState<string | null>(null)
   const [currentModel, setCurrentModel] = useState(DEFAULT_MODEL)
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
-  const [menuNewChatTabTrigger, setMenuNewChatTabTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
   // Credential requests per session (queue to handle multiple concurrent requests)
@@ -323,7 +190,7 @@ export default function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
 
   // Compute if app is fully ready (all data loaded)
-  const isFullyReady = appState === 'ready' && sessionsLoaded && !isLoadingAgents
+  const isFullyReady = appState === 'ready' && sessionsLoaded
 
   // Trigger splash exit animation when fully ready
   useEffect(() => {
@@ -398,6 +265,15 @@ export default function App() {
     setShowResetDialog(true)
   }, [])
 
+  // Get initial sessionId and focused mode from URL params (for "Open in New Window" feature)
+  const { initialSessionId, isFocusedMode } = useMemo(() => {
+    const params = new URLSearchParams(window.location.search)
+    return {
+      initialSessionId: params.get('sessionId'),
+      isFocusedMode: params.get('focused') === 'true',
+    }
+  }, [])
+
   // Check auth state and get window's workspace ID on mount
   useEffect(() => {
     const initialize = async () => {
@@ -428,18 +304,19 @@ export default function App() {
     initialize()
   }, [])
 
-  // Tab system - closeChatTabBySession for deletion, openChatTab for new chat
-  const { closeChatTabBySession, openChatTab, setActiveTab } = useTabs()
+  // Session selection state
+  const [, setSession] = useSession()
 
   // Notification system - shows native OS notifications and badge count
   const handleNavigateToSession = useCallback((sessionId: string) => {
-    // Navigate to the session by switching to its tab
-    setActiveTab(`chat:${sessionId}`)
-  }, [setActiveTab])
+    // Navigate to the session via central routing (uses allChats filter)
+    navigate(routes.view.allChats(sessionId))
+  }, [])
 
   const { isWindowFocused, showSessionNotification } = useNotifications({
     workspaceId: windowWorkspaceId,
-    sessions,
+    // NOTE: sessions removed - hook now uses sessionMetaMapAtom internally
+    // to prevent closures from retaining full message arrays
     onNavigateToSession: handleNavigateToSession,
     enabled: notificationsEnabled,
   })
@@ -451,8 +328,8 @@ export default function App() {
     window.electronAPI.getWorkspaces().then(setWorkspaces)
     window.electronAPI.getNotificationsEnabled().then(setNotificationsEnabled)
     window.electronAPI.getSessions().then((loadedSessions) => {
-      setSessions(loadedSessions)
-      // Initialize per-session atoms for isolated streaming updates
+      // Initialize per-session atoms and metadata map
+      // NOTE: No sessionsAtom used - sessions are only in per-session atoms
       initializeSessions(loadedSessions)
       // Initialize unified sessionOptions from session data
       const optionsMap = new Map<string, SessionOptions>()
@@ -469,6 +346,14 @@ export default function App() {
       setSessionOptions(optionsMap)
       // Mark sessions as loaded for splash screen
       setSessionsLoaded(true)
+
+      // If window was opened with a specific session (via "Open in New Window"), select it
+      if (initialSessionId && windowWorkspaceId) {
+        const session = loadedSessions.find(s => s.id === initialSessionId)
+        if (session) {
+          navigate(routes.view.allChats(session.id))
+        }
+      }
     })
     // Load stored model preference
     window.electronAPI.getModel().then((storedModel) => {
@@ -484,33 +369,13 @@ export default function App() {
     })
     // Load app-level theme
     window.electronAPI.getAppTheme().then(setAppTheme)
-  }, [appState])
+  }, [appState, initialSessionId, windowWorkspaceId, setSession, initializeSessions])
 
-  // Load agents and workspace theme when window's workspace is set
+  // Load workspace theme when window's workspace is set
   useEffect(() => {
     if (windowWorkspaceId) {
-      setIsLoadingAgents(true)
-      window.electronAPI.getAgents(windowWorkspaceId)
-        .then(setAgents)
-        .finally(() => setIsLoadingAgents(false))
-      // Load workspace-level theme
       window.electronAPI.getWorkspaceTheme(windowWorkspaceId).then(setWorkspaceTheme)
-    } else {
-      setAgents([])
-      setIsLoadingAgents(false)
     }
-  }, [windowWorkspaceId])
-
-  // Subscribe to agents changed events (when agents are created/synced/deleted via chat)
-  useEffect(() => {
-    const cleanup = window.electronAPI.onAgentsChanged(() => {
-      if (windowWorkspaceId) {
-        console.log('[App] Agents changed, refreshing list')
-        window.electronAPI.getAgents(windowWorkspaceId)
-          .then(setAgents)
-      }
-    })
-    return cleanup
   }, [windowWorkspaceId])
 
   // Subscribe to theme change events (live updates when theme.json files change)
@@ -544,7 +409,7 @@ export default function App() {
   useEffect(() => {
     // Handoff events signal end of streaming - need to sync back to React state
     // Also includes todo_state_changed so status updates immediately reflect in sidebar
-    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed'])
+    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed', 'title_generated'])
 
     // Helper to handle side effects (same logic for both paths)
     const handleEffects = (effects: Effect[], sessionId: string, eventType: string) => {
@@ -567,10 +432,6 @@ export default function App() {
               next.set(effect.sessionId, { ...current, permissionMode: effect.permissionMode })
               return next
             })
-            break
-          }
-          case 'ask_question_request': {
-            console.log('[App] ask_question_request:', effect.sessionId, effect.request)
             break
           }
           case 'credential_request': {
@@ -638,16 +499,14 @@ export default function App() {
         // Handle background task events
         handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
 
-        // For handoff events, also sync to React state
-        // This reconciles React state with all the streaming updates
+        // For handoff events, update metadata map for list display
+        // NOTE: No sessionsAtom to sync - atom and metadata are the source of truth
         if (isHandoff) {
-          setSessions(prev => {
-            const exists = prev.some(s => s.id === sessionId)
-            if (!exists) {
-              return [...prev, updatedSession]
-            }
-            return prev.map(s => s.id === sessionId ? updatedSession : s)
-          })
+          // Update metadata map
+          const metaMap = store.get(sessionMetaMapAtom)
+          const newMetaMap = new Map(metaMap)
+          newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
+          store.set(sessionMetaMapAtom, newMetaMap)
 
           // Show notification on complete (when window is not focused)
           if (event.type === 'complete') {
@@ -663,30 +522,29 @@ export default function App() {
         return
       }
 
-      // Not streaming: React state is source of truth (syncs to atoms via useEffect)
-      setSessions(prev => {
-        const currentSession = prev.find(s => s.id === sessionId) ?? null
+      // Not streaming: use per-session atoms directly (no sessionsAtom)
+      const currentSession = store.get(sessionAtomFamily(sessionId))
 
-        const { session: updatedSession, effects } = processAgentEvent(
-          agentEvent,
-          currentSession,
-          workspaceId
-        )
+      const { session: updatedSession, effects } = processAgentEvent(
+        agentEvent,
+        currentSession,
+        workspaceId
+      )
 
-        // Handle side effects
-        handleEffects(effects, sessionId, event.type)
+      // Handle side effects
+      handleEffects(effects, sessionId, event.type)
 
-        // Handle background task events
-        handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
+      // Handle background task events
+      handleBackgroundTaskEvent(store, sessionId, event, agentEvent)
 
-        // If session didn't exist before, add it
-        if (!currentSession) {
-          return [...prev, updatedSession]
-        }
+      // Update per-session atom
+      updateSessionDirect(sessionId, () => updatedSession)
 
-        // Update existing session
-        return prev.map(s => s.id === sessionId ? updatedSession : s)
-      })
+      // Update metadata map
+      const metaMap = store.get(sessionMetaMapAtom)
+      const newMetaMap = new Map(metaMap)
+      newMetaMap.set(sessionId, extractSessionMeta(updatedSession))
+      store.set(sessionMetaMapAtom, newMetaMap)
     })
 
     return cleanup
@@ -697,14 +555,11 @@ export default function App() {
     const unsubNewChat = window.electronAPI.onMenuNewChat(() => {
       setMenuNewChatTrigger(n => n + 1)
     })
-    const unsubNewChatTab = window.electronAPI.onMenuNewChatTab(() => {
-      setMenuNewChatTabTrigger(n => n + 1)
-    })
     const unsubSettings = window.electronAPI.onMenuOpenSettings(() => {
       handleOpenSettings()
     })
     const unsubShortcuts = window.electronAPI.onMenuKeyboardShortcuts(() => {
-      navigate(routes.tab.shortcuts())
+      navigate(routes.view.settings('shortcuts'))
     })
     const unsubHelp = window.electronAPI.onMenuOpenHelp(() => {
       // Open help documentation URL
@@ -713,21 +568,15 @@ export default function App() {
 
     return () => {
       unsubNewChat()
-      unsubNewChatTab()
       unsubSettings()
       unsubShortcuts()
       unsubHelp()
     }
   }, [])
 
-  const handleCreateSession = useCallback(async (workspaceId: string, agentId?: string): Promise<Session> => {
-    // Find agent if provided - prefer displayName for human-readable title
-    const agent = agentId ? agents.find(a => a.id === agentId) : undefined
-    const agentName = agent?.displayName || agent?.name
-    // Pass agentName to main process so it's stored in the session
-    const session = await window.electronAPI.createSession(workspaceId, agentId, agentName)
-    setSessions(prev => [session, ...prev])
-    // Also update per-session atom for isolated updates
+  const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
+    const session = await window.electronAPI.createSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
 
     // Apply session defaults to the unified sessionOptions
@@ -744,32 +593,32 @@ export default function App() {
     }
 
     return session
-  }, [agents, addSession])
+  }, [addSession])
 
   // Deep link navigation is initialized later after handleInputChange is defined
 
   const handleDeleteSession = useCallback(async (sessionId: string, skipConfirmation = false): Promise<boolean> => {
     // Show confirmation dialog before deleting (unless skipped or session is empty)
     if (!skipConfirmation) {
-      // Check if session has any messages - skip confirmation for empty sessions
-      const session = sessions.find(s => s.id === sessionId)
-      const isEmpty = !session || session.messages.length === 0
+      // Check if session has any messages using session metadata from Jotai store
+      // We use store.get() instead of closing over sessions to prevent memory leaks
+      // (closures would retain the full sessions array with all messages)
+      const metaMap = store.get(sessionMetaMapAtom)
+      const meta = metaMap.get(sessionId)
+      // Session is empty if it has no lastFinalMessageId (no assistant responses) and no preview (no user messages)
+      const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.preview)
 
       if (!isEmpty) {
-        const confirmed = await window.electronAPI.showDeleteSessionConfirmation(session.name || 'Untitled')
+        const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
         if (!confirmed) return false
       }
     }
 
-    // Close the tab first to prevent race conditions where the tab
-    // tries to render while the session is being deleted
-    closeChatTabBySession(sessionId)
     await window.electronAPI.deleteSession(sessionId)
-    setSessions(prev => prev.filter(s => s.id !== sessionId))
-    // Also remove from per-session atom
+    // Remove from per-session atom and metadata map (no sessionsAtom)
     removeSession(sessionId)
     return true
-  }, [closeChatTabBySession, sessions, removeSession])
+  }, [store, removeSession])
 
   const handleFlagSession = useCallback((sessionId: string) => {
     updateSessionById(sessionId, { isFlagged: true })
@@ -841,19 +690,14 @@ export default function App() {
             .filter((_, i) => storeResults[i].status === 'rejected')
             .map(a => a.name)
             .join(', ')
-          setSessions(prev => prev.map(s =>
-            s.id === sessionId
-              ? {
-                  ...s,
-                  messages: [...s.messages, {
-                    id: generateMessageId(),
-                    role: 'warning' as const,
-                    content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
-                    timestamp: Date.now()
-                  }]
-                }
-              : s
-          ))
+          updateSessionById(sessionId, (s) => ({
+            messages: [...s.messages, {
+              id: generateMessageId(),
+              role: 'warning' as const,
+              content: `⚠️ ${failedCount} attachment(s) could not be stored and will not be sent: ${failedNames}`,
+              timestamp: Date.now()
+            }]
+          }))
         }
 
         // Step 2: Create processed attachments for Claude
@@ -893,11 +737,12 @@ export default function App() {
         isPending: true,  // Optimistic - will be confirmed by backend
       }
 
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId
-          ? { ...s, messages: [...s.messages, userMessage], isProcessing: true, lastMessageAt: Date.now() }
-          : s
-      ))
+      // Optimistic UI update - add user message and set processing state
+      updateSessionById(sessionId, (s) => ({
+        messages: [...s.messages, userMessage],
+        isProcessing: true,
+        lastMessageAt: Date.now()
+      }))
 
       // Step 5: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
@@ -910,38 +755,20 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to send message:', error)
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId
-          ? {
-              ...s,
-              isProcessing: false,
-              messages: [
-                ...s.messages,
-                {
-                  id: generateMessageId(),
-                  role: 'error' as const,
-                  content: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                  timestamp: Date.now()
-                }
-              ]
-            }
-          : s
-      ))
+      updateSessionById(sessionId, (s) => ({
+        isProcessing: false,
+        messages: [
+          ...s.messages,
+          {
+            id: generateMessageId(),
+            role: 'error' as const,
+            content: `Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            timestamp: Date.now()
+          }
+        ]
+      }))
     }
-  }, [sessionOptions])
-
-  const handleRefreshAgents = useCallback(async () => {
-    if (windowWorkspaceId) {
-      setIsLoadingAgents(true)
-      try {
-        // Reload local agents
-        const refreshedAgents = await window.electronAPI.refreshAgents(windowWorkspaceId)
-        setAgents(refreshedAgents)
-      } finally {
-        setIsLoadingAgents(false)
-      }
-    }
-  }, [windowWorkspaceId])
+  }, [sessionOptions, updateSessionById])
 
   const handleModelChange = useCallback((model: string) => {
     setCurrentModel(model)
@@ -1006,33 +833,28 @@ export default function App() {
     draftSaveTimeoutRef.current.set(sessionId, timeout)
   }, [])
 
-  // Open new chat - creates session and opens tab
-  // Used by components via ChatContext and for programmatic navigation
+  // Open new chat - creates session and selects it
+  // Used by components via AppShellContext and for programmatic navigation
   const openNewChat = useCallback(async (params: NewChatActionParams = {}) => {
     if (!windowWorkspaceId) {
       console.warn('[App] Cannot open new chat: no workspace ID')
       return
     }
 
-    const session = await handleCreateSession(windowWorkspaceId, params.agentId)
+    const session = await handleCreateSession(windowWorkspaceId)
 
     if (params.name) {
       await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: params.name })
     }
 
-    openChatTab(
-      session.id,
-      windowWorkspaceId,
-      params.name || session.name || 'New Chat',
-      params.agentId,
-      { forceNew: true }
-    )
+    // Navigate to the chat view - this sets both selectedSession and activeView
+    navigate(routes.view.allChats(session.id))
 
-    // Pre-fill input if provided (after a small delay to ensure tab is mounted)
+    // Pre-fill input if provided (after a small delay to ensure component is mounted)
     if (params.input) {
       setTimeout(() => handleInputChange(session.id, params.input!), 100)
     }
-  }, [windowWorkspaceId, handleCreateSession, openChatTab, handleInputChange])
+  }, [windowWorkspaceId, handleCreateSession, handleInputChange])
 
   const handleRespondToPermission = useCallback(async (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
     console.log('[App] handleRespondToPermission called:', { sessionId, requestId, allowed, alwaysAllow })
@@ -1054,9 +876,7 @@ export default function App() {
         }
         return next
       })
-      // Force sessions state refresh to ensure React processes any pending tool_result updates
-      console.log('[App] handleRespondToPermission: forcing sessions state refresh')
-      setSessions(prev => [...prev])
+      // Note: No need to force session refresh - per-session atoms update automatically
     } else {
       // Response failed (agent/session gone) - clear the permission anyway
       // to avoid UI being stuck with stale permission
@@ -1094,9 +914,7 @@ export default function App() {
         }
         return next
       })
-      // Force sessions state refresh to ensure React processes any pending updates
-      console.log('[App] handleRespondToCredential: forcing sessions state refresh')
-      setSessions(prev => [...prev])
+      // Note: No need to force session refresh - per-session atoms update automatically
     } else {
       // Response failed (agent/session gone) - clear the credential anyway
       // to avoid UI being stuck with stale credential request
@@ -1131,15 +949,15 @@ export default function App() {
   }, [])
 
   const handleOpenSettings = useCallback(() => {
-    navigate(routes.tab.settings())
+    navigate(routes.view.settings())
   }, [])
 
   const handleOpenKeyboardShortcuts = useCallback(() => {
-    navigate(routes.tab.shortcuts())
+    navigate(routes.view.settings('shortcuts'))
   }, [])
 
   const handleOpenStoredUserPreferences = useCallback(() => {
-    navigate(routes.tab.preferences())
+    navigate(routes.view.settings('preferences'))
   }, [])
 
   // Show reset confirmation dialog
@@ -1152,9 +970,9 @@ export default function App() {
     try {
       await window.electronAPI.logout()
       // Reset all state
-      setSessions([])
+      // Clear session atoms - initialize with empty array clears all per-session atoms
+      initializeSessions([])
       setWorkspaces([])
-      setAgents([])
       setWindowWorkspaceId(null)
       // Reset setupNeeds to force fresh onboarding start
       setSetupNeeds({
@@ -1172,7 +990,7 @@ export default function App() {
     } finally {
       setShowResetDialog(false)
     }
-  }, [onboarding])
+  }, [onboarding, initializeSessions])
 
   // Handle workspace selection
   // - Default: switch workspace in same window (in-window switching)
@@ -1211,15 +1029,14 @@ export default function App() {
     onboarding.handleCancel()
   }, [onboarding])
 
-  // Build context value for Chat component
+  // Build context value for AppShell component
   // This is memoized to prevent unnecessary re-renders
   // IMPORTANT: Must be before early returns to maintain consistent hook order
-  const chatContextValue = useMemo<ChatContextType>(() => ({
+  const appShellContextValue = useMemo<AppShellContextType>(() => ({
     // Data
-    sessions,
+    // NOTE: sessions is NOT included - use sessionMetaMapAtom for listing
+    // and useSession(id) hook for individual sessions. This prevents memory leaks.
     workspaces,
-    agents,
-    isLoadingAgents,
     activeWorkspaceId: windowWorkspaceId,
     currentModel,
     pendingPermissions,
@@ -1250,7 +1067,6 @@ export default function App() {
     onOpenSettings: handleOpenSettings,
     onOpenKeyboardShortcuts: handleOpenKeyboardShortcuts,
     onOpenStoredUserPreferences: handleOpenStoredUserPreferences,
-    onRefreshAgents: handleRefreshAgents,
     onReset: handleReset,
     // Session options
     onSessionOptionsChange: handleSessionOptionsChange,
@@ -1258,10 +1074,8 @@ export default function App() {
     // New chat (via deep link navigation)
     openNewChat,
   }), [
-    sessions,
+    // NOTE: sessions removed to prevent memory leaks - components use atoms instead
     workspaces,
-    agents,
-    isLoadingAgents,
     windowWorkspaceId,
     currentModel,
     pendingPermissions,
@@ -1287,7 +1101,6 @@ export default function App() {
     handleOpenSettings,
     handleOpenKeyboardShortcuts,
     handleOpenStoredUserPreferences,
-    handleRefreshAgents,
     handleReset,
     handleSessionOptionsChange,
     handleInputChange,
@@ -1361,13 +1174,11 @@ export default function App() {
 
           {/* Main UI - always rendered, splash fades away to reveal it */}
           <div className="h-full text-foreground">
-            <Chat
-              contextValue={chatContextValue}
+            <AppShell
+              contextValue={appShellContextValue}
               defaultLayout={[20, 32, 48]}
               menuNewChatTrigger={menuNewChatTrigger}
-              menuNewChatTabTrigger={menuNewChatTabTrigger}
-              windowMode={windowMode}
-              initialTab={initialTab}
+              isFocusedMode={isFocusedMode}
             />
             <ResetConfirmationDialog
               open={showResetDialog}

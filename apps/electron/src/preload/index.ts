@@ -1,11 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment, type AgentActivateOptions, type AuthType } from '../shared/types'
+import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment, type AuthType } from '../shared/types'
 
 const api: ElectronAPI = {
   // Session management
   getSessions: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSIONS),
   getSessionMessages: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_MESSAGES, sessionId),
-  createSession: (workspaceId: string, agentId?: string, agentName?: string) => ipcRenderer.invoke(IPC_CHANNELS.CREATE_SESSION, workspaceId, agentId, agentName),
+  createSession: (workspaceId: string, options?: import('../shared/types').CreateSessionOptions) => ipcRenderer.invoke(IPC_CHANNELS.CREATE_SESSION, workspaceId, options),
   deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_SESSION, sessionId),
   sendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: import('../shared/types').StoredAttachment[], options?: import('../shared/types').SendMessageOptions) => ipcRenderer.invoke(IPC_CHANNELS.SEND_MESSAGE, sessionId, message, attachments, storedAttachments, options),
   cancelProcessing: (sessionId: string, silent?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.CANCEL_PROCESSING, sessionId, silent),
@@ -29,37 +29,9 @@ const api: ElectronAPI = {
   getWindowWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_WORKSPACE),
   getWindowMode: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_MODE),
   openWorkspace: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_WORKSPACE, workspaceId),
+  openSessionInNewWindow: (workspaceId: string, sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_SESSION_IN_NEW_WINDOW, workspaceId, sessionId),
   switchWorkspace: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.SWITCH_WORKSPACE, workspaceId),
   closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.CLOSE_WINDOW),
-  openTabContentWindow: (params: { workspaceId: string; tabType: string; tabParams?: Record<string, string> }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.OPEN_TAB_CONTENT_WINDOW, params),
-
-  // Agent management
-  getAgents: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_AGENTS, workspaceId),
-  refreshAgents: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.REFRESH_AGENTS, workspaceId),
-  checkAgentAuth: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.CHECK_AGENT_AUTH, workspaceId, agentId),
-  getAgentAuthStatus: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_AGENT_AUTH_STATUS, workspaceId, agentId),
-  getAgentDefinition: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_AGENT_DEFINITION, workspaceId, agentId),
-  reloadAgent: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.RELOAD_AGENT, workspaceId, agentId),
-  resetAgent: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.RESET_AGENT, workspaceId, agentId),
-  ensureBuiltinAgent: (workspaceId: string, slug: string) => ipcRenderer.invoke(IPC_CHANNELS.ENSURE_BUILTIN_AGENT, workspaceId, slug),
-
-  // Agent authentication
-  getAgentAuthRequirements: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_AGENT_AUTH_REQUIREMENTS, workspaceId, agentId),
-  startMcpOAuth: (workspaceId: string, agentId: string, serverUrl: string, serverName: string) => ipcRenderer.invoke(IPC_CHANNELS.START_MCP_OAUTH, workspaceId, agentId, serverUrl, serverName),
-  saveMcpBearer: (workspaceId: string, agentId: string, serverName: string, token: string) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_MCP_BEARER, workspaceId, agentId, serverName, token),
-  saveApiCredentials: (workspaceId: string, agentId: string, apiName: string, credential: string) => ipcRenderer.invoke(IPC_CHANNELS.SAVE_API_CREDENTIALS, workspaceId, agentId, apiName, credential),
-  validateMcpConnection: (serverUrl: string, accessToken?: string) => ipcRenderer.invoke(IPC_CHANNELS.VALIDATE_MCP_CONNECTION, serverUrl, accessToken),
-
-  // Agent state management (unified state machine, agent-scoped)
-  getAgentStatus: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_GET_STATUS, workspaceId, agentId),
-  activateAgent: (workspaceId: string, agentId: string, options?: AgentActivateOptions) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_ACTIVATE, workspaceId, agentId, options),
-  continueAfterMcpAuth: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CONTINUE_MCP_AUTH, workspaceId, agentId),
-  continueAfterApiAuth: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CONTINUE_API_AUTH, workspaceId, agentId),
-  deactivateAgent: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_DEACTIVATE, workspaceId, agentId),
-  reloadAgentState: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_RELOAD, workspaceId, agentId),
-  resetAgentState: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_RESET, workspaceId, agentId),
-  markAgentActive: (workspaceId: string, agentId: string) => ipcRenderer.invoke(IPC_CHANNELS.AGENT_MARK_ACTIVE, workspaceId, agentId),
 
   // Event listeners
   onSessionEvent: (callback: (event: SessionEvent) => void) => {
@@ -70,15 +42,6 @@ const api: ElectronAPI = {
     // Return cleanup function
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.SESSION_EVENT, handler)
-    }
-  },
-  onAgentStatusChanged: (callback: (workspaceId: string, agentId: string, status: import('../shared/types').AgentStatus) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string, agentId: string, status: import('../shared/types').AgentStatus) => {
-      callback(workspaceId, agentId, status)
-    }
-    ipcRenderer.on(IPC_CHANNELS.AGENT_STATUS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.AGENT_STATUS_CHANGED, handler)
     }
   },
 
@@ -122,11 +85,6 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MENU_NEW_CHAT, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_NEW_CHAT, handler)
   },
-  onMenuNewChatTab: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_NEW_CHAT_TAB, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_NEW_CHAT_TAB, handler)
-  },
   onMenuOpenSettings: (callback: () => void) => {
     const handler = () => callback()
     ipcRenderer.on(IPC_CHANNELS.MENU_OPEN_SETTINGS, handler)
@@ -143,7 +101,7 @@ const api: ElectronAPI = {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_OPEN_HELP, handler)
   },
 
-  // Deep link navigation listener
+  // Deep link navigation listener (for external craftagents:// URLs)
   onDeepLinkNavigate: (callback: (nav: import('../shared/types').DeepLinkNavigation) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, nav: import('../shared/types').DeepLinkNavigation) => {
       callback(nav)
@@ -234,11 +192,6 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_START_OAUTH, workspaceId, sourceSlug),
   saveSourceCredentials: (workspaceId: string, sourceSlug: string, credential: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, workspaceId, sourceSlug, credential),
-  // Agent-scoped sources
-  getAgentSources: (workspaceId: string, agentSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_AGENT, workspaceId, agentSlug),
-  promoteSource: (workspaceId: string, agentSlug: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_PROMOTE, workspaceId, agentSlug, sourceSlug),
   getSourcePermissionsConfig: (workspaceId: string, sourceSlug: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_PERMISSIONS, workspaceId, sourceSlug),
   getMcpTools: (workspaceId: string, sourceSlug: string) =>
@@ -265,6 +218,29 @@ const api: ElectronAPI = {
     }
   },
 
+  // Skills
+  getSkills: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_GET, workspaceId),
+  getSkillFiles: (workspaceId: string, skillSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_GET_FILES, workspaceId, skillSlug),
+  deleteSkill: (workspaceId: string, skillSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_DELETE, workspaceId, skillSlug),
+  openSkillInEditor: (workspaceId: string, skillSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_OPEN_EDITOR, workspaceId, skillSlug),
+  openSkillInFinder: (workspaceId: string, skillSlug: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_OPEN_FINDER, workspaceId, skillSlug),
+
+  // Skills change listener (live updates when skills are added/removed/modified)
+  onSkillsChanged: (callback: (skills: import('@craft-agent/shared/skills').LoadedSkill[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, skills: import('@craft-agent/shared/skills').LoadedSkill[]) => {
+      callback(skills)
+    }
+    ipcRenderer.on(IPC_CHANNELS.SKILLS_CHANGED, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.SKILLS_CHANGED, handler)
+    }
+  },
+
   // Statuses change listener (live updates when statuses config or icon files change)
   onStatusesChanged: (callback: (workspaceId: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, workspaceId: string) => {
@@ -276,23 +252,10 @@ const api: ElectronAPI = {
     }
   },
 
-  // Agents change listener (live updates when agents are created/synced/deleted)
-  onAgentsChanged: (callback: () => void) => {
-    const handler = () => {
-      callback()
-    }
-    ipcRenderer.on(IPC_CHANNELS.AGENTS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.AGENTS_CHANGED, handler)
-    }
-  },
-
-  // Theme (cascading: app → workspace → agent)
+  // Theme (cascading: app → workspace)
   getAppTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_APP),
   getWorkspaceTheme: (workspaceId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_WORKSPACE, workspaceId),
-  getAgentTheme: (workspaceId: string, agentSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_AGENT, workspaceId, agentSlug),
 
   // Logo URL resolution (uses Node.js filesystem cache for provider domains)
   getLogoUrl: (serviceUrl: string, provider?: string) =>
@@ -317,15 +280,6 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, handler)
     }
   },
-  onAgentThemeChange: (callback: (agentSlug: string, theme: import('@craft-agent/shared/config').ThemeOverrides | null) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, agentSlug: string, theme: import('@craft-agent/shared/config').ThemeOverrides | null) => {
-      callback(agentSlug, theme)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_AGENT_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_AGENT_CHANGED, handler)
-    }
-  },
 
   // Notifications
   showNotification: (title: string, body: string, workspaceId: string, sessionId: string) =>
@@ -334,6 +288,11 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_GET_ENABLED) as Promise<boolean>,
   setNotificationsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_SET_ENABLED, enabled),
+  // Mode cycling
+  getEnabledPermissionModes: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.MODE_CYCLING_GET_ENABLED) as Promise<('safe' | 'ask' | 'allow-all')[]>,
+  setEnabledPermissionModes: (modes: ('safe' | 'ask' | 'allow-all')[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MODE_CYCLING_SET_ENABLED, modes),
   updateBadgeCount: (count: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.BADGE_UPDATE, count),
   clearBadgeCount: () =>

@@ -6,10 +6,10 @@ import { toast } from 'sonner'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 
 // Import REAL components from the main app
-import { FreeFormInput } from '@/components/chat/input/FreeFormInput'
-import { InputContainer } from '@/components/chat/input/InputContainer'
-import { PermissionRequest } from '@/components/chat/input/structured/PermissionRequest'
-import type { StructuredInputState } from '@/components/chat/input/structured/types'
+import { FreeFormInput } from '@/components/app-shell/input/FreeFormInput'
+import { InputContainer } from '@/components/app-shell/input/InputContainer'
+import { PermissionRequest } from '@/components/app-shell/input/structured/PermissionRequest'
+import type { StructuredInputState } from '@/components/app-shell/input/structured/types'
 
 // Import adapters for mock data generation
 import {

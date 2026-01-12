@@ -8,7 +8,6 @@ Terminal User Interface for Craft Agent - an interactive CLI for managing Craft 
 - Tool execution visualization with background task support
 - Multi-workspace support with session persistence
 - Permission modes (Explore, Ask to Edit, Auto)
-- @mention system for activating sub-agents
 - Keyboard shortcuts and command history
 - File drag-and-drop support
 - Markdown rendering with syntax highlighting
@@ -51,7 +50,7 @@ craft -p "summarize notes" --output-format json
 | `Enter` | Send message |
 | `Shift+Enter` | New line |
 | `↑/↓` | Navigate command history |
-| `Tab` | Autocomplete @mentions |
+| `Tab` | Autocomplete commands |
 | `Ctrl+C` | Cancel current operation |
 | `Ctrl+U` | Clear input line |
 | `Cmd+←/→` | Jump to line start/end |

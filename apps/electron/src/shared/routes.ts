@@ -4,10 +4,15 @@
  * Type-safe route definitions for navigation throughout the app.
  * All navigation should use these route builders instead of hardcoded strings.
  *
+ * Route Formats:
+ * - action/{name}[/{id}] - Trigger side effects
+ * - {filter}[/chat/{sessionId}] - Compound view routes for full navigation state
+ *
  * Usage:
  *   import { routes } from '@/shared/routes'
- *   navigate(routes.tab.settings())
- *   navigate(routes.action.newChat({ agentId: 'claude' }))
+ *   navigate(routes.action.newChat())
+ *   navigate(routes.view.allChats())
+ *   navigate(routes.view.settings('shortcuts'))
  */
 
 // Helper to build query strings from params
@@ -26,43 +31,11 @@ function toQueryString(params?: Record<string, string | undefined>): string {
  */
 export const routes = {
   // ============================================
-  // Tab Routes - Open tabs in the tab bar
-  // ============================================
-  tab: {
-    /** Open settings tab */
-    settings: () => 'tab/settings' as const,
-
-    /** Open keyboard shortcuts tab */
-    shortcuts: () => 'tab/shortcuts' as const,
-
-    /** Open user preferences tab */
-    preferences: () => 'tab/preferences' as const,
-
-    /** Open a chat session tab */
-    chat: (sessionId: string) => `tab/chat/${sessionId}` as const,
-
-    /** Open agent info tab */
-    agentInfo: (agentId: string) => `tab/agent-info/${agentId}` as const,
-
-    /** Open source info tab */
-    sourceInfo: (sourceSlug: string, agentSlug?: string) =>
-      agentSlug
-        ? (`tab/source-info/${agentSlug}/${sourceSlug}` as const)
-        : (`tab/source-info/${sourceSlug}` as const),
-
-    /** Open file viewer tab */
-    file: (path: string) => `tab/file?path=${encodeURIComponent(path)}` as const,
-
-    /** Open browser tab */
-    browser: (url: string) => `tab/browser?url=${encodeURIComponent(url)}` as const,
-  },
-
-  // ============================================
   // Action Routes - Trigger actions
   // ============================================
   action: {
     /** Create a new chat session */
-    newChat: (params?: { agentId?: string; input?: string; name?: string }) =>
+    newChat: (params?: { input?: string; name?: string; onboarding?: 'add-source' | 'connect-sources' | 'welcome' }) =>
       `action/new-chat${toQueryString(params)}` as const,
 
     /** Rename a session */
@@ -81,10 +54,6 @@ export const routes = {
     unflagSession: (sessionId: string) =>
       `action/unflag-session/${sessionId}` as const,
 
-    // Note: archive/unarchive routes can be added when API support is available
-    // archiveSession: (sessionId: string) => `action/archive-session/${sessionId}` as const,
-    // unarchiveSession: (sessionId: string) => `action/unarchive-session/${sessionId}` as const,
-
     /** Start OAuth flow for a source */
     oauth: (sourceSlug: string) => `action/oauth/${sourceSlug}` as const,
 
@@ -98,14 +67,6 @@ export const routes = {
     deleteSource: (sourceSlug: string) =>
       `action/delete-source/${sourceSlug}` as const,
 
-    /** Activate an agent */
-    activateAgent: (agentId: string) =>
-      `action/activate-agent/${agentId}` as const,
-
-    /** Deactivate an agent */
-    deactivateAgent: (agentId: string) =>
-      `action/deactivate-agent/${agentId}` as const,
-
     /** Set permission mode for a session */
     setPermissionMode: (
       sessionId: string,
@@ -118,33 +79,52 @@ export const routes = {
   },
 
   // ============================================
-  // Sidebar Routes - Navigate sidebar
+  // View Routes - Compound sidebar/navigator/details routes
   // ============================================
-  sidebar: {
-    /** Show inbox (default chat filter) */
-    inbox: () => 'sidebar/inbox' as const,
+  view: {
+    /** All chats view (chats navigator, allChats filter) */
+    allChats: (sessionId?: string) =>
+      sessionId ? `allChats/chat/${sessionId}` as const : 'allChats' as const,
 
-    /** Show archive */
-    archive: () => 'sidebar/archive' as const,
+    /** Flagged view (chats navigator, flagged filter) */
+    flagged: (sessionId?: string) =>
+      sessionId ? `flagged/chat/${sessionId}` as const : 'flagged' as const,
 
-    /** Show flagged sessions */
-    flagged: () => 'sidebar/flagged' as const,
+    /** Todo state filter view (chats navigator, state filter) */
+    state: (stateId: string, sessionId?: string) =>
+      sessionId
+        ? `state/${stateId}/chat/${sessionId}` as const
+        : `state/${stateId}` as const,
 
-    /** Show sources panel */
-    sources: () => 'sidebar/sources' as const,
+    /** Sources view (sources navigator) */
+    sources: (params?: { category?: 'local-files' | 'online-sources' | 'local-mcp'; sourceSlug?: string }) => {
+      const { category, sourceSlug } = params ?? {}
+      if (sourceSlug) {
+        // Include category in URL if present: sources/{category}/source/{slug}
+        if (category) return `sources/${category}/source/${sourceSlug}` as const
+        return `sources/source/${sourceSlug}` as const
+      }
+      if (category) return `sources/${category}` as const
+      return 'sources' as const
+    },
 
-    /** Filter by agent */
-    agent: (agentId: string) => `sidebar/agent/${agentId}` as const,
+    /** Skills view (skills navigator) */
+    skills: (skillSlug?: string) =>
+      skillSlug
+        ? `skills/skill/${skillSlug}` as const
+        : 'skills' as const,
 
-    /** Filter by todo state */
-    todoState: (stateId: string) => `sidebar/state/${stateId}` as const,
+    /** Settings view (settings navigator) */
+    settings: (subpage?: 'general' | 'shortcuts' | 'preferences') =>
+      subpage && subpage !== 'general'
+        ? `settings/${subpage}` as const
+        : 'settings' as const,
   },
 } as const
 
 /**
  * Type representing any valid route string
  */
-export type TabRoute = ReturnType<(typeof routes.tab)[keyof typeof routes.tab]>
 export type ActionRoute = ReturnType<(typeof routes.action)[keyof typeof routes.action]>
-export type SidebarRoute = ReturnType<(typeof routes.sidebar)[keyof typeof routes.sidebar]>
-export type Route = TabRoute | ActionRoute | SidebarRoute
+export type ViewRoute = ReturnType<(typeof routes.view)[keyof typeof routes.view]>
+export type Route = ActionRoute | ViewRoute

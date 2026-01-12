@@ -1,13 +1,12 @@
 /**
  * Theme Configuration
  *
- * Cascading theme system with app → workspace → agent precedence.
+ * Cascading theme system with app → workspace precedence.
  * Light mode is default, with optional dark mode overrides.
  *
  * Storage locations:
  * - App:       ~/.craft-agent/theme.json
  * - Workspace: ~/.craft-agent/workspaces/{id}/theme.json
- * - Agent:     ~/.craft-agent/workspaces/{id}/agents/{slug}/theme.json
  */
 
 /**
@@ -34,7 +33,7 @@ export interface ThemeColors {
 
 /**
  * Theme overrides - light mode default, optional dark overrides
- * Cascades: app → workspace → agent (last wins)
+ * Cascades: app → workspace (last wins)
  */
 export interface ThemeOverrides extends ThemeColors {
   // Optional dark mode overrides
@@ -83,17 +82,15 @@ function mergeThemes(
 }
 
 /**
- * Resolve theme from cascading sources (app → workspace → agent)
+ * Resolve theme from cascading sources (app → workspace)
  * Later sources override earlier ones
  */
 export function resolveTheme(
   app?: ThemeOverrides,
-  workspace?: ThemeOverrides,
-  agent?: ThemeOverrides
+  workspace?: ThemeOverrides
 ): ThemeOverrides {
   let result = mergeThemes(undefined, app);
   result = mergeThemes(result, workspace);
-  result = mergeThemes(result, agent);
   return result;
 }
 

@@ -19,26 +19,53 @@ let anthropicClient: Anthropic | null = null;
 
 /**
  * Get or create Anthropic client for summarization.
- * Returns null if no API key is available (craft_credits/oauth users).
+ * Supports all auth types: api_key, oauth_token, and craft_credits.
  */
 async function getAnthropicClient(): Promise<Anthropic | null> {
   if (anthropicClient) {
     return anthropicClient;
   }
 
-  // Try to get API key from credential manager
-  const manager = getCredentialManager();
-  const apiKey = await manager.getApiKey();
-
-  if (!apiKey) {
-    // No API key available - user is on craft_credits or oauth_token auth
-    // These auth types don't give us direct Anthropic API access for summarization
-    debug('[summarize] No API key available - summarization will use truncation fallback');
-    return null;
+  // Option 1: Direct API key from env (set by setAuthEnvironment)
+  const envApiKey = process.env.ANTHROPIC_API_KEY;
+  if (envApiKey && envApiKey !== 'craft-credits-placeholder') {
+    anthropicClient = new Anthropic({ apiKey: envApiKey });
+    debug('[summarize] Using ANTHROPIC_API_KEY for summarization');
+    return anthropicClient;
   }
 
-  anthropicClient = new Anthropic({ apiKey });
-  return anthropicClient;
+  // Option 2: Claude Max OAuth token
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oauthToken) {
+    anthropicClient = new Anthropic({ apiKey: oauthToken });
+    debug('[summarize] Using CLAUDE_CODE_OAUTH_TOKEN for summarization');
+    return anthropicClient;
+  }
+
+  // Option 3: Craft Credits Gateway
+  if (process.env.USE_CRAFT_AI_GATEWAY === 'true' && process.env.CRAFT_API_GATEWAY_TOKEN) {
+    anthropicClient = new Anthropic({
+      apiKey: 'craft-credits-placeholder',
+      baseURL: 'https://api.craft.do/ai-gateway/anthropic',
+      defaultHeaders: {
+        'authorization': process.env.CRAFT_API_GATEWAY_TOKEN,
+      },
+    });
+    debug('[summarize] Using Craft AI Gateway for summarization');
+    return anthropicClient;
+  }
+
+  // Fallback: try credential manager (for cases where env vars aren't set yet)
+  const manager = getCredentialManager();
+  const apiKey = await manager.getApiKey();
+  if (apiKey) {
+    anthropicClient = new Anthropic({ apiKey });
+    debug('[summarize] Using API key from credential manager for summarization');
+    return anthropicClient;
+  }
+
+  debug('[summarize] No auth available - summarization will use truncation fallback');
+  return null;
 }
 
 /**

@@ -2,7 +2,6 @@ import React, { memo, useMemo, useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { formatTokens } from '../utils/markdown.ts';
 import type { AuthType, TokenDisplayMode } from '@craft-agent/shared/config';
-import { AnimatedSpinner } from './Spinner.tsx';
 import { DEFAULT_MODEL, getModelDisplayName } from '@craft-agent/shared/config';
 import { CRAFT_LOGO } from '@craft-agent/shared/branding';
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent';
@@ -16,16 +15,12 @@ export interface HeaderProps {
   outputTokens?: number;
   costUsd?: number;
   authType?: AuthType;
-  activeAgentName?: string;
-  agentsLoading?: boolean;
   tokenDisplay?: TokenDisplayMode;
   showCost?: boolean;
   showClock?: boolean;
   version?: string;
   /** Current permission mode ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode;
-  /** @deprecated Use permissionMode instead */
-  safeMode?: boolean;
   /** Show "Press Ctrl+C again to exit" warning */
   exitWarning?: boolean;
   /** Show "Cannot toggle Plan Mode while processing" warning */
@@ -41,20 +36,15 @@ export const Header: React.FC<HeaderProps> = memo(({
   outputTokens = 0,
   costUsd = 0,
   authType = 'api_key',
-  activeAgentName,
-  agentsLoading = false,
   tokenDisplay = 'hidden',
   showCost = true,
   showClock = false,
   version,
-  permissionMode,
-  safeMode = false,
+  permissionMode = 'ask',
   exitWarning = false,
   planToggleWarning = false,
 }) => {
-  // Resolve permission mode: prefer explicit prop, fallback to legacy safeMode
-  const resolvedMode: PermissionMode = permissionMode ?? (safeMode ? 'safe' : 'ask');
-  const modeConfig = PERMISSION_MODE_CONFIG[resolvedMode];
+  const modeConfig = PERMISSION_MODE_CONFIG[permissionMode];
 
   // Use the mode's muted color for terminal background display
   const modeBackgroundColor = useMemo(() => modeConfig.colors.muted, [modeConfig.colors.muted]);
@@ -76,6 +66,19 @@ export const Header: React.FC<HeaderProps> = memo(({
     if (authType === 'craft_credits') return 'Craft Credits';
     return 'Unknown';
   }, [authType]);
+
+  // Clock display state
+  const [clockDisplay, setClockDisplay] = useState<string>('');
+  useEffect(() => {
+    if (!showClock) return;
+    const update = () => {
+      const now = new Date();
+      setClockDisplay(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    };
+    update();
+    const interval = setInterval(update, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, [showClock]);
 
   // Show only the exit warning when active (replaces entire header)
   if (exitWarning) {
@@ -101,18 +104,7 @@ export const Header: React.FC<HeaderProps> = memo(({
     <Box justifyContent="space-between">
       {/* Left side: craft | ● mcp | auth | version */}
       <Box>
-        {/* Agent name or "craft" */}
-        {agentsLoading && (
-          <>
-            <AnimatedSpinner color="magenta" />
-            <Text dimColor> </Text>
-          </>
-        )}
-        {activeAgentName ? (
-          <Text color="magenta" bold>@{activeAgentName.length > 12 ? activeAgentName.slice(0, 12) + '…' : activeAgentName}</Text>
-        ) : (
-          <Text color="magenta" bold>craft</Text>
-        )}
+        <Text color="magenta" bold>craft</Text>
         <Text dimColor> </Text>
         <Text backgroundColor={modeBackgroundColor} color="white" bold> {modeConfig.shortName.toUpperCase()} </Text>
         <Text dimColor> | </Text>

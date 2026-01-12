@@ -5,6 +5,7 @@
 // Workspace and config types
 export type {
   Workspace,
+  McpAuthType,
   AuthType,
   OAuthCredentials,
   TokenDisplayMode,
@@ -33,22 +34,12 @@ export type {
   AgentEventUsage,
   RecoveryAction,
   TypedError,
-  Question,
   PermissionRequest,
   AgentEvent,
+  // Auth-related types
+  CredentialInputMode,
+  AuthRequestType,
+  AuthStatus,
 } from './message.ts';
 export { generateMessageId } from './message.ts';
 
-// Agent types
-export type {
-  SubAgentMetadata,
-  SubAgentDefinition,
-  McpServerConfig,
-  ApiConfig,
-  ActiveAgentState,
-  CachedSubAgent,
-  AgentRegistry,
-  AgentStatus,
-  AgentActivationProgress,
-  AgentActivateOptions,
-} from './agent.ts';

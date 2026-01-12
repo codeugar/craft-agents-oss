@@ -12,7 +12,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Configuration (storage, preferences, themes, watcher)
 - MCP client and validation
 - Headless execution mode
-- Subagent system
 - Dynamic status system
 - Session persistence
 
@@ -24,7 +23,6 @@ This package uses subpath exports for clean imports:
 import { CraftAgent, getPermissionMode, setPermissionMode } from '@craft-agent/shared/agent';
 import { loadStoredConfig, type Workspace } from '@craft-agent/shared/config';
 import { getCredentialManager } from '@craft-agent/shared/credentials';
-import { SubAgentManager } from '@craft-agent/shared/agents';
 import { CraftMcpClient } from '@craft-agent/shared/mcp';
 import { loadWorkspaceSources, type LoadedSource } from '@craft-agent/shared/sources';
 import { loadStatusConfig, createStatus } from '@craft-agent/shared/statuses';
@@ -37,7 +35,6 @@ import { debug } from '@craft-agent/shared/utils';
 ```
 src/
 ├── agent/              # CraftAgent, session-scoped-tools, mode-manager, mode-types, permissions-config
-├── agents/             # Agent management, extraction, cache, builtin-agents
 ├── auth/               # OAuth, balance, craft-token, claude-token, state
 ├── clients/            # External API clients (Craft API)
 ├── config/             # Storage, preferences, models, theme, watcher
@@ -81,10 +78,9 @@ Three-level permission system per session:
 - **UI config:** `PERMISSION_MODE_CONFIG` provides display names, colors, SVG icons
 
 ### Permissions Configuration (`src/agent/permissions-config.ts`)
-Customizable safety rules at three levels (additive merging):
+Customizable safety rules at two levels (additive merging):
 - Workspace: `~/.craft-agent/workspaces/{id}/permissions.json`
 - Source: `~/.craft-agent/workspaces/{id}/sources/{slug}/permissions.json`
-- Agent: `~/.craft-agent/workspaces/{id}/agents/{slug}/permissions.json`
 
 **Rule types:**
 - `blockedTools` - Tools to block (extends defaults)
@@ -98,11 +94,9 @@ Tools available within agent sessions with callback registry:
 
 **Source management:** `source_test`, `source_oauth_trigger`, `source_gmail_oauth_trigger`, `source_credential_prompt`
 
-**Agent management:** `agent_list`, `agent_create`, `agent_delete`
-
 **Utilities:** `SubmitPlan`, `config_validate`
 
-**Callbacks:** `onPlanSubmitted`, `onOAuthBrowserOpen`, `onOAuthSuccess`, `onOAuthError`, `onCredentialRequest`, `onSourcesChanged`, `onSourceActivated`, `onAgentsChanged`
+**Callbacks:** `onPlanSubmitted`, `onOAuthBrowserOpen`, `onOAuthSuccess`, `onOAuthError`, `onCredentialRequest`, `onSourcesChanged`, `onSourceActivated`
 
 ### Dynamic Status System (`src/statuses/`)
 Workspace-level customizable workflow states:
@@ -116,12 +110,11 @@ Workspace-level customizable workflow states:
 **CRUD:** `createStatus()`, `updateStatus()`, `deleteStatus()`, `reorderStatuses()`
 
 ### Theme System (`src/config/theme.ts`)
-Cascading theme configuration: app → workspace → agent (last wins)
+Cascading theme configuration: app → workspace (last wins)
 
 **Storage:**
 - App: `~/.craft-agent/theme.json`
 - Workspace: `~/.craft-agent/workspaces/{id}/theme.json`
-- Agent: `~/.craft-agent/workspaces/{id}/agents/{slug}/theme.json`
 
 **6-color system:** `background`, `foreground`, `accent`, `info`, `success`, `destructive`
 
@@ -145,15 +138,10 @@ Multi-workspace configuration stored in `~/.craft-agent/config.json`. Supports:
 ### Config Watcher (`src/config/watcher.ts`)
 File watcher for live config updates:
 - Watches `config.json`, `theme.json`, `permissions.json` at all levels
-- Callbacks: `onConfigChange`, `onThemeChange`, `onWorkspacePermissionsChange`, `onSourcePermissionsChange`, `onAgentPermissionsChange`
-
-### Agents (`src/agents/`)
-Agents are specialized configurations that extend the base agent with custom instructions, MCP servers, and REST APIs. Stored as folders at `~/.craft-agent/workspaces/{id}/agents/{slug}/`.
+- Callbacks: `onConfigChange`, `onThemeChange`, `onWorkspacePermissionsChange`, `onSourcePermissionsChange`
 
 ### Sources (`src/sources/`)
 Sources are external data connections (MCP servers, APIs, local filesystems). Stored at `~/.craft-agent/workspaces/{id}/sources/{slug}/` with config.json and guide.md. Types: `mcp`, `api`, `local`, `gmail`.
-
-**Agent scoping:** Sources can be workspace-scoped or agent-scoped (stored in `agents/{slug}/sources/`)
 
 ## Dependencies
 

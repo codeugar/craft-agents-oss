@@ -5,7 +5,7 @@
  * All agent events flow through a single pure function for consistent state transitions.
  */
 
-import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, AskQuestionRequest, TodoState, AgentStatus } from '../../shared/types'
+import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, TodoState, AuthRequest } from '../../shared/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -204,15 +204,6 @@ export interface PermissionModeChangedEvent {
 }
 
 /**
- * Ask question request event
- */
-export interface AskQuestionRequestEvent {
-  type: 'ask_question_request'
-  sessionId: string
-  request: AskQuestionRequest
-}
-
-/**
  * Credential request event - prompts user for credentials
  */
 export interface CredentialRequestEvent {
@@ -269,12 +260,44 @@ export interface UserMessageEvent {
 }
 
 /**
- * Agent status event - updates agent state (idle, extracting, ready, etc.)
+ * Session shared event - session was shared to viewer
  */
-export interface AgentStatusEvent {
-  type: 'agent_status'
+export interface SessionSharedEvent {
+  type: 'session_shared'
   sessionId: string
-  status: AgentStatus
+  sharedUrl: string
+}
+
+/**
+ * Session unshared event - session share was revoked
+ */
+export interface SessionUnsharedEvent {
+  type: 'session_unshared'
+  sessionId: string
+}
+
+/**
+ * Auth request event - unified auth flow (credential or OAuth)
+ * Adds auth-request message to session and displays inline auth UI
+ */
+export interface AuthRequestEvent {
+  type: 'auth_request'
+  sessionId: string
+  message: Message
+  request: AuthRequest
+}
+
+/**
+ * Auth completed event - auth request was completed (success, failure, or cancelled)
+ * Updates the auth-request message status
+ */
+export interface AuthCompletedEvent {
+  type: 'auth_completed'
+  sessionId: string
+  requestId: string
+  success: boolean
+  cancelled?: boolean
+  error?: string
 }
 
 /**
@@ -299,12 +322,14 @@ export type AgentEvent =
   | TitleGeneratedEvent
   | WorkingDirectoryChangedEvent
   | PermissionModeChangedEvent
-  | AskQuestionRequestEvent
   | TaskBackgroundedEvent
   | ShellBackgroundedEvent
   | TaskProgressEvent
   | UserMessageEvent
-  | AgentStatusEvent
+  | SessionSharedEvent
+  | SessionUnsharedEvent
+  | AuthRequestEvent
+  | AuthCompletedEvent
 
 /**
  * Side effects that need to be handled outside the pure processor
@@ -314,7 +339,6 @@ export type Effect =
   | { type: 'credential_request'; request: CredentialRequest }
   | { type: 'generate_title'; sessionId: string; userMessage: string }
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
-  | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
 
 /**
  * Result of processing an event

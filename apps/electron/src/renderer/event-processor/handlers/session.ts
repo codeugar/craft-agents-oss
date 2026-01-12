@@ -21,9 +21,11 @@ import type {
   TitleGeneratedEvent,
   WorkingDirectoryChangedEvent,
   PermissionModeChangedEvent,
-  AskQuestionRequestEvent,
   UserMessageEvent,
-  AgentStatusEvent,
+  SessionSharedEvent,
+  SessionUnsharedEvent,
+  AuthRequestEvent,
+  AuthCompletedEvent,
 } from '../types'
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
@@ -331,23 +333,6 @@ export function handlePermissionModeChanged(
 }
 
 /**
- * Handle ask_question_request - return effect for parent to handle
- */
-export function handleAskQuestionRequest(
-  state: SessionState,
-  event: AskQuestionRequestEvent
-): ProcessResult {
-  return {
-    state,
-    effects: [{
-      type: 'ask_question_request',
-      sessionId: event.sessionId,
-      request: event.request,
-    }],
-  }
-}
-
-/**
  * Handle user_message - confirms optimistic user message from backend
  *
  * Three statuses:
@@ -402,6 +387,7 @@ export function handleUserMessage(
         ...session,
         messages: updatedMessages,
         lastMessageAt: Date.now(),
+        lastMessageRole: 'user',  // Clear plan badge when user responds
         // Set isProcessing when message is accepted/processing (enables multi-window sync)
         isProcessing: status === 'accepted' || status === 'processing',
       },
@@ -483,12 +469,11 @@ export function handlePlanSubmitted(
 }
 
 /**
- * Handle agent_status - update agent status on session
- * This is informational; the actual agent state is managed by useAgentState hook
+ * Handle session_shared - session was shared to viewer
  */
-export function handleAgentStatus(
+export function handleSessionShared(
   state: SessionState,
-  event: AgentStatusEvent
+  event: SessionSharedEvent
 ): ProcessResult {
   const { session, streaming } = state
 
@@ -496,7 +481,94 @@ export function handleAgentStatus(
     state: {
       session: {
         ...session,
-        agentStatus: event.status,
+        sharedUrl: event.sharedUrl,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle session_unshared - session share was revoked
+ */
+export function handleSessionUnshared(
+  state: SessionState,
+  _event: SessionUnsharedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        sharedUrl: undefined,
+        sharedId: undefined,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle auth_request - add auth-request message to session
+ * This is the unified auth flow - execution is paused until auth completes
+ */
+export function handleAuthRequest(
+  state: SessionState,
+  event: AuthRequestEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  // Add auth-request message to session
+  return {
+    state: {
+      session: {
+        ...appendMessage(session, event.message),
+        isProcessing: false,  // Agent execution is paused
+      },
+      streaming: null,  // Clear any streaming state
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle auth_completed - update auth-request message status
+ * The agent will resume via a new user message (sent by session manager)
+ */
+export function handleAuthCompleted(
+  state: SessionState,
+  event: AuthCompletedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  // Update the auth-request message status
+  const updatedMessages = session.messages.map(m => {
+    if (
+      m.role === 'auth-request' &&
+      m.authRequestId === event.requestId &&
+      m.authStatus === 'pending'
+    ) {
+      return {
+        ...m,
+        authStatus: event.success
+          ? ('completed' as const)
+          : event.cancelled
+            ? ('cancelled' as const)
+            : ('failed' as const),
+        authError: event.error,
+      }
+    }
+    return m
+  })
+
+  return {
+    state: {
+      session: {
+        ...session,
+        messages: updatedMessages,
       },
       streaming,
     },

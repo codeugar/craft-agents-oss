@@ -29,9 +29,11 @@ import {
   handleTitleGenerated,
   handleWorkingDirectoryChanged,
   handlePermissionModeChanged,
-  handleAskQuestionRequest,
   handleUserMessage,
-  handleAgentStatus,
+  handleSessionShared,
+  handleSessionUnshared,
+  handleAuthRequest,
+  handleAuthCompleted,
 } from './handlers/session'
 
 /**
@@ -116,9 +118,6 @@ export function processEvent(
     case 'permission_mode_changed':
       return handlePermissionModeChanged(state, event)
 
-    case 'ask_question_request':
-      return handleAskQuestionRequest(state, event)
-
     case 'sources_changed':
       return handleSourcesChanged(state, event)
 
@@ -134,8 +133,17 @@ export function processEvent(
     case 'user_message':
       return handleUserMessage(state, event)
 
-    case 'agent_status':
-      return handleAgentStatus(state, event)
+    case 'session_shared':
+      return handleSessionShared(state, event)
+
+    case 'session_unshared':
+      return handleSessionUnshared(state, event)
+
+    case 'auth_request':
+      return handleAuthRequest(state, event)
+
+    case 'auth_completed':
+      return handleAuthCompleted(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

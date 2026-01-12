@@ -23,9 +23,7 @@ export interface Session {
   name?: string;                 // Optional user-defined name
   createdAt: number;
   lastUsedAt: number;
-  // Inbox/Archive/Agent features
-  agentId?: string;              // Assigned agent ID (for filtering)
-  agentName?: string;            // Cached agent name for display
+  // Inbox/Archive features
   isArchived?: boolean;          // Whether this session is archived
   isFlagged?: boolean;           // Whether this session is flagged
   status?: SessionStatus;        // Workflow status (todo, in_progress, needs_review, done, cancelled)
@@ -43,7 +41,7 @@ export interface StoredSession extends Session {
 
 /**
  * Session metadata for listing (without loading full messages)
- * Extended with agent assignment and archive status for Inbox/Archive features
+ * Extended with archive status for Inbox/Archive features
  */
 export interface SessionMetadata {
   id: string;
@@ -54,9 +52,7 @@ export interface SessionMetadata {
   messageCount: number;
   preview?: string;        // Preview of first user message
   sdkSessionId?: string;
-  // Inbox/Archive/Agent features
-  agentId?: string;        // Assigned agent ID (for filtering)
-  agentName?: string;      // Cached agent name for display (e.g., "work/coder")
+  // Inbox/Archive features
   isArchived?: boolean;    // Whether this session is archived
   isFlagged?: boolean;     // Whether this session is flagged
   status?: SessionStatus;  // Workflow status

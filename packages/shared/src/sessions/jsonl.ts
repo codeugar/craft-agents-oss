@@ -55,14 +55,14 @@ export function readSessionJsonl(sessionFile: string): StoredSession | null {
       lastUsedAt: header.lastUsedAt,
       name: header.name,
       sdkSessionId: header.sdkSessionId,
-      agentSlug: header.agentSlug,
-      agentName: header.agentName,
       isFlagged: header.isFlagged,
       todoState: header.todoState,
       permissionMode: header.permissionMode,
       lastReadMessageId: header.lastReadMessageId,
       enabledSourceSlugs: header.enabledSourceSlugs,
       workingDirectory: header.workingDirectory,
+      sharedUrl: header.sharedUrl,
+      sharedId: header.sharedId,
       messages,
       tokenUsage: header.tokenUsage,
     };
@@ -90,7 +90,7 @@ export function writeSessionJsonl(sessionFile: string, session: StoredSession): 
 
 /**
  * Create a SessionHeader from a StoredSession.
- * Pre-computes messageCount and preview for fast list loading.
+ * Pre-computes messageCount, preview, and lastMessageRole for fast list loading.
  */
 export function createSessionHeader(session: StoredSession): SessionHeader {
   return {
@@ -100,19 +100,35 @@ export function createSessionHeader(session: StoredSession): SessionHeader {
     lastUsedAt: Date.now(),
     name: session.name,
     sdkSessionId: session.sdkSessionId,
-    agentSlug: session.agentSlug,
-    agentName: session.agentName,
     isFlagged: session.isFlagged,
     todoState: session.todoState,
     permissionMode: session.permissionMode,
     lastReadMessageId: session.lastReadMessageId,
     enabledSourceSlugs: session.enabledSourceSlugs,
     workingDirectory: session.workingDirectory,
+    sharedUrl: session.sharedUrl,
+    sharedId: session.sharedId,
     // Pre-computed fields
     messageCount: session.messages.length,
+    lastMessageRole: extractLastMessageRole(session.messages),
     preview: extractPreview(session.messages),
     tokenUsage: session.tokenUsage,
   };
+}
+
+/**
+ * Extract the role of the last message for badge display.
+ * Only returns roles that are meaningful for UI display (user, assistant, plan, tool, error).
+ */
+function extractLastMessageRole(messages: StoredMessage[]): SessionHeader['lastMessageRole'] {
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) return undefined;
+  // Map message types to the subset we care about for display
+  const role = lastMessage.type;
+  if (role === 'user' || role === 'assistant' || role === 'plan' || role === 'tool' || role === 'error') {
+    return role;
+  }
+  return undefined;
 }
 
 /**

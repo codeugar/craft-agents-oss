@@ -37,8 +37,7 @@ apps/tui/
 │   │   │   └── useResize.ts     # Terminal resize handling
 │   │   ├── input/
 │   │   │   ├── useHistory.ts    # Command history
-│   │   │   ├── useCommands.ts   # Slash command handling
-│   │   │   └── useMentionHandler.ts  # @agent mentions
+│   │   │   └── useCommands.ts   # Slash command handling
 │   │   └── modals/
 │   │       ├── useModalState.ts
 │   │       ├── useWorkspaceHandlers.ts
@@ -232,7 +231,7 @@ When `--debug` is not passed:
 | Keyboard handling         | Auth (`auth/`) |
 | Markdown rendering        | MCP client (`mcp/`) |
 |                           | Credentials (`credentials/`) |
-|                           | Sub-agents (`agents/`) |
+|                           | Sources (`sources/`) |
 |                           | Debug utilities (`utils/`) |
 |                           | Headless mode (`headless/`) |
 

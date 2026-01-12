@@ -41,7 +41,7 @@ export type CommandCategory =
   | 'AI & Billing'
   | 'Configuration'
   | 'Space'
-  | 'Sub-Agents'
+  | 'Workspace'
   | 'Attaching Files'
   | 'Troubleshooting';
 
@@ -54,11 +54,9 @@ export interface CommandDefinition {
 /**
  * Primary commands with descriptions and categories.
  * Order determines tab completion priority (first match wins).
- * Heavier commands (agent, workspace, model) are prioritized.
  */
 export const COMMANDS: CommandDefinition[] = [
   // Heavy/common commands first (for tab completion priority)
-  { command: '/agent', description: 'Manage sub-agents (list, info, refresh, clear)', category: 'Sub-Agents' },
   { command: '/safe', description: 'Toggle safe mode (read-only exploration)', category: 'Safe Mode' },
   { command: '/workspace', description: 'Switch workspace (add, rename, remove)', category: 'Workspace' },
   { command: '/model', description: 'Show or change model (e.g., /model opus)', category: 'AI & Billing' },
@@ -95,7 +93,6 @@ export const CATEGORY_ORDER: CommandCategory[] = [
   'AI & Billing',
   'Configuration',
   'Space',
-  'Sub-Agents',
   'Attaching Files',
   'Troubleshooting',
 ];
@@ -134,15 +131,6 @@ export const SUBCOMMANDS: Record<string, Record<string, string>> = {
     'add': 'Add a new Craft space',
     'rename': 'Rename current space',
     'remove': 'Remove a Craft space',
-  },
-  '/agent': {
-    'list': 'List available sub-agents',
-    'create': 'Create a new sub-agent',
-    'clear': 'Return to main assistant',
-    'reload': 'Reload agent instructions',
-    'reset': 'Clear all data and exit (re-select to restart setup)',
-    'refresh': 'Re-scan Agents folder',
-    'info': 'Show active agent details',
   },
   '/safe': {
     'start': 'Enable safe mode (read-only)',
@@ -233,55 +221,6 @@ export function resolveCommand(input: string): string {
 }
 
 // ============================================
-// Agent filtering
-// ============================================
-
-/**
- * Filter agents for hint display and resolution
- * Prefers prefix matches, falls back to contains matches
- * Includes special entries: 'main' (return to main assistant) and 'agent' (open agent menu)
- */
-export function filterAgents(query: string, agents: string[]): FilterMatch<string> {
-  const allAgents = ['main', 'agent', ...agents];
-  const lowerQuery = query.toLowerCase();
-
-  // First: prefix matches
-  const prefixMatches = allAgents.filter(a =>
-    a.toLowerCase().startsWith(lowerQuery)
-  );
-
-  if (prefixMatches.length > 0) {
-    return {
-      matches: prefixMatches,
-      singleMatch: prefixMatches.length === 1 ? prefixMatches[0]! : null,
-      query,
-    };
-  }
-
-  // Fallback: contains matches
-  const containsMatches = allAgents.filter(a =>
-    a.toLowerCase().includes(lowerQuery)
-  );
-
-  return {
-    matches: containsMatches,
-    singleMatch: containsMatches.length === 1 ? containsMatches[0]! : null,
-    query,
-  };
-}
-
-/**
- * Resolve a partial agent mention to a full agent name.
- * Returns the first matching agent name or null if no matches.
- */
-export function resolveAgentMention(query: string, agents: string[]): string | null {
-  if (!query) return null;
-
-  const match = filterAgents(query, agents);
-  return match.matches.length > 0 ? match.matches[0]! : null;
-}
-
-// ============================================
 // Tab completion (for Input.tsx)
 // ============================================
 
@@ -290,20 +229,8 @@ export function resolveAgentMention(query: string, agents: string[]): string | n
  * Returns the completed string or null if no completion available.
  * Completes to the first match if there are multiple matches.
  */
-export function getTabCompletion(input: string, agents: string[]): string | null {
+export function getTabCompletion(input: string): string | null {
   const trimmed = input.trim();
-
-  // Handle @mention completion
-  if (trimmed.startsWith('@')) {
-    const query = trimmed.slice(1);
-    const match = filterAgents(query, agents);
-    // Complete to first match if any
-    if (match.matches.length > 0) {
-      const firstMatch = match.matches[0]!;
-      return `@${firstMatch} `;
-    }
-    return null;
-  }
 
   // Handle slash command completion
   if (trimmed.startsWith('/')) {
@@ -357,7 +284,7 @@ export function getCommandHint(input: string): HintData {
     return {
       selected: null,
       description: null,
-      others: ['/agent', '/workspace', '/model', '/help', '/clear', '/tools', '/credits', '/exit'],
+      others: ['/workspace', '/model', '/help', '/clear', '/tools', '/credits', '/exit'],
     };
   }
 
@@ -398,55 +325,11 @@ export function getCommandHint(input: string): HintData {
 }
 
 /**
- * Get hint data for @mentions
- */
-/**
- * Get description for a specific hint (command or agent mention)
+ * Get description for a specific hint (command)
  */
 export function getHintDescription(hint: string): string | null {
-  // Command hints
   if (hint.startsWith('/')) {
     return COMMAND_MAP[hint] ?? null;
   }
-  // Agent hints
-  if (hint.startsWith('@')) {
-    const name = hint.slice(1);
-    if (name === 'main') return 'Return to main assistant';
-    if (name === 'agent') return 'Open agent menu';
-    if (name.includes('/')) return `Activate ${name.split('/').pop()} agent`;
-    return 'Activate sub-agent';
-  }
   return null;
-}
-
-export function getAgentHint(query: string, agents: string[]): HintData {
-  // Empty @ shows all options
-  if (query === '') {
-    const allAgents = ['main', 'agent', ...agents.slice(0, 2)];
-    return {
-      selected: null,
-      description: null,
-      others: allAgents.map(a => `@${a}`),
-    };
-  }
-
-  const match = filterAgents(query, agents);
-
-  if (match.matches.length > 0) {
-    const first = match.matches[0]!;
-    const description = first === 'main'
-      ? 'Return to main assistant'
-      : first === 'agent'
-        ? 'Open agent menu'
-        : first.includes('/')
-          ? `Activate ${first.split('/').pop()} agent`
-          : 'Activate sub-agent';
-    return {
-      selected: `@${first}`,
-      description,
-      others: match.matches.slice(1).slice(0, 3).map(a => `@${a}`),
-    };
-  }
-
-  return { selected: null, description: null, others: [] };
 }

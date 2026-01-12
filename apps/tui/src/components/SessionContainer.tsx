@@ -5,16 +5,12 @@ import { Messages, type Message } from './Messages.tsx';
 import { Input } from './Input.tsx';
 import { ModelSelector } from './ModelSelector.tsx';
 import { MODELS } from '@craft-agent/shared/config';
-import { AgentMenu, type AgentAction } from './AgentMenu.tsx';
 import { WorkspaceSelector } from './WorkspaceSelector.tsx';
 import { WorkspaceRename } from './WorkspaceRename.tsx';
 import { ApiKeyChange } from './ApiKeyChange.tsx';
 import { ClaudeMaxAuth } from './ClaudeMaxAuth.tsx';
 import { CraftCreditsAuth } from './CraftCreditsAuth.tsx';
-import { AskUserQuestion } from './AskUserQuestion.tsx';
 import { TodoList } from './TodoList.tsx';
-import { ApiAuth } from './ApiAuth.tsx';
-import { PlanMenu, type PlanAction } from './PlanMenu.tsx';
 import { PlanSelector, type PlanFile } from './PlanSelector.tsx';
 import { SessionMenu } from './SessionMenu.tsx';
 import { HelpPanel } from './HelpPanel.tsx';
@@ -30,16 +26,15 @@ import {
   useModalState,
   useCommands,
   useWorkspaceHandlers,
-  useMentionHandler,
-  useAgentMenuHandlers,
   useSettingsHandlers,
 } from '../hooks/index.ts';
 import { isShiftTab, isClearScreen, isExit, isSafeModeToggle } from '../keyboard/index.ts';
 import {
+  getPermissionMode,
   PERMISSION_MODE_MESSAGES,
   PERMISSION_MODE_PROMPTS,
-} from '@craft-agent/shared/agents';
-import { getPermissionMode, type PermissionMode } from '@craft-agent/shared/agent';
+  type PermissionMode,
+} from '@craft-agent/shared/agent';
 import { useGlobalContext } from '../context/GlobalContext.tsx';
 import {
   getWorkspaces,
@@ -68,7 +63,6 @@ export interface SessionContainerProps {
   config: CraftAgentConfig;
   session: SessionConfig;  // Current session (primary isolation boundary)
   onRequestSetup?: () => void;
-  initialAgent?: string;
   initialPrompt?: string;
   initialError?: string;
 }
@@ -90,7 +84,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   config,
   session,
   onRequestSetup,
-  initialAgent,
   initialPrompt,
   initialError,
 }) => {
@@ -135,26 +128,13 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     typedError,
     dismissTypedError,
     pendingPermission,
-    pendingQuestion,
     hasExecutingTool,
     sendMessage,
     interrupt,
     respondToPermission,
-    respondToQuestion,
-    // Agent-related
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activeAgentMcpServers,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
     resetAgentInstance,
-    refreshAgents,
     fetchTools,
-    agentsLoading,
-    // MCP auth for sub-agent servers
+    // MCP auth for sources
     pendingMcpAuth,
     completeMcpAuth,
     cancelMcpAuth,
@@ -168,8 +148,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     permissionMode,
     cycleMode,
     setSessionPermissionMode,
-    // Legacy safe mode flag (deprecated - use permissionMode instead)
-    safeMode,
     // Plan handling
     activePlan,
     cancelPlan,
@@ -226,8 +204,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   const [compactMode, setCompactMode] = useState(true);
   const [tokenDisplayMode, setTokenDisplayMode] = useState<TokenDisplayMode>(getTokenDisplay());
   const [showCostSetting, setShowCostSetting] = useState(getShowCost());
-  const [showClockSetting, setShowClockSetting] = useState(getShowClock());
-  const [safeModeSetting, setSafeModeSetting] = useState(getSafeMode());
+  const [showClockSetting, setShowClockSetting] = useState(true);
+  const [safeModeSetting, setSafeModeSetting] = useState(false);
   // Only show welcome banner on truly new sessions (no prior messages)
   // This prevents duplicate banners when switching to workspaces with existing sessions
   const [showWelcome, setShowWelcome] = useState(() => {
@@ -272,58 +250,12 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
   const initialStartupDoneRef = useRef(false);
   const initialPromptPendingRef = useRef<string | null>(initialPrompt ?? null);
 
-  // Track if agent loading has started
-  const agentsLoadingStartedRef = useRef(false);
-  if (agentsLoading) {
-    agentsLoadingStartedRef.current = true;
-  }
-
-  // Handle initial agent activation and prompt on startup
+  // Handle initial prompt on startup
   useEffect(() => {
     if (initialStartupDoneRef.current) return;
 
-    if (initialAgent) {
-      if (!agentsLoadingStartedRef.current) return;
-      if (agentsLoading) return;
-    }
-
     const runInitialStartup = async () => {
       initialStartupDoneRef.current = true;
-
-      if (initialAgent) {
-        debug('[SessionContainer] Auto-activating initial agent:', initialAgent);
-
-        const agentExists = availableAgents.some(
-          a => a.toLowerCase() === initialAgent.toLowerCase()
-        );
-
-        if (!agentExists) {
-          setLocalMessages(prev => [...prev, {
-            id: `startup-error-${Date.now()}`,
-            type: 'error',
-            content: `Agent '@${initialAgent}' not found. Available agents: ${availableAgents.map(a => `@${a}`).join(', ') || 'none'}`,
-            timestamp: Date.now(),
-          }]);
-          initialPromptPendingRef.current = null;
-          return;
-        }
-
-        const result = await activateAgent(initialAgent);
-        debug('[SessionContainer] Initial agent activation result:', result);
-
-        if (result === 'pending_auth') {
-          return;
-        }
-
-        if (result !== true) {
-          setLocalMessages(prev => [...prev, {
-            id: `startup-error-${Date.now()}`,
-            type: 'error',
-            content: `Failed to activate agent '@${initialAgent}'`,
-            timestamp: Date.now(),
-          }]);
-        }
-      }
 
       if (initialPromptPendingRef.current) {
         debug('[SessionContainer] Auto-sending initial prompt');
@@ -333,22 +265,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     };
 
     runInitialStartup();
-  }, [agentsLoading, availableAgents, initialAgent, activateAgent, sendMessage]);
-
-  // Handle initial prompt after auth completes
-  useEffect(() => {
-    if (
-      initialPromptPendingRef.current &&
-      !pendingMcpAuth &&
-      !pendingApiAuth &&
-      activeAgentName
-    ) {
-      debug('[SessionContainer] Auth completed, sending pending initial prompt');
-      const prompt = initialPromptPendingRef.current;
-      initialPromptPendingRef.current = null;
-      sendMessage(prompt);
-    }
-  }, [pendingMcpAuth, pendingApiAuth, activeAgentName, sendMessage]);
+  }, [sendMessage]);
 
   // Handle terminal resize
   const handleTerminalResize = useCallback(() => {
@@ -381,16 +298,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
-    safeMode,
+    safeMode: permissionMode === 'safe',
     approvePlan,
     cancelPlan,
     setSessionPermissionMode,
@@ -407,15 +316,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     addMessage: addLocalMessage,
   });
 
-  // Mention handler hook - handles @mentions
-  const { handleMention } = useMentionHandler({
-    availableAgents,
-    activateAgent,
-    deactivateAgent,
-    openModal,
-    sendMessage,
-  });
-
   const handleModelSelect = useCallback((modelId: string) => {
     closeModal();
     setModel(modelId);
@@ -425,30 +325,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     closeModal();
   }, [closeModal]);
 
-  // Agent menu handlers hook
-  const { handleAgentAction: rawHandleAgentAction, handleAgentMenuCancel } = useAgentMenuHandlers({
-    closeModal,
-    openModal,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
-    fetchTools,
-    triggerMcpAuth,
-    triggerApiAuth,
-    activeAgentName,
-    activeAgentDefinition,
-    activeAgentMcpServers,
-  });
-
-  // Wrap to add message display
-  const handleAgentAction = useCallback(async (action: AgentAction) => {
-    const result = await rawHandleAgentAction(action);
-    if (result.message) {
-      addLocalMessage(result.message.content, result.message.type);
-    }
-  }, [rawHandleAgentAction, addLocalMessage]);
 
   // Settings handlers hook
   const settingsHandlers = useSettingsHandlers({
@@ -487,11 +363,11 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     }
   }, [closeModal, triggerMcpAuth, triggerApiAuth]);
 
-  // Plan menu handler
-  const handlePlanAction = useCallback((action: PlanAction) => {
+  // Plan menu handler (simplified - no active plan support)
+  const handlePlanMenuAction = useCallback((actionType: string) => {
     closeModal();
 
-    switch (action.type) {
+    switch (actionType) {
       case 'start':
         // Start Craft Agents safe mode (same as /safe and SHIFT+TAB)
         setSessionPermissionMode('safe');
@@ -502,28 +378,11 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         // Open unified plan selector (list/load/delete)
         openModal('planSelector');
         break;
-      case 'view':
-        if (activePlan) {
-          addLocalMessage(`Active plan: ${activePlan.title}\nState: ${activePlan.state}\nSteps: ${activePlan.steps.length}`, 'system');
-        } else {
-          addLocalMessage('No active plan.', 'system');
-        }
-        break;
-      case 'approve':
-        if (activePlan) {
-          approvePlan();
-          addLocalMessage('Plan approved. Proceeding with execution...', 'system');
-        }
-        break;
-      case 'cancel':
-        if (activePlan) {
-          const title = activePlan.title;
-          cancelPlan();
-          addLocalMessage(`Plan cancelled: ${title}`, 'system');
-        }
+      default:
+        addLocalMessage('Plan feature not available.', 'system');
         break;
     }
-  }, [activePlan, approvePlan, cancelPlan, closeModal, openModal, addLocalMessage, sendMessage, setSessionPermissionMode]);
+  }, [closeModal, openModal, addLocalMessage, sendMessage, setSessionPermissionMode]);
 
   // Plan selector handler - loads selected plan as attachment
   const handlePlanSelect = useCallback((plan: PlanFile) => {
@@ -647,17 +506,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     async (input: string) => {
       addToHistory(input);
 
-      // Handle @mentions using hook
-      if (input.startsWith('@')) {
-        const result = await handleMention(input);
-        if (result.handled) {
-          if (result.message) {
-            addLocalMessage(result.message.content, result.message.type);
-          }
-          return;
-        }
-      }
-
       // Handle slash commands using hook
       if (input.startsWith('/')) {
         const result = await handleCommand(input);
@@ -687,7 +535,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
 
       await sendMessage(text || input, allAttachments.length > 0 ? allAttachments : undefined);
     },
-    [addToHistory, handleMention, handleCommand, addLocalMessage, pendingAttachments, sendMessage]
+    [addToHistory, handleCommand, addLocalMessage, pendingAttachments, sendMessage]
   );
 
   // Handle Ctrl+C to interrupt or exit, and permission responses
@@ -742,7 +590,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     // Ctrl+S: Toggle Safe Mode
     if (isSafeModeToggle(input, key)) {
       const newMode = !safeModeSetting;
-      setSafeMode(newMode);
       setSafeModeSetting(newMode);
       addLocalMessage(`Safe Mode ${newMode ? 'enabled' : 'disabled'}`, 'info');
       return;
@@ -755,7 +602,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
     }
 
     if (input === '\x03' || (key.ctrl && input === 'c')) {
-      debug('[SessionContainer] main useInput Ctrl+C detected:', { pendingPermission: !!pendingPermission, isProcessing, hasOpenModal, pendingQuestion: !!pendingQuestion, pendingMcpAuth: !!pendingMcpAuth, pendingApiAuth: !!pendingApiAuth });
+      debug('[SessionContainer] main useInput Ctrl+C detected:', { pendingPermission: !!pendingPermission, isProcessing, hasOpenModal, pendingMcpAuth: !!pendingMcpAuth });
       if (pendingPermission) {
         debug('[SessionContainer] Denying permission');
         respondToPermission(false, false);
@@ -764,7 +611,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         interrupt();
       } else {
         // Only handle if Input is not rendered (Input handles its own Ctrl+C)
-        const inputIsRendered = !hasOpenModal && !pendingPermission && !pendingQuestion && !pendingMcpAuth && !pendingApiAuth;
+        const inputIsRendered = !hasOpenModal && !pendingPermission && !pendingMcpAuth;
         debug('[SessionContainer] inputIsRendered:', inputIsRendered);
         if (!inputIsRendered) {
           // Double-press logic for modals/overlays
@@ -789,14 +636,8 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
       if (isOpen('help')) {
         closeModal();
         setStaticResetKey(k => k + 1);
-      } else if (isOpen('planReview') && !activePlan) {
-        // Close /plan view when there's no active plan
-        closeModal();
       } else if (pendingPermission) {
         respondToPermission(false, false);
-      } else if (pendingQuestion) {
-        // AskUserQuestion handles Escape itself - don't also interrupt
-        return;
       } else if (isProcessing) {
         interrupt();
       }
@@ -848,48 +689,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         }} />
       )}
 
-      {/* Agent menu overlay */}
-      {isOpen('agentMenu') && (
-        <AgentMenu
-          agents={availableAgents}
-          activeAgentName={activeAgentName}
-          onAction={handleAgentAction}
-          onCancel={handleAgentMenuCancel}
-        />
-      )}
-
-      {/* Credentials viewer overlay */}
-      {isOpen('credentialsViewer') && activeAgentDefinition && activeAgentName && (
-        <CredentialsViewer
-          definition={activeAgentDefinition}
-          agentName={activeAgentName}
-          getCredential={getAgentCredential}
-          saveCredential={saveAgentCredential}
-          onClose={closeModal}
-        />
-      )}
-
-      {/* Reauth selector overlay */}
-      {isOpen('reauthSelector') && activeAgentDefinition && activeAgentName && (
-        <ReauthSelector
-          definition={activeAgentDefinition}
-          agentName={activeAgentName}
-          getCredential={getAgentCredential}
-          clearCredentials={clearAgentCredentials}
-          onConfirm={handleReauthConfirm}
-          onCancel={closeModal}
-        />
-      )}
-
-      {/* Plan menu overlay */}
-      {isOpen('planMenu') && (
-        <PlanMenu
-          activePlan={activePlan}
-          onAction={handlePlanAction}
-          onCancel={closeModal}
-        />
-      )}
-
       {/* Plan selector overlay */}
       {isOpen('planSelector') && (
         <PlanSelector
@@ -900,34 +699,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         />
       )}
 
-      {/* Plan review overlay (/plan view command) */}
-      {isOpen('planReview') && activePlan && (
-        <PlanReview
-          plan={activePlan}
-          sessionId={session.id}
-          onApprove={(modifiedPlan, savedPath) => {
-            closeModal();
-            respondToPlanReview({ action: 'approve', modifiedPlan, savedPath });
-          }}
-          onRefine={(feedback) => {
-            closeModal();
-            respondToPlanReview({ action: 'refine', feedback });
-          }}
-          onSaveOnly={(modifiedPlan, savedPath) => {
-            closeModal();
-            respondToPlanReview({ action: 'saveOnly', modifiedPlan, savedPath });
-          }}
-          onCancel={closeModal}
-        />
-      )}
-
-      {/* Plan review overlay - no active plan message */}
-      {isOpen('planReview') && !activePlan && (
-        <Box flexDirection="column" paddingX={1}>
-          <Text dimColor>No active plan. Use '/plan start' to create one or '/plan list' to view saved plans.</Text>
-          <Text dimColor>Press Escape to close.</Text>
-        </Box>
-      )}
+      {/* Plan review overlay - REMOVED (no active plan support) */}
 
       {/* Session menu overlay */}
       {isOpen('sessionMenu') && (
@@ -1032,17 +804,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
         </Box>
       )}
 
-      {/* API key authentication for REST API integrations */}
-      {pendingApiAuth && (
-        <ApiAuth
-          apis={pendingApiAuth.apis}
-          workspaceId={workspace.id}
-          agentId={pendingApiAuth.agentId}
-          onComplete={completeApiAuth}
-          onCancel={cancelApiAuth}
-        />
-      )}
-
       {/* Input + Status bar + Header together at bottom */}
       <Box flexDirection="column" width="100%" paddingX={1}>
         {/* Typed error banner */}
@@ -1072,17 +833,7 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           </Box>
         )}
 
-        {/* AskUserQuestion prompt (SDK built-in) */}
-        {pendingQuestion && (
-          <Box marginBottom={1}>
-            <AskUserQuestion
-              questions={pendingQuestion.questions}
-              onSubmit={respondToQuestion}
-            />
-          </Box>
-        )}
-
-        {!hasOpenModal && !pendingPermission && !pendingQuestion && !pendingMcpAuth && !pendingApiAuth && (
+        {!hasOpenModal && !pendingPermission && !pendingMcpAuth && (
           <Input
             onSubmit={handleSubmit}
             onPaste={handlePaste}
@@ -1094,8 +845,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
             history={history}
             attachmentCount={pendingAttachments.length}
             attachmentLabel={attachmentLabel}
-            availableAgents={availableAgents}
-            activeAgentName={activeAgentName ?? undefined}
             columns={terminalColumns}
           />
         )}
@@ -1108,8 +857,6 @@ export const SessionContainer: React.FC<SessionContainerProps> = ({
           outputTokens={tokenUsage.outputTokens}
           costUsd={tokenUsage.costUsd}
           authType={getAuthType()}
-          activeAgentName={activeAgentName ?? undefined}
-          agentsLoading={agentsLoading}
           tokenDisplay={tokenDisplayMode}
           showCost={showCostSetting}
           showClock={showClockSetting}

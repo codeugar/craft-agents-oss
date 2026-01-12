@@ -11,7 +11,7 @@
  * - ~/.craft-agent/workspaces/{slug}/ - Workspace directory (recursive)
  *   - theme.json - Workspace-level theme overrides
  *   - sources/{slug}/config.json, guide.md, permissions.json
- *   - agents/{slug}/config.json, instructions.md, theme.json
+ *   - skills/{slug}/SKILL.md, icon.*
  *   - permissions.json
  */
 
@@ -26,16 +26,15 @@ import {
   validateConfig,
   validatePreferences,
   validateSource,
-  validateAgent,
   type ValidationResult,
 } from './validators.ts';
 import type { LoadedSource, SourceGuide } from '../sources/types.ts';
-import type { LoadedAgent } from '../agents/folder-types.ts';
 import { loadSource, loadWorkspaceSources, loadSourceGuide } from '../sources/storage.ts';
-import { loadAgent, loadWorkspaceAgents, loadAgentInstructions } from '../agents/folder-storage.ts';
 import { permissionsConfigCache } from '../agent/permissions-config.ts';
-import { getWorkspacePath, getWorkspaceSourcesPath, getWorkspaceAgentsPath } from '../workspaces/storage.ts';
-import { loadAppTheme, loadWorkspaceTheme, loadAgentTheme } from './storage.ts';
+import { getWorkspacePath, getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts';
+import type { LoadedSkill } from '../skills/types.ts';
+import { loadSkill, loadWorkspaceSkills } from '../skills/storage.ts';
+import { loadAppTheme, loadWorkspaceTheme } from './storage.ts';
 import type { ThemeOverrides } from './theme.ts';
 
 // ============================================================
@@ -86,13 +85,11 @@ export interface ConfigWatcherCallbacks {
   /** Called when the sources list changes (add/remove folders) */
   onSourcesListChange?: (sources: LoadedSource[]) => void;
 
-  // Agent callbacks
-  /** Called when a specific agent config changes (null if deleted) */
-  onAgentChange?: (slug: string, agent: LoadedAgent | null) => void;
-  /** Called when an agent's instructions.md changes */
-  onAgentInstructionsChange?: (slug: string, instructions: string) => void;
-  /** Called when the agents list changes (add/remove folders) */
-  onAgentsListChange?: (agents: LoadedAgent[]) => void;
+  // Skill callbacks
+  /** Called when a specific skill changes (null if deleted) */
+  onSkillChange?: (slug: string, skill: LoadedSkill | null) => void;
+  /** Called when the skills list changes (add/remove folders) */
+  onSkillsListChange?: (skills: LoadedSkill[]) => void;
 
   // Permissions callbacks
   /** Called when workspace permissions.json changes */
@@ -111,8 +108,6 @@ export interface ConfigWatcherCallbacks {
   onAppThemeChange?: (theme: ThemeOverrides | null) => void;
   /** Called when workspace-level theme.json changes */
   onWorkspaceThemeChange?: (theme: ThemeOverrides | null) => void;
-  /** Called when agent-level theme.json changes */
-  onAgentThemeChange?: (agentSlug: string, theme: ThemeOverrides | null) => void;
 
   // Error callbacks
   /** Called when a validation error occurs */
@@ -159,12 +154,12 @@ export class ConfigWatcher {
 
   // Track known items for detecting adds/removes
   private knownSources: Set<string> = new Set();
-  private knownAgents: Set<string> = new Set();
+  private knownSkills: Set<string> = new Set();
 
   // Computed paths
   private workspaceDir: string;
   private sourcesDir: string;
-  private agentsDir: string;
+  private skillsDir: string;
 
   constructor(workspaceIdOrPath: string, callbacks: ConfigWatcherCallbacks) {
     this.callbacks = callbacks;
@@ -179,7 +174,7 @@ export class ConfigWatcher {
       this.workspaceDir = getWorkspacePath(workspaceIdOrPath);
     }
     this.sourcesDir = getWorkspaceSourcesPath(this.workspaceDir);
-    this.agentsDir = getWorkspaceAgentsPath(this.workspaceDir);
+    this.skillsDir = getWorkspaceSkillsPath(this.workspaceDir);
   }
 
   /**
@@ -216,11 +211,12 @@ export class ConfigWatcher {
     this.watchWorkspaceDir();
     span.mark('watchWorkspaceDir');
 
-    // Initial scan to populate known sources/agents
+    // Initial scan to populate known sources and skills
     this.scanSources();
     span.mark('scanSources');
-    this.scanAgents();
-    span.mark('scanAgents');
+
+    this.scanSkills();
+    span.mark('scanSkills');
 
     debug('[ConfigWatcher] Started watching files');
     span.end();
@@ -249,7 +245,7 @@ export class ConfigWatcher {
     this.watchers = [];
 
     this.knownSources.clear();
-    this.knownAgents.clear();
+    this.knownSkills.clear();
 
     debug('[ConfigWatcher] Stopped');
   }
@@ -344,24 +340,23 @@ export class ConfigWatcher {
       return;
     }
 
-    // Agents changes: agents/{slug}/...
-    if (parts[0] === 'agents' && parts.length >= 2) {
+    // Skills changes: skills/{slug}/...
+    if (parts[0] === 'skills' && parts.length >= 2) {
       const slug = parts[1]!;  // Safe: checked parts.length >= 2
       const file = parts[2];
 
-      // Directory-level changes (new/removed agent folders)
+      // Directory-level changes (new/removed skill folders)
       if (parts.length === 2) {
-        this.debounce('agents-dir', () => this.handleAgentsDirChange());
+        this.debounce('skills-dir', () => this.handleSkillsDirChange());
         return;
       }
 
       // File-level changes
-      if (file === 'config.json') {
-        this.debounce(`agent-config:${slug}`, () => this.handleAgentConfigChange(slug));
-      } else if (file === 'instructions.md') {
-        this.debounce(`agent-instructions:${slug}`, () => this.handleAgentInstructionsChange(slug));
-      } else if (file === 'theme.json') {
-        this.debounce(`agent-theme:${slug}`, () => this.handleAgentThemeChange(slug));
+      if (file === 'SKILL.md') {
+        this.debounce(`skill:${slug}`, () => this.handleSkillChange(slug));
+      } else if (file && /^icon\.(svg|png|jpg|jpeg)$/i.test(file)) {
+        // Icon file changes also trigger a skill change (to update iconPath)
+        this.debounce(`skill-icon:${slug}`, () => this.handleSkillChange(slug));
       }
       return;
     }
@@ -545,59 +540,59 @@ export class ConfigWatcher {
   }
 
   // ============================================================
-  // Agents Handlers
+  // Skills Handlers
   // ============================================================
 
   /**
-   * Scan agents directory to populate known agents
+   * Scan skills directory to populate known skills
    */
-  private scanAgents(): void {
-    if (!existsSync(this.agentsDir)) {
-      mkdirSync(this.agentsDir, { recursive: true });
+  private scanSkills(): void {
+    if (!existsSync(this.skillsDir)) {
+      mkdirSync(this.skillsDir, { recursive: true });
       return;
     }
 
     try {
-      const entries = readdirSync(this.agentsDir);
+      const entries = readdirSync(this.skillsDir);
 
       for (const entry of entries) {
-        const entryPath = join(this.agentsDir, entry);
+        const entryPath = join(this.skillsDir, entry);
         if (statSync(entryPath).isDirectory()) {
-          this.knownAgents.add(entry);
+          this.knownSkills.add(entry);
         }
       }
 
-      debug('[ConfigWatcher] Known agents:', Array.from(this.knownAgents));
+      debug('[ConfigWatcher] Known skills:', Array.from(this.knownSkills));
     } catch (error) {
-      debug('[ConfigWatcher] Error scanning agents:', error);
+      debug('[ConfigWatcher] Error scanning skills:', error);
     }
   }
 
   /**
-   * Handle agents directory change (add/remove folders)
+   * Handle skills directory change (add/remove folders)
    */
-  private handleAgentsDirChange(): void {
-    debug('[ConfigWatcher] Agents directory changed');
+  private handleSkillsDirChange(): void {
+    debug('[ConfigWatcher] Skills directory changed');
 
-    if (!existsSync(this.agentsDir)) {
+    if (!existsSync(this.skillsDir)) {
       // Directory was deleted
-      const removed = Array.from(this.knownAgents);
-      this.knownAgents.clear();
+      const removed = Array.from(this.knownSkills);
+      this.knownSkills.clear();
 
       for (const slug of removed) {
-        this.callbacks.onAgentChange?.(slug, null);
+        this.callbacks.onSkillChange?.(slug, null);
       }
 
-      this.callbacks.onAgentsListChange?.([]);
+      this.callbacks.onSkillsListChange?.([]);
       return;
     }
 
     try {
-      const entries = readdirSync(this.agentsDir);
+      const entries = readdirSync(this.skillsDir);
       const currentFolders = new Set<string>();
 
       for (const entry of entries) {
-        const entryPath = join(this.agentsDir, entry);
+        const entryPath = join(this.skillsDir, entry);
         if (statSync(entryPath).isDirectory()) {
           currentFolders.add(entry);
         }
@@ -605,68 +600,43 @@ export class ConfigWatcher {
 
       // Find added folders
       for (const folder of currentFolders) {
-        if (!this.knownAgents.has(folder)) {
-          debug('[ConfigWatcher] New agent folder:', folder);
-          this.knownAgents.add(folder);
+        if (!this.knownSkills.has(folder)) {
+          debug('[ConfigWatcher] New skill folder:', folder);
+          this.knownSkills.add(folder);
 
-          const agent = loadAgent(this.workspaceDir, folder);
-          if (agent) {
-            this.callbacks.onAgentChange?.(folder, agent);
+          const skill = loadSkill(this.workspaceDir, folder);
+          if (skill) {
+            this.callbacks.onSkillChange?.(folder, skill);
           }
         }
       }
 
       // Find removed folders
-      for (const folder of this.knownAgents) {
+      for (const folder of this.knownSkills) {
         if (!currentFolders.has(folder)) {
-          debug('[ConfigWatcher] Removed agent folder:', folder);
-          this.knownAgents.delete(folder);
-          this.callbacks.onAgentChange?.(folder, null);
+          debug('[ConfigWatcher] Removed skill folder:', folder);
+          this.knownSkills.delete(folder);
+          this.callbacks.onSkillChange?.(folder, null);
         }
       }
 
       // Notify list change
-      const allAgents = loadWorkspaceAgents(this.workspaceDir);
-      this.callbacks.onAgentsListChange?.(allAgents);
+      const allSkills = loadWorkspaceSkills(this.workspaceDir);
+      this.callbacks.onSkillsListChange?.(allSkills);
     } catch (error) {
-      debug('[ConfigWatcher] Error handling agents dir change:', error);
-      this.callbacks.onError?.('agents/', error as Error);
+      debug('[ConfigWatcher] Error handling skills dir change:', error);
+      this.callbacks.onError?.('skills/', error as Error);
     }
   }
 
   /**
-   * Handle agent config.json change
+   * Handle skill SKILL.md or icon change
    */
-  private handleAgentConfigChange(slug: string): void {
-    debug('[ConfigWatcher] Agent config changed:', slug);
+  private handleSkillChange(slug: string): void {
+    debug('[ConfigWatcher] Skill changed:', slug);
 
-    const validation = validateAgent(this.workspaceDir, slug);
-    if (!validation.valid) {
-      debug('[ConfigWatcher] Agent validation failed:', slug, validation.errors);
-      this.callbacks.onValidationError?.(`agents/${slug}/config.json`, validation);
-      return;
-    }
-
-    const agent = loadAgent(this.workspaceDir, slug);
-    this.callbacks.onAgentChange?.(slug, agent);
-  }
-
-  /**
-   * Handle agent instructions.md change
-   */
-  private handleAgentInstructionsChange(slug: string): void {
-    debug('[ConfigWatcher] Agent instructions changed:', slug);
-
-    const instructions = loadAgentInstructions(this.workspaceDir, slug);
-    if (instructions !== null) {
-      this.callbacks.onAgentInstructionsChange?.(slug, instructions);
-    }
-
-    // Also emit full agent change
-    const agent = loadAgent(this.workspaceDir, slug);
-    if (agent) {
-      this.callbacks.onAgentChange?.(slug, agent);
-    }
+    const skill = loadSkill(this.workspaceDir, slug);
+    this.callbacks.onSkillChange?.(slug, skill);
   }
 
   // ============================================================
@@ -766,15 +736,6 @@ export class ConfigWatcher {
     debug('[ConfigWatcher] Workspace theme.json changed:', this.workspaceId);
     const theme = loadWorkspaceTheme(this.workspaceDir);
     this.callbacks.onWorkspaceThemeChange?.(theme);
-  }
-
-  /**
-   * Handle agent-level theme.json change
-   */
-  private handleAgentThemeChange(agentSlug: string): void {
-    debug('[ConfigWatcher] Agent theme.json changed:', agentSlug);
-    const theme = loadAgentTheme(this.workspaceDir, agentSlug);
-    this.callbacks.onAgentThemeChange?.(agentSlug, theme);
   }
 }
 

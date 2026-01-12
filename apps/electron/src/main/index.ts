@@ -98,7 +98,7 @@ async function createInitialWindows(): Promise<void> {
 
   if (workspaces.length === 0) {
     // No workspaces configured - create window without workspace (will show onboarding)
-    windowManager.createWindow('')
+    windowManager.createWindow({ workspaceId: '' })
     return
   }
 
@@ -110,22 +110,11 @@ async function createInitialWindows(): Promise<void> {
       // Skip invalid workspaces
       if (!validWorkspaceIds.includes(saved.workspaceId)) continue
 
-      if (saved.type === 'tab-content' && saved.query) {
-        // Restore tab-content window with full query
-        const params = Object.fromEntries(new URLSearchParams(saved.query))
-        const win = windowManager.createTabContentWindow(
-          saved.workspaceId,
-          params.tabType || 'settings',
-          params
-        )
-        win.setBounds(saved.bounds)
-        restoredCount++
-      } else {
-        // Restore main window
-        const win = windowManager.createWindow(saved.workspaceId)
-        win.setBounds(saved.bounds)
-        restoredCount++
-      }
+      // Restore main window
+      const win = windowManager.createWindow({ workspaceId: saved.workspaceId })
+      win.setBounds(saved.bounds)
+
+      restoredCount++
     }
 
     if (restoredCount > 0) {
@@ -135,7 +124,7 @@ async function createInitialWindows(): Promise<void> {
   }
 
   // Default: open window for first workspace
-  windowManager.createWindow(workspaces[0].id)
+  windowManager.createWindow({ workspaceId: workspaces[0].id })
   mainLog.info(`Created window for first workspace: ${workspaces[0].name}`)
 }
 
@@ -145,8 +134,7 @@ app.whenReady().then(async () => {
   // Initialize bundled docs
   initializeDocs()
 
-  // Create the application menu
-  createApplicationMenu()
+  // Application menu is created after windowManager initialization (see below)
 
   // Set dock icon on macOS (required for dev mode, bundled apps use Info.plist)
   if (process.platform === 'darwin' && app.dock) {
@@ -161,6 +149,9 @@ app.whenReady().then(async () => {
   try {
     // Initialize window manager
     windowManager = new WindowManager()
+
+    // Create the application menu (needs windowManager for New Window action)
+    createApplicationMenu(windowManager)
 
     // Initialize unified preview window manager (all preview types)
     unifiedPreviewWindowManager = new UnifiedPreviewWindowManager()
@@ -208,9 +199,9 @@ app.whenReady().then(async () => {
         const wsId = savedState?.lastFocusedWorkspaceId || workspaces[0].id
         // Verify workspace still exists
         if (workspaces.some(ws => ws.id === wsId)) {
-          windowManager.createWindow(wsId)
+          windowManager.createWindow({ workspaceId: wsId })
         } else {
-          windowManager.createWindow(workspaces[0].id)
+          windowManager.createWindow({ workspaceId: workspaces[0].id })
         }
       }
     }

@@ -1,21 +1,19 @@
 import { formatPreferencesForPrompt } from '../config/preferences.ts';
-import type { SubAgentDefinition } from '../agents/types.ts';
 import { debug } from '../utils/debug.ts';
 import { getPermissionModesDocumentation } from '../agent/mode-manager.ts';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { DOC_REFS } from '../docs/index.ts';
 
-/** Maximum size of CLAUDE.md/agents.md file to include (10KB) */
+/** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
 
 /** Files to look for in working directory (in priority order) */
-const CONTEXT_FILES = ['CLAUDE.md', 'agents.md'];
+const CONTEXT_FILES = ['CLAUDE.md'];
 
 /**
- * Read the project context file (CLAUDE.md or agents.md) from a directory.
+ * Read the project context file (CLAUDE.md) from a directory.
  * Returns the content if found, null otherwise.
- * CLAUDE.md takes precedence over agents.md.
  */
 export function readProjectContextFile(directory: string): { filename: string; content: string } | null {
   for (const filename of CONTEXT_FILES) {
@@ -44,7 +42,7 @@ export function readProjectContextFile(directory: string): { filename: string; c
 
 /**
  * Get the working directory context string for injection into user messages.
- * Includes the working directory path and any CLAUDE.md/agents.md content.
+ * Includes the working directory path and any CLAUDE.md content.
  * Returns empty string if no working directory is set.
  */
 export function getWorkingDirectoryContext(workingDirectory?: string): string {
@@ -90,37 +88,26 @@ export interface DebugModeConfig {
 
 /**
  * Get the full system prompt with current date/time and user preferences
- * Optionally includes active sub-agent context and temporary clarifications.
  *
  * Note: Safe Mode context is injected via user messages instead of system prompt
  * to preserve prompt caching.
  */
 export function getSystemPrompt(
-  activeAgent?: SubAgentDefinition,
-  temporaryClarifications?: string,
   pinnedPreferencesPrompt?: string,
   debugMode?: DebugModeConfig,
   workspaceRootPath?: string
 ): string {
   // Use pinned preferences if provided (for session consistency after compaction)
   const preferences = pinnedPreferencesPrompt ?? formatPreferencesForPrompt();
-  const agentContext = activeAgent ? formatAgentContext(activeAgent, temporaryClarifications) : '';
   const debugContext = debugMode?.enabled ? formatDebugModeContext(debugMode.logFilePath) : '';
-
-  debug('[getSystemPrompt] activeAgent:', activeAgent?.name || 'none');
-  debug('[getSystemPrompt] instructions length:', activeAgent?.instructions?.length || 0);
-  if (activeAgent?.instructions) {
-    debug('[getSystemPrompt] instructions:', activeAgent.instructions);
-  }
 
   // Note: Date/time context is now added to user messages instead of system prompt
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
   const basePrompt = getCraftAssistantPrompt(workspaceRootPath);
-  const fullPrompt = `${preferences}${basePrompt}${agentContext}${debugContext}`;
+  const fullPrompt = `${preferences}${basePrompt}${debugContext}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
-  debug('[getSystemPrompt] agentContext length:', agentContext.length);
 
   return fullPrompt;
 }
@@ -173,54 +160,6 @@ Grep pattern="." path="${logFilePath}" head_limit=50
 }
 
 /**
- * Format sub-agent context for injection into system prompt
- * Makes clear the agent must ADOPT the persona, not just append instructions
- */
-function formatAgentContext(agent: SubAgentDefinition, temporaryClarifications?: string): string {
-  const clarificationsSection = temporaryClarifications
-    ? `
-
-### Pending Clarifications (from user, not yet saved)
-The user has provided these clarifications during setup. They are NOT yet saved to your instructions, but you should follow them.
-
-${temporaryClarifications}
-`
-    : '';
-
-  return `
-
----
-## ACTIVE AGENT MODE: ${agent.name}
-
-**IMPORTANT: You are now operating as a different agent. The instructions below OVERRIDE your default "Craft Agent" persona.**
-
-You must:
-1. ADOPT the identity, personality, and behavior defined below
-2. ACT according to these instructions, even if they differ from default behavior
-3. Refer to yourself as "${agent.name}" (not "Craft Agent" or "Craft Assistant")
-
-### Agent Instructions
-${agent.instructions}
-${clarificationsSection}
-
-### Full Capabilities
-
-Beyond your agent-specific tools, you have access to ALL standard capabilities:
-- **Bash/Shell**: Run any command, use curl/wget to fetch files, process data with standard unix tools
-- **File Operations**: Read files (including PDFs, images), write files, edit code
-- **Web**: Fetch URLs, search the web for information
-
-Use these proactively when they help accomplish the user's goal. Don't assume limitations - try tools before saying something isn't possible.
-
-### Self-Modification
-You can update your Instructions document using \`update_agent_instructions\` when you learn something that should persist across conversations. Only add NEW learnings - don't rewrite existing instructions.
-
-**CRITICAL:** \`update_agent_instructions\` is the ONLY way to modify your source instructions.
----
-`;
-}
-
-/**
  * Get the Craft Assistant system prompt with workspace-specific paths
  */
 function getCraftAssistantPrompt(workspaceRootPath?: string): string {
@@ -250,23 +189,86 @@ Each source has:
 - \`config.json\` - Connection settings and authentication
 - \`guide.md\` - Usage guidelines and context (read this before first use!)
 
-**Before using an external source** for the first time in a session, read its \`guide.md\` to understand its capabilities and any rate limits.
+**IMPORTANT - Before using an external source** for the first time in a session:
+1. Read its \`guide.md\` at \`{workspacePath}/sources/{slug}/guide.md\`
+2. The guide.md contains rate limits, API patterns, and service-specific gotchas
+3. For new sources without a guide.md, create one during setup following the format in \`${DOC_REFS.sources}\`
 
 ## Configuration Documentation
 
-**IMPORTANT:** Before creating, modifying, or troubleshooting sources, agents, or permissions, you MUST read the relevant documentation first:
+**CRITICAL - READ BEFORE ACTING:** You MUST read the relevant documentation BEFORE creating, modifying, or troubleshooting any configuration. NEVER guess schemas, patterns, or authentication methods. The docs contain exact specifications that differ from standard approaches.
 
-| Topic | Documentation |
-|-------|---------------|
-| Sources (MCP, API, local) | \`${DOC_REFS.sources}\` |
-| Agents | \`${DOC_REFS.agents}\` |
-| Permissions (Explore mode rules) | \`${DOC_REFS.permissions}\` |
+| Topic | Documentation | When to Read |
+|-------|---------------|--------------|
+| Sources | \`${DOC_REFS.sources}\` | BEFORE creating/modifying ANY source |
+| Source Guides | \`${DOC_REFS.sourceGuides}\` | BEFORE setting up a specific service (GitHub, Slack, Gmail, etc.) |
+| Permissions | \`${DOC_REFS.permissions}\` | BEFORE modifying Explore mode rules |
+| Skills | \`${DOC_REFS.skills}\` | BEFORE creating custom skills |
+| Themes | \`${DOC_REFS.themes}\` | BEFORE customizing colors |
+
+### Source Setup - MANDATORY Reading Order
+
+When a user wants to add a source (e.g., "add GitHub", "connect to Slack", "set up Gmail"):
+
+1. **FIRST - Check for a specialized guide:** Read from \`${DOC_REFS.sourceGuides}\` for that service
+   - Example: \`${DOC_REFS.sourceGuides}github.com.md\` for GitHub
+   - Example: \`${DOC_REFS.sourceGuides}slack.com.md\` for Slack
+   - These contain **CRITICAL setup hints** like "check for gh CLI before creating GitHub source"
+
+2. **THEN - Read the main sources doc:** \`${DOC_REFS.sources}\` for config.json schema and setup flow
+
+3. **NEVER skip step 1** - Some services have mandatory prerequisites (e.g., GitHub requires checking for \`gh\` CLI first, Slack MUST use native API not MCP)
+
+**Available source guides:**
+\`\`\`
+${DOC_REFS.sourceGuides}
+├── github.com.md      # CRITICAL: Check for gh CLI first!
+├── slack.com.md       # MUST use native API, not MCP
+├── gmail.com.md       # Google OAuth setup
+├── google-calendar.md
+├── google-drive.md
+├── google-docs.md
+├── google-sheets.md
+├── linear.app.md
+├── craft.do.md
+├── outlook.com.md
+├── microsoft-calendar.md
+├── teams.microsoft.com.md
+├── sharepoint.com.md
+├── filesystem.md      # Local stdio MCP
+├── brave-search.md    # Requires API key
+└── memory.md          # Knowledge graph
+\`\`\`
 
 **Workspace structure:**
 - Sources: \`${workspacePath}/sources/{slug}/\`
-- Agents: \`${workspacePath}/agents/{slug}/\`
+- Skills: \`${workspacePath}/skills/{slug}/\`
+- Theme: \`${workspacePath}/theme.json\` (or \`~/.craft-agent/theme.json\` for app-wide)
 
-**When users ask about sources, agents, or permissions:** Always read the corresponding documentation file first. Do not guess or assume - the docs have the exact schemas and patterns to follow.
+### Skills - MANDATORY Reading
+
+When a user wants to create, modify, or troubleshoot a skill:
+- **ALWAYS read** \`${DOC_REFS.skills}\` FIRST
+- Contains exact SKILL.md format, metadata fields (name, description, globs, alwaysAllow)
+- Skills use the same format as Claude Code SDK - but MUST read docs for validation requirements
+- NEVER guess the schema - it has specific required fields
+
+### Themes - MANDATORY Reading
+
+When a user wants to customize colors or theming:
+- **ALWAYS read** \`${DOC_REFS.themes}\` FIRST
+- Contains the 6-color system (background, foreground, accent, info, success, destructive)
+- Uses OKLCH color format for perceptually uniform colors
+- Supports cascading (app → workspace) and dark mode overrides
+- NEVER guess color names or structure
+
+### Permissions - MANDATORY Reading
+
+When a user wants to customize Explore mode permissions or troubleshoot blocked operations:
+- **ALWAYS read** \`${DOC_REFS.permissions}\` FIRST
+- Contains rule types: MCP patterns, API endpoints, bash patterns, blocked tools, write paths
+- **Auto-scoping:** Source permissions.json patterns are auto-scoped to that source (write simple patterns like \`list\`, not full \`mcp__source__list\`)
+- Rules are additive - they extend defaults, cannot restrict further
 
 ## Interaction Guidelines
 
@@ -282,7 +284,7 @@ Each source has:
 
 6. **Use Available Tools**: Only call tools that exist. Check the tool list and use exact names.
 
-7. **Craft Agent Documentation**: When users ask questions like "How to...", "How can I...", "How do I...", "Can I...", or "Is it possible to..." about installing, creating, setting up, configuring, or connecting anything related to Craft Agent - use the tools from the \`docs\` MCP server. This includes questions about agents, MCP servers, APIs, connectivity, setup and installation flow. Do NOT/textCODE instructions for these topics. Craft Agent has its own approach.
+7. **Craft Agent Documentation**: When users ask questions like "How to...", "How can I...", "How do I...", "Can I...", or "Is it possible to..." about installing, creating, setting up, configuring, or connecting anything related to Craft Agent - read the relevant documentation file from \`~/.craft-agent/docs/\` using the Read tool. This includes questions about sources, skills, permissions, and themes. Do NOT make up instructions for these topics - Craft Agent has specific patterns that differ from standard approaches.
 
 8. **HTML and SVG Rendering**: Your markdown output supports raw HTML including SVG. Use this for:
    - Inline SVG diagrams, icons, or visualizations
@@ -300,6 +302,12 @@ ${getPermissionModesDocumentation()}
 - If a tool fails, explain the error and suggest alternatives.
 - If content is not found, help refine the search.
 - If unsure about destructive actions, ask for clarification.
+
+**Troubleshooting with Documentation:**
+- **Source connection fails:** Re-read \`${DOC_REFS.sources}\` and the specific source guide in \`${DOC_REFS.sourceGuides}\`
+- **Permission denied in Explore mode:** Read \`${DOC_REFS.permissions}\` to check/add allowed patterns
+- **Skill not loading:** Read \`${DOC_REFS.skills}\` for validation requirements, run \`skill_validate\`
+- **Theme not applying:** Read \`${DOC_REFS.themes}\` for schema and cascading rules
 
 ## Tool Metadata
 
@@ -339,5 +347,31 @@ When users attach files (PDFs, images, documents) to messages, they are stored i
 When running in headless mode (indicated by \`<headless_mode>\` wrapper in user messages):
 - Execute tasks directly without interactive planning
 - Provide concise, actionable responses
-- Tool permissions are handled automatically via policies`;
+- Tool permissions are handled automatically via policies
+
+## Session Onboarding
+
+When a user starts a new session, they may see onboarding messages in the UI before sending their first message. These messages provide guidance and quick actions to help users get started.
+
+When the user sends their first message, you may receive a \`<session_onboarding>\` block that describes what they were shown:
+- Welcome message with capabilities overview
+- Sources needing authentication (if any)
+- Quick action buttons they could click
+
+**Example:**
+\`\`\`
+<session_onboarding>
+The user started a new session and was shown:
+- Welcome! I can help you work with your documents...
+- Quick actions: [Connect sources] [Browse documents] [What can you do?] [Add a source]
+
+The user clicked: "Connect sources"
+</session_onboarding>
+\`\`\`
+
+**How to respond:**
+- If the user clicked a quick action, respond to that specific request
+- Keep context that this is likely their first interaction in this session
+- If sources need authentication, offer to help connect them
+- Be welcoming but concise - don't repeat the onboarding content back to them`;
 }

@@ -6,7 +6,7 @@ A Claude Code-like agent for Craft documents using the Anthropic SDK and Craft M
 
 - **Claude Code-like Experience**: Streaming responses, tool visualization, and real-time updates
 - **Craft MCP Integration**: Access to 32+ Craft document tools (blocks, collections, search, tasks)
-- **Subagents**: Define specialized agents in Craft documents with custom instructions, MCP servers, and REST APIs
+- **Sources**: Connect to MCP servers, REST APIs, and local filesystems
 - **Dynamic API Integration**: Automatically extract REST APIs from documentation and create flexible tools
 - **Permission Modes**: Three-level system (Explore, Ask to Edit, Auto) with customizable rules
 - **Background Tasks**: Run long-running operations in the background with progress tracking
@@ -16,7 +16,7 @@ A Claude Code-like agent for Craft documents using the Anthropic SDK and Craft M
 - **Rich Terminal UI**: Built with Ink (React for CLIs)
 - **Ultrathink Mode**: Type "ultrathink" in your message for extended thinking
 - **Command History**: Navigate previous inputs with arrow keys
-- **Slash Commands**: `/help`, `/tools`, `/setup`, `/clear`, `/agent`, `/info`, `/exit`
+- **Slash Commands**: `/help`, `/tools`, `/setup`, `/clear`, `/info`, `/exit`
 - **Interactive Setup**: First-run wizard to configure API keys and MCP connection
 
 ## Prerequisites
@@ -91,7 +91,6 @@ bun dev
 |---------|-------------|
 | `/help` | Show help message |
 | `/tools` | List available Craft MCP tools |
-| `/agent` | List, activate, or deactivate subagents |
 | `/info` | Show active agent info and available tools |
 | `/safe` | Toggle Explore mode (read-only) |
 | `/setup` | Re-run the configuration wizard |
@@ -126,8 +125,6 @@ craft --print "Summarize today's tasks" --output-format stream-json
 # Use a specific workspace
 craft --print "What tasks are due?" --workspace my-workspace
 
-# Use a specific subagent
-craft --print "Search for TypeScript tutorials" --agent researcher
 ```
 
 ### CLI Flags
@@ -140,7 +137,6 @@ craft --print "Search for TypeScript tutorials" --agent researcher
 | `--session-resume` | Resume last session instead of starting fresh |
 | `--session <id>` | Use explicit session ID (for workflow management) |
 | `--workspace, -w <name>` | Use specific workspace |
-| `--agent, -a <name>` | Activate specific subagent |
 | `--model, -m <model>` | Override model selection |
 
 ### Permission Policies
@@ -232,7 +228,7 @@ The header shows the current mode indicator.
 
 ### Customizable Permissions
 
-Each workspace, source, and agent can have a `permissions.json` file with custom rules:
+Each workspace and source can have a `permissions.json` file with custom rules:
 - `blockedTools` - Additional tools to block
 - `allowedBashPatterns` - Regex patterns for safe bash commands
 - `allowedMcpPatterns` - Regex patterns for allowed MCP tools
@@ -313,52 +309,7 @@ Standard terminal/readline shortcuts for efficient text editing:
 - `collectionItems_delete`
 - `tasks_delete`
 
-## Subagents
-
-Subagents are specialized agents defined in Craft documents. They extend the base agent with custom instructions, MCP servers, and REST APIs.
-
-### Defining a Subagent
-
-Create a Craft document with an "Instructions" section containing the agent's system prompt. You can also include:
-
-**MCP Servers** (HTTP, SSE, or stdio):
-```yaml
-servers:
-  - name: myserver
-    url: https://example.com/mcp
-  - name: filesystem
-    transport: stdio
-    command: npx
-    args: ["-y", "@anthropic/mcp-server-filesystem"]
-```
-
-**REST APIs** (detected from various sources):
-```bash
-# Curl examples
-curl -X POST https://api.exa.ai/search \
-  -H "x-api-key: YOUR_API_KEY" \
-  -d '{"query": "search query", "numResults": 10}'
-
-# Or fetch/axios calls, inline API docs, or links to API documentation
-```
-
-The extractor will automatically:
-- Detect APIs from curl examples, fetch calls, axios requests, or API documentation
-- Extract authentication methods (header, bearer, query, basic, or public)
-- Generate comprehensive markdown documentation for Claude
-- Create a single flexible tool (`api_{name}`) that Claude uses with the documentation
-- Prompt for API credentials on first activation (with custom labels when provided)
-
-### Using Subagents
-
-```bash
-/agent              # List available subagents
-/agent myagent      # Activate a subagent
-/agent off          # Deactivate current subagent
-/info               # Show active agent info and tools
-```
-
-### Large Response Handling & Intent-Aware Summarization
+## Large Response Handling & Intent-Aware Summarization
 
 Tool responses (from MCP tools, REST APIs, etc.) that exceed ~60KB are automatically summarized using Claude Haiku to prevent context overflow.
 
@@ -420,7 +371,6 @@ craft-tui-agent/
     └── shared/                # Shared business logic
         └── src/
             ├── agent/         # CraftAgent, session-scoped-tools, permissions
-            ├── agents/        # Agent management, API tools
             ├── auth/          # OAuth, tokens, state
             ├── config/        # Storage, preferences, themes
             ├── credentials/   # AES-256-GCM encrypted storage

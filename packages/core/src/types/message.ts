@@ -14,7 +14,33 @@ export type MessageRole =
   | 'system'
   | 'info'
   | 'warning'
-  | 'plan';
+  | 'plan'
+  | 'onboarding'
+  | 'auth-request';
+
+/**
+ * Credential input modes for different auth types
+ */
+export type CredentialInputMode =
+  | 'bearer'      // Single token field (Bearer Token, API Key)
+  | 'basic'       // Username + Password fields
+  | 'header'      // API Key with custom header name
+  | 'query';      // API Key for query parameter
+
+/**
+ * Auth request types
+ */
+export type AuthRequestType =
+  | 'credential'
+  | 'oauth'
+  | 'oauth-google'
+  | 'oauth-slack'
+  | 'oauth-microsoft';
+
+/**
+ * Auth request status
+ */
+export type AuthStatus = 'pending' | 'completed' | 'cancelled' | 'failed';
 
 /**
  * Tool execution status
@@ -105,6 +131,29 @@ export interface Message {
   ultrathink?: boolean;
   // Plan-specific fields (for role='plan')
   planPath?: string;  // Path to the plan markdown file
+  // Onboarding-specific fields (for role='onboarding')
+  onboardingId?: string;
+  onboardingWidget?: 'quick-actions' | 'source-auth';
+  onboardingData?: Record<string, unknown>;
+  onboardingSent?: boolean;
+  // Auth-request-specific fields (for role='auth-request')
+  authRequestId?: string;         // Unique ID for the auth request
+  authRequestType?: AuthRequestType;
+  authSourceSlug?: string;
+  authSourceName?: string;
+  authStatus?: AuthStatus;
+  authCredentialMode?: CredentialInputMode;  // For credential requests
+  authHeaderName?: string;        // For header auth - the header name
+  authLabels?: {                  // Custom field labels
+    credential?: string;
+    username?: string;
+    password?: string;
+  };
+  authDescription?: string;       // Description/instructions
+  authHint?: string;              // Hint about where to find credentials
+  authError?: string;             // Error message if auth failed
+  authEmail?: string;             // Authenticated email (for OAuth)
+  authWorkspace?: string;         // Authenticated workspace (for Slack)
 }
 
 /**
@@ -148,6 +197,29 @@ export interface StoredMessage {
   ultrathink?: boolean;
   // Plan-specific fields (for role='plan')
   planPath?: string;
+  // Onboarding-specific fields (for role='onboarding')
+  onboardingId?: string;
+  onboardingWidget?: 'quick-actions' | 'source-auth';
+  onboardingData?: Record<string, unknown>;
+  onboardingSent?: boolean;
+  // Auth-request-specific fields (for role='auth-request')
+  authRequestId?: string;
+  authRequestType?: AuthRequestType;
+  authSourceSlug?: string;
+  authSourceName?: string;
+  authStatus?: AuthStatus;
+  authCredentialMode?: CredentialInputMode;
+  authHeaderName?: string;
+  authLabels?: {
+    credential?: string;
+    username?: string;
+    password?: string;
+  };
+  authDescription?: string;
+  authHint?: string;
+  authError?: string;
+  authEmail?: string;
+  authWorkspace?: string;
 }
 
 /**
@@ -218,19 +290,6 @@ export interface TypedError {
 }
 
 /**
- * Question for AskUserQuestion tool
- */
-export interface Question {
-  question: string;
-  header: string;
-  options: Array<{
-    label: string;
-    description: string;
-  }>;
-  multiSelect: boolean;
-}
-
-/**
  * Permission request from agent (e.g., bash command approval)
  */
 export interface PermissionRequest {
@@ -266,7 +325,6 @@ export type AgentEvent =
   | { type: 'tool_result'; toolUseId: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | { type: 'parent_update'; toolUseId: string; parentToolUseId: string }
   | { type: 'permission_request'; requestId: string; toolName: string; command: string; description: string }
-  | { type: 'ask_user'; requestId: string; questions: Question[] }
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
   | { type: 'complete'; usage?: AgentEventUsage }

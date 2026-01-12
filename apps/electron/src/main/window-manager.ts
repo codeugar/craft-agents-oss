@@ -11,8 +11,15 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 interface ManagedWindow {
   window: BrowserWindow
   workspaceId: string
-  mode?: 'main' | 'tab-content'
-  query?: string  // Full query string for restoration (tab-content windows)
+}
+
+export interface CreateWindowOptions {
+  /** The workspace to open (empty string for onboarding) */
+  workspaceId: string
+  /** Whether to open in focused mode (smaller window, no sidebars) */
+  focused?: boolean
+  /** Deep link URL to navigate to after window loads (without ?window= param) */
+  initialDeepLink?: string
 }
 
 export class WindowManager {
@@ -20,10 +27,11 @@ export class WindowManager {
 
   /**
    * Create a new window for a workspace
-   * @param workspaceId - The workspace to open (empty string for onboarding)
-   * @param mode - Optional mode for the window ('main' or 'tab-content')
+   * @param options - Window creation options
    */
-  createWindow(workspaceId: string, mode?: 'main' | 'tab-content'): BrowserWindow {
+  createWindow(options: CreateWindowOptions): BrowserWindow {
+    const { workspaceId, focused = false, initialDeepLink } = options
+
     // Load platform-specific app icon
     const getIconPath = () => {
       const resourcesDir = join(__dirname, '../resources')
@@ -43,9 +51,13 @@ export class WindowManager {
       windowLog.warn('App icon not found at:', iconPath)
     }
 
+    // Use smaller window size for focused mode (single session view)
+    const windowWidth = focused ? 900 : 1400
+    const windowHeight = focused ? 700 : 900
+
     const window = new BrowserWindow({
-      width: 1400,
-      height: 900,
+      width: windowWidth,
+      height: windowHeight,
       minWidth: 800,
       minHeight: 600,
       show: false, // Don't show until ready-to-show event (faster perceived startup)
@@ -105,10 +117,10 @@ export class WindowManager {
       })
     }
 
-    // Load the renderer with workspace ID and mode as query params
+    // Load the renderer with workspace ID as query param
     const query: Record<string, string> = { workspaceId }
-    if (mode) {
-      query.mode = mode
+    if (focused) {
+      query.focused = 'true' // Open in focused mode (no sidebars)
     }
 
     if (VITE_DEV_SERVER_URL) {
@@ -118,13 +130,36 @@ export class WindowManager {
       window.loadFile(join(__dirname, 'renderer/index.html'), { query })
     }
 
+    // If an initial deep link was provided, navigate to it after the window is ready
+    if (initialDeepLink) {
+      window.once('ready-to-show', () => {
+        // Import parseDeepLink dynamically to avoid circular dependency
+        import('./deep-link').then(({ parseDeepLink }) => {
+          const target = parseDeepLink(initialDeepLink)
+          if (target && (target.view || target.action)) {
+            // Wait a bit for React to mount and register IPC listeners
+            setTimeout(() => {
+              if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+                window.webContents.send(IPC_CHANNELS.DEEP_LINK_NAVIGATE, {
+                  view: target.view,
+                  action: target.action,
+                  actionParams: target.actionParams,
+                })
+              }
+            }, 100)
+          }
+        })
+      })
+    }
+
     // Store the window mapping
     const webContentsId = window.webContents.id
-    this.windows.set(webContentsId, { window, workspaceId, mode })
+    this.windows.set(webContentsId, { window, workspaceId })
 
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
-      if (!window.isDestroyed()) {
+      // Check mainFrame - it becomes null when render frame is disposed
+      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
         window.webContents.send(IPC_CHANNELS.SYSTEM_THEME_CHANGED, nativeTheme.shouldUseDarkColors)
       }
     }
@@ -132,12 +167,12 @@ export class WindowManager {
 
     // Handle focus/blur to broadcast window focus state
     window.on('focus', () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
         window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, true)
       }
     })
     window.on('blur', () => {
-      if (!window.isDestroyed()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
         window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, false)
       }
     })
@@ -176,6 +211,11 @@ export class WindowManager {
         windows.push(managed.window)
       }
     }
+    // Debug: log registered workspaces when lookup fails
+    if (windows.length === 0 && this.windows.size > 0) {
+      const registered = Array.from(this.windows.values()).map(m => m.workspaceId)
+      windowLog.warn(`No windows for workspace '${workspaceId}', have: [${registered.join(', ')}]`)
+    }
     return windows
   }
 
@@ -185,14 +225,6 @@ export class WindowManager {
   getWorkspaceForWindow(webContentsId: number): string | null {
     const managed = this.windows.get(webContentsId)
     return managed?.workspaceId ?? null
-  }
-
-  /**
-   * Get mode for a window (by webContents.id)
-   */
-  getModeForWindow(webContentsId: number): 'main' | 'tab-content' | null {
-    const managed = this.windows.get(webContentsId)
-    return managed?.mode ?? null
   }
 
   /**
@@ -219,14 +251,31 @@ export class WindowManager {
    * Update the workspace ID for an existing window (for in-window switching)
    * @param webContentsId - The webContents.id of the window
    * @param workspaceId - The new workspace ID
+   * @returns true if window was found and updated, false otherwise
    */
-  updateWindowWorkspace(webContentsId: number, workspaceId: string): void {
+  updateWindowWorkspace(webContentsId: number, workspaceId: string): boolean {
     const managed = this.windows.get(webContentsId)
     if (managed) {
       const oldWorkspaceId = managed.workspaceId
       managed.workspaceId = workspaceId
       windowLog.info(`Updated window ${webContentsId} from workspace ${oldWorkspaceId} to ${workspaceId}`)
+      return true
     }
+    // Window not found - log for debugging
+    windowLog.warn(`Cannot update workspace for unknown window ${webContentsId}, registered: [${Array.from(this.windows.keys()).join(', ')}]`)
+    return false
+  }
+
+  /**
+   * Register an existing window with a workspace ID
+   * Used for re-registration when window mapping is lost (e.g., after refresh)
+   * @param window - The BrowserWindow to register
+   * @param workspaceId - The workspace ID to associate with
+   */
+  registerWindow(window: BrowserWindow, workspaceId: string): void {
+    const webContentsId = window.webContents.id
+    this.windows.set(webContentsId, { window, workspaceId })
+    windowLog.info(`Registered window ${webContentsId} for workspace ${workspaceId}`)
   }
 
   /**
@@ -234,118 +283,6 @@ export class WindowManager {
    */
   getAllWindows(): ManagedWindow[] {
     return Array.from(this.windows.values()).filter(m => !m.window.isDestroyed())
-  }
-
-  /**
-   * Create a tab content window (lightweight window showing only tab content)
-   * Used for "Open in New Window" functionality
-   * @param workspaceId - The workspace this window belongs to
-   * @param tabType - The type of tab to display (chat, settings, etc.)
-   * @param tabParams - Tab-specific parameters (sessionId, agentId, path, etc.)
-   */
-  createTabContentWindow(workspaceId: string, tabType: string, tabParams?: Record<string, string>): BrowserWindow {
-    // Load platform-specific app icon
-    const getIconPath = () => {
-      const resourcesDir = join(__dirname, '../resources')
-      if (process.platform === 'darwin') {
-        return join(resourcesDir, 'icon.icns')
-      } else if (process.platform === 'win32') {
-        return join(resourcesDir, 'icon.ico')
-      } else {
-        return join(resourcesDir, 'icon.png')
-      }
-    }
-
-    const iconPath = getIconPath()
-    const iconExists = existsSync(iconPath)
-
-    const window = new BrowserWindow({
-      width: 800,
-      height: 600,
-      minWidth: 400,
-      minHeight: 300,
-      show: false,
-      title: '',
-      icon: iconExists ? iconPath : undefined,
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 18, y: 18 },
-      vibrancy: 'under-window',
-      visualEffectState: 'active',
-      webPreferences: {
-        preload: join(__dirname, 'preload.cjs'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false,
-        webviewTag: true
-      }
-    })
-
-    // Show window when ready
-    window.once('ready-to-show', () => {
-      window.show()
-    })
-
-    // Open external links in default browser
-    window.webContents.setWindowOpenHandler((details) => {
-      shell.openExternal(details.url)
-      return { action: 'deny' }
-    })
-
-    // Build query params for tab content window
-    const query: Record<string, string> = {
-      workspaceId,
-      mode: 'tab-content',
-      tabType,
-    }
-    // Add tab params to query string
-    if (tabParams) {
-      for (const [key, value] of Object.entries(tabParams)) {
-        query[key] = value
-      }
-    }
-
-    // Build query string for loading and storage
-    const queryString = new URLSearchParams(query).toString()
-
-    if (VITE_DEV_SERVER_URL) {
-      window.loadURL(`${VITE_DEV_SERVER_URL}?${queryString}`)
-    } else {
-      window.loadFile(join(__dirname, 'renderer/index.html'), { query })
-    }
-
-    // Store the window mapping with query for restoration
-    const webContentsId = window.webContents.id
-    this.windows.set(webContentsId, { window, workspaceId, mode: 'tab-content', query: queryString })
-
-    // Listen for system theme changes
-    const themeHandler = () => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.SYSTEM_THEME_CHANGED, nativeTheme.shouldUseDarkColors)
-      }
-    }
-    nativeTheme.on('updated', themeHandler)
-
-    // Handle focus/blur
-    window.on('focus', () => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, true)
-      }
-    })
-    window.on('blur', () => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.WINDOW_FOCUS_STATE, false)
-      }
-    })
-
-    // Cleanup on close
-    window.on('closed', () => {
-      nativeTheme.removeListener('updated', themeHandler)
-      this.windows.delete(webContentsId)
-      windowLog.info(`Tab content window closed for workspace ${workspaceId}, tab ${tabType}`)
-    })
-
-    windowLog.info(`Created tab content window for workspace ${workspaceId}, tab ${tabType}`)
-    return window
   }
 
   /**
@@ -360,27 +297,18 @@ export class WindowManager {
       existing.focus()
       return existing
     }
-    return this.createWindow(workspaceId)
+    return this.createWindow({ workspaceId })
   }
 
   /**
-   * Get list of workspace IDs that have open windows (for persistence)
-   * @deprecated Use getWindowStates() instead for full window state persistence
-   */
-  getOpenWorkspaceIds(): string[] {
-    return this.getAllWindows().map(m => m.workspaceId)
-  }
-
-  /**
-   * Get window states for persistence (includes bounds, type, and query)
+   * Get window states for persistence (includes bounds)
    * Used by window-state.ts to save/restore windows
    */
   getWindowStates(): SavedWindow[] {
     return this.getAllWindows().map(managed => ({
-      type: (managed.mode === 'tab-content' ? 'tab-content' : 'main') as 'main' | 'tab-content',
+      type: 'main' as const,
       workspaceId: managed.workspaceId,
       bounds: managed.window.getBounds(),
-      query: managed.query
     }))
   }
 
@@ -427,7 +355,10 @@ export class WindowManager {
    */
   broadcastToAll(channel: string, ...args: unknown[]): void {
     for (const managed of this.getAllWindows()) {
-      if (!managed.window.isDestroyed()) {
+      // Check mainFrame - it becomes null when render frame is disposed
+      if (!managed.window.isDestroyed() &&
+          !managed.window.webContents.isDestroyed() &&
+          managed.window.webContents.mainFrame) {
         managed.window.webContents.send(channel, ...args)
       }
     }

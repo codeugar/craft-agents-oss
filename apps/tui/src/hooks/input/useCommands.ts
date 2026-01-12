@@ -9,8 +9,8 @@ import { readClipboard, readFileAttachment, type FileAttachment } from '@craft-a
 import { getCurrentVersion } from '@craft-agent/shared/version';
 import type { ModalName } from '../modals/useModalState.ts';
 import type { Message } from '../../components/Messages.tsx';
-import type { SubAgentDefinition } from '@craft-agent/shared/agents';
-import { PERMISSION_MODE_MESSAGES, PERMISSION_MODE_PROMPTS } from '@craft-agent/shared/agents';
+import { PERMISSION_MODE_MESSAGES, PERMISSION_MODE_PROMPTS } from '@craft-agent/shared/agent';
+import { formatContextDisplay } from '../../utils/context-formatter.ts';
 
 /**
  * Result of command execution
@@ -43,6 +43,8 @@ export interface UseCommandsProps {
   setModel: (model: string) => void;
   setWorkspace: (workspace: Workspace) => void;
   startNewSession: () => SessionConfig;
+  resetSession: () => void;
+  tokenUsage: { contextTokens: number };
 
   // Modal control
   openModal: (name: ModalName) => void;
@@ -51,15 +53,7 @@ export interface UseCommandsProps {
   pendingAttachments: FileAttachment[];
   setPendingAttachments: React.Dispatch<React.SetStateAction<FileAttachment[]>>;
 
-  // Agent operations
-  availableAgents: string[];
-  activeAgentName: string | null;
-  activeAgentDefinition: SubAgentDefinition | null;
-  activateAgent: (name: string) => Promise<boolean | 'pending_auth'>;
-  deactivateAgent: () => void;
-  reloadAgent: () => Promise<boolean>;
-  resetAgent: () => Promise<boolean>;
-  refreshAgents: () => Promise<string[] | { error: string }>;
+  // Tools
   fetchTools: () => Promise<ToolGroup[]>;
 
   // Safe mode operations (read-only exploration)
@@ -110,14 +104,6 @@ export function useCommands(props: UseCommandsProps) {
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
     safeMode,
     approvePlan,
@@ -343,9 +329,7 @@ export function useCommands(props: UseCommandsProps) {
         return { handled: true };
 
       case '/safemode': {
-        const currentMode = getSafeMode();
-        const newMode = !currentMode;
-        setSafeMode(newMode);
+        const newMode = !safeMode;
         setSafeModeSetting(newMode);
         return {
           handled: true,
@@ -624,8 +608,18 @@ export function useCommands(props: UseCommandsProps) {
         }
 
         if (subCommand === 'view') {
-          openModal('planReview');
-          return { handled: true };
+          // Check if there's a plan loaded as attachment
+          const planAttachment = pendingAttachments.find(a => a.name.endsWith('.md'));
+          if (!planAttachment) {
+            return {
+              handled: true,
+              message: { content: 'No plan loaded. Use `/plan load <name>` to load one.', type: 'system' },
+            };
+          }
+          return {
+            handled: true,
+            message: { content: `**Plan: ${planAttachment.name}**\n\n${planAttachment.text || '(No content)'}`, type: 'assistant' },
+          };
         }
 
         if (subCommand === 'approve') {
@@ -659,176 +653,18 @@ export function useCommands(props: UseCommandsProps) {
         if (subCommand === 'save') {
           return {
             handled: true,
-            message: { content: 'Use the plan review modal to save plans to Craft.', type: 'system' },
+            message: { content: 'Plan saving is not available in TUI.', type: 'system' },
           };
         }
 
-        // No subcommand - open interactive plan menu
-        openModal('planMenu');
-        return { handled: true };
-      }
-
-      // ============================================
-      // Agent Commands
-      // ============================================
-      case '/agent': {
-        const subCommand = parts[1] ?? '';
-
-        if (subCommand === 'list') {
-          const agentList = availableAgents.length > 0
-            ? availableAgents.map(a => `- @${a}`).join('\n')
-            : '(No agents found. Create an "Agents" folder in Craft.)';
-          return {
-            handled: true,
-            message: { content: `**Available Sub-Agents**\n\n${agentList}`, type: 'assistant' },
-          };
-        }
-
-        if (subCommand === 'clear' || subCommand === 'dismiss') {
-          deactivateAgent();
-          return {
-            handled: true,
-            message: { content: 'Returned to main assistant', type: 'system' },
-          };
-        }
-
-        if (subCommand === 'refresh') {
-          const { setTerminalProgressIndeterminate, clearTerminalProgress } = await import('../../utils/terminalProgress.ts');
-          setTerminalProgressIndeterminate();
-          try {
-            const result = await refreshAgents();
-            if ('error' in result) {
-              return {
-                handled: true,
-                message: { content: result.error, type: 'error' },
-              };
-            }
-            const agentList = result.length > 0
-              ? `Found ${result.length} agent${result.length === 1 ? '' : 's'}: ${result.map(a => `@${a}`).join(', ')}`
-              : 'No agents found. Create an "Agents" folder in Craft with agent documents.';
-            return {
-              handled: true,
-              message: { content: agentList, type: 'system' },
-            };
-          } finally {
-            clearTerminalProgress();
-          }
-        }
-
-        if (subCommand === 'info') {
-          if (activeAgentName) {
-            let info = `**Active Agent**: @${activeAgentName}`;
-
-            if (activeAgentDefinition?.capabilities && activeAgentDefinition.capabilities.length > 0) {
-              info += '\n\n**Capabilities**\n' + activeAgentDefinition.capabilities.map(c => `• ${c}`).join('\n');
-            }
-
-            const toolGroups = await fetchTools();
-            const agentToolGroups = toolGroups.filter(g => g.name !== 'Craft');
-            for (const group of agentToolGroups) {
-              info += `\n\n**${group.name}**`;
-              if (group.tools.length > 0) {
-                info += `: ${group.tools.map(t => t.name).join(', ')}`;
-              } else {
-                info += ': (no tools)';
-              }
-            }
-            return {
-              handled: true,
-              message: { content: info, type: 'assistant' },
-            };
-          }
-          return {
-            handled: true,
-            message: { content: 'No sub-agent active. Use @agentname to activate one.', type: 'system' },
-          };
-        }
-
-        if (subCommand === 'reload') {
-          if (!activeAgentName) {
-            return {
-              handled: true,
-              message: {
-                content: 'No sub-agent active. Use @agentname to activate one first.',
-                type: 'error',
-              },
-            };
-          }
-          const { setTerminalProgressIndeterminate, clearTerminalProgress } = await import('../../utils/terminalProgress.ts');
-          setTerminalProgressIndeterminate();
-          try {
-            const success = await reloadAgent();
-            if (success) {
-              return {
-                handled: true,
-                message: { content: `Agent @${activeAgentName} instructions reloaded.`, type: 'system' },
-              };
-            }
-            return {
-              handled: true,
-              message: { content: `Failed to reload agent @${activeAgentName}`, type: 'error' },
-            };
-          } finally {
-            clearTerminalProgress();
-          }
-        }
-
-        if (subCommand === 'reset') {
-          if (!activeAgentName) {
-            return {
-              handled: true,
-              message: {
-                content: 'No sub-agent active. Use @agentname to activate one first.',
-                type: 'error',
-              },
-            };
-          }
-          const agentToReset = activeAgentName;
-          const { setTerminalProgressIndeterminate, clearTerminalProgress } = await import('../../utils/terminalProgress.ts');
-          setTerminalProgressIndeterminate();
-          try {
-            const success = await resetAgent();
-            if (success) {
-              return {
-                handled: true,
-                message: {
-                  content: `Agent @${agentToReset} reset. Select it again to restart setup.`,
-                  type: 'system',
-                },
-              };
-            }
-            return {
-              handled: true,
-              message: { content: `Failed to reset agent @${agentToReset}`, type: 'error' },
-            };
-          } finally {
-            clearTerminalProgress();
-          }
-        }
-
-        if (subCommand === 'create') {
-          return {
-            handled: true,
-            message: {
-              content: 'Agent creation not yet implemented. Create a document in your "Agents" folder manually.',
-              type: 'system',
-            },
-          };
-        }
-
-        if (subCommand) {
-          const activated = await activateAgent(subCommand);
-          if (!activated) {
-            return {
-              handled: true,
-              message: { content: `Agent not found: ${subCommand}`, type: 'error' },
-            };
-          }
-          return { handled: true };
-        }
-
-        openModal('agentMenu');
-        return { handled: true };
+        // No subcommand - show help
+        return {
+          handled: true,
+          message: {
+            content: `**Plan Commands**\n\n- \`/plan list\` - List available plans\n- \`/plan load <name>\` - Load a plan\n- \`/plan view\` - View active plan\n- \`/plan approve\` - Approve plan (in safe mode)\n- \`/plan cancel\` - Cancel safe mode`,
+            type: 'assistant',
+          },
+        };
       }
 
       // ============================================
@@ -855,14 +691,6 @@ export function useCommands(props: UseCommandsProps) {
     openModal,
     pendingAttachments,
     setPendingAttachments,
-    availableAgents,
-    activeAgentName,
-    activeAgentDefinition,
-    activateAgent,
-    deactivateAgent,
-    reloadAgent,
-    resetAgent,
-    refreshAgents,
     fetchTools,
     safeMode,
     approvePlan,

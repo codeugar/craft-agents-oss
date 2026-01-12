@@ -76,11 +76,11 @@ function handleNotificationClick(workspaceId: string, sessionId: string): void {
 
   if (!window) {
     // Create a new window for this workspace
-    windowManager.createWindow(workspaceId)
+    windowManager.createWindow({ workspaceId })
     window = windowManager.getWindowByWorkspace(workspaceId)
   }
 
-  if (window && !window.isDestroyed()) {
+  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
     // Focus the window
     if (window.isMinimized()) {
       window.restore()
@@ -137,14 +137,15 @@ export function updateBadgeCount(count: number): void {
       // Draw badge onto icon using the renderer process
       // We'll send this to the renderer which has Canvas API
       const windows = BrowserWindow.getAllWindows()
-      if (windows.length > 0 && baseIconDataUrl) {
-        windows[0].webContents.send('badge:draw', { count, iconDataUrl: baseIconDataUrl })
+      const window = windows[0]
+      if (window && !window.isDestroyed() && !window.webContents.isDestroyed() && baseIconDataUrl) {
+        window.webContents.send('badge:draw', { count, iconDataUrl: baseIconDataUrl })
       }
     } else {
       // Reset to original icon (no badge)
       if (baseIconPath) {
         const originalIcon = nativeImage.createFromPath(baseIconPath)
-        app.dock.setIcon(originalIcon)
+        app.dock?.setIcon(originalIcon)
       }
     }
     mainLog.info('Badge count updated:', count)
@@ -164,7 +165,7 @@ export function setDockIconWithBadge(dataUrl: string): void {
 
   try {
     const icon = nativeImage.createFromDataURL(dataUrl)
-    app.dock.setIcon(icon)
+    app.dock?.setIcon(icon)
     mainLog.info('Dock icon updated with badge')
   } catch (error) {
     mainLog.error('Failed to set dock icon with badge:', error)

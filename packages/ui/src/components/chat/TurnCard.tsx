@@ -182,10 +182,8 @@ export interface TurnCardProps {
   renderActionsMenu?: () => React.ReactNode
   /** Callback when user accepts the plan (plan responses only) */
   onAcceptPlan?: () => void
-  /** Whether a user message has been sent after this turn (hides plan approve footer) */
-  hasUserResponse?: boolean
-  /** Callback when user sends feedback via fullscreen commenting */
-  onSendFeedback?: (feedback: string) => void
+  /** Whether this is the last response in the session (shows Accept Plan button only for last response) */
+  isLastResponse?: boolean
 }
 
 // ============================================================================
@@ -850,14 +848,12 @@ export interface ResponseCardProps {
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
   onPopOut?: () => void
-  /** Callback when user sends feedback via fullscreen commenting */
-  onSendFeedback?: (feedback: string) => void
   /** Card variant - 'response' for AI messages, 'plan' for plan messages */
   variant?: 'response' | 'plan'
   /** Callback when user accepts the plan (plan variant only) */
   onAccept?: () => void
-  /** Whether a user message has been sent after this plan (hides the approve footer) */
-  hasUserResponse?: boolean
+  /** Whether this is the last response in the session (shows Accept Plan button only for last response) */
+  isLastResponse?: boolean
   /** Whether to show the Accept Plan button (default: true) */
   showAcceptPlan?: boolean
 }
@@ -885,10 +881,9 @@ export function ResponseCard({
   onOpenFile,
   onOpenUrl,
   onPopOut,
-  onSendFeedback,
   variant = 'response',
   onAccept,
-  hasUserResponse = false,
+  isLastResponse = true,
   showAcceptPlan = true,
 }: ResponseCardProps) {
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
@@ -1040,9 +1035,16 @@ export function ResponseCard({
               )}
             </div>
 
-            {/* Right side - Accept Plan (only shown for plan variant until user responds) */}
-            {isPlan && !hasUserResponse && showAcceptPlan && (
-              <div className="flex items-center gap-3">
+            {/* Right side - Accept Plan (only shown for plan variant when it's the last response) */}
+            {isPlan && showAcceptPlan && (
+              <div
+                className={cn(
+                  "flex items-center gap-3 transition-all duration-200",
+                  isLastResponse
+                    ? "opacity-100 translate-x-0"
+                    : "opacity-0 translate-x-2 pointer-events-none"
+                )}
+              >
                 <span className="text-xs text-muted-foreground">
                   Type your feedback in chat or
                 </span>
@@ -1060,7 +1062,7 @@ export function ResponseCard({
           </div>
         </div>
 
-        {/* Fullscreen overlay with commenting */}
+        {/* Fullscreen overlay */}
         <FullscreenOverlay
           content={text}
           isOpen={isFullscreen}
@@ -1068,7 +1070,6 @@ export function ResponseCard({
           variant={isPlan ? 'plan' : undefined}
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
-          onSendFeedback={onSendFeedback}
         />
       </>
     )
@@ -1215,8 +1216,7 @@ export const TurnCard = React.memo(function TurnCard({
   todos,
   renderActionsMenu,
   onAcceptPlan,
-  hasUserResponse,
-  onSendFeedback,
+  isLastResponse,
 }: TurnCardProps) {
   const hasRunning = activities.some(a => a.status === 'running')
 
@@ -1467,10 +1467,9 @@ export const TurnCard = React.memo(function TurnCard({
             onOpenFile={onOpenFile}
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
-            onSendFeedback={onSendFeedback}
             variant={response.isPlan ? 'plan' : 'response'}
             onAccept={onAcceptPlan}
-            hasUserResponse={hasUserResponse}
+            isLastResponse={isLastResponse}
           />
         </div>
       )}
@@ -1489,6 +1488,9 @@ export const TurnCard = React.memo(function TurnCard({
   // Re-render if expansion state changed
   if (prev.isExpanded !== next.isExpanded) return false
   if (prev.expandedActivityGroups !== next.expandedActivityGroups) return false
+
+  // Re-render if isLastResponse changed (for Accept Plan button visibility)
+  if (prev.isLastResponse !== next.isLastResponse) return false
 
   // For complete, non-streaming turns: skip re-render if same turn
   // These are static and safe to cache

@@ -68,19 +68,19 @@ export function getWorkspaceSourcesPath(rootPath: string): string {
 }
 
 /**
- * Get path to workspace agents directory
- * @param rootPath - Absolute path to workspace root folder
- */
-export function getWorkspaceAgentsPath(rootPath: string): string {
-  return join(rootPath, 'agents');
-}
-
-/**
  * Get path to workspace sessions directory
  * @param rootPath - Absolute path to workspace root folder
  */
 export function getWorkspaceSessionsPath(rootPath: string): string {
   return join(rootPath, 'sessions');
+}
+
+/**
+ * Get path to workspace skills directory
+ * @param rootPath - Absolute path to workspace root folder
+ */
+export function getWorkspaceSkillsPath(rootPath: string): string {
+  return join(rootPath, 'skills');
 }
 
 // ============================================================
@@ -172,10 +172,18 @@ export function loadWorkspace(rootPath: string): LoadedWorkspace | null {
   const config = loadWorkspaceConfig(rootPath);
   if (!config) return null;
 
+  // Ensure plugin manifest exists (migration for existing workspaces)
+  ensurePluginManifest(rootPath, config.name);
+
+  // Ensure skills directory exists (migration for existing workspaces)
+  const skillsPath = getWorkspaceSkillsPath(rootPath);
+  if (!existsSync(skillsPath)) {
+    mkdirSync(skillsPath, { recursive: true });
+  }
+
   return {
     config,
     sourceSlugs: listSubdirNames(getWorkspaceSourcesPath(rootPath)),
-    agentSlugs: listSubdirNames(getWorkspaceAgentsPath(rootPath)),
     sessionCount: countSubdirs(getWorkspaceSessionsPath(rootPath)),
   };
 }
@@ -192,7 +200,6 @@ export function getWorkspaceSummary(rootPath: string): WorkspaceSummary | null {
     slug: config.slug,
     name: config.name,
     sourceCount: countSubdirs(getWorkspaceSourcesPath(rootPath)),
-    agentCount: countSubdirs(getWorkspaceAgentsPath(rootPath)),
     sessionCount: countSubdirs(getWorkspaceSessionsPath(rootPath)),
     createdAt: config.createdAt,
     updatedAt: config.updatedAt,
@@ -253,8 +260,8 @@ export function createWorkspaceAtPath(
   // Create workspace directory structure
   mkdirSync(rootPath, { recursive: true });
   mkdirSync(getWorkspaceSourcesPath(rootPath), { recursive: true });
-  mkdirSync(getWorkspaceAgentsPath(rootPath), { recursive: true });
   mkdirSync(getWorkspaceSessionsPath(rootPath), { recursive: true });
+  mkdirSync(getWorkspaceSkillsPath(rootPath), { recursive: true });
 
   // Save config
   saveWorkspaceConfig(rootPath, config);
@@ -262,6 +269,9 @@ export function createWorkspaceAtPath(
   // Initialize status configuration with defaults
   saveStatusConfig(rootPath, getDefaultStatusConfig());
   ensureDefaultIconFiles(rootPath);
+
+  // Initialize plugin manifest for SDK integration (enables skills, commands, agents)
+  ensurePluginManifest(rootPath, name);
 
   return config;
 }
@@ -366,5 +376,37 @@ export function isLocalMcpEnabled(rootPath: string): boolean {
 // ============================================================
 // Exports
 // ============================================================
+
+// ============================================================
+// Plugin Manifest (for SDK plugin integration)
+// ============================================================
+
+/**
+ * Ensure workspace has a .claude-plugin/plugin.json manifest.
+ * This allows the workspace to be loaded as an SDK plugin,
+ * enabling skills, commands, and agents from the workspace.
+ *
+ * @param rootPath - Absolute path to workspace root folder
+ * @param workspaceName - Display name for the workspace (used in plugin name)
+ */
+export function ensurePluginManifest(rootPath: string, workspaceName: string): void {
+  const pluginDir = join(rootPath, '.claude-plugin');
+  const manifestPath = join(pluginDir, 'plugin.json');
+
+  if (existsSync(manifestPath)) return;
+
+  // Create .claude-plugin directory
+  if (!existsSync(pluginDir)) {
+    mkdirSync(pluginDir, { recursive: true });
+  }
+
+  // Create minimal plugin manifest
+  const manifest = {
+    name: `craft-workspace-${workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    version: '1.0.0',
+  };
+
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+}
 
 export { CONFIG_DIR, DEFAULT_WORKSPACES_DIR };

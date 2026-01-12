@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { rm, readFile } from 'fs/promises'
-import { CraftAgent, type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, AbortReason } from '@craft-agent/shared/agent'
+import { CraftAgent, type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest } from '@craft-agent/shared/agent'
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
@@ -28,6 +28,8 @@ import {
   getSessionAttachmentsPath,
   getSessionPath as getSessionStoragePath,
   sessionPersistenceQueue,
+  generateOnboardingMessages,
+  formatOnboardingContext,
   type StoredSession,
   type StoredMessage,
   type SessionMetadata,
@@ -40,9 +42,6 @@ import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPa
 import { getCraftToken } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
-import { FolderAgentManager } from '@craft-agent/shared/agents'
-import type { SubAgentDefinition, AgentStatus, AgentActivateOptions } from '@craft-agent/shared/agents'
-import { AgentStateManager } from '@craft-agent/shared/agents'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
 import { generateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf } from '@craft-agent/shared/utils'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
@@ -119,16 +118,11 @@ interface ManagedSession {
   pendingTextParent?: string
   // Session name (user-defined or AI-generated)
   name?: string
-  // Session metadata
-  agentId?: string
-  agentName?: string
   isFlagged: boolean
   /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode
   // SDK session ID for conversation continuity
   sdkSessionId?: string
-  // Track whether agent was successfully activated via AgentStateManager
-  agentActivated?: boolean
   // Token usage for display
   tokenUsage?: {
     inputTokens: number
@@ -139,7 +133,7 @@ interface ManagedSession {
     cacheReadTokens?: number
     cacheCreationTokens?: number
   }
-  // Todo state (user-controlled) - determines inbox vs done
+  // Todo state (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   todoState?: string
   // Read/unread tracking - ID of last message user has read
@@ -156,10 +150,8 @@ interface ManagedSession {
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
   sharedId?: string
-  // Sources that need credentials (detected at session creation)
-  sourcesNeedingAuth?: LoadedSource[]
-  // Whether auto-setup context has been triggered (prevents multiple triggers)
-  autoSetupTriggered?: boolean
+  // Role/type of the last message (for badge display without loading messages)
+  lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   // Message queue for handling new messages while processing
   // When a message arrives during processing, we interrupt and queue
   messageQueue: Array<{
@@ -171,6 +163,11 @@ interface ManagedSession {
   }>
   // Map of shellId -> command for killing background shells
   backgroundShellCommands: Map<string, string>
+  // Whether messages have been loaded from disk (for lazy loading)
+  messagesLoaded: boolean
+  // Pending auth request tracking (for unified auth flow)
+  pendingAuthRequestId?: string
+  pendingAuthRequest?: AuthRequest
 }
 
 // Convert runtime Message to StoredMessage for persistence
@@ -203,6 +200,20 @@ function messageToStored(msg: Message): StoredMessage {
     errorCanRetry: msg.errorCanRetry,
     // Ultrathink
     ultrathink: msg.ultrathink,
+    // Auth request fields
+    authRequestId: msg.authRequestId,
+    authRequestType: msg.authRequestType,
+    authSourceSlug: msg.authSourceSlug,
+    authSourceName: msg.authSourceName,
+    authStatus: msg.authStatus,
+    authCredentialMode: msg.authCredentialMode,
+    authHeaderName: msg.authHeaderName,
+    authLabels: msg.authLabels,
+    authDescription: msg.authDescription,
+    authHint: msg.authHint,
+    authError: msg.authError,
+    authEmail: msg.authEmail,
+    authWorkspace: msg.authWorkspace,
   }
 }
 
@@ -235,6 +246,20 @@ function storedToMessage(stored: StoredMessage): Message {
     errorCanRetry: stored.errorCanRetry,
     // Ultrathink
     ultrathink: stored.ultrathink,
+    // Auth request fields
+    authRequestId: stored.authRequestId,
+    authRequestType: stored.authRequestType,
+    authSourceSlug: stored.authSourceSlug,
+    authSourceName: stored.authSourceName,
+    authStatus: stored.authStatus,
+    authCredentialMode: stored.authCredentialMode,
+    authHeaderName: stored.authHeaderName,
+    authLabels: stored.authLabels,
+    authDescription: stored.authDescription,
+    authHint: stored.authHint,
+    authError: stored.authError,
+    authEmail: stored.authEmail,
+    authWorkspace: stored.authWorkspace,
   }
 }
 
@@ -249,18 +274,15 @@ interface PendingDelta {
 export class SessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
   private windowManager: WindowManager | null = null
-  // Workspace-scoped FolderAgentManager cache (reads agents from disk)
-  private folderAgentManagers: Map<string, FolderAgentManager> = new Map()
-  // Cache AgentStateManager per agent (agent-scoped: workspaceId:agentId)
-  // This is the single source of truth for agent activation state
-  private agentStateManagers: Map<string, AgentStateManager> = new Map()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
-  // Config watchers for live updates (sources, agents, etc.) - one per workspace
+  // Config watchers for live updates (sources, etc.) - one per workspace
   private configWatchers: Map<string, ConfigWatcher> = new Map()
   // Pending credential request resolvers (keyed by requestId)
   private pendingCredentialResolvers: Map<string, (response: import('../shared/types').CredentialResponse) => void> = new Map()
+  // Promise deduplication for lazy-loading messages (prevents race conditions)
+  private messageLoadingPromises: Map<string, Promise<void>> = new Map()
 
   setWindowManager(wm: WindowManager): void {
     this.windowManager = wm
@@ -311,14 +333,6 @@ export class SessionManager {
         const sources = loadWorkspaceSources(workspaceRootPath)
         this.broadcastSourcesChanged(sources)
       },
-      onAgentsListChange: () => {
-        sessionLog.info(`Agents list changed in ${workspaceRootPath}`)
-        this.broadcastAgentsChanged()
-      },
-      onAgentChange: () => {
-        sessionLog.info(`Agent changed in ${workspaceRootPath}`)
-        this.broadcastAgentsChanged()
-      },
       onStatusConfigChange: (workspaceId: string) => {
         sessionLog.info(`Status config changed in ${workspaceId}`)
         this.broadcastStatusesChanged(workspaceId)
@@ -335,9 +349,16 @@ export class SessionManager {
         sessionLog.info(`Workspace theme changed in ${workspaceRootPath}`)
         this.broadcastWorkspaceThemeChanged(theme)
       },
-      onAgentThemeChange: (agentSlug, theme) => {
-        sessionLog.info(`Agent theme changed: ${agentSlug}`)
-        this.broadcastAgentThemeChanged(agentSlug, theme)
+      onSkillsListChange: async (skills) => {
+        sessionLog.info(`Skills list changed in ${workspaceRootPath} (${skills.length} skills)`)
+        this.broadcastSkillsChanged(skills)
+      },
+      onSkillChange: async (slug, skill) => {
+        sessionLog.info(`Skill '${slug}' changed:`, skill ? 'updated' : 'deleted')
+        // Broadcast updated list to UI
+        const { loadWorkspaceSkills } = await import('@craft-agent/shared/skills')
+        const skills = loadWorkspaceSkills(workspaceRootPath)
+        this.broadcastSkillsChanged(skills)
       },
     }
 
@@ -353,15 +374,6 @@ export class SessionManager {
     if (!this.windowManager) return
 
     this.windowManager.broadcastToAll(IPC_CHANNELS.SOURCES_CHANGED, sources)
-  }
-
-  /**
-   * Broadcast agents changed event to all windows
-   */
-  private broadcastAgentsChanged(): void {
-    if (!this.windowManager) return
-
-    this.windowManager.broadcastToAll(IPC_CHANNELS.AGENTS_CHANGED)
   }
 
   /**
@@ -392,12 +404,12 @@ export class SessionManager {
   }
 
   /**
-   * Broadcast agent theme changed event to all windows
+   * Broadcast skills changed event to all windows
    */
-  private broadcastAgentThemeChanged(agentSlug: string, theme: import('@craft-agent/shared/config').ThemeOverrides | null): void {
+  private broadcastSkillsChanged(skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
     if (!this.windowManager) return
-    sessionLog.info(`Broadcasting agent theme changed for ${agentSlug}`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.THEME_AGENT_CHANGED, agentSlug, theme)
+    sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
+    this.windowManager.broadcastToAll(IPC_CHANNELS.SKILLS_CHANGED, skills)
   }
 
   /**
@@ -427,220 +439,6 @@ export class SessionManager {
     managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
 
     sessionLog.info(`Sources reloaded for session ${managed.id}: ${Object.keys(mcpServers).length} MCP, ${Object.keys(apiServers).length} API`)
-  }
-
-  /**
-   * Get the folder-based agent manager for a workspace
-   * Agents are loaded from disk on demand
-   */
-  private getFolderAgentManager(workspaceRootPath: string): FolderAgentManager {
-    let manager = this.folderAgentManagers.get(workspaceRootPath)
-    if (!manager) {
-      manager = new FolderAgentManager(workspaceRootPath)
-      this.folderAgentManagers.set(workspaceRootPath, manager)
-    }
-    return manager
-  }
-
-  /**
-   * Load agent definition for a given agent ID
-   * Used when activating an agent for a session
-   */
-  private async loadAgentDefinition(agentId: string, workspace: Workspace): Promise<SubAgentDefinition | null> {
-    try {
-      const workspaceRootPath = workspace.rootPath
-      const manager = this.getFolderAgentManager(workspaceRootPath)
-      const definition = manager.getAgentDefinition(agentId)
-      if (definition) {
-        sessionLog.info(`Loaded agent definition: ${definition.name}`)
-      }
-      return definition
-    } catch (error) {
-      sessionLog.error(`Failed to load agent definition ${agentId}:`, error)
-      return null
-    }
-  }
-
-  /**
-   * Get an AgentStateManager for an agent (agent-scoped)
-   * Returns undefined if not yet created
-   */
-  getAgentStateManager(workspaceId: string, agentId: string): AgentStateManager | undefined {
-    const key = `${workspaceId}:${agentId}`
-    return this.agentStateManagers.get(key)
-  }
-
-  /**
-   * Get or create an AgentStateManager for an agent (agent-scoped)
-   * The manager is cached per (workspaceId, agentId) and is the single source of truth
-   */
-  async getOrCreateAgentStateManager(workspaceId: string, agentId: string): Promise<AgentStateManager | null> {
-    const key = `${workspaceId}:${agentId}`
-
-    // Check cache first
-    if (this.agentStateManagers.has(key)) {
-      return this.agentStateManagers.get(key)!
-    }
-
-    sessionLog.info(`Creating AgentStateManager for workspace="${workspaceId}", agent="${agentId}"`)
-
-    // Get workspace to get the slug for folder-based agent manager
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      sessionLog.error(`Workspace not found: ${workspaceId}`)
-      return null
-    }
-    const workspaceRootPath = workspace.rootPath
-    const folderAgentManager = this.getFolderAgentManager(workspaceRootPath)
-
-    // Create AgentStateManager with folder-based agent manager
-    const stateManager = new AgentStateManager(workspaceId, folderAgentManager)
-
-    // Subscribe to status changes and broadcast complete state to all windows
-    // Uses broadcastAgentState() to include needsSetup/needsAuth/reason
-    stateManager.on('status', async () => {
-      await this.broadcastAgentState(workspaceId, agentId)
-    })
-
-    // Cache it
-    this.agentStateManagers.set(key, stateManager)
-    sessionLog.info(`Created AgentStateManager for agent ${agentId} in workspace ${workspaceId}`)
-
-    return stateManager
-  }
-
-  /**
-   * Broadcast complete agent state to all windows
-   * Single source of truth - call this after ANY agent state change
-   * Computes full state: status + needsSetup + needsAuth + reason
-   */
-  async broadcastAgentState(workspaceId: string, agentId: string): Promise<void> {
-    if (!this.windowManager) return
-
-    // Get current status from state manager
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    const status = stateManager?.getStatus() ?? { status: 'idle' as const }
-
-    // Compute setup requirements
-    const { agentService } = await import('./agent-service')
-    const setupStatus = await agentService.getAgentSetupStatus(workspaceId, agentId)
-
-    // Build complete state
-    const completeState = {
-      ...status,
-      needsSetup: setupStatus.needsSetup,
-      needsAuth: setupStatus.needsAuth,
-      reason: setupStatus.reason,
-    }
-
-    // Broadcast to all windows
-    this.windowManager.broadcastToAll(IPC_CHANNELS.AGENT_STATUS_CHANGED, workspaceId, agentId, completeState)
-    sessionLog.info(`Broadcast agent state: ${status.status}, needsSetup=${setupStatus.needsSetup}, needsAuth=${setupStatus.needsAuth} for ${agentId}`)
-  }
-
-
-  /**
-   * Get current agent status (agent-scoped)
-   * For folder-based agents, they're ready immediately (no activation needed)
-   */
-  async getAgentStatus(workspaceId: string, agentId: string): Promise<AgentStatus> {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (stateManager) {
-      return stateManager.getStatus()
-    }
-
-    // Check if sources need authentication
-    const { agentService } = await import('./agent-service')
-    const setupStatus = await agentService.getAgentSetupStatus(workspaceId, agentId)
-
-    // Return status with auth info (needsSetup is always false for folder agents)
-    return {
-      status: 'idle',
-      needsSetup: false,
-      needsAuth: setupStatus.needsAuth,
-      reason: setupStatus.reason
-    }
-  }
-
-  /**
-   * Activate an agent (agent-scoped)
-   */
-  async activateAgent(
-    workspaceId: string,
-    agentId: string,
-    options?: AgentActivateOptions
-  ): Promise<AgentStatus> {
-    sessionLog.info(`activateAgent called: workspaceId="${workspaceId}", agentId="${agentId}"`)
-
-    const stateManager = await this.getOrCreateAgentStateManager(workspaceId, agentId)
-    if (!stateManager) {
-      sessionLog.error(`Failed to create state manager for workspace="${workspaceId}", agent="${agentId}"`)
-      return { status: 'error', agentId, agentName: agentId || 'unknown', error: 'Could not create state manager' }
-    }
-    return stateManager.activate(agentId, options)
-  }
-
-  /**
-   * Continue after MCP auth step (agent-scoped)
-   */
-  async continueAfterMcpAuth(workspaceId: string, agentId: string): Promise<AgentStatus> {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (!stateManager) {
-      return { status: 'idle' }
-    }
-    return stateManager.continueAfterMcpAuth()
-  }
-
-  /**
-   * Continue after API auth step (agent-scoped)
-   */
-  async continueAfterApiAuth(workspaceId: string, agentId: string): Promise<AgentStatus> {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (!stateManager) {
-      return { status: 'idle' }
-    }
-    return stateManager.continueAfterApiAuth()
-  }
-
-  /**
-   * Deactivate agent (agent-scoped)
-   */
-  deactivateAgent(workspaceId: string, agentId: string): void {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (stateManager) {
-      stateManager.deactivate()
-    }
-  }
-
-  /**
-   * Reload agent (agent-scoped)
-   */
-  async reloadAgent(workspaceId: string, agentId: string): Promise<AgentStatus> {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (!stateManager) {
-      return { status: 'idle' }
-    }
-    return stateManager.reload()
-  }
-
-  /**
-   * Reset agent (clear definition and credentials) (agent-scoped)
-   */
-  async resetAgent(workspaceId: string, agentId: string): Promise<void> {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (stateManager) {
-      await stateManager.reset()
-    }
-  }
-
-  /**
-   * Mark agent as active (agent-scoped)
-   */
-  markAgentActive(workspaceId: string, agentId: string): void {
-    const stateManager = this.getAgentStateManager(workspaceId, agentId)
-    if (stateManager) {
-      stateManager.markActive()
-    }
   }
 
   /**
@@ -732,7 +530,7 @@ export class SessionManager {
     this.loadSessionsFromDisk()
   }
 
-  // Load all existing sessions from disk into memory
+  // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
   private loadSessionsFromDisk(): void {
     try {
       const workspaces = getWorkspaces()
@@ -747,72 +545,45 @@ export class SessionManager {
         const wsDefaultWorkingDir = wsConfig?.defaults?.workingDirectory
 
         for (const meta of sessionMetadata) {
-          // Load full session data
-          const storedSession = loadStoredSession(workspaceRootPath, meta.id)
-          if (!storedSession) {
-            sessionLog.warn(`Skipping session ${meta.id}: could not load from disk`)
-            continue
-          }
-
-          // Convert stored messages to runtime messages
-          const messages = (storedSession.messages || []).map(storedToMessage)
-
-          // Create managed session (agent is lazy-loaded on first message)
+          // Create managed session from metadata only (messages lazy-loaded on demand)
+          // This dramatically reduces memory usage at startup - messages are loaded
+          // when getSession() is called for a specific session
           const managed: ManagedSession = {
-            id: storedSession.id,
+            id: meta.id,
             workspace,
             agent: null,  // Lazy-load agent when needed
-            messages,
+            messages: [],  // Lazy-load messages when needed
             isProcessing: false,
-            lastMessageAt: storedSession.lastUsedAt,
+            lastMessageAt: meta.lastUsedAt,
             streamingText: '',
             pendingTools: new Map(),
             parentToolStack: [],
             toolToParentMap: new Map(),
             pendingTextParent: undefined,
-            name: storedSession.name,
-            agentId: storedSession.agentSlug,
-            agentName: storedSession.agentName,
-            isFlagged: storedSession.isFlagged ?? false,
-            permissionMode: storedSession.permissionMode,
-            sdkSessionId: storedSession.sdkSessionId,
-            tokenUsage: storedSession.tokenUsage,
-            todoState: storedSession.todoState,
-            lastReadMessageId: storedSession.lastReadMessageId,
-            enabledSourceSlugs: storedSession.enabledSourceSlugs,
-            workingDirectory: storedSession.workingDirectory ?? wsDefaultWorkingDir,
+            name: meta.name,
+            isFlagged: meta.isFlagged ?? false,
+            permissionMode: meta.permissionMode,
+            sdkSessionId: meta.sdkSessionId,
+            tokenUsage: undefined,  // Loaded with messages
+            todoState: meta.todoState,
+            lastReadMessageId: undefined,  // Loaded with messages
+            enabledSourceSlugs: undefined,  // Loaded with messages
+            workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
+            lastMessageRole: meta.lastMessageRole,
             messageQueue: [],
             backgroundShellCommands: new Map(),
+            messagesLoaded: false,  // Mark as not loaded
           }
 
-          this.sessions.set(storedSession.id, managed)
+          this.sessions.set(meta.id, managed)
           totalSessions++
         }
       }
 
-      sessionLog.info(`Loaded ${totalSessions} sessions from disk`)
+      sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
     }
-  }
-
-  /**
-   * Build setup context for sources that need authentication.
-   * This is prepended to the first user message to prompt the agent to help with source setup.
-   */
-  private buildSetupContext(sources: LoadedSource[]): string {
-    const sourceList = sources.map(s => {
-      const authType = s.config.mcp?.authType || s.config.api?.authType || 'unknown'
-      return `- ${s.config.name} (${s.config.type}, ${authType} auth)`
-    }).join('\n')
-
-    return `<setup_required>
-The following sources need authentication before they can be used:
-${sourceList}
-
-Please help me set up authentication for these sources first, then proceed with my request.
-Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token sources.
-</setup_required>`
   }
 
   // Persist a session to disk (async with debouncing)
@@ -831,8 +602,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         createdAt: managed.lastMessageAt,  // Approximate, will be overwritten if already exists
         lastUsedAt: Date.now(),
         sdkSessionId: managed.sdkSessionId,
-        agentSlug: managed.agentId,  // agentId in ManagedSession is actually the slug
-        agentName: managed.agentName,
         isFlagged: managed.isFlagged,
         permissionMode: managed.permissionMode,
         todoState: managed.todoState,
@@ -865,11 +634,275 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     await sessionPersistenceQueue.flushAll()
   }
 
+  // ============================================
+  // Unified Auth Request Helpers
+  // ============================================
+
+  /**
+   * Get human-readable description for auth request
+   */
+  private getAuthRequestDescription(request: AuthRequest): string {
+    switch (request.type) {
+      case 'credential':
+        return `Authentication required for ${request.sourceName}`
+      case 'oauth':
+        return `OAuth authentication for ${request.sourceName}`
+      case 'oauth-google':
+        return `Sign in with Google for ${request.sourceName}`
+      case 'oauth-slack':
+        return `Sign in with Slack for ${request.sourceName}`
+      case 'oauth-microsoft':
+        return `Sign in with Microsoft for ${request.sourceName}`
+    }
+  }
+
+  /**
+   * Format auth result message to send back to agent
+   */
+  private formatAuthResultMessage(result: AuthResult): string {
+    if (result.success) {
+      let msg = `Authentication completed for ${result.sourceSlug}.`
+      if (result.email) msg += ` Signed in as ${result.email}.`
+      if (result.workspace) msg += ` Connected to workspace: ${result.workspace}.`
+      msg += ' Credentials have been saved.'
+      return msg
+    }
+    if (result.cancelled) {
+      return `Authentication cancelled for ${result.sourceSlug}.`
+    }
+    return `Authentication failed for ${result.sourceSlug}: ${result.error || 'Unknown error'}`
+  }
+
+  /**
+   * Run OAuth flow for a given auth request (non-credential types)
+   * Called after forceAbort to execute the OAuth flow asynchronously
+   */
+  private async runOAuthFlow(managed: ManagedSession, request: AuthRequest): Promise<void> {
+    if (request.type === 'credential') return // Credentials handled by UI
+
+    sessionLog.info(`Running OAuth flow for ${request.sourceSlug} (type: ${request.type})`)
+
+    // Find the source in workspace sources
+    const sources = loadWorkspaceSources(managed.workspace.rootPath)
+    const source = sources.find(s => s.config.slug === request.sourceSlug)
+
+    if (!source) {
+      sessionLog.error(`Source ${request.sourceSlug} not found for OAuth`)
+      await this.completeAuthRequest(managed.id, {
+        requestId: request.requestId,
+        sourceSlug: request.sourceSlug,
+        success: false,
+        error: `Source ${request.sourceSlug} not found`,
+      })
+      return
+    }
+
+    // Get credential manager and run OAuth
+    const credManager = getSourceCredentialManager()
+
+    try {
+      const result = await credManager.authenticate(source, {
+        onStatus: (msg) => sessionLog.info(`[OAuth ${request.sourceSlug}] ${msg}`),
+        onError: (err) => sessionLog.error(`[OAuth ${request.sourceSlug}] ${err}`),
+      })
+
+      if (result.success) {
+        await this.completeAuthRequest(managed.id, {
+          requestId: request.requestId,
+          sourceSlug: request.sourceSlug,
+          success: true,
+          email: result.email,
+        })
+      } else {
+        await this.completeAuthRequest(managed.id, {
+          requestId: request.requestId,
+          sourceSlug: request.sourceSlug,
+          success: false,
+          error: result.error,
+        })
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      sessionLog.error(`OAuth flow failed for ${request.sourceSlug}:`, errorMessage)
+      await this.completeAuthRequest(managed.id, {
+        requestId: request.requestId,
+        sourceSlug: request.sourceSlug,
+        success: false,
+        error: errorMessage,
+      })
+    }
+  }
+
+  /**
+   * Start OAuth flow for a pending auth request (called when user clicks "Sign in")
+   * This is the user-initiated trigger - OAuth no longer starts automatically
+   */
+  async startSessionOAuth(sessionId: string, requestId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`Cannot start OAuth - session ${sessionId} not found`)
+      return
+    }
+
+    // Find the pending auth request
+    if (managed.pendingAuthRequestId !== requestId || !managed.pendingAuthRequest) {
+      sessionLog.warn(`Cannot start OAuth - no pending request with id ${requestId}`)
+      return
+    }
+
+    const request = managed.pendingAuthRequest
+    if (request.type === 'credential') {
+      sessionLog.warn(`Cannot start OAuth for credential request`)
+      return
+    }
+
+    // Run the OAuth flow
+    await this.runOAuthFlow(managed, request)
+  }
+
+  /**
+   * Complete an auth request and send result back to agent
+   * This updates the auth message status and sends a faked user message
+   */
+  async completeAuthRequest(sessionId: string, result: AuthResult): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`Cannot complete auth request - session ${sessionId} not found`)
+      return
+    }
+
+    // Find and update the pending auth-request message
+    const authMessage = managed.messages.find(m =>
+      m.role === 'auth-request' &&
+      m.authRequestId === result.requestId &&
+      m.authStatus === 'pending'
+    )
+
+    if (authMessage) {
+      authMessage.authStatus = result.success ? 'completed' :
+                               result.cancelled ? 'cancelled' : 'failed'
+      authMessage.authError = result.error
+      authMessage.authEmail = result.email
+      authMessage.authWorkspace = result.workspace
+    }
+
+    // Emit auth_completed event to update UI
+    this.sendEvent({
+      type: 'auth_completed',
+      sessionId,
+      requestId: result.requestId,
+      success: result.success,
+      cancelled: result.cancelled,
+      error: result.error,
+    }, managed.workspace.id)
+
+    // Create faked user message with result
+    const resultContent = this.formatAuthResultMessage(result)
+
+    // Clear pending auth state
+    managed.pendingAuthRequestId = undefined
+    managed.pendingAuthRequest = undefined
+
+    // Persist session with updated auth message
+    this.persistSession(managed)
+
+    // Send the result as a new message to resume conversation
+    // Use empty arrays for attachments since this is a system-generated message
+    await this.sendMessage(sessionId, resultContent, [], [], {})
+
+    sessionLog.info(`Auth request completed for ${result.sourceSlug}: ${result.success ? 'success' : 'failed'}`)
+  }
+
+  /**
+   * Handle credential input from the UI (for non-OAuth auth)
+   * Called when user submits credentials via the inline form
+   */
+  async handleCredentialInput(
+    sessionId: string,
+    requestId: string,
+    response: import('../shared/types').CredentialResponse
+  ): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.pendingAuthRequest) {
+      sessionLog.warn(`Cannot handle credential input - no pending auth request for session ${sessionId}`)
+      return
+    }
+
+    const request = managed.pendingAuthRequest as CredentialAuthRequest
+    if (request.requestId !== requestId) {
+      sessionLog.warn(`Credential request ID mismatch: expected ${request.requestId}, got ${requestId}`)
+      return
+    }
+
+    if (response.cancelled) {
+      await this.completeAuthRequest(sessionId, {
+        requestId,
+        sourceSlug: request.sourceSlug,
+        success: false,
+        cancelled: true,
+      })
+      return
+    }
+
+    try {
+      // Store credentials using existing workspace ID extraction pattern
+      const credManager = getCredentialManager()
+      // Extract workspace ID from root path (last segment of path)
+      const wsId = managed.workspace.rootPath.split('/').pop() || managed.workspace.id
+
+      if (request.mode === 'basic') {
+        const encoded = Buffer.from(`${response.username}:${response.password}`).toString('base64')
+        await credManager.set(
+          { type: 'source_basic', workspaceId: wsId, sourceId: request.sourceSlug },
+          { value: encoded }
+        )
+      } else if (request.mode === 'bearer') {
+        await credManager.set(
+          { type: 'source_bearer', workspaceId: wsId, sourceId: request.sourceSlug },
+          { value: response.value! }
+        )
+      } else {
+        // header or query - both use API key storage
+        await credManager.set(
+          { type: 'source_apikey', workspaceId: wsId, sourceId: request.sourceSlug },
+          { value: response.value! }
+        )
+      }
+
+      // Update source config to mark as authenticated
+      // Uses the same pattern as the OAuth tools
+      const { loadSourceConfigWithFallback, saveSourceConfigWithContext } = await import('@craft-agent/shared/sources')
+      const sourceResult = loadSourceConfigWithFallback(managed.workspace.rootPath, request.sourceSlug)
+      if (sourceResult) {
+        sourceResult.config.isAuthenticated = true
+        sourceResult.config.connectionStatus = 'connected'
+        sourceResult.config.connectionError = undefined
+        saveSourceConfigWithContext(managed.workspace.rootPath, sourceResult.config)
+      }
+
+      await this.completeAuthRequest(sessionId, {
+        requestId,
+        sourceSlug: request.sourceSlug,
+        success: true,
+      })
+    } catch (error) {
+      sessionLog.error(`Failed to save credentials for ${request.sourceSlug}:`, error)
+      await this.completeAuthRequest(sessionId, {
+        requestId,
+        sourceSlug: request.sourceSlug,
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save credentials',
+      })
+    }
+  }
+
   getWorkspaces(): Workspace[] {
     return getWorkspaces()
   }
 
   getSessions(): Session[] {
+    // Returns session metadata only - messages are NOT included to save memory
+    // Use getSession(id) to load messages for a specific session
     return Array.from(this.sessions.values())
       .map(m => ({
         id: m.id,
@@ -877,16 +910,17 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         workspaceName: m.workspace.name,
         name: m.name,
         lastMessageAt: m.lastMessageAt,
-        messages: m.messages,
+        messages: [],  // Never send all messages - use getSession(id) for specific session
         isProcessing: m.isProcessing,
-        agentId: m.agentId,
-        agentName: m.agentName,
         isFlagged: m.isFlagged,
         permissionMode: m.permissionMode,
         todoState: m.todoState,
         lastReadMessageId: m.lastReadMessageId,
         workingDirectory: m.workingDirectory,
         enabledSourceSlugs: m.enabledSourceSlugs,
+        sharedUrl: m.sharedUrl,
+        sharedId: m.sharedId,
+        lastMessageRole: m.lastMessageRole,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -894,10 +928,15 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
   /**
    * Get a single session by ID with all messages loaded.
    * Used for lazy loading session messages when session is selected.
+   * Messages are loaded from disk on first access to reduce memory usage.
    */
-  getSession(sessionId: string): Session | null {
+  async getSession(sessionId: string): Promise<Session | null> {
     const m = this.sessions.get(sessionId)
     if (!m) return null
+
+    // Lazy-load messages from disk if not yet loaded
+    await this.ensureMessagesLoaded(m)
+
     return {
       id: m.id,
       workspaceId: m.workspace.id,
@@ -906,15 +945,58 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       lastMessageAt: m.lastMessageAt,
       messages: m.messages,
       isProcessing: m.isProcessing,
-      agentId: m.agentId,
-      agentName: m.agentName,
       isFlagged: m.isFlagged,
       permissionMode: m.permissionMode,
       todoState: m.todoState,
       lastReadMessageId: m.lastReadMessageId,
       workingDirectory: m.workingDirectory,
       enabledSourceSlugs: m.enabledSourceSlugs,
+      sharedUrl: m.sharedUrl,
+      sharedId: m.sharedId,
+      lastMessageRole: m.lastMessageRole,
     }
+  }
+
+  /**
+   * Ensure messages are loaded for a managed session.
+   * Uses promise deduplication to prevent race conditions when multiple
+   * concurrent calls (e.g., rapid session switches + message send) try
+   * to load messages simultaneously.
+   */
+  private async ensureMessagesLoaded(managed: ManagedSession): Promise<void> {
+    if (managed.messagesLoaded) return
+
+    // Deduplicate concurrent loads - return existing promise if already loading
+    const existingPromise = this.messageLoadingPromises.get(managed.id)
+    if (existingPromise) {
+      return existingPromise
+    }
+
+    const loadPromise = this.loadMessagesFromDisk(managed)
+    this.messageLoadingPromises.set(managed.id, loadPromise)
+
+    try {
+      await loadPromise
+    } finally {
+      this.messageLoadingPromises.delete(managed.id)
+    }
+  }
+
+  /**
+   * Internal: Load messages from disk storage into the managed session.
+   */
+  private async loadMessagesFromDisk(managed: ManagedSession): Promise<void> {
+    const storedSession = loadStoredSession(managed.workspace.rootPath, managed.id)
+    if (storedSession) {
+      managed.messages = (storedSession.messages || []).map(storedToMessage)
+      managed.tokenUsage = storedSession.tokenUsage
+      managed.lastReadMessageId = storedSession.lastReadMessageId
+      managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
+      managed.sharedUrl = storedSession.sharedUrl
+      managed.sharedId = storedSession.sharedId
+      sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
+    }
+    managed.messagesLoaded = true
   }
 
   /**
@@ -926,7 +1008,7 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     return getSessionStoragePath(managed.workspace.rootPath, sessionId)
   }
 
-  async createSession(workspaceId: string, agentId?: string, agentName?: string): Promise<Session> {
+  async createSession(workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
@@ -938,33 +1020,39 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const wsConfig = loadWorkspaceConfig(workspaceRootPath)
     const defaultWorkingDir = wsConfig?.defaults?.workingDirectory || undefined
 
-    // Check if agent's sources need authentication
-    let sourcesNeedingAuth: LoadedSource[] = []
-    if (agentId) {
-      const folderAgentManager = this.getFolderAgentManager(workspaceRootPath)
-      const loadedAgent = folderAgentManager.getAgentBySlug(agentId)
-      if (loadedAgent) {
-        sourcesNeedingAuth = getSourcesNeedingAuth(loadedAgent.sources)
-        if (sourcesNeedingAuth.length > 0) {
-          sessionLog.info(`Agent '${agentId}' has ${sourcesNeedingAuth.length} source(s) needing auth:`,
-            sourcesNeedingAuth.map(s => s.config.slug).join(', '))
-        }
-      }
-    }
-
     // Use storage layer to create and persist the session
     const storedSession = createStoredSession(workspaceRootPath, {
-      agentSlug: agentId,
-      agentName,
       permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
     })
+
+    // Generate onboarding messages only if requested via options
+    let onboardingMessages: Message[] = []
+    if (options?.onboarding) {
+      const sources = loadWorkspaceSources(workspaceRootPath)
+      const storedOnboardingMessages = generateOnboardingMessages({
+        sources: sources.map((s) => s.config),
+        workspaceName: workspace.name,
+        context: options.onboarding,
+      })
+
+      // Convert StoredMessage to Message for runtime use
+      onboardingMessages = storedOnboardingMessages.map((m) => ({
+        id: m.id,
+        role: m.type as Message['role'],
+        content: m.content,
+        timestamp: m.timestamp ?? Date.now(),
+        onboardingId: m.onboardingId,
+        onboardingWidget: m.onboardingWidget,
+        onboardingData: m.onboardingData,
+      }))
+    }
 
     const managed: ManagedSession = {
       id: storedSession.id,
       workspace,
       agent: null,  // Lazy-load agent on first message
-      messages: [],
+      messages: onboardingMessages,
       isProcessing: false,
       lastMessageAt: storedSession.lastUsedAt,
       streamingText: '',
@@ -972,22 +1060,18 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       parentToolStack: [],
       toolToParentMap: new Map(),
       pendingTextParent: undefined,
-      agentId,
-      agentName,
       isFlagged: false,
       permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
-      // Auto-setup tracking
-      sourcesNeedingAuth: sourcesNeedingAuth.length > 0 ? sourcesNeedingAuth : undefined,
-      autoSetupTriggered: false,
       messageQueue: [],
       backgroundShellCommands: new Map(),
+      messagesLoaded: true,  // New sessions don't need to load messages from disk
     }
 
     this.sessions.set(storedSession.id, managed)
 
-    // Persist with agent info or if non-default permission mode is set
-    if (agentId || agentName || defaultPermissionMode !== 'ask') {
+    // Only persist if we have onboarding messages to save
+    if (onboardingMessages.length > 0) {
       this.persistSession(managed)
     }
 
@@ -996,10 +1080,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       lastMessageAt: managed.lastMessageAt,
-      messages: [],
+      messages: onboardingMessages,
       isProcessing: false,
-      agentId,
-      agentName,
       isFlagged: false,
       permissionMode: defaultPermissionMode,
       todoState: undefined,  // User-controlled, defaults to undefined (treated as 'todo')
@@ -1009,7 +1091,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
 
   /**
    * Get or create agent for a session (lazy loading)
-   * NOTE: Agent definition is applied in sendMessage() via AgentStateManager
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<CraftAgent> {
     if (!managed.agent) {
@@ -1050,24 +1131,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         }, managed.workspace.id)
       }
 
-      // Set up credential request handler to forward requests to renderer and await response
-      managed.agent.onCredentialRequest = (request) => {
-        sessionLog.info(`Credential request for session ${managed.id}:`, request.sourceSlug)
-        return new Promise<import('../shared/types').CredentialResponse>((resolve) => {
-          // Store the resolver to be called when renderer responds
-          this.pendingCredentialResolvers.set(request.requestId, resolve)
-
-          // Send event to renderer to show credential input UI
-          this.sendEvent({
-            type: 'credential_request',
-            sessionId: managed.id,
-            request: {
-              ...request,
-              sessionId: managed.id,
-            }
-          }, managed.workspace.id)
-        })
-      }
+      // Note: Credential requests now flow through onAuthRequest (unified auth flow)
+      // The legacy onCredentialRequest callback has been removed from CraftAgent
 
       // Set up mode change handlers
       managed.agent.onPermissionModeChange = (mode) => {
@@ -1098,6 +1163,9 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
 
           // Add to session messages
           managed.messages.push(planMessage)
+
+          // Update lastMessageRole for badge display
+          managed.lastMessageRole = 'plan'
 
           // Send event to renderer
           this.sendEvent({
@@ -1130,12 +1198,72 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         }
       }
 
-      // NOTE: Source and agent reloading is now handled by ConfigWatcher callbacks
+      // Wire up onAuthRequest to add auth message to conversation and pause execution
+      managed.agent.onAuthRequest = (request) => {
+        sessionLog.info(`Auth request for session ${managed.id}:`, request.type, request.sourceSlug)
+
+        // Create auth-request message
+        const authMessage: Message = {
+          id: generateMessageId(),
+          role: 'auth-request',
+          content: this.getAuthRequestDescription(request),
+          timestamp: Date.now(),
+          authRequestId: request.requestId,
+          authRequestType: request.type,
+          authSourceSlug: request.sourceSlug,
+          authSourceName: request.sourceName,
+          authStatus: 'pending',
+          // Copy type-specific fields for credentials
+          ...(request.type === 'credential' && {
+            authCredentialMode: request.mode,
+            authLabels: request.labels,
+            authDescription: request.description,
+            authHint: request.hint,
+            authHeaderName: request.headerName,
+          }),
+        }
+
+        // Add to session messages
+        managed.messages.push(authMessage)
+
+        // Store pending auth request for later resolution
+        managed.pendingAuthRequestId = request.requestId
+        managed.pendingAuthRequest = request
+
+        // Force-abort execution (like SubmitPlan)
+        if (managed.isProcessing && managed.agent) {
+          sessionLog.info(`Force-aborting after auth request for session ${managed.id}`)
+          managed.agent.forceAbort(AbortReason.AuthRequest)
+          managed.isProcessing = false
+          managed.abortController = undefined
+
+          // Clear parent tool tracking (stale entries would corrupt future tracking)
+          managed.parentToolStack = []
+          managed.toolToParentMap.clear()
+          managed.pendingTextParent = undefined
+
+          // Send complete event so renderer knows processing stopped
+          this.sendEvent({ type: 'complete', sessionId: managed.id }, managed.workspace.id)
+        }
+
+        // Emit auth_request event to renderer
+        this.sendEvent({
+          type: 'auth_request',
+          sessionId: managed.id,
+          message: authMessage,
+          request: request,
+        }, managed.workspace.id)
+
+        // Persist session state
+        this.persistSession(managed)
+
+        // OAuth flow is now user-initiated via startSessionOAuth()
+        // The UI will call sessionCommand({ type: 'startOAuth' }) when user clicks "Sign in"
+      }
+
+      // NOTE: Source reloading is now handled by ConfigWatcher callbacks
       // which detect filesystem changes and update all affected sessions.
       // See setupConfigWatcher() for the full reload logic.
-
-      // NOTE: Agent definition is now applied in sendMessage() via AgentStateManager.activate()
-      // This ensures proper state machine flow: extraction → auth checks → activation
 
       // Apply session-scoped permission mode to the newly created agent
       // This ensures the UI toggle state is reflected in the agent before first message
@@ -1226,9 +1354,51 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       })
 
       sessionLog.info(`Session ${sessionId} shared at ${data.url}`)
+      // Notify all windows for this workspace
+      this.sendEvent({ type: 'session_shared', sessionId, sharedUrl: data.url }, managed.workspace.id)
       return { success: true, url: data.url }
     } catch (error) {
       sessionLog.error('Share error:', error)
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
+  /**
+   * Update an existing shared session
+   * Re-uploads session data to the same URL
+   */
+  async updateShare(sessionId: string): Promise<import('../shared/types').ShareResult> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      return { success: false, error: 'Session not found' }
+    }
+    if (!managed.sharedId) {
+      return { success: false, error: 'Session not shared' }
+    }
+
+    try {
+      // Load session directly from disk (already in correct format)
+      const storedSession = loadStoredSession(managed.workspace.rootPath, sessionId)
+      if (!storedSession) {
+        return { success: false, error: 'Session file not found' }
+      }
+
+      const { VIEWER_URL } = await import('@craft-agent/shared/branding')
+      const response = await fetch(`${VIEWER_URL}/s/api/${managed.sharedId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(storedSession)
+      })
+
+      if (!response.ok) {
+        sessionLog.error(`Update share failed with status ${response.status}`)
+        return { success: false, error: 'Failed to update shared session' }
+      }
+
+      sessionLog.info(`Session ${sessionId} share updated at ${managed.sharedUrl}`)
+      return { success: true, url: managed.sharedUrl }
+    } catch (error) {
+      sessionLog.error('Update share error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   }
@@ -1268,6 +1438,8 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       })
 
       sessionLog.info(`Session ${sessionId} share revoked`)
+      // Notify all windows for this workspace
+      this.sendEvent({ type: 'session_unshared', sessionId }, managed.workspace.id)
       return { success: true }
     } catch (error) {
       sessionLog.error('Revoke error:', error)
@@ -1457,7 +1629,10 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     // If processing is in progress, abort and wait for cleanup
     if (managed.isProcessing && managed.abortController) {
       managed.abortController.abort()
-      // Brief wait for abort to propagate and in-flight operations to settle
+      // TIMING NOTE: Brief wait for abort signal to propagate through async
+      // operations. AbortController.abort() is synchronous but in-flight
+      // promises may still be settling. 100ms is a generous buffer to prevent
+      // file corruption from overlapping writes during rapid delete operations.
       await new Promise(resolve => setTimeout(resolve, 100))
     }
 
@@ -1475,10 +1650,12 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     // Clean up session-scoped tool callbacks to prevent memory accumulation
     unregisterSessionScopedToolCallbacks(sessionId)
 
-    this.sessions.delete(sessionId)
+    // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
+    if (managed.agent) {
+      managed.agent.dispose()
+    }
 
-    // Note: We don't clean up AgentStateManager here because it's agent-scoped,
-    // not session-scoped. It will be reused by other sessions with the same agent.
+    this.sessions.delete(sessionId)
 
     // Delete from disk too
     deleteStoredSession(workspaceRootPath, sessionId)
@@ -1495,6 +1672,9 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+
+    // Ensure messages are loaded before we try to add new ones
+    await this.ensureMessagesLoaded(managed)
 
     // If currently processing, queue the message and interrupt
     // The SDK will send a 'complete' event which triggers onProcessingStopped
@@ -1553,6 +1733,9 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       }
       managed.messages.push(userMessage)
 
+      // Update lastMessageRole for badge display
+      managed.lastMessageRole = 'user'
+
       // Emit user_message event so UI can confirm the optimistic message
       this.sendEvent({
         type: 'user_message',
@@ -1560,6 +1743,18 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
         message: userMessage,
         status: 'accepted'
       }, managed.workspace.id)
+
+      // If this is the first user message and no name exists, immediately update title
+      // with the message preview. The AI-generated title will replace this when it arrives.
+      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
+      if (isFirstUserMessage && !managed.name) {
+        const previewTitle = message.slice(0, 50) + (message.length > 50 ? '…' : '')
+        this.sendEvent({
+          type: 'title_generated',
+          sessionId,
+          title: previewTitle,
+        }, managed.workspace.id)
+      }
     }
 
     managed.lastMessageAt = Date.now()
@@ -1572,81 +1767,11 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
     const myAbortController = managed.abortController
 
     // Start perf span for entire sendMessage flow
-    const sendSpan = perf.span('session.sendMessage', { sessionId, hasAgent: !!managed.agentId })
+    const sendSpan = perf.span('session.sendMessage', { sessionId })
 
     // Get or create the agent (lazy loading)
     const agent = await this.getOrCreateAgent(managed)
     sendSpan.mark('agent.ready')
-
-    // If session has an agent that hasn't been activated yet, activate via AgentStateManager
-    // This is the source of truth for agent state - ensures proper extraction, auth handling, etc.
-    if (managed.agentId && !managed.agentActivated) {
-      sessionLog.info(`Activating agent ${managed.agentId} for session ${sessionId}`)
-
-      // Emit extracting status so UI knows we're loading
-      this.sendEvent({
-        type: 'agent_status',
-        sessionId,
-        status: { status: 'extracting', agentId: managed.agentId, agentName: managed.agentName || managed.agentId, message: 'Loading agent...' }
-      }, managed.workspace.id)
-
-      // Get or create agent-scoped state manager
-      const stateManager = await this.getOrCreateAgentStateManager(managed.workspace.id, managed.agentId)
-      if (stateManager) {
-        // Check current status - may already be activated from setup wizard
-        let status = stateManager.getStatus()
-
-        // Only activate if not already activated (could be ready/active from setup wizard)
-        if (status.status === 'idle') {
-          // Activate via state machine (handles registry population, extraction, auth checks)
-          status = await stateManager.activate(managed.agentId)
-        }
-        sessionLog.info(`Agent activation result: ${status.status}`)
-
-        // Emit final status
-        this.sendEvent({ type: 'agent_status', sessionId, status }, managed.workspace.id)
-
-        if (status.status === 'error') {
-          // Activation failed - emit error and abort message sending
-          this.sendEvent({ type: 'error', sessionId, error: `Agent activation failed: ${status.error}` }, managed.workspace.id)
-          managed.isProcessing = false
-          managed.abortController = undefined
-          this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
-          return
-        }
-
-        // If needs auth, abort and let UI handle it
-        if (status.status === 'needs_mcp_auth' || status.status === 'needs_api_auth') {
-          const authType = status.status === 'needs_mcp_auth' ? 'MCP server' : 'API'
-          this.sendEvent({ type: 'error', sessionId, error: `Agent requires ${authType} authentication. Please configure credentials first.` }, managed.workspace.id)
-          managed.isProcessing = false
-          managed.abortController = undefined
-          this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
-          return
-        }
-
-        // Agent activated successfully - apply definition to CraftAgent
-        if (status.status === 'active' || status.status === 'ready') {
-          const definition = status.definition
-          if (definition) {
-            try {
-              const mcpServers = await stateManager.buildMcpServerConfig()
-              const apiServers = await stateManager.buildApiServers()
-              // Pass sources needing auth to inject setup instructions into the agent
-              agent.setActiveAgentDefinition(definition, mcpServers, apiServers, managed.sourcesNeedingAuth)
-              managed.agentActivated = true
-              sessionLog.info(`Applied agent definition "${definition.name}" to session ${sessionId}`)
-            } catch (error) {
-              sessionLog.error(`Failed to build agent configs for ${managed.agentId}:`, error)
-              this.sendEvent({ type: 'error', sessionId, error: `Failed to configure agent: ${error instanceof Error ? error.message : String(error)}` }, managed.workspace.id)
-            }
-          }
-        }
-      } else {
-        sessionLog.warn(`Could not create AgentStateManager for session ${sessionId}`)
-      }
-      sendSpan.mark('agent.activated')
-    }
 
     // Always set all sources for context (even if none are enabled)
     const workspaceRootPath = managed.workspace.rootPath
@@ -1679,14 +1804,6 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       sendSpan.mark('servers.applied')
     }
 
-    // Auto-setup: prepend setup context on first message if sources need auth
-    if (!managed.autoSetupTriggered && managed.sourcesNeedingAuth?.length) {
-      managed.autoSetupTriggered = true
-      const setupContext = this.buildSetupContext(managed.sourcesNeedingAuth)
-      message = setupContext + '\n\n' + message
-      sessionLog.info(`Prepended setup context for ${managed.sourcesNeedingAuth.length} source(s) needing auth`)
-    }
-
     try {
       sessionLog.info('Starting chat for session:', sessionId)
       sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
@@ -1705,8 +1822,26 @@ Use oauth_trigger for OAuth sources, credential_prompt for API key/bearer token 
       if (attachments?.length) {
         sessionLog.info('Attachments:', attachments.length)
       }
+
+      // Check for unsent onboarding messages and prepend context
+      let messageToSend = message
+      const onboardingMsgs = managed.messages.filter(
+        (m) => m.role === 'onboarding' && !m.onboardingSent
+      )
+      if (onboardingMsgs.length > 0) {
+        const onboardingContext = formatOnboardingContext(onboardingMsgs)
+        if (onboardingContext) {
+          messageToSend = `${onboardingContext}\n\n${message}`
+          // Mark onboarding messages as sent
+          for (const msg of onboardingMsgs) {
+            msg.onboardingSent = true
+          }
+          sessionLog.info('Prepended onboarding context to message')
+        }
+      }
+
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(message, attachments)
+      const chatIterator = agent.chat(messageToSend, attachments)
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
@@ -2055,11 +2190,24 @@ To view this task's output:
   /**
    * Respond to a pending credential request
    * Returns true if the response was delivered, false if no pending request found
+   *
+   * Supports both:
+   * - New unified auth flow (via handleCredentialInput)
+   * - Legacy callback flow (via pendingCredentialResolvers)
    */
-  respondToCredential(sessionId: string, requestId: string, response: import('../shared/types').CredentialResponse): boolean {
+  async respondToCredential(sessionId: string, requestId: string, response: import('../shared/types').CredentialResponse): Promise<boolean> {
+    // First, check if this is a new unified auth flow request
+    const managed = this.sessions.get(sessionId)
+    if (managed?.pendingAuthRequest && managed.pendingAuthRequest.requestId === requestId) {
+      sessionLog.info(`Credential response (unified flow) for ${requestId}: cancelled=${response.cancelled}`)
+      await this.handleCredentialInput(sessionId, requestId, response)
+      return true
+    }
+
+    // Fall back to legacy callback flow
     const resolver = this.pendingCredentialResolvers.get(requestId)
     if (resolver) {
-      sessionLog.info(`Credential response for ${requestId}: cancelled=${response.cancelled}`)
+      sessionLog.info(`Credential response (legacy flow) for ${requestId}: cancelled=${response.cancelled}`)
       resolver(response)
       this.pendingCredentialResolvers.delete(requestId)
       return true
@@ -2152,6 +2300,12 @@ To view this task's output:
         managed.messages.push(assistantMessage)
         managed.streamingText = ''
         managed.pendingTextParent = undefined // Clear for next text block
+
+        // Update lastMessageRole for badge display (only for final messages)
+        if (!event.isIntermediate) {
+          managed.lastMessageRole = 'assistant'
+        }
+
         this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: textParentToolUseId }, workspaceId)
 
         // Generate title asynchronously after first assistant response
@@ -2500,11 +2654,15 @@ To view this task's output:
 
     // Send event to all windows for this workspace
     for (const window of windows) {
-      if (!window.isDestroyed()) {
+      // Check mainFrame - it becomes null when render frame is disposed
+      // This prevents Electron's internal error logging before our try-catch
+      if (!window.isDestroyed() &&
+          !window.webContents.isDestroyed() &&
+          window.webContents.mainFrame) {
         try {
           window.webContents.send(IPC_CHANNELS.SESSION_EVENT, event)
-        } catch (error) {
-          sessionLog.error(`Failed to send ${event.type} event to window:`, error)
+        } catch {
+          // Silently ignore - expected during window closure race conditions
         }
       }
     }

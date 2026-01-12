@@ -12,27 +12,21 @@ interface UseThemeOptions {
    * Workspace-level theme (from workspace/theme.json)
    */
   workspaceTheme?: ThemeOverrides | null
-
-  /**
-   * Agent-level theme (from workspace/agents/{slug}/theme.json)
-   */
-  agentTheme?: ThemeOverrides | null
 }
 
 /**
- * Hook to manage cascading theme (app → workspace → agent).
+ * Hook to manage cascading theme (app → workspace).
  * Resolves themes and injects CSS variables into document.
  *
  * @example
  * ```tsx
  * const [appTheme] = useAtom(appThemeAtom)
  * const [workspaceTheme] = useAtom(workspaceThemeAtom)
- * const agentTheme = activeAgent?.theme
  *
- * useTheme({ appTheme, workspaceTheme, agentTheme })
+ * useTheme({ appTheme, workspaceTheme })
  * ```
  */
-export function useTheme({ appTheme, workspaceTheme, agentTheme }: UseThemeOptions = {}) {
+export function useTheme({ appTheme, workspaceTheme }: UseThemeOptions = {}) {
   // Get resolved mode from ThemeContext (respects app's theme setting, not just system)
   const { resolvedMode } = useThemeContext()
   const isDark = resolvedMode === 'dark'
@@ -41,15 +35,14 @@ export function useTheme({ appTheme, workspaceTheme, agentTheme }: UseThemeOptio
   const resolvedTheme = useMemo(() => {
     return resolveTheme(
       appTheme ?? undefined,
-      workspaceTheme ?? undefined,
-      agentTheme ?? undefined
+      workspaceTheme ?? undefined
     )
-  }, [appTheme, workspaceTheme, agentTheme])
+  }, [appTheme, workspaceTheme])
 
   // Generate CSS and inject into document
   useEffect(() => {
     // Only apply if we have any theme overrides
-    const hasOverrides = appTheme || workspaceTheme || agentTheme
+    const hasOverrides = appTheme || workspaceTheme
     if (!hasOverrides) return
 
     // Generate CSS variable declarations
@@ -74,7 +67,7 @@ export function useTheme({ appTheme, workspaceTheme, agentTheme }: UseThemeOptio
       // Don't remove on every change - only on full unmount
       // We want the style to persist between re-renders
     }
-  }, [resolvedTheme, isDark, appTheme, workspaceTheme, agentTheme])
+  }, [resolvedTheme, isDark, appTheme, workspaceTheme])
 
   return {
     theme: resolvedTheme,

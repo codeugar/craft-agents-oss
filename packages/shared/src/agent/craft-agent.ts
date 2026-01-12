@@ -3,11 +3,9 @@ import { getDefaultOptions } from './options.ts';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import { z } from 'zod';
 import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext } from '../prompts/system.ts';
-import type { SubAgentDefinition } from '../agents/types.ts';
 // Plan types are used by UI components; not needed in craft-agent.ts since Safe Mode is user-controlled
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
-import { updateAgentInstructions as agenticUpdateInstructions, type UpdateInstructionsContext, type UpdateInstructionsResult, type UpdateInstructionsProgressEvent } from '../agents/instruction-updater.ts';
 import { shouldUseExtendedCacheTtl, loadStoredConfig, getDefaultPermissionMode, type Workspace } from '../config/storage.ts';
 import { isLocalMcpEnabled } from '../workspaces/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
@@ -25,8 +23,7 @@ import {
   unregisterSessionScopedToolCallbacks,
   getSessionScopedTools,
   cleanupSessionScopedTools,
-  type CredentialRequest,
-  type CredentialResponse,
+  type AuthRequest,
 } from './session-scoped-tools.ts';
 import {
   getPermissionMode,
@@ -52,7 +49,6 @@ import {
 } from '../config/watcher.ts';
 import type { ValidationIssue } from '../config/validators.ts';
 import type { LoadedSource } from '../sources/types.ts';
-import type { LoadedAgent } from '../agents/folder-types.ts';
 
 // Re-export permission mode functions for TUI/Electron usage
 export {
@@ -65,7 +61,7 @@ export {
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
 } from './mode-manager.ts';
-// Documentation is now served via external HTTP MCP at agents.craft.do/docs/mcp
+// Documentation is served via local files at ~/.craft-agent/docs/
 
 // Import and re-export AgentEvent from core (single source of truth)
 import type { AgentEvent } from '@craft-agent/core/types';
@@ -73,7 +69,6 @@ export type { AgentEvent };
 
 // Re-export types for UI components
 export type { LoadedSource } from '../sources/types.ts';
-export type { LoadedAgent } from '../agents/folder-types.ts';
 
 /**
  * Reason for aborting agent execution.
@@ -84,6 +79,8 @@ export enum AbortReason {
   UserStop = 'user_stop',
   /** Agent submitted a plan and is awaiting review */
   PlanSubmitted = 'plan_submitted',
+  /** Agent requested authentication and is awaiting user input */
+  AuthRequest = 'auth_request',
   /** New message sent while processing (silent redirect) */
   Redirect = 'redirect',
 }
@@ -162,54 +159,6 @@ function isInternalSDKError(message: string): boolean {
   return internalErrorPatterns.some((pattern) => lowerMsg.includes(pattern));
 }
 
-// AskUserQuestion types
-export interface QuestionOption {
-  label: string;
-  description: string;
-}
-
-export interface Question {
-  question: string;
-  header: string;
-  options: QuestionOption[];
-  multiSelect: boolean;
-}
-
-interface PendingQuestion {
-  resolve: (answers: Record<string, string>) => void;
-  questions: Question[];
-}
-
-// Context provider for agent instructions update (set by TUI when agent is active)
-// Provides all context needed for agentic update
-let updateAgentInstructionsContextProvider: (() => UpdateInstructionsContext | null) | null = null;
-
-export function setUpdateAgentInstructionsContextProvider(
-  provider: (() => UpdateInstructionsContext | null) | null
-): void {
-  updateAgentInstructionsContextProvider = provider;
-}
-
-// Result callback for update_agent_instructions (set by TUI)
-// Called after update completes to invalidate cache
-let updateAgentInstructionsResultCallback: ((success: boolean) => Promise<void>) | null = null;
-
-export function setUpdateAgentInstructionsResultCallback(
-  callback: ((success: boolean) => Promise<void>) | null
-): void {
-  updateAgentInstructionsResultCallback = callback;
-}
-
-// Progress callback for update_agent_instructions (set by TUI)
-// Called during agentic update to show nested tool progress
-let updateAgentInstructionsProgressCallback: ((event: UpdateInstructionsProgressEvent) => void) | null = null;
-
-export function setUpdateAgentInstructionsProgressCallback(
-  callback: ((event: UpdateInstructionsProgressEvent) => void) | null
-): void {
-  updateAgentInstructionsProgressCallback = callback;
-}
-
 // ============================================================
 // Global Tool Permission System
 // Used by both bash commands (via agent instance) and MCP tools (via global functions)
@@ -279,19 +228,6 @@ export function resolveGlobalPermission(requestId: string, allowed: boolean): vo
  */
 export function clearGlobalPermissions(): void {
   globalPendingPermissions.clear();
-}
-
-// Callback for agent instructions reload (set by TUI when agent is active)
-let reloadAgentInstructionsCallback: (() => Promise<boolean>) | null = null;
-
-export function setReloadAgentInstructionsCallback(
-  callback: (() => Promise<boolean>) | null
-): void {
-  reloadAgentInstructionsCallback = callback;
-}
-
-export function getReloadAgentInstructionsCallback(): (() => Promise<boolean>) | null {
-  return reloadAgentInstructionsCallback;
 }
 
 // Handle preferences update (extracted for use in MCP tool)
@@ -376,166 +312,19 @@ const updateUserPreferencesTool = tool(
   }
 );
 
-// Agent-only tool: reload_agent_instructions
-const reloadAgentInstructionsTool = tool(
-  'reload_agent_instructions',
-  `Reload the current agent's instructions from the Craft document. Use this when the user asks you to refresh, reload, or update your instructions. This will fetch the latest version of your instructions from the source document.`,
-  {},
-  async () => {
-    const callback = getReloadAgentInstructionsCallback();
-    if (!callback) {
-      return {
-        content: [{ type: 'text', text: 'No agent is currently active. This tool only works when a sub-agent is active.' }],
-      };
-    }
-    try {
-      const success = await callback();
-      return {
-        content: [{
-          type: 'text',
-          text: success
-            ? 'Instructions reloaded successfully from the Craft document. My instructions have been updated.'
-            : 'Failed to reload instructions. Please try again or use /agent reload.',
-        }],
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        content: [{ type: 'text', text: `Failed to reload instructions: ${message}` }],
-        isError: true,
-      };
-    }
+// Cached MCP server for preferences
+let cachedPrefToolsServer: ReturnType<typeof createSdkMcpServer> | null = null;
+
+// Preferences MCP server - user preferences tool
+function getPreferencesServer(_unused?: boolean): ReturnType<typeof createSdkMcpServer> {
+  if (!cachedPrefToolsServer) {
+    cachedPrefToolsServer = createSdkMcpServer({
+      name: 'preferences',
+      version: '1.0.0',
+      tools: [updateUserPreferencesTool],
+    });
   }
-);
-
-// Agent-only tool: update_agent_instructions
-const updateAgentInstructionsTool = tool(
-  'update_agent_instructions',
-  `Update your Instructions document with a new learning or instruction. Use this when you learn something from the user that should persist across conversations.
-
-**CRITICAL: This is the ONLY way to update your source instructions.** Never use direct Craft MCP tools (blocks_update, markdown_add, etc.) to modify your Instructions document. Always use this tool instead - it handles the update safely and correctly.
-
-This tool requires user permission before running. It will:
-1. Read the current Instructions document from Craft (source of truth)
-2. Intelligently add or update the content based on your request
-3. Write the changes back to the document
-
-IMPORTANT guidelines for what to write:
-- Write ONLY the new learning or instruction, not your full instructions
-- Use human-friendly references: "this document", "this page", "the Instructions section"
-- Do NOT include document IDs or block IDs in your content
-- Keep it concise and actionable
-- Format as a clear instruction or note that your future self can follow
-
-Example good content:
-- "When the user asks about projects, always check the Projects folder first"
-- "User prefers bullet points over numbered lists"
-- "Always confirm before making destructive changes"
-
-Example bad content:
-- "Update document 12345 with..." (don't include IDs)
-- [Entire rewrite of instructions] (only add what's new)`,
-  {
-    content: z.string().describe('The new learning or instruction to add. Should be a concise, actionable note.'),
-    section: z.string().optional().describe('Optional: which section to add this to (e.g., "Learnings", "User Preferences"). Defaults to appending at the end.'),
-  },
-  async (args) => {
-    // Check if context provider is set
-    if (!updateAgentInstructionsContextProvider) {
-      return {
-        content: [{ type: 'text', text: 'No agent is currently active. This tool only works when a sub-agent is active.' }],
-      };
-    }
-
-    // Get the context
-    const context = updateAgentInstructionsContextProvider();
-    if (!context) {
-      return {
-        content: [{ type: 'text', text: 'Could not get agent context. Ensure an agent is active.' }],
-      };
-    }
-
-    // Request user permission via global permission system
-    const allowed = await requestToolPermission(
-      'update_agent_instructions',
-      args.content.substring(0, 100) + (args.content.length > 100 ? '...' : ''),
-      `Update ${context.agentName}'s instructions with:\n${args.content}`
-    );
-    if (!allowed) {
-      return {
-        content: [{ type: 'text', text: 'User denied permission to update instructions.' }],
-      };
-    }
-
-    try {
-      // Format the content with optional section header
-      const section = args.section ? `## ${args.section}\n` : '';
-      const formattedContent = section ? `${section}${args.content}` : args.content;
-
-      // Run the agentic update
-      debug('[update_agent_instructions] Running agentic update with context:', {
-        documentId: context.documentId,
-        instructionsBlockId: context.instructionsBlockId,
-        agentName: context.agentName,
-      });
-
-      const result: UpdateInstructionsResult = await agenticUpdateInstructions(
-        formattedContent,
-        context,
-        updateAgentInstructionsProgressCallback ?? undefined
-      );
-
-      // Notify TUI of result to invalidate cache
-      if (updateAgentInstructionsResultCallback) {
-        await updateAgentInstructionsResultCallback(result.success);
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text: result.success
-            ? `${result.message}\n\nUpdated content:\n${result.updatedContent || args.content}\n\nThis will persist across conversations.`
-            : result.message,
-        }],
-        ...(result.success ? {} : { isError: true }),
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        content: [{ type: 'text', text: `Failed to update instructions: ${message}` }],
-        isError: true,
-      };
-    }
-  }
-);
-
-// Cached MCP servers for performance (recreated when agent state changes)
-let cachedPrefToolsServerForBase: ReturnType<typeof createSdkMcpServer> | null = null;
-let cachedPrefToolsServerForAgent: ReturnType<typeof createSdkMcpServer> | null = null;
-
-// Preferences MCP server - user preferences and agent instruction tools
-function getPreferencesServer(hasActiveAgent: boolean): ReturnType<typeof createSdkMcpServer> {
-  if (hasActiveAgent) {
-    // Agent is active - include agent-specific tools
-    if (!cachedPrefToolsServerForAgent) {
-      cachedPrefToolsServerForAgent = createSdkMcpServer({
-        name: 'preferences',
-        version: '1.0.0',
-        tools: [updateUserPreferencesTool, reloadAgentInstructionsTool, updateAgentInstructionsTool],
-      });
-    }
-    return cachedPrefToolsServerForAgent;
-  } else {
-    // No agent - only user preferences
-    if (!cachedPrefToolsServerForBase) {
-      cachedPrefToolsServerForBase = createSdkMcpServer({
-        name: 'preferences',
-        version: '1.0.0',
-        tools: [updateUserPreferencesTool],
-      });
-    }
-    return cachedPrefToolsServerForBase;
-  }
+  return cachedPrefToolsServer;
 }
 
 /**
@@ -554,15 +343,8 @@ export class CraftAgent {
   private sessionId: string | null = null;
   private isHeadless: boolean = false;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
-  private pendingQuestions: Map<string, PendingQuestion> = new Map();
   private alwaysAllowedCommands: Set<string> = new Set(); // Base commands allowed for this session (e.g., "ls", "cat")
   private alwaysAllowedDomains: Set<string> = new Set(); // Domains allowed for curl/wget (session-scoped)
-  private activeAgentDefinition: SubAgentDefinition | null = null;
-  // Pre-built MCP server configs for the active agent (includes auth headers)
-  // Supports both HTTP/SSE and stdio transports
-  private agentMcpServers: Record<string, SdkMcpServerConfig> = {};
-  // In-process MCP servers for API integrations (created from ApiConfig)
-  private agentApiServers: Record<string, ReturnType<typeof createSdkMcpServer>> = {};
   // Pre-built source server configs (user-defined sources, separate from agent)
   // Supports both HTTP/SSE and stdio transports
   private sourceMcpServers: Record<string, SdkMcpServerConfig> = {};
@@ -592,7 +374,8 @@ export class CraftAgent {
   private configWatcher: ConfigWatcher | null = null;
   // Pinned system prompt components (captured on first chat, used for consistency after compaction)
   private pinnedPreferencesPrompt: string | null = null;
-  private pinnedAgentDefinition: SubAgentDefinition | null = null;
+  // Track if preference drift notification has been shown this session
+  private preferencesDriftNotified: boolean = false;
   // Captured stderr from SDK subprocess (for error diagnostics when process exits with code 1)
   private lastStderrOutput: string[] = [];
 
@@ -617,30 +400,26 @@ export class CraftAgent {
   // Debug callback for status messages
   public onDebug: ((message: string) => void) | null = null;
 
-  // Callback for AskUserQuestion tool - set by TUI to receive question prompts
-  public onAskUserQuestion: ((request: { requestId: string; questions: Question[] }) => void) | null = null;
-
   /** Callback when permission mode changes */
   public onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
 
   // Callback when a plan is submitted - set by TUI to display plan message
   public onPlanSubmitted: ((planPath: string) => void) | null = null;
 
-  // Callback when credential input is needed - set by Electron/TUI to show secure input UI
-  // Returns a promise that resolves with the user's response
-  public onCredentialRequest: ((request: CredentialRequest) => Promise<CredentialResponse>) | null = null;
+  // Callback when authentication is requested (unified auth flow)
+  // This follows the SubmitPlan pattern:
+  // 1. Tool calls onAuthRequest
+  // 2. Session manager creates auth-request message and calls forceAbort
+  // 3. User completes auth in UI
+  // 4. Auth result is sent as a "faked user message"
+  // 5. Agent resumes and processes the result
+  public onAuthRequest: ((request: AuthRequest) => void) | null = null;
 
   // Callback when a source config changes (hot-reload from file watcher)
   public onSourceChange: ((slug: string, source: LoadedSource | null) => void) | null = null;
 
   // Callback when the sources list changes (add/remove)
   public onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
-
-  // Callback when an agent changes
-  public onAgentChange: ((slug: string, agent: LoadedAgent | null) => void) | null = null;
-
-  // Callback when the agents list changes
-  public onAgentsListChange: ((agents: LoadedAgent[]) => void) | null = null;
 
   // Callback when config file validation fails
   public onConfigValidationError: ((file: string, errors: ValidationIssue[]) => void) | null = null;
@@ -675,13 +454,9 @@ export class CraftAgent {
         this.onDebug?.(`[CraftAgent] onPlanSubmitted received: ${planPath}`);
         this.onPlanSubmitted?.(planPath);
       },
-      onCredentialRequest: async (request) => {
-        this.onDebug?.(`[CraftAgent] onCredentialRequest received: ${request.sourceSlug}`);
-        if (this.onCredentialRequest) {
-          return this.onCredentialRequest(request);
-        }
-        // No handler registered - return cancelled
-        return { type: 'credential', cancelled: true };
+      onAuthRequest: (request) => {
+        this.onDebug?.(`[CraftAgent] onAuthRequest received: ${request.sourceSlug} (type: ${request.type})`);
+        this.onAuthRequest?.(request);
       },
     });
 
@@ -708,14 +483,6 @@ export class CraftAgent {
       onSourcesListChange: (sources) => {
         debug('[CraftAgent] Sources list changed:', sources.length);
         this.onSourcesListChange?.(sources);
-      },
-      onAgentChange: (slug, agent) => {
-        debug('[CraftAgent] Agent changed:', slug, agent ? 'updated' : 'deleted');
-        this.onAgentChange?.(slug, agent);
-      },
-      onAgentsListChange: (agents) => {
-        debug('[CraftAgent] Agents list changed:', agents.length);
-        this.onAgentsListChange?.(agents);
       },
       onValidationError: (file, result) => {
         debug('[CraftAgent] Config validation error:', file, result.errors);
@@ -846,16 +613,6 @@ export class CraftAgent {
     }
   }
 
-  /**
-   * Respond to a pending AskUserQuestion request
-   */
-  respondToQuestion(requestId: string, answers: Record<string, string>): void {
-    const pending = this.pendingQuestions.get(requestId);
-    if (pending) {
-      pending.resolve(answers);
-      this.pendingQuestions.delete(requestId);
-    }
-  }
   // ============================================
   // Safe Mode Methods
   // ============================================
@@ -966,28 +723,22 @@ export class CraftAgent {
       // Pin system prompt components on first chat() call for consistency after compaction
       // The SDK's resume mechanism expects system prompt consistency within a session
       const currentPreferencesPrompt = formatPreferencesForPrompt();
-      const currentAgentSlug = this.activeAgentDefinition?.slug ?? null;
 
       if (this.pinnedPreferencesPrompt === null) {
         // First chat in this session - pin current values
         this.pinnedPreferencesPrompt = currentPreferencesPrompt;
-        this.pinnedAgentDefinition = this.activeAgentDefinition;
         debug('[chat] Pinned system prompt components for session consistency');
       } else {
         // Detect drift: warn user if context has changed since session started
         const preferencesDrifted = currentPreferencesPrompt !== this.pinnedPreferencesPrompt;
-        const agentDrifted = currentAgentSlug !== (this.pinnedAgentDefinition?.slug ?? null);
 
-        if (preferencesDrifted || agentDrifted) {
-          const driftReasons: string[] = [];
-          if (preferencesDrifted) driftReasons.push('preferences');
-          if (agentDrifted) driftReasons.push('agent');
-
+        if (preferencesDrifted && !this.preferencesDriftNotified) {
           yield {
             type: 'info',
-            message: `Note: Your ${driftReasons.join(' and ')} changed since this session started. Start a new session to apply changes.`,
+            message: `Note: Your preferences changed since this session started. Start a new session to apply changes.`,
           };
-          debug(`[chat] Detected drift in: ${driftReasons.join(', ')}`);
+          this.preferencesDriftNotified = true;
+          debug(`[chat] Detected drift in: preferences`);
         }
       }
 
@@ -1006,43 +757,20 @@ export class CraftAgent {
 
       // Build MCP servers config - always use HTTP (SDK handles sources efficiently)
       // Filter out stdio servers if local MCP is disabled
-      const agentMcpResult = this.getAgentMcpServersFiltered();
       const sourceMcpResult = this.getSourceMcpServersFiltered();
-      const agentApiServers = this.getAgentApiServers();
 
-      debug('[chat] agentMcpServers:', agentMcpResult.servers);
-      debug('[chat] agentApiServers:', agentApiServers);
       debug('[chat] sourceMcpServers:', sourceMcpResult.servers);
       debug('[chat] sourceApiServers:', this.sourceApiServers);
 
-      const hasActiveAgent = this.activeAgentDefinition !== null;
-      const activeAgentSlug = this.activeAgentDefinition?.slug;
       const mcpServers: Options['mcpServers'] = {
-        preferences: getPreferencesServer(hasActiveAgent),
-        // Session-scoped tools (SubmitPlan, source_test, agent_create, etc.)
-        session: getSessionScopedTools(sessionId, this.workspaceRootPath, activeAgentSlug),
-        // External docs MCP server (public, no auth required)
-        // Provides Craft Agent documentation for agents, MCP servers, APIs, and setup
-        docs: {
-          type: 'http',
-          url: 'https://agents.craft.do/docs/mcp',
-        },
-        // Add agent-specific MCP servers if an agent is active (filtered by local MCP setting)
-        ...agentMcpResult.servers,
-        // Add in-process API servers (REST APIs converted to MCP tools)
-        ...agentApiServers,
+        preferences: getPreferencesServer(false),
+        // Session-scoped tools (SubmitPlan, source_test, etc.)
+        session: getSessionScopedTools(sessionId, this.workspaceRootPath),
         // Add user-defined source servers (MCP and API, filtered by local MCP setting)
         // Note: Craft MCP server is now added via sources system
         ...sourceMcpResult.servers,
         ...this.sourceApiServers,
       };
-
-      // Debug: log active agent before building system prompt
-      debug('[chat] activeAgentDefinition:', this.activeAgentDefinition?.name || 'none');
-      debug('[chat] activeAgentDefinition instructions:', this.activeAgentDefinition?.instructions?.length || 0, 'chars');
-      if (this.activeAgentDefinition?.instructions) {
-        debug('[chat] instructions:', this.activeAgentDefinition.instructions);
-      }
       
       // Configure SDK options
       const model = this.config.model || DEFAULT_MODEL;
@@ -1088,18 +816,14 @@ export class CraftAgent {
           type: 'preset',
           preset: 'claude_code',
           append: getSystemPrompt(
-            this.pinnedAgentDefinition ?? undefined,
-            this.temporaryClarifications ?? undefined,
             this.pinnedPreferencesPrompt ?? undefined,
             this.config.debugMode,
             this.workspaceRootPath
           ),
         },
-        // Option B: Custom system prompt (uncomment to use instead)
-        // systemPrompt: getSystemPrompt(this.activeAgentDefinition ?? undefined),
         cwd: this.config.session?.workingDirectory ?? process.cwd(),
         includePartialMessages: true,
-        // Enable the full Claude Code toolset (includes AskUserQuestion)
+        // Enable the full Claude Code toolset
         tools: { type: 'preset', preset: 'claude_code' },
         // Bypass SDK's built-in permission system - we handle all permissions via PreToolUse hook
         // This allows Safe Mode to properly allow read-only bash commands without SDK interference
@@ -1129,7 +853,6 @@ export class CraftAgent {
               const permissionsContext: PermissionsContext = {
                 workspaceRootPath: this.workspaceRootPath,
                 activeSourceSlugs: Array.from(this.activeSourceServerNames),
-                activeAgentSlug: this.activeAgentDefinition?.slug,
               };
 
               // In 'allow-all' mode, still check for explicitly blocked tools
@@ -1201,25 +924,19 @@ export class CraftAgent {
                 const serverName = parts[1];
                 if (parts.length >= 3 && serverName) {
                   // Built-in MCP servers that are always available (session-scoped tools)
-                  const builtInMcpServers = new Set(['preferences', 'session', 'docs']);
+                  const builtInMcpServers = new Set(['preferences', 'session']);
 
-                  // Check if this is a source server (not built-in, not agent server)
+                  // Check if this is a source server (not built-in)
                   if (!builtInMcpServers.has(serverName)) {
-                    // Check if this is an agent server (from active agent definition)
-                    const isAgentServer = Object.keys(this.agentMcpServers).includes(serverName) ||
-                                          Object.keys(this.agentApiServers).includes(serverName);
-
-                    // If not an agent server, it must be a source server
-                    if (!isAgentServer) {
-                      const isActive = this.activeSourceServerNames.has(serverName);
-                      if (!isActive) {
-                        this.onDebug?.(`BLOCKED source tool: ${input.tool_name} (source "${serverName}" is no longer available)`);
-                        return {
-                          continue: false,
-                          decision: 'block' as const,
-                          reason: `Source "${serverName}" is no longer available. The source may have been disabled or its credentials expired. Please check the source status and re-enable it if needed.`,
-                        };
-                      }
+                    // Check if source server is active
+                    const isActive = this.activeSourceServerNames.has(serverName);
+                    if (!isActive) {
+                      this.onDebug?.(`BLOCKED source tool: ${input.tool_name} (source "${serverName}" is no longer available)`);
+                      return {
+                        continue: false,
+                        decision: 'block' as const,
+                        reason: `Source "${serverName}" is no longer available. The source may have been disabled or its credentials expired. Please check the source status and re-enable it if needed.`,
+                      };
                     }
                   }
                 }
@@ -1270,7 +987,7 @@ export class CraftAgent {
               // Built-in SDK tools (don't extract _intent from these)
               const builtInTools = new Set([
                 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-                'WebFetch', 'WebSearch', 'Task', 'TaskOutput', 'AskUserQuestion',
+                'WebFetch', 'WebSearch', 'Task', 'TaskOutput',
                 'TodoWrite', 'MultiEdit', 'NotebookEdit', 'KillShell',
                 'SubmitPlan', 'Skill', 'SlashCommand',
               ]);
@@ -1543,15 +1260,14 @@ export class CraftAgent {
               // Skip built-in SDK tools (they have their own context management)
               const builtInTools = new Set([
                 'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-                'WebFetch', 'WebSearch', 'Task', 'AskUserQuestion',
+                'WebFetch', 'WebSearch', 'Task',
                 'TodoWrite', 'MultiEdit', 'NotebookEdit', 'KillShell',
                 'SubmitPlan', 'Skill', 'SlashCommand',
               ]);
 
-              // Skip in-process MCP tools (preferences, agent management)
+              // Skip in-process MCP tools (preferences)
               const inProcessTools = new Set([
-                'update_user_preferences', 'reload_agent_instructions',
-                'update_agent_instructions',
+                'update_user_preferences',
               ]);
 
               // Skip API tools - they already handle summarization internally
@@ -1644,52 +1360,10 @@ export class CraftAgent {
         // Skip resume on retry (after session expiry) to start fresh
         ...(!_isRetry && this.sessionId ? { resume: this.sessionId } : {}),
         mcpServers,
-        // Custom permission handler for Bash commands and AskUserQuestion
+        // Custom permission handler for Bash commands
         canUseTool: async (toolName, input, toolOptions) => {
           // Debug: show what tools are being called
           this.onDebug?.(`canUseTool: ${toolName}`);
-
-          // Handle AskUserQuestion tool - needs user input
-          if (toolName === 'AskUserQuestion') {
-            const typedInput = input as { questions?: unknown[] };
-            if (typedInput.questions && Array.isArray(typedInput.questions)) {
-              const requestId = `ask-${toolOptions.toolUseID}`;
-
-              // Parse questions from input
-              const questions: Question[] = typedInput.questions.map((q: unknown) => {
-                const qObj = q as Record<string, unknown>;
-                return {
-                  question: String(qObj.question || ''),
-                  header: String(qObj.header || ''),
-                  options: Array.isArray(qObj.options)
-                    ? (qObj.options as Array<Record<string, unknown>>).map(o => ({
-                        label: String(o.label || ''),
-                        description: String(o.description || ''),
-                      }))
-                    : [],
-                  multiSelect: Boolean(qObj.multiSelect),
-                };
-              });
-
-              // Create promise for user response
-              const answerPromise = new Promise<Record<string, string>>((resolve) => {
-                this.pendingQuestions.set(requestId, { resolve, questions });
-              });
-
-              // Notify TUI
-              if (this.onAskUserQuestion) {
-                this.onAskUserQuestion({ requestId, questions });
-              } else {
-                // No handler - return empty answers
-                this.pendingQuestions.delete(requestId);
-                return { behavior: 'allow' as const, updatedInput: { ...input, answers: {} } };
-              }
-
-              // Wait for user to answer
-              const answers = await answerPromise;
-              return { behavior: 'allow' as const, updatedInput: { ...input, answers } };
-            }
-          }
 
           // Bash commands require user permission
           if (toolName === 'Bash') {
@@ -1708,6 +1382,8 @@ export class CraftAgent {
         },
         // Selectively disable tools - file tools are disabled (use MCP), web/code controlled by settings
         disallowedTools,
+        // Load workspace as SDK plugin (enables skills, commands, agents from workspace)
+        plugins: [{ type: 'local' as const, path: this.workspaceRootPath }],
       };
 
       // Track whether we're trying to resume a session (for error handling)
@@ -1959,7 +1635,7 @@ export class CraftAgent {
             this.sessionId = null;
             // Clear pinned state so retry captures fresh values
             this.pinnedPreferencesPrompt = null;
-            this.pinnedAgentDefinition = null;
+            this.preferencesDriftNotified = false;
             // Use 'info' instead of 'status' to show message without spinner
             yield { type: 'info', message: 'Session expired, restoring context...' };
             // Recursively call with isRetry=true (yield* delegates all events)
@@ -2020,7 +1696,7 @@ export class CraftAgent {
           this.sessionId = null;
           // Clear pinned state so retry captures fresh values
           this.pinnedPreferencesPrompt = null;
-          this.pinnedAgentDefinition = null;
+          this.preferencesDriftNotified = false;
 
           // Provide context-aware message (conservative: only match explicit session/resume terms)
           const isSessionError =
@@ -2236,9 +1912,19 @@ export class CraftAgent {
     // Add file attachments with stored path info
     if (attachments) {
       for (const attachment of attachments) {
+        // Always include path info for files with storedPath
+        if (attachment.storedPath) {
+          let pathInfo = `[Attached file: ${attachment.name}]`;
+          pathInfo += `\n[Stored at: ${attachment.storedPath}]`;
+          if (attachment.markdownPath) {
+            pathInfo += `\n[Markdown version: ${attachment.markdownPath}]`;
+          }
+          parts.push(pathInfo);
+        }
+
+        // Also include inline content for text files
         if (attachment.type === 'text' && attachment.text) {
-          const pathInfo = attachment.storedPath ? `\n[Stored at: ${attachment.storedPath}]` : '';
-          parts.push(`[File: ${attachment.name}]${pathInfo}\n\`\`\`\n${attachment.text}\n\`\`\``);
+          parts.push(`\`\`\`\n${attachment.text}\n\`\`\``);
         }
       }
     }
@@ -2979,7 +2665,7 @@ export class CraftAgent {
     this.sessionId = null;
     // Clear pinned state so next chat() will capture fresh values
     this.pinnedPreferencesPrompt = null;
-    this.pinnedAgentDefinition = null;
+    this.preferencesDriftNotified = false;
   }
 
   /**
@@ -3043,62 +2729,8 @@ export class CraftAgent {
     }
   }
 
-  getActiveAgentDefinition(): SubAgentDefinition | null {
-    return this.activeAgentDefinition;
-  }
-
   /**
-   * Set the active agent definition and optionally its pre-built MCP server configs
-   * @param definition The agent definition (or null to deactivate)
-   * @param mcpServers Pre-built MCP server configs with auth headers (from SubAgentManager.buildMcpServerConfig)
-   * @param apiServers In-process MCP servers for REST APIs (from SubAgentManager.buildApiServers)
-   */
-  setActiveAgentDefinition(
-    definition: SubAgentDefinition | null,
-    mcpServers?: Record<string, SdkMcpServerConfig>,
-    apiServers?: Record<string, ReturnType<typeof createSdkMcpServer>>,
-    sourcesNeedingAuth?: LoadedSource[]
-  ): void {
-    // If sources need auth, inject setup instructions into the agent
-    if (definition && sourcesNeedingAuth && sourcesNeedingAuth.length > 0) {
-      const setupInstructions = this.buildSourceSetupInstructions(sourcesNeedingAuth);
-      const augmentedInstructions = definition.instructions
-        ? definition.instructions + '\n\n' + setupInstructions
-        : setupInstructions;
-
-      this.activeAgentDefinition = {
-        ...definition,
-        instructions: augmentedInstructions,
-      };
-      this.onDebug?.(`[CraftAgent] Injected setup instructions for ${sourcesNeedingAuth.length} source(s)`);
-    } else {
-      this.activeAgentDefinition = definition;
-    }
-
-    this.agentMcpServers = mcpServers ?? {};
-    this.agentApiServers = apiServers ?? {};
-  }
-
-  /**
-   * Build instructions for helping users set up sources that need authentication.
-   * These instructions are appended to the agent's instructions when sources need auth.
-   */
-  private buildSourceSetupInstructions(sources: LoadedSource[]): string {
-    const sourceNames = sources.map(s => s.config.name).join(', ');
-
-    return `## Source Authentication Assistance
-
-Some of your sources need authentication before they can be used (${sourceNames}). You have access to these tools:
-- \`source_oauth_trigger\`: Start OAuth authentication for MCP sources (opens browser)
-- \`source_credential_prompt\`: Prompt user for API keys/tokens via secure input UI
-- \`source_gmail_oauth_trigger\`: Start Google OAuth for Gmail sources
-- \`source_test\`: Test if a source connection works
-
-When you see <setup_required> in a message, help the user authenticate those sources before proceeding with their actual request. After successful authentication, the source tools will become available.`;
-  }
-
-  /**
-   * Set source servers (user-defined sources, separate from agent)
+   * Set source servers (user-defined sources)
    * These are MCP servers and API tools added via the source selector UI
    * @param mcpServers Pre-built MCP server configs with auth headers
    * @param apiServers In-process MCP servers for REST APIs
@@ -3171,18 +2803,6 @@ When you see <setup_required> in a message, help the user authenticate those sou
   }
 
   /**
-   * Get SDK-compatible MCP server config for the active agent's custom MCP servers
-   * Returns the pre-built config that was set via setActiveAgentDefinition()
-   * The config is built by SubAgentManager.buildMcpServerConfig() which handles auth
-   *
-   * Filters out stdio servers if local MCP is disabled for the workspace.
-   * @returns Object with filtered servers and names of any skipped stdio servers
-   */
-  private getAgentMcpServersFiltered(): { servers: Record<string, SdkMcpServerConfig>; skipped: string[] } {
-    return this.filterMcpServersByLocalEnabled(this.agentMcpServers);
-  }
-
-  /**
    * Get filtered source MCP servers based on local MCP setting
    * @returns Object with filtered servers and names of any skipped stdio servers
    */
@@ -3220,14 +2840,6 @@ When you see <setup_required> in a message, help the user authenticate those sou
     return { servers: filtered, skipped };
   }
 
-  /**
-   * Get in-process MCP servers for REST APIs
-   * These are created by createApiServer() from API configs extracted from agent documents
-   */
-  private getAgentApiServers(): Record<string, ReturnType<typeof createSdkMcpServer>> {
-    return this.agentApiServers;
-  }
-
   async close(): Promise<void> {
     this.forceAbort();
   }
@@ -3243,31 +2855,22 @@ When you see <setup_required> in a message, help the user authenticate those sou
 
     // Clear pending operations
     this.pendingPermissions.clear();
-    this.pendingQuestions.clear();
 
     // Clear security whitelists
     this.alwaysAllowedCommands.clear();
     this.alwaysAllowedDomains.clear();
 
-    // Clear active agent state
-    this.activeAgentDefinition = null;
-    this.agentMcpServers = {};
-    this.agentApiServers = {};
-    this.temporaryClarifications = null;
-
     // Clear pinned system prompt state
     this.pinnedPreferencesPrompt = null;
-    this.pinnedAgentDefinition = null;
+    this.preferencesDriftNotified = false;
 
     // Clear callbacks
     this.onPermissionRequest = null;
     this.onDebug = null;
-    this.onAskUserQuestion = null;
     this.onPlanSubmitted = null;
+    this.onAuthRequest = null;
     this.onSourceChange = null;
     this.onSourcesListChange = null;
-    this.onAgentChange = null;
-    this.onAgentsListChange = null;
     this.onConfigValidationError = null;
 
     // Stop config watcher

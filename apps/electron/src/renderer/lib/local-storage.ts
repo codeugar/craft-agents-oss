@@ -15,12 +15,9 @@ export const KEYS = {
   sidebarWidth: 'sidebar-width',
   sessionListWidth: 'session-list-width',
   sidebarMode: 'sidebar-mode',
-  selectedSourceSlug: 'selected-source-slug',
   listFilter: 'list-filter',
   expandedFolders: 'expanded-folders',
-  statusCollapsed: 'status-collapsed',
-  agentsCollapsed: 'agents-collapsed',
-  sourcesCollapsed: 'sources-collapsed',
+  collapsedSidebarItems: 'collapsed-sidebar-items',
 
   // Theme
   theme: 'theme',

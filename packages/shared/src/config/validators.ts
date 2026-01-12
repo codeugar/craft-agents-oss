@@ -8,7 +8,6 @@
  * - config.json: Main app configuration
  * - preferences.json: User preferences
  * - sources/{slug}/config.json: Workspace-scoped source configs
- * - agents/{slug}/config.json: Workspace-scoped agent configs
  */
 
 import { z } from 'zod';
@@ -268,8 +267,10 @@ export function validatePreferences(): ValidationResult {
 
 /**
  * Validate all config files
+ * @param workspaceId - Optional workspace ID for source validation
+ * @param workspaceRoot - Optional workspace root path for skill validation
  */
-export function validateAll(workspaceId?: string): ValidationResult {
+export function validateAll(workspaceId?: string, workspaceRoot?: string): ValidationResult {
   const results: ValidationResult[] = [
     validateConfig(),
     validatePreferences(),
@@ -278,7 +279,11 @@ export function validateAll(workspaceId?: string): ValidationResult {
   // Include workspace-scoped validations if workspaceId is provided
   if (workspaceId) {
     results.push(validateAllSources(workspaceId));
-    results.push(validateAllAgents(workspaceId));
+  }
+
+  // Include skill validation if workspaceRoot is provided
+  if (workspaceRoot) {
+    results.push(validateAllSkills(workspaceRoot));
   }
 
   const allErrors = results.flatMap(r => r.errors);
@@ -295,7 +300,7 @@ export function validateAll(workspaceId?: string): ValidationResult {
 // Source & Agent Validators (Folder-Based Architecture)
 // ============================================================
 
-import { getWorkspaceSourcesPath, getWorkspaceAgentsPath } from '../workspaces/storage.ts';
+import { getWorkspaceSourcesPath } from '../workspaces/storage.ts';
 
 // --- sources/{slug}/config.json ---
 
@@ -380,46 +385,11 @@ export const FolderSourceConfigSchema = z.object({
   { message: 'Config must include type-specific configuration (mcp, api, or local)' }
 );
 
-// --- agents/{slug}/config.json ---
-
-const AgentSourceRefSchema = z.object({
-  type: z.enum(['url', 'local']),
-  url: z.string().url().optional(),
-  lastSynced: z.number().int().min(0).optional(),
-});
-
-export const FolderAgentConfigSchema = z.object({
-  name: z.string().min(1),
-  slug: z.string().regex(/^\.?[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens (optional leading dot for builtins)'),
-  enabled: z.boolean(),
-  source: AgentSourceRefSchema.optional(),
-  useSources: z.array(z.string()).optional(),
-  createdAt: z.number().int().min(0),
-  updatedAt: z.number().int().min(0),
-});
-
 /**
  * Validate a source config object
  */
 export function validateSourceConfig(config: unknown): ValidationResult {
   const result = FolderSourceConfigSchema.safeParse(config);
-
-  if (result.success) {
-    return { valid: true, errors: [], warnings: [] };
-  }
-
-  return {
-    valid: false,
-    errors: zodErrorToIssues(result.error, 'config.json'),
-    warnings: [],
-  };
-}
-
-/**
- * Validate an agent config object
- */
-export function validateAgentConfig(config: unknown): ValidationResult {
-  const result = FolderAgentConfigSchema.safeParse(config);
 
   if (result.success) {
     return { valid: true, errors: [], warnings: [] };
@@ -501,82 +471,6 @@ export function validateSource(workspaceId: string, slug: string): ValidationRes
 }
 
 /**
- * Validate an agent folder (workspace-scoped)
- */
-export function validateAgent(workspaceId: string, slug: string): ValidationResult {
-  const agentsDir = getWorkspaceAgentsPath(workspaceId);
-  const errors: ValidationIssue[] = [];
-  const warnings: ValidationIssue[] = [];
-  const file = `agents/${slug}/config.json`;
-  const dir = join(agentsDir, slug);
-  const configPath = join(dir, 'config.json');
-  const instructionsPath = join(dir, 'instructions.md');
-
-  if (!existsSync(dir)) {
-    return {
-      valid: false,
-      errors: [{
-        file,
-        path: '',
-        message: `Agent folder '${slug}' does not exist`,
-        severity: 'error',
-      }],
-      warnings: [],
-    };
-  }
-
-  // Check config.json
-  if (!existsSync(configPath)) {
-    errors.push({
-      file,
-      path: '',
-      message: 'config.json not found',
-      severity: 'error',
-      suggestion: 'Create a config.json file in the agent folder',
-    });
-  } else {
-    try {
-      const raw = readFileSync(configPath, 'utf-8');
-      const content = JSON.parse(raw);
-      const configResult = validateAgentConfig(content);
-      errors.push(...configResult.errors);
-      warnings.push(...configResult.warnings);
-
-      // Check if slug matches folder name
-      if (content.slug && content.slug !== slug) {
-        warnings.push({
-          file,
-          path: 'slug',
-          message: `Slug '${content.slug}' does not match folder name '${slug}'`,
-          severity: 'warning',
-          suggestion: `Update slug to '${slug}' or rename the folder`,
-        });
-      }
-    } catch (e) {
-      errors.push({
-        file,
-        path: '',
-        message: `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`,
-        severity: 'error',
-      });
-    }
-  }
-
-  // Check instructions.md
-  if (!existsSync(instructionsPath)) {
-    warnings.push({
-      file: `agents/${slug}/instructions.md`,
-      path: '',
-      message: 'instructions.md not found',
-      severity: 'warning',
-      suggestion: 'Create an instructions.md file with agent behavior instructions',
-    });
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
-}
-
-/**
  * Validate all sources in a workspace
  */
 export function validateAllSources(workspaceId: string): ValidationResult {
@@ -629,48 +523,213 @@ export function validateAllSources(workspaceId: string): ValidationResult {
   };
 }
 
+// ============================================================
+// Skill Validators
+// ============================================================
+
+import matter from 'gray-matter';
+import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
+import { basename, extname } from 'path';
+
 /**
- * Validate all agents in a workspace
+ * Schema for skill metadata (SKILL.md frontmatter)
  */
-export function validateAllAgents(workspaceId: string): ValidationResult {
-  const agentsDir = getWorkspaceAgentsPath(workspaceId);
+export const SkillMetadataSchema = z.object({
+  name: z.string().min(1, 'Skill name is required'),
+  description: z.string().min(1, 'Skill description is required'),
+  globs: z.array(z.string()).optional(),
+  alwaysAllow: z.array(z.string()).optional(),
+});
+
+/**
+ * Find icon file in skill directory
+ */
+function findSkillIconForValidation(skillDir: string): string | null {
+  const iconExtensions = ['.svg', '.png', '.jpg', '.jpeg'];
+
+  for (const ext of iconExtensions) {
+    const iconPath = join(skillDir, `icon${ext}`);
+    if (existsSync(iconPath)) {
+      return iconPath;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validate a skill folder
+ * @param workspaceRoot - Absolute path to workspace root folder
+ * @param slug - Skill directory name
+ */
+export function validateSkill(workspaceRoot: string, slug: string): ValidationResult {
+  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
+  const skillDir = join(skillsDir, slug);
+  const skillFile = join(skillDir, 'SKILL.md');
+  const file = `skills/${slug}/SKILL.md`;
+
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
-  if (!existsSync(agentsDir)) {
+  // 1. Validate slug format
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    errors.push({
+      file: `skills/${slug}`,
+      path: 'slug',
+      message: 'Slug must be lowercase alphanumeric with hyphens',
+      severity: 'error',
+      suggestion: 'Rename folder to use lowercase letters, numbers, and hyphens only',
+    });
+  }
+
+  // 2. Check directory exists
+  if (!existsSync(skillDir)) {
+    return {
+      valid: false,
+      errors: [{
+        file: `skills/${slug}`,
+        path: '',
+        message: `Skill folder '${slug}' does not exist`,
+        severity: 'error',
+      }],
+      warnings: [],
+    };
+  }
+
+  // 3. Check SKILL.md exists
+  if (!existsSync(skillFile)) {
+    return {
+      valid: false,
+      errors: [{
+        file,
+        path: '',
+        message: 'SKILL.md not found',
+        severity: 'error',
+        suggestion: 'Create a SKILL.md file with YAML frontmatter',
+      }],
+      warnings: [],
+    };
+  }
+
+  // 4. Parse SKILL.md
+  let content: string;
+  try {
+    content = readFileSync(skillFile, 'utf-8');
+  } catch (e) {
+    return {
+      valid: false,
+      errors: [{
+        file,
+        path: '',
+        message: `Cannot read file: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        severity: 'error',
+      }],
+      warnings: [],
+    };
+  }
+
+  // 5. Parse frontmatter
+  let frontmatter: unknown;
+  let body: string;
+  try {
+    const parsed = matter(content);
+    frontmatter = parsed.data;
+    body = parsed.content;
+  } catch (e) {
+    return {
+      valid: false,
+      errors: [{
+        file,
+        path: 'frontmatter',
+        message: `Invalid YAML frontmatter: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        severity: 'error',
+      }],
+      warnings: [],
+    };
+  }
+
+  // 6. Validate frontmatter schema
+  const metaResult = SkillMetadataSchema.safeParse(frontmatter);
+  if (!metaResult.success) {
+    errors.push(...zodErrorToIssues(metaResult.error, file));
+  }
+
+  // 7. Check content is not empty
+  if (!body || body.trim().length === 0) {
+    errors.push({
+      file,
+      path: 'content',
+      message: 'Skill content is empty (nothing after frontmatter)',
+      severity: 'error',
+      suggestion: 'Add skill instructions after the YAML frontmatter',
+    });
+  }
+
+  // 8. Validate icon if present
+  const iconPath = findSkillIconForValidation(skillDir);
+  if (iconPath) {
+    const ext = extname(iconPath).toLowerCase();
+    if (!['.svg', '.png', '.jpg', '.jpeg'].includes(ext)) {
+      warnings.push({
+        file: `skills/${slug}/${basename(iconPath)}`,
+        path: '',
+        message: `Unexpected icon format: ${ext}`,
+        severity: 'warning',
+        suggestion: 'Use .svg, .png, or .jpg for icons',
+      });
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Validate all skills in a workspace
+ * @param workspaceRoot - Absolute path to workspace root folder
+ */
+export function validateAllSkills(workspaceRoot: string): ValidationResult {
+  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+
+  if (!existsSync(skillsDir)) {
     return {
       valid: true,
       errors: [],
       warnings: [{
-        file: 'agents/',
+        file: 'skills/',
         path: '',
-        message: 'Agents directory does not exist (no agents configured)',
+        message: 'Skills directory does not exist (no skills configured)',
         severity: 'warning',
       }],
     };
   }
 
-  const entries = readdirSync(agentsDir);
-  const agentFolders = entries.filter((entry) => {
-    const entryPath = join(agentsDir, entry);
+  const entries = readdirSync(skillsDir);
+  const skillFolders = entries.filter((entry) => {
+    const entryPath = join(skillsDir, entry);
     return statSync(entryPath).isDirectory();
   });
 
-  if (agentFolders.length === 0) {
+  if (skillFolders.length === 0) {
     return {
       valid: true,
       errors: [],
       warnings: [{
-        file: 'agents/',
+        file: 'skills/',
         path: '',
-        message: 'No agents configured',
+        message: 'No skills configured',
         severity: 'warning',
       }],
     };
   }
 
-  for (const folder of agentFolders) {
-    const result = validateAgent(workspaceId, folder);
+  for (const folder of skillFolders) {
+    const result = validateSkill(workspaceRoot, folder);
     errors.push(...result.errors);
     warnings.push(...result.warnings);
   }

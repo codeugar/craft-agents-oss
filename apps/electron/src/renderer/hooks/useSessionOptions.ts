@@ -2,7 +2,7 @@
  * Session Options Types
  *
  * Type definitions and helpers for session-scoped settings.
- * The actual hook is in ChatContext.tsx as useSessionOptionsFor().
+ * The actual hook is in AppShellContext.tsx as useSessionOptionsFor().
  *
  * ADDING A NEW SESSION OPTION:
  * 1. Add field to SessionOptions interface below

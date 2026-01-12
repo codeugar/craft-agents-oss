@@ -9,7 +9,6 @@ import type {
   TokenUsage as CoreTokenUsage,
   Workspace as CoreWorkspace,
   SessionMetadata as CoreSessionMetadata,
-  SubAgentMetadata as CoreSubAgentMetadata,
   StoredAttachment as CoreStoredAttachment,
 } from '@craft-agent/core/types';
 
@@ -25,26 +24,7 @@ export type {
   CoreTokenUsage as TokenUsage,
   CoreWorkspace as Workspace,
   CoreSessionMetadata as SessionMetadata,
-  CoreSubAgentMetadata as SubAgentMetadata,
   CoreStoredAttachment as StoredAttachment,
-};
-
-// Import and re-export agent types for Info dialog
-// Use types-only subpath to avoid pulling in debug.ts (Node.js fs dependency)
-import type {
-  SubAgentDefinition,
-  McpServerConfig,
-  ApiConfig,
-  AgentStatus,
-  AgentActivateOptions,
-} from '@craft-agent/shared/agents/types';
-
-export type {
-  SubAgentDefinition,
-  McpServerConfig,
-  ApiConfig,
-  AgentStatus,
-  AgentActivateOptions,
 };
 
 // Import and re-export auth types for onboarding
@@ -56,15 +36,28 @@ export type { AuthState, SetupNeeds, AuthType };
 // Import source types for session source selection
 import type { LoadedSource, FolderSourceConfig, SourceConnectionStatus } from '@craft-agent/shared/sources/types';
 export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
-export { generateMessageId } from '@craft-agent/core/types';
+
+// Import skill types
+import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/types';
+export type { LoadedSkill, SkillMetadata };
 
 /**
- * Auth requirements for an agent - lists MCP servers and APIs needing credentials
+ * File/directory entry in a skill folder
  */
-export interface AgentAuthRequirements {
-  mcpServers: Array<{ name: string; url: string; requiresAuth?: boolean }>
-  apis: Array<{ name: string; auth?: { type: string; credentialLabel?: string; secretLabel?: string } }>
+export interface SkillFile {
+  name: string
+  type: 'file' | 'directory'
+  size?: number
+  children?: SkillFile[]
 }
+
+// Import auth request types for unified auth flow
+import type { AuthRequest as SharedAuthRequest, CredentialInputMode as SharedCredentialInputMode, CredentialAuthRequest as SharedCredentialAuthRequest } from '@craft-agent/shared/agent';
+export type { SharedAuthRequest as AuthRequest };
+export type { SharedCredentialInputMode as CredentialInputMode };
+// CredentialRequest is used by UI components for displaying credential input
+export type CredentialRequest = SharedCredentialAuthRequest;
+export { generateMessageId } from '@craft-agent/core/types';
 
 /**
  * OAuth result from main process
@@ -110,14 +103,6 @@ export interface ShareResult {
   error?: string
 }
 
-/**
- * Agent activation status - indicates if agent needs activation or auth
- */
-export interface AgentSetupStatus {
-  needsSetup: boolean  // Agent definition has never been extracted (needs activation)
-  needsAuth: boolean   // Definition exists but credentials are missing
-  reason?: string
-}
 
 // Re-export permission types from core, extended with sessionId for multi-session context
 export type { PermissionRequest as BasePermissionRequest } from '@craft-agent/core/types';
@@ -134,46 +119,10 @@ export interface PermissionRequest extends BasePermissionRequest {
 // Credential Input Types (Secure Auth UI)
 // ============================================
 
-/**
- * Credential input modes for different auth types
- */
-export type CredentialInputMode =
-  | 'bearer'      // Single token field (Bearer Token, API Key)
-  | 'basic'       // Username + Password fields
-  | 'header'      // API Key with custom header name
-  | 'query'       // API Key for query parameter
+// CredentialInputMode is imported from @craft-agent/shared/agent above
 
 /**
- * Credential request from agent - triggers secure input UI
- */
-export interface CredentialRequest {
-  requestId: string
-  sessionId: string
-  /** Source slug to associate credentials with */
-  sourceSlug: string
-  /** Display name for the source/service */
-  sourceName: string
-  /** What type of credential input to show */
-  mode: CredentialInputMode
-  /** Custom labels for fields */
-  labels?: {
-    /** Label for primary credential field (default: "API Key" or "Bearer Token") */
-    credential?: string
-    /** Label for username field in basic auth (default: "Username") */
-    username?: string
-    /** Label for password field in basic auth (default: "Password") */
-    password?: string
-  }
-  /** Optional description/instructions */
-  description?: string
-  /** Optional hint about where to find the credential */
-  hint?: string
-  /** For header auth - the header name being used */
-  headerName?: string
-}
-
-/**
- * Credential response from user
+ * Credential response from user (for credential auth requests)
  */
 export interface CredentialResponse {
   type: 'credential'
@@ -215,36 +164,6 @@ export interface Plan {
   updatedAt?: number
 }
 
-/**
- * MCP server with auth status for Info dialog
- */
-export interface McpServerWithAuthStatus {
-  name: string
-  url: string
-  requiresAuth?: boolean
-  hasAuth: boolean  // Whether credentials have been provided
-  tools?: string[]
-  logo?: string  // Local logo filename (e.g., "craft.png")
-}
-
-/**
- * API with auth status for Info dialog
- */
-export interface ApiWithAuthStatus {
-  name: string
-  baseUrl: string
-  auth?: { type: string; credentialLabel?: string; secretLabel?: string }
-  hasAuth: boolean  // Whether credentials have been provided
-  logo?: string  // Local logo filename (e.g., "exa.png")
-}
-
-/**
- * Auth status for an agent's MCP servers and APIs
- */
-export interface AgentAuthStatus {
-  mcpServers: McpServerWithAuthStatus[]
-  apis: ApiWithAuthStatus[]
-}
 
 // ============================================
 // Onboarding Types
@@ -337,13 +256,11 @@ export interface Session {
   messages: Message[]
   isProcessing: boolean
   // Session metadata
-  agentId?: string
-  agentName?: string
   isFlagged?: boolean
   // Advanced options (persisted per session)
   /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode
-  // Todo state (user-controlled) - determines inbox vs completed
+  // Todo state (user-controlled) - determines open vs closed
   todoState?: TodoState
   // Read/unread tracking - ID of last message user has read
   lastReadMessageId?: string
@@ -355,31 +272,21 @@ export interface Session {
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
   sharedId?: string
+  // Role/type of the last message (for badge display without loading messages)
+  lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   // Current status for ProcessingIndicator (e.g., compacting)
   currentStatus?: {
     message: string
     statusType?: string
   }
-  // Agent status (idle, extracting, ready, active, etc.)
-  agentStatus?: AgentStatus
 }
 
-// AskUserQuestion types (matches shared/agent/craft-agent.ts)
-export interface QuestionOption {
-  label: string;
-  description: string;
-}
-
-export interface Question {
-  question: string;
-  header: string;
-  options: QuestionOption[];
-  multiSelect: boolean;
-}
-
-export interface AskQuestionRequest {
-  requestId: string;
-  questions: Question[];
+/**
+ * Options for creating a new session
+ */
+export interface CreateSessionOptions {
+  /** Onboarding context to show welcome/guidance messages */
+  onboarding?: 'add-source' | 'connect-sources' | 'welcome'
 }
 
 // Events sent from main to renderer
@@ -398,13 +305,11 @@ export type SessionEvent =
   | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete'; level?: 'info' | 'warning' | 'error' | 'success' }
   | { type: 'title_generated'; sessionId: string; title: string }
   | { type: 'working_directory_changed'; sessionId: string; workingDirectory: string }
-  | { type: 'agent_status'; sessionId: string; status: AgentStatus }
   | { type: 'permission_request'; sessionId: string; request: PermissionRequest }
   | { type: 'credential_request'; sessionId: string; request: CredentialRequest }
   // Permission mode events
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode }
   | { type: 'plan_submitted'; sessionId: string; message: CoreMessage }
-  | { type: 'ask_question_request'; sessionId: string; request: AskQuestionRequest }
   // Source events
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   // Background task/shell events
@@ -419,6 +324,11 @@ export type SessionEvent =
   | { type: 'session_unflagged'; sessionId: string }
   | { type: 'todo_state_changed'; sessionId: string; todoState: TodoState }
   | { type: 'session_deleted'; sessionId: string }
+  | { type: 'session_shared'; sessionId: string; sharedUrl: string }
+  | { type: 'session_unshared'; sessionId: string }
+  // Auth request events (unified auth flow)
+  | { type: 'auth_request'; sessionId: string; message: CoreMessage; request: SharedAuthRequest }
+  | { type: 'auth_completed'; sessionId: string; requestId: string; success: boolean; cancelled?: boolean; error?: string }
 
 // Options for sendMessage
 export interface SendMessageOptions {
@@ -446,14 +356,14 @@ export type SessionCommand =
   | { type: 'setSources'; sourceSlugs: string[] }
   | { type: 'showInFinder' }
   | { type: 'shareToViewer' }
+  | { type: 'updateShare' }
   | { type: 'revokeShare' }
+  | { type: 'startOAuth'; requestId: string }
 
 /**
  * Parameters for opening a new chat session
  */
 export interface NewChatActionParams {
-  /** Agent ID to use for the new chat */
-  agentId?: string
   /** Text to pre-fill in the input (not sent automatically) */
   input?: string
   /** Session name */
@@ -485,41 +395,12 @@ export const IPC_CHANNELS = {
   GET_WINDOW_WORKSPACE: 'window:getWorkspace',
   GET_WINDOW_MODE: 'window:getMode',
   OPEN_WORKSPACE: 'window:openWorkspace',
+  OPEN_SESSION_IN_NEW_WINDOW: 'window:openSessionInNewWindow',
   SWITCH_WORKSPACE: 'window:switchWorkspace',
   CLOSE_WINDOW: 'window:close',
-  OPEN_TAB_CONTENT_WINDOW: 'window:openTabContent',
-
-  // Agent management
-  GET_AGENTS: 'agents:get',
-  REFRESH_AGENTS: 'agents:refresh',
-  CHECK_AGENT_AUTH: 'agents:checkAuth',
-  GET_AGENT_AUTH_STATUS: 'agents:getAuthStatus',
-  GET_AGENT_DEFINITION: 'agents:getDefinition',
-  RELOAD_AGENT: 'agents:reloadAgent',
-  RESET_AGENT: 'agents:resetAgent',
-  ENSURE_BUILTIN_AGENT: 'agents:ensureBuiltinAgent',
-
-  // Agent authentication
-  GET_AGENT_AUTH_REQUIREMENTS: 'agents:getAuthRequirements',
-  START_MCP_OAUTH: 'agents:startMcpOAuth',
-  SAVE_MCP_BEARER: 'agents:saveMcpBearer',
-  SAVE_API_CREDENTIALS: 'agents:saveApiCredentials',
-  VALIDATE_MCP_CONNECTION: 'agents:validateMcpConnection',
-
-  // Agent state management (unified state machine, agent-scoped by workspaceId:agentId)
-  AGENT_GET_STATUS: 'agent:getStatus',           // (workspaceId, agentId) → AgentStatus
-  AGENT_ACTIVATE: 'agent:activate',               // (workspaceId, agentId, options?) → AgentStatus
-  AGENT_CONTINUE_MCP_AUTH: 'agent:continueMcpAuth', // (workspaceId, agentId) → AgentStatus
-  AGENT_CONTINUE_API_AUTH: 'agent:continueApiAuth', // (workspaceId, agentId) → AgentStatus
-  AGENT_DEACTIVATE: 'agent:deactivate',           // (workspaceId, agentId) → void
-  AGENT_RELOAD: 'agent:reload',                   // (workspaceId, agentId) → AgentStatus
-  AGENT_RESET: 'agent:reset',                     // (workspaceId, agentId) → void
-  AGENT_MARK_ACTIVE: 'agent:markActive',          // (workspaceId, agentId) → void
 
   // Events from main to renderer
   SESSION_EVENT: 'session:event',
-  AGENT_STATUS_CHANGED: 'agent:statusChanged',    // Broadcast: { workspaceId, agentId, status } - complete state including needsSetup/needsAuth
-  AGENTS_CHANGED: 'agents:changed',               // Broadcast: agents list changed (created/synced/deleted) - triggers sidebar refresh
 
   // File operations
   READ_FILE: 'file:read',
@@ -544,12 +425,12 @@ export const IPC_CHANNELS = {
 
   // Menu actions (main → renderer)
   MENU_NEW_CHAT: 'menu:newChat',
-  MENU_NEW_CHAT_TAB: 'menu:newChatTab',
+  MENU_NEW_WINDOW: 'menu:newWindow',
   MENU_OPEN_SETTINGS: 'menu:openSettings',
   MENU_KEYBOARD_SHORTCUTS: 'menu:keyboardShortcuts',
   MENU_OPEN_HELP: 'menu:openHelp',
 
-  // Deep link navigation (main → renderer)
+  // Deep link navigation (main → renderer, for external craftagents:// URLs)
   DEEP_LINK_NAVIGATE: 'deeplink:navigate',
 
   // Auth
@@ -598,23 +479,27 @@ export const IPC_CHANNELS = {
   SOURCES_START_OAUTH: 'sources:startOAuth',
   SOURCES_SAVE_CREDENTIALS: 'sources:saveCredentials',
   SOURCES_CHANGED: 'sources:changed',
-  // Agent-scoped sources
-  SOURCES_GET_AGENT: 'sources:getAgent',
-  SOURCES_PROMOTE: 'sources:promote',
-
+  
   // Source permissions config
   SOURCES_GET_PERMISSIONS: 'sources:getPermissions',
   // MCP tools listing
   SOURCES_GET_MCP_TOOLS: 'sources:getMcpTools',
 
+  // Skills (workspace-scoped)
+  SKILLS_GET: 'skills:get',
+  SKILLS_GET_FILES: 'skills:getFiles',
+  SKILLS_DELETE: 'skills:delete',
+  SKILLS_OPEN_EDITOR: 'skills:openEditor',
+  SKILLS_OPEN_FINDER: 'skills:openFinder',
+  SKILLS_CHANGED: 'skills:changed',
+
   // Status management (workspace-scoped)
   STATUSES_LIST: 'statuses:list',
   STATUSES_CHANGED: 'statuses:changed',  // Broadcast event
 
-  // Theme management (cascading: app → workspace → agent)
+  // Theme management (cascading: app → workspace)
   THEME_APP_CHANGED: 'theme:appChanged',        // Broadcast event
   THEME_WORKSPACE_CHANGED: 'theme:workspaceChanged',  // Broadcast event
-  THEME_AGENT_CHANGED: 'theme:agentChanged',    // Broadcast event
 
   // Generic workspace image loading/saving (for icons, etc.)
   WORKSPACE_READ_IMAGE: 'workspace:readImage',
@@ -633,10 +518,9 @@ export const IPC_CHANNELS = {
   WORKSPACE_SETTINGS_ENABLE_PORTABLE: 'workspaceSettings:enablePortable',
   WORKSPACE_SETTINGS_DISABLE_PORTABLE: 'workspaceSettings:disablePortable',
 
-  // Theme (cascading: app → workspace → agent)
+  // Theme (cascading: app → workspace)
   THEME_GET_APP: 'theme:getApp',
   THEME_GET_WORKSPACE: 'theme:getWorkspace',
-  THEME_GET_AGENT: 'theme:getAgent',
 
   // Logo URL resolution (uses Node.js filesystem cache)
   LOGO_GET_URL: 'logo:getUrl',
@@ -646,6 +530,11 @@ export const IPC_CHANNELS = {
   NOTIFICATION_NAVIGATE: 'notification:navigate',  // Broadcast: { workspaceId, sessionId }
   NOTIFICATION_GET_ENABLED: 'notification:getEnabled',
   NOTIFICATION_SET_ENABLED: 'notification:setEnabled',
+
+  // Mode cycling settings
+  MODE_CYCLING_GET_ENABLED: 'modeCycling:getEnabled',
+  MODE_CYCLING_SET_ENABLED: 'modeCycling:setEnabled',
+
   BADGE_UPDATE: 'badge:update',
   BADGE_CLEAR: 'badge:clear',
   BADGE_SET_ICON: 'badge:setIcon',
@@ -814,14 +703,13 @@ export type PreviewMode = PreviewData['mode']
 
 // Re-import types for ElectronAPI
 import type { Workspace, SessionMetadata, StoredAttachment as StoredAttachmentType } from '@craft-agent/core/types';
-import type { SubAgentMetadata } from '@craft-agent/core/types';
 
 // Type-safe IPC API exposed to renderer
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
   getSessionMessages(sessionId: string): Promise<Session | null>
-  createSession(workspaceId: string, agentId?: string, agentName?: string): Promise<Session>
+  createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
@@ -841,41 +729,12 @@ export interface ElectronAPI {
   getWindowWorkspace(): Promise<string | null>
   getWindowMode(): Promise<string | null>
   openWorkspace(workspaceId: string): Promise<void>
+  openSessionInNewWindow(workspaceId: string, sessionId: string): Promise<void>
   switchWorkspace(workspaceId: string): Promise<void>
   closeWindow(): Promise<void>
-  openTabContentWindow(params: TabContentWindowParams): Promise<void>
-
-  // Agent management
-  getAgents(workspaceId: string): Promise<SubAgentMetadata[]>
-  refreshAgents(workspaceId: string): Promise<SubAgentMetadata[]>
-  checkAgentAuth(workspaceId: string, agentId: string): Promise<{ needsAuth: boolean; reason?: string }>
-  getAgentAuthStatus(workspaceId: string, agentId: string): Promise<AgentAuthStatus>
-  getAgentDefinition(workspaceId: string, agentId: string): Promise<SubAgentDefinition | null>
-  reloadAgent(workspaceId: string, agentId: string): Promise<boolean>
-  resetAgent(workspaceId: string, agentId: string): Promise<boolean>
-  ensureBuiltinAgent(workspaceId: string, slug: string): Promise<string | null>
-
-  // Agent authentication
-  getAgentAuthRequirements(workspaceId: string, agentId: string): Promise<AgentAuthRequirements>
-  startMcpOAuth(workspaceId: string, agentId: string, serverUrl: string, serverName: string): Promise<OAuthResult>
-  saveMcpBearer(workspaceId: string, agentId: string, serverName: string, token: string): Promise<void>
-  saveApiCredentials(workspaceId: string, agentId: string, apiName: string, credential: string): Promise<void>
-  validateMcpConnection(serverUrl: string, accessToken?: string): Promise<McpValidationResult>
-
-  // Agent state management (unified state machine, agent-scoped)
-  getAgentStatus(workspaceId: string, agentId: string): Promise<AgentStatus>
-  activateAgent(workspaceId: string, agentId: string, options?: AgentActivateOptions): Promise<AgentStatus>
-  continueAfterMcpAuth(workspaceId: string, agentId: string): Promise<AgentStatus>
-  continueAfterApiAuth(workspaceId: string, agentId: string): Promise<AgentStatus>
-  deactivateAgent(workspaceId: string, agentId: string): Promise<void>
-  reloadAgentState(workspaceId: string, agentId: string): Promise<AgentStatus>
-  resetAgentState(workspaceId: string, agentId: string): Promise<void>
-  markAgentActive(workspaceId: string, agentId: string): Promise<void>
 
   // Event listeners
   onSessionEvent(callback: (event: SessionEvent) => void): () => void
-  /** Listens for complete agent state changes (status + needsSetup + needsAuth) */
-  onAgentStatusChanged(callback: (workspaceId: string, agentId: string, status: AgentStatus) => void): () => void
 
   // File operations
   readFile(path: string): Promise<string>
@@ -900,12 +759,11 @@ export interface ElectronAPI {
 
   // Menu event listeners
   onMenuNewChat(callback: () => void): () => void
-  onMenuNewChatTab(callback: () => void): () => void
   onMenuOpenSettings(callback: () => void): () => void
   onMenuKeyboardShortcuts(callback: () => void): () => void
   onMenuOpenHelp(callback: () => void): () => void
 
-  // Deep link navigation listener
+  // Deep link navigation listener (for external craftagents:// URLs)
   onDeepLinkNavigate(callback: (nav: DeepLinkNavigation) => void): () => void
 
   // Auth
@@ -967,17 +825,25 @@ export interface ElectronAPI {
 
   // Sources
   getSources(workspaceId: string): Promise<LoadedSource[]>
-  getAgentSources(workspaceId: string, agentSlug: string): Promise<LoadedSource[]>
   createSource(workspaceId: string, config: Partial<FolderSourceConfig>): Promise<FolderSourceConfig>
   deleteSource(workspaceId: string, sourceSlug: string): Promise<void>
   startSourceOAuth(workspaceId: string, sourceSlug: string): Promise<{ success: boolean; error?: string; accessToken?: string }>
   saveSourceCredentials(workspaceId: string, sourceSlug: string, credential: string): Promise<void>
-  promoteSource(workspaceId: string, agentSlug: string, sourceSlug: string): Promise<void>
   getSourcePermissionsConfig(workspaceId: string, sourceSlug: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
 
   // Sources change listener (live updates when sources are added/removed)
   onSourcesChanged(callback: (sources: LoadedSource[]) => void): () => void
+
+  // Skills
+  getSkills(workspaceId: string): Promise<LoadedSkill[]>
+  getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
+  deleteSkill(workspaceId: string, skillSlug: string): Promise<void>
+  openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
+  openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
+
+  // Skills change listener (live updates when skills are added/removed/modified)
+  onSkillsChanged(callback: (skills: LoadedSkill[]) => void): () => void
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@craft-agent/shared/statuses').StatusConfig[]>
@@ -988,18 +854,13 @@ export interface ElectronAPI {
   readWorkspaceImage(workspaceId: string, relativePath: string): Promise<string>
   writeWorkspaceImage(workspaceId: string, relativePath: string, base64: string, mimeType: string): Promise<void>
 
-  // Agents change listener (live updates when agents are created/synced/deleted)
-  onAgentsChanged(callback: () => void): () => void
-
-  // Theme (cascading: app → workspace → agent)
+  // Theme (cascading: app → workspace)
   getAppTheme(): Promise<import('@config/theme').ThemeOverrides | null>
   getWorkspaceTheme(workspaceId: string): Promise<import('@config/theme').ThemeOverrides | null>
-  getAgentTheme(workspaceId: string, agentSlug: string): Promise<import('@config/theme').ThemeOverrides | null>
 
   // Theme change listeners (live updates when theme.json files change)
   onAppThemeChange(callback: (theme: import('@config/theme').ThemeOverrides | null) => void): () => void
   onWorkspaceThemeChange(callback: (theme: import('@config/theme').ThemeOverrides | null) => void): () => void
-  onAgentThemeChange(callback: (agentSlug: string, theme: import('@config/theme').ThemeOverrides | null) => void): () => void
 
   // Logo URL resolution (uses Node.js filesystem cache for provider domains)
   getLogoUrl(serviceUrl: string, provider?: string): Promise<string | null>
@@ -1008,6 +869,11 @@ export interface ElectronAPI {
   showNotification(title: string, body: string, workspaceId: string, sessionId: string): Promise<void>
   getNotificationsEnabled(): Promise<boolean>
   setNotificationsEnabled(enabled: boolean): Promise<void>
+
+  // Mode cycling
+  getEnabledPermissionModes(): Promise<PermissionMode[]>
+  setEnabledPermissionModes(modes: PermissionMode[]): Promise<void>
+
   updateBadgeCount(count: number): Promise<void>
   clearBadgeCount(): Promise<void>
   setDockIconWithBadge(dataUrl: string): Promise<void>
@@ -1056,22 +922,234 @@ export interface WorkspaceSettings {
  * Navigation payload for deep links (main → renderer)
  */
 export interface DeepLinkNavigation {
+  /** Compound route format (e.g., 'allChats/chat/abc123', 'settings/shortcuts') */
+  view?: string
+  /** Tab type */
   tabType?: string
   tabParams?: Record<string, string>
   action?: string
   actionParams?: Record<string, string>
-  sidebar?: string
-  sidebarParams?: Record<string, string>
+}
+
+// ============================================
+// Unified Navigation State Types
+// ============================================
+
+/**
+ * Chat filter options - determines which sessions to show
+ * - 'allChats': All sessions regardless of status
+ * - 'flagged': Only flagged sessions
+ * - 'state': Sessions with specific status ID
+ */
+export type ChatFilter =
+  | { kind: 'allChats' }
+  | { kind: 'flagged' }
+  | { kind: 'state'; stateId: string }
+
+/**
+ * Settings subpage options
+ */
+export type SettingsSubpage = 'general' | 'shortcuts' | 'preferences'
+
+/**
+ * Source category options for filtering sources
+ */
+export type SourceCategory = 'local-files' | 'online-sources' | 'local-mcp'
+
+/**
+ * Chats navigation state - shows SessionList in navigator
+ */
+export interface ChatsNavigationState {
+  navigator: 'chats'
+  filter: ChatFilter
+  /** Selected chat details, or null for empty state */
+  details: { type: 'chat'; sessionId: string } | null
 }
 
 /**
- * Parameters for opening a tab content window
+ * Sources navigation state - shows SourcesListPanel in navigator
  */
-export interface TabContentWindowParams {
-  workspaceId: string
-  tabType: string
-  /** Tab-specific parameters (sessionId, agentId, path, etc.) */
-  tabParams?: Record<string, string>
+export interface SourcesNavigationState {
+  navigator: 'sources'
+  /** Optional category filter */
+  category?: SourceCategory
+  /** Selected source details, or null for empty state */
+  details: { type: 'source'; sourceSlug: string } | null
+}
+
+/**
+ * Settings navigation state - shows SettingsNavigator in navigator
+ * Settings subpages are the details themselves (no separate selection)
+ */
+export interface SettingsNavigationState {
+  navigator: 'settings'
+  subpage: SettingsSubpage
+}
+
+/**
+ * Skills navigation state - shows SkillsListPanel in navigator
+ */
+export interface SkillsNavigationState {
+  navigator: 'skills'
+  /** Selected skill details, or null for empty state */
+  details: { type: 'skill'; skillSlug: string } | null
+}
+
+/**
+ * Unified navigation state - single source of truth for all 3 panels
+ *
+ * From this state we can derive:
+ * - LeftSidebar: which item is highlighted (from navigator + filter/category/subpage)
+ * - NavigatorPanel: which list/content to show (from navigator)
+ * - MainContentPanel: what details to display (from details or subpage)
+ */
+export type NavigationState =
+  | ChatsNavigationState
+  | SourcesNavigationState
+  | SettingsNavigationState
+  | SkillsNavigationState
+
+/**
+ * Type guard to check if state is chats navigation
+ */
+export const isChatsNavigation = (
+  state: NavigationState
+): state is ChatsNavigationState => state.navigator === 'chats'
+
+/**
+ * Type guard to check if state is sources navigation
+ */
+export const isSourcesNavigation = (
+  state: NavigationState
+): state is SourcesNavigationState => state.navigator === 'sources'
+
+/**
+ * Type guard to check if state is settings navigation
+ */
+export const isSettingsNavigation = (
+  state: NavigationState
+): state is SettingsNavigationState => state.navigator === 'settings'
+
+/**
+ * Type guard to check if state is skills navigation
+ */
+export const isSkillsNavigation = (
+  state: NavigationState
+): state is SkillsNavigationState => state.navigator === 'skills'
+
+/**
+ * Default navigation state - allChats with no selection
+ */
+export const DEFAULT_NAVIGATION_STATE: NavigationState = {
+  navigator: 'chats',
+  filter: { kind: 'allChats' },
+  details: null,
+}
+
+/**
+ * Get a persistence key for localStorage from NavigationState
+ */
+export const getNavigationStateKey = (state: NavigationState): string => {
+  if (state.navigator === 'sources') {
+    const base = state.category ? `sources:${state.category}` : 'sources'
+    if (state.details) {
+      return `${base}/source/${state.details.sourceSlug}`
+    }
+    return base
+  }
+  if (state.navigator === 'skills') {
+    if (state.details) {
+      return `skills/skill/${state.details.skillSlug}`
+    }
+    return 'skills'
+  }
+  if (state.navigator === 'settings') {
+    return `settings:${state.subpage}`
+  }
+  // Chats
+  const f = state.filter
+  let base: string
+  if (f.kind === 'state') base = `state:${f.stateId}`
+  else base = f.kind
+  if (state.details) {
+    return `${base}/chat/${state.details.sessionId}`
+  }
+  return base
+}
+
+/**
+ * Parse a persistence key back to NavigationState
+ * Returns null if the key is invalid
+ */
+export const parseNavigationStateKey = (key: string): NavigationState | null => {
+  // Handle sources
+  if (key === 'sources') return { navigator: 'sources', details: null }
+  if (key.startsWith('sources:')) {
+    const rest = key.slice(8)
+    // Check for source details
+    if (rest.includes('/source/')) {
+      const [categoryPart, , sourceSlug] = rest.split('/')
+      const category = categoryPart as SourceCategory
+      if (!['local-files', 'online-sources', 'local-mcp'].includes(category)) {
+        return { navigator: 'sources', details: null }
+      }
+      if (sourceSlug) {
+        return { navigator: 'sources', category, details: { type: 'source', sourceSlug } }
+      }
+      return { navigator: 'sources', category, details: null }
+    }
+    const category = rest as SourceCategory
+    if (['local-files', 'online-sources', 'local-mcp'].includes(category)) {
+      return { navigator: 'sources', category, details: null }
+    }
+  }
+
+  // Handle skills
+  if (key === 'skills') return { navigator: 'skills', details: null }
+  if (key.startsWith('skills/skill/')) {
+    const skillSlug = key.slice(13)
+    if (skillSlug) {
+      return { navigator: 'skills', details: { type: 'skill', skillSlug } }
+    }
+    return { navigator: 'skills', details: null }
+  }
+
+  // Handle settings
+  if (key === 'settings') return { navigator: 'settings', subpage: 'general' }
+  if (key.startsWith('settings:')) {
+    const subpage = key.slice(9) as SettingsSubpage
+    if (['general', 'shortcuts', 'preferences'].includes(subpage)) {
+      return { navigator: 'settings', subpage }
+    }
+  }
+
+  // Handle chats - parse filter and optional session
+  const parseChatsKey = (filterKey: string, sessionId?: string): NavigationState | null => {
+    let filter: ChatFilter
+    if (filterKey === 'allChats') filter = { kind: 'allChats' }
+    else if (filterKey === 'flagged') filter = { kind: 'flagged' }
+    else if (filterKey.startsWith('state:')) {
+      const stateId = filterKey.slice(6)
+      if (!stateId) return null
+      filter = { kind: 'state', stateId }
+    } else {
+      return null
+    }
+    return {
+      navigator: 'chats',
+      filter,
+      details: sessionId ? { type: 'chat', sessionId } : null,
+    }
+  }
+
+  // Check for chat details
+  if (key.includes('/chat/')) {
+    const [filterPart, , sessionId] = key.split('/')
+    return parseChatsKey(filterPart, sessionId)
+  }
+
+  // Simple filter key
+  return parseChatsKey(key)
 }
 
 declare global {

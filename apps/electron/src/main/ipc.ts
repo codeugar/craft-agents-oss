@@ -5,12 +5,11 @@ import { normalize, isAbsolute, join, basename, dirname, resolve } from 'path'
 import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { SessionManager } from './sessions'
-import { ipcLog } from './logger'
+import { ipcLog, windowLog } from './logger'
 import { WindowManager } from './window-manager'
 import { UnifiedPreviewWindowManager } from './unified-preview-window'
-import { agentService } from './agent-service'
 import { registerOnboardingHandlers } from './onboarding'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AgentActivateOptions, type AuthType, type BillingMethodInfo, type SendMessageOptions, type PreviewData } from '../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AuthType, type BillingMethodInfo, type SendMessageOptions, type PreviewData } from '../shared/types'
 import { readFileAttachment, perf } from '@craft-agent/shared/utils'
 import { getAiCreditTopUpUrl } from '@craft-agent/shared/auth'
 import { getAuthType, setAuthType, getPreferencesPath, getModel, setModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getDefaultPermissionMode, setDefaultPermissionMode, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, type Workspace } from '@craft-agent/shared/config'
@@ -126,7 +125,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Get a single session with messages (for lazy loading)
   ipcMain.handle(IPC_CHANNELS.GET_SESSION_MESSAGES, async (_event, sessionId: string) => {
     const end = perf.start('ipc.getSessionMessages')
-    const session = sessionManager.getSession(sessionId)
+    const session = await sessionManager.getSession(sessionId)
     end()
     return session
   })
@@ -168,9 +167,20 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     windowManager.focusOrCreateWindow(workspaceId)
   })
 
-  // Get mode for the calling window
-  ipcMain.handle(IPC_CHANNELS.GET_WINDOW_MODE, (event) => {
-    return windowManager.getModeForWindow(event.sender.id)
+  // Open a session in a new window
+  ipcMain.handle(IPC_CHANNELS.OPEN_SESSION_IN_NEW_WINDOW, async (_event, workspaceId: string, sessionId: string) => {
+    // Build deep link for session navigation
+    const deepLink = `craftagents://allChats/chat/${sessionId}`
+    windowManager.createWindow({
+      workspaceId,
+      focused: true,
+      initialDeepLink: deepLink,
+    })
+  })
+
+  // Get mode for the calling window (always 'main' now)
+  ipcMain.handle(IPC_CHANNELS.GET_WINDOW_MODE, () => {
+    return 'main'
   })
 
   // Close the calling window
@@ -178,16 +188,22 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     windowManager.closeWindow(event.sender.id)
   })
 
-  // Open a tab content window (lightweight window showing only tab content)
-  ipcMain.handle(IPC_CHANNELS.OPEN_TAB_CONTENT_WINDOW, async (_event, params: { workspaceId: string; tabType: string; tabParams?: Record<string, string> }) => {
-    windowManager.createTabContentWindow(params.workspaceId, params.tabType, params.tabParams)
-  })
-
   // Switch workspace in current window (in-window switching)
   ipcMain.handle(IPC_CHANNELS.SWITCH_WORKSPACE, async (event, workspaceId: string) => {
     const end = perf.start('ipc.switchWorkspace', { workspaceId })
+
     // Update the window's workspace mapping
-    windowManager.updateWindowWorkspace(event.sender.id, workspaceId)
+    const updated = windowManager.updateWindowWorkspace(event.sender.id, workspaceId)
+
+    // If update failed, the window may have been re-created (e.g., after refresh)
+    // Try to register it
+    if (!updated) {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win) {
+        windowManager.registerWindow(win, workspaceId)
+        windowLog.info(`Re-registered window ${event.sender.id} for workspace ${workspaceId}`)
+      }
+    }
 
     // Set up ConfigWatcher for the new workspace
     const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -197,10 +213,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     end()
   })
 
-  // Create a new session (with optional agent assignment)
-  ipcMain.handle(IPC_CHANNELS.CREATE_SESSION, async (_event, workspaceId: string, agentId?: string, agentName?: string) => {
-    const end = perf.start('ipc.createSession', { workspaceId, agentId })
-    const session = sessionManager.createSession(workspaceId, agentId, agentName)
+  // Create a new session
+  ipcMain.handle(IPC_CHANNELS.CREATE_SESSION, async (_event, workspaceId: string, options?: import('../shared/types').CreateSessionOptions) => {
+    const end = perf.start('ipc.createSession', { workspaceId })
+    const session = sessionManager.createSession(workspaceId, options)
     end()
     return session
   })
@@ -225,7 +241,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       const window = callingWorkspaceId
         ? windowManager.getWindowByWorkspace(callingWorkspaceId)
         : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-      if (window && !window.isDestroyed()) {
+      // Check mainFrame - it becomes null when render frame is disposed
+      if (window && !window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
         window.webContents.send(IPC_CHANNELS.SESSION_EVENT, {
           type: 'error',
           sessionId,
@@ -313,8 +330,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       }
       case 'shareToViewer':
         return sessionManager.shareToViewer(sessionId)
+      case 'updateShare':
+        return sessionManager.updateShare(sessionId)
       case 'revokeShare':
         return sessionManager.revokeShare(sessionId)
+      case 'startOAuth':
+        return sessionManager.startSessionOAuth(sessionId, command.requestId)
       default: {
         const _exhaustive: never = command
         throw new Error(`Unknown session command: ${JSON.stringify(command)}`)
@@ -543,140 +564,23 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return !app.isPackaged
   })
 
-  // Agent management
-  ipcMain.handle(IPC_CHANNELS.GET_AGENTS, async (_event, workspaceId: string) => {
-    return agentService.getAgents(workspaceId)
-  })
-
-  ipcMain.handle(IPC_CHANNELS.REFRESH_AGENTS, async (_event, workspaceId: string) => {
-    return agentService.refreshAgents(workspaceId)
-  })
-
-  // Ensure a builtin agent exists in the workspace
-  ipcMain.handle(IPC_CHANNELS.ENSURE_BUILTIN_AGENT, async (_event, workspaceId: string, slug: string) => {
-    return agentService.ensureBuiltinAgent(workspaceId, slug)
-  })
-
-  // Check if an agent needs authentication
-  ipcMain.handle(IPC_CHANNELS.CHECK_AGENT_AUTH, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.checkAgentAuthStatus(workspaceId, agentId)
-  })
-
-  // Get auth status for all MCP servers and APIs (for Info dialog)
-  ipcMain.handle(IPC_CHANNELS.GET_AGENT_AUTH_STATUS, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.getAgentAuthStatus(workspaceId, agentId)
-  })
-
-  // Get full agent definition for Info display
-  ipcMain.handle(IPC_CHANNELS.GET_AGENT_DEFINITION, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.getAgentDefinition(workspaceId, agentId)
-  })
-
-  // Reload agent (clear cache, re-extract from Craft)
-  ipcMain.handle(IPC_CHANNELS.RELOAD_AGENT, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.reloadAgent(workspaceId, agentId)
-  })
-
-  // Reset agent (clear all cached data including credentials)
-  // Uses sessionManager.resetAgent() to properly reset AgentStateManager state
-  ipcMain.handle(IPC_CHANNELS.RESET_AGENT, async (_event, workspaceId: string, agentId: string) => {
-    await sessionManager.resetAgent(workspaceId, agentId)
-    // Broadcast complete state after reset
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-    return true
-  })
-
-  // Agent authentication - get detailed requirements
-  ipcMain.handle(IPC_CHANNELS.GET_AGENT_AUTH_REQUIREMENTS, async (_event, workspaceId: string, agentId: string) => {
-    return agentService.getAuthRequirements(workspaceId, agentId)
-  })
-
-  // Agent authentication - start OAuth flow for MCP server
-  ipcMain.handle(IPC_CHANNELS.START_MCP_OAUTH, async (_event, workspaceId: string, agentId: string, serverUrl: string, serverName: string) => {
-    const result = await agentService.startMcpOAuth(workspaceId, agentId, serverUrl, serverName)
-    // Broadcast complete state on success
-    if (result.success) {
-      await sessionManager.broadcastAgentState(workspaceId, agentId)
-    }
-    return result
-  })
-
-  // Agent authentication - save bearer token for MCP server
-  ipcMain.handle(IPC_CHANNELS.SAVE_MCP_BEARER, async (_event, workspaceId: string, agentId: string, serverName: string, token: string) => {
-    await agentService.saveMcpBearer(workspaceId, agentId, serverName, token)
-    // Broadcast complete state after saving
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-  })
-
-  // Agent authentication - save API credentials
-  ipcMain.handle(IPC_CHANNELS.SAVE_API_CREDENTIALS, async (_event, workspaceId: string, agentId: string, apiName: string, credential: string) => {
-    await agentService.saveApiCredentials(workspaceId, agentId, apiName, credential)
-    // Broadcast complete state after saving
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-  })
-
-  // Agent authentication - validate MCP connection
-  ipcMain.handle(IPC_CHANNELS.VALIDATE_MCP_CONNECTION, async (_event, serverUrl: string, accessToken?: string) => {
-    return agentService.validateMcpConnectionStatus(serverUrl, accessToken)
-  })
-
-  // ============================================================
-  // Agent State Management (agent-scoped, unified state machine)
-  // ============================================================
-
-  // Get current agent status (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_GET_STATUS, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.getAgentStatus(workspaceId, agentId)
-  })
-
-  // Start agent activation flow (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_ACTIVATE, async (_event, workspaceId: string, agentId: string, options?: AgentActivateOptions) => {
-    return sessionManager.activateAgent(workspaceId, agentId, options)
-  })
-
-  // Continue after MCP server auth completes (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_CONTINUE_MCP_AUTH, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.continueAfterMcpAuth(workspaceId, agentId)
-  })
-
-  // Continue after API auth completes (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_CONTINUE_API_AUTH, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.continueAfterApiAuth(workspaceId, agentId)
-  })
-
-  // Deactivate agent (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_DEACTIVATE, async (_event, workspaceId: string, agentId: string) => {
-    sessionManager.deactivateAgent(workspaceId, agentId)
-    // Broadcast complete state after deactivation
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-  })
-
-  // Reload agent (clear cache, re-extract) (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_RELOAD, async (_event, workspaceId: string, agentId: string) => {
-    return sessionManager.reloadAgent(workspaceId, agentId)
-  })
-
-  // Reset agent (clear cache AND credentials) (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_RESET, async (_event, workspaceId: string, agentId: string) => {
-    await sessionManager.resetAgent(workspaceId, agentId)
-    // Broadcast complete state after reset
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-  })
-
-  // Mark agent as active (agent-scoped)
-  ipcMain.handle(IPC_CHANNELS.AGENT_MARK_ACTIVE, async (_event, workspaceId: string, agentId: string) => {
-    sessionManager.markAgentActive(workspaceId, agentId)
-    // Broadcast complete state after marking active
-    await sessionManager.broadcastAgentState(workspaceId, agentId)
-  })
-
-  // Shell operations - open URL in external browser
+  // Shell operations - open URL in external browser (or handle craftagents:// internally)
   ipcMain.handle(IPC_CHANNELS.OPEN_URL, async (_event, url: string) => {
     try {
       // Validate URL format
       const parsed = new URL(url)
+
+      // Handle craftagents:// URLs internally via deep link handler
+      // This ensures ?window= params work correctly for "Open in New Window"
+      if (parsed.protocol === 'craftagents:') {
+        const { handleDeepLink } = await import('./deep-link')
+        await handleDeepLink(url, windowManager)
+        return
+      }
+
+      // External URLs - open in default browser
       if (!['http:', 'https:', 'mailto:', 'craftdocs:'].includes(parsed.protocol)) {
-        throw new Error('Only http, https, mailto, and craftdocs URLs are allowed')
+        throw new Error('Only http, https, mailto, craftdocs URLs are allowed')
       }
       await shell.openExternal(url)
     } catch (error) {
@@ -689,8 +593,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Shell operations - open file in default application
   ipcMain.handle(IPC_CHANNELS.OPEN_FILE, async (_event, path: string) => {
     try {
+      // Resolve relative paths to absolute before validation
+      const absolutePath = resolve(path)
       // Validate path is within allowed directories
-      const safePath = await validateFilePath(path)
+      const safePath = await validateFilePath(absolutePath)
       // openPath opens file with default application (e.g., VS Code for .ts files)
       const result = await shell.openPath(safePath)
       if (result) {
@@ -707,8 +613,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // Shell operations - show file in folder (opens Finder/Explorer with file selected)
   ipcMain.handle(IPC_CHANNELS.SHOW_IN_FOLDER, async (_event, path: string) => {
     try {
+      // Resolve relative paths to absolute before validation
+      const absolutePath = resolve(path)
       // Validate path is within allowed directories
-      const safePath = await validateFilePath(path)
+      const safePath = await validateFilePath(absolutePath)
       shell.showItemInFolder(safePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -1165,48 +1073,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     ipcLog.info(`Saved credentials for source: ${sourceSlug}`)
   })
 
-  // Get agent-scoped sources
-  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_AGENT, async (_event, workspaceId: string, agentSlug: string) => {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) return []
-    const { loadAgentSources } = await import('@craft-agent/shared/sources')
-    return loadAgentSources(workspace.rootPath, agentSlug)
-  })
-
-  // Promote agent source to workspace (copy)
-  ipcMain.handle(IPC_CHANNELS.SOURCES_PROMOTE, async (_event, workspaceId: string, agentSlug: string, sourceSlug: string) => {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-    const { loadAgentSource, createSource, loadSource } = await import('@craft-agent/shared/sources')
-
-    // Load the agent-scoped source
-    const agentSource = loadAgentSource(workspace.rootPath, agentSlug, sourceSlug)
-    if (!agentSource) {
-      throw new Error(`Agent source not found: ${sourceSlug}`)
-    }
-
-    // Check if source already exists at workspace level
-    const existingWorkspaceSource = loadSource(workspace.rootPath, sourceSlug)
-    if (existingWorkspaceSource) {
-      throw new Error(`Source already exists at workspace level: ${sourceSlug}`)
-    }
-
-    // Copy to workspace sources
-    const newConfig = createSource(workspace.rootPath, {
-      name: agentSource.config.name,
-      provider: agentSource.config.provider,
-      type: agentSource.config.type,
-      mcp: agentSource.config.mcp,
-      api: agentSource.config.api,
-      local: agentSource.config.local,
-      iconUrl: agentSource.config.iconUrl,
-      enabled: agentSource.config.enabled,
-    })
-
-    ipcLog.info(`Promoted source ${sourceSlug} from agent ${agentSlug} to workspace`)
-    return newConfig
-  })
-
   // Get permissions config for a source (raw format for UI display)
   ipcMain.handle(IPC_CHANNELS.SOURCES_GET_PERMISSIONS, async (_event, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -1340,6 +1206,117 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       }
       return { success: false, error: errorMessage }
     }
+  })
+
+  // ============================================================
+  // Skills (Workspace-scoped)
+  // ============================================================
+
+  // Get all skills for a workspace
+  ipcMain.handle(IPC_CHANNELS.SKILLS_GET, async (_event, workspaceId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      ipcLog.error(`SKILLS_GET: Workspace not found: ${workspaceId}`)
+      return []
+    }
+    const { loadWorkspaceSkills } = await import('@craft-agent/shared/skills')
+    return loadWorkspaceSkills(workspace.rootPath)
+  })
+
+  // Get files in a skill directory
+  ipcMain.handle(IPC_CHANNELS.SKILLS_GET_FILES, async (_event, workspaceId: string, skillSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      ipcLog.error(`SKILLS_GET_FILES: Workspace not found: ${workspaceId}`)
+      return []
+    }
+
+    const { join } = await import('path')
+    const { readdirSync, statSync } = await import('fs')
+    const { getWorkspaceSkillsPath } = await import('@craft-agent/shared/workspaces')
+
+    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
+    const skillDir = join(skillsDir, skillSlug)
+
+    interface SkillFile {
+      name: string
+      type: 'file' | 'directory'
+      size?: number
+      children?: SkillFile[]
+    }
+
+    function scanDirectory(dirPath: string): SkillFile[] {
+      try {
+        const entries = readdirSync(dirPath, { withFileTypes: true })
+        return entries
+          .filter(entry => !entry.name.startsWith('.')) // Skip hidden files
+          .map(entry => {
+            const fullPath = join(dirPath, entry.name)
+            if (entry.isDirectory()) {
+              return {
+                name: entry.name,
+                type: 'directory' as const,
+                children: scanDirectory(fullPath),
+              }
+            } else {
+              const stats = statSync(fullPath)
+              return {
+                name: entry.name,
+                type: 'file' as const,
+                size: stats.size,
+              }
+            }
+          })
+          .sort((a, b) => {
+            // Directories first, then files
+            if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+            return a.name.localeCompare(b.name)
+          })
+      } catch (err) {
+        ipcLog.error(`SKILLS_GET_FILES: Error scanning ${dirPath}:`, err)
+        return []
+      }
+    }
+
+    return scanDirectory(skillDir)
+  })
+
+  // Delete a skill from a workspace
+  ipcMain.handle(IPC_CHANNELS.SKILLS_DELETE, async (_event, workspaceId: string, skillSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const { deleteSkill } = await import('@craft-agent/shared/skills')
+    deleteSkill(workspace.rootPath, skillSlug)
+    ipcLog.info(`Deleted skill: ${skillSlug}`)
+  })
+
+  // Open skill SKILL.md in editor
+  ipcMain.handle(IPC_CHANNELS.SKILLS_OPEN_EDITOR, async (_event, workspaceId: string, skillSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const { join } = await import('path')
+    const { shell } = await import('electron')
+    const { getWorkspaceSkillsPath } = await import('@craft-agent/shared/workspaces')
+
+    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
+    const skillFile = join(skillsDir, skillSlug, 'SKILL.md')
+    await shell.openPath(skillFile)
+  })
+
+  // Open skill folder in Finder/Explorer
+  ipcMain.handle(IPC_CHANNELS.SKILLS_OPEN_FINDER, async (_event, workspaceId: string, skillSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const { join } = await import('path')
+    const { shell } = await import('electron')
+    const { getWorkspaceSkillsPath } = await import('@craft-agent/shared/workspaces')
+
+    const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
+    const skillDir = join(skillsDir, skillSlug)
+    await shell.showItemInFolder(skillDir)
   })
 
   // ============================================================
@@ -1504,15 +1481,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return loadWorkspaceTheme(workspace.rootPath)
   })
 
-  ipcMain.handle(IPC_CHANNELS.THEME_GET_AGENT, async (_event, workspaceId: string, agentSlug: string) => {
-    const workspace = getWorkspaceByNameOrId(workspaceId)
-    if (!workspace) {
-      return null
-    }
-    const { loadAgentTheme } = await import('@craft-agent/shared/config/storage')
-    return loadAgentTheme(workspace.rootPath, agentSlug)
-  })
-
   // Logo URL resolution (uses Node.js filesystem cache for provider domains)
   ipcMain.handle(IPC_CHANNELS.LOGO_GET_URL, async (_event, serviceUrl: string, provider?: string) => {
     const { getLogoUrl } = await import('@craft-agent/shared/utils/logo')
@@ -1572,4 +1540,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const { isAnyWindowFocused } = require('./notifications')
     return isAnyWindowFocused()
   })
+
+  // Get enabled permission modes for SHIFT+TAB cycling
+  ipcMain.handle(IPC_CHANNELS.MODE_CYCLING_GET_ENABLED, async () => {
+    const { getEnabledPermissionModes } = await import('@craft-agent/shared/config/storage')
+    return getEnabledPermissionModes()
+  })
+
+  // Set enabled permission modes for SHIFT+TAB cycling
+  ipcMain.handle(IPC_CHANNELS.MODE_CYCLING_SET_ENABLED, async (_event, modes: string[]) => {
+    const { setEnabledPermissionModes } = await import('@craft-agent/shared/config/storage')
+    setEnabledPermissionModes(modes as ('safe' | 'ask' | 'allow-all')[])
+  })
+
 }

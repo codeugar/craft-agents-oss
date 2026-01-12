@@ -1,13 +1,13 @@
 import * as React from 'react'
 import type { ComponentEntry } from './types'
-import { AttachmentPreview } from '@/components/chat/AttachmentPreview'
-import { PermissionBanner } from '@/components/chat/PermissionBanner'
-import { SetupAuthBanner } from '@/components/chat/SetupAuthBanner'
+import { AttachmentPreview } from '@/components/app-shell/AttachmentPreview'
+import { PermissionBanner } from '@/components/app-shell/PermissionBanner'
+import { SetupAuthBanner } from '@/components/app-shell/SetupAuthBanner'
 import { TurnCard, type ActivityItem } from '@craft-agent/ui'
-import type { BackgroundTask } from '@/components/chat/ActiveTasksBar'
-import { ActiveOptionBadges } from '@/components/chat/ActiveOptionBadges'
-import { InputContainer } from '@/components/chat/input'
-import type { StructuredResponse } from '@/components/chat/input/structured/types'
+import type { BackgroundTask } from '@/components/app-shell/ActiveTasksBar'
+import { ActiveOptionBadges } from '@/components/app-shell/ActiveOptionBadges'
+import { InputContainer } from '@/components/app-shell/input'
+import type { StructuredResponse } from '@/components/app-shell/input/structured/types'
 import { Button } from '@/components/ui/button'
 import { motion } from 'motion/react'
 import { ArrowUp, Paperclip, ChevronDown, Sparkles } from 'lucide-react'
@@ -692,17 +692,12 @@ export const chatComponents: ComponentEntry[] = [
           type: 'select',
           options: [
             { label: 'Hidden', value: 'hidden' },
-            { label: 'Setup', value: 'setup' },
-            { label: 'Auth', value: 'auth' },
+            { label: 'MCP Auth', value: 'mcp_auth' },
+            { label: 'API Auth', value: 'api_auth' },
+            { label: 'Error', value: 'error' },
           ],
         },
-        defaultValue: 'setup',
-      },
-      {
-        name: 'agentName',
-        description: 'Name of the agent',
-        control: { type: 'string', placeholder: 'Agent name' },
-        defaultValue: 'GitHub Copilot',
+        defaultValue: 'mcp_auth',
       },
       {
         name: 'reason',
@@ -712,9 +707,10 @@ export const chatComponents: ComponentEntry[] = [
       },
     ],
     variants: [
-      { name: 'Setup Needed', props: { state: 'setup', agentName: 'GitHub Copilot' } },
-      { name: 'Auth Needed', props: { state: 'auth', agentName: 'Linear' } },
-      { name: 'Custom Reason', props: { state: 'auth', agentName: 'Slack', reason: 'Your OAuth token has expired. Please re-authenticate to continue.' } },
+      { name: 'MCP Auth', props: { state: 'mcp_auth' } },
+      { name: 'API Auth', props: { state: 'api_auth' } },
+      { name: 'Custom Reason', props: { state: 'api_auth', reason: 'Your OAuth token has expired. Please re-authenticate to continue.' } },
+      { name: 'Error', props: { state: 'error' } },
       { name: 'Hidden', props: { state: 'hidden' } },
     ],
     mockData: () => ({

@@ -243,10 +243,11 @@ navigate(routes.sidebar.flagged())        // Show flagged
 External apps can navigate using `craftagents://` URLs:
 
 ```
-craftagents://tab/settings
-craftagents://tab/chat/session123
-craftagents://action/new-chat?agentId=claude
-craftagents://workspace/{id}/tab/agent-info/my-agent
+craftagents://settings
+craftagents://allChats/chat/session123
+craftagents://sources/source/github
+craftagents://action/new-chat
+craftagents://workspace/{id}/allChats/chat/abc123
 ```
 
 See `CLAUDE.md` for complete route reference.
@@ -256,11 +257,10 @@ See `CLAUDE.md` for complete route reference.
 | File | Purpose |
 |------|---------|
 | `main/index.ts` | App entry, window creation |
-| `main/sessions.ts` | CraftAgent wrapper, event processing, subagent integration |
+| `main/sessions.ts` | CraftAgent wrapper, event processing, source integration |
 | `main/ipc.ts` | IPC channel handlers (sessions, files, shell) |
 | `main/menu.ts` | Application menu (File, Edit, View, Help) |
 | `main/deep-link.ts` | Deep link URL parsing and handling |
-| `main/agent-service.ts` | Agent listing, caching, auth checking |
 | `main/sources-service.ts` | Source loading and authentication service |
 | `preload/index.ts` | Context bridge API |
 | `renderer/App.tsx` | React root, state management |
