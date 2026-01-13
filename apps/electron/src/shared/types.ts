@@ -51,6 +51,16 @@ export interface SkillFile {
   children?: SkillFile[]
 }
 
+/**
+ * File/directory entry in a session folder
+ */
+export interface SessionFile {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size?: number
+}
+
 // Import auth request types for unified auth flow
 import type { AuthRequest as SharedAuthRequest, CredentialInputMode as SharedCredentialInputMode, CredentialAuthRequest as SharedCredentialAuthRequest } from '@craft-agent/shared/agent';
 export type { SharedAuthRequest as AuthRequest };
@@ -390,6 +400,7 @@ export const IPC_CHANNELS = {
   // Workspace management
   GET_WORKSPACES: 'workspaces:get',
   CREATE_WORKSPACE: 'workspaces:create',
+  CHECK_WORKSPACE_SLUG: 'workspaces:checkSlug',
 
   // Window management
   GET_WINDOW_WORKSPACE: 'window:getWorkspace',
@@ -408,6 +419,11 @@ export const IPC_CHANNELS = {
   READ_FILE_ATTACHMENT: 'file:readAttachment',
   STORE_ATTACHMENT: 'file:storeAttachment',
   GENERATE_THUMBNAIL: 'file:generateThumbnail',
+
+  // Session info panel
+  GET_SESSION_FILES: 'sessions:getFiles',
+  GET_SESSION_NOTES: 'sessions:getNotes',
+  SET_SESSION_NOTES: 'sessions:setNotes',
 
   // Theme
   GET_SYSTEM_THEME: 'theme:getSystemPreference',
@@ -728,6 +744,7 @@ export interface ElectronAPI {
   // Workspace management
   getWorkspaces(): Promise<Workspace[]>
   createWorkspace(folderPath: string, name: string): Promise<Workspace>
+  checkWorkspaceSlug(slug: string): Promise<{ exists: boolean; path: string }>
 
   // Window management
   getWindowWorkspace(): Promise<string | null>
@@ -824,6 +841,11 @@ export interface ElectronAPI {
   setDraft(sessionId: string, text: string): Promise<void>
   deleteDraft(sessionId: string): Promise<void>
   getAllDrafts(): Promise<Record<string, string>>
+
+  // Session Info Panel
+  getSessionFiles(sessionId: string): Promise<SessionFile[]>
+  getSessionNotes(sessionId: string): Promise<string>
+  setSessionNotes(sessionId: string, content: string): Promise<void>
 
   // Sources
   getSources(workspaceId: string): Promise<LoadedSource[]>
@@ -937,6 +959,16 @@ export interface DeepLinkNavigation {
 // ============================================
 
 /**
+ * Right sidebar panel types
+ * Defines the content displayed in the right sidebar
+ */
+export type RightSidebarPanel =
+  | { type: 'sessionMetadata' }
+  | { type: 'files'; path?: string }
+  | { type: 'history' }
+  | { type: 'none' }
+
+/**
  * Chat filter options - determines which sessions to show
  * - 'allChats': All sessions regardless of status
  * - 'flagged': Only flagged sessions
@@ -965,6 +997,8 @@ export interface ChatsNavigationState {
   filter: ChatFilter
   /** Selected chat details, or null for empty state */
   details: { type: 'chat'; sessionId: string } | null
+  /** Optional right sidebar panel state */
+  rightSidebar?: RightSidebarPanel
 }
 
 /**
@@ -976,6 +1010,8 @@ export interface SourcesNavigationState {
   category?: SourceCategory
   /** Selected source details, or null for empty state */
   details: { type: 'source'; sourceSlug: string } | null
+  /** Optional right sidebar panel state */
+  rightSidebar?: RightSidebarPanel
 }
 
 /**
@@ -985,6 +1021,8 @@ export interface SourcesNavigationState {
 export interface SettingsNavigationState {
   navigator: 'settings'
   subpage: SettingsSubpage
+  /** Optional right sidebar panel state */
+  rightSidebar?: RightSidebarPanel
 }
 
 /**
@@ -994,6 +1032,8 @@ export interface SkillsNavigationState {
   navigator: 'skills'
   /** Selected skill details, or null for empty state */
   details: { type: 'skill'; skillSlug: string } | null
+  /** Optional right sidebar panel state */
+  rightSidebar?: RightSidebarPanel
 }
 
 /**

@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 1,
   "workspaces": {
     "": {
       "name": "craft-tui-agent",
@@ -76,12 +75,12 @@
     },
     "apps/electron": {
       "name": "@craft-agent/electron",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "dependencies": {
         "@craft-agent/core": "workspace:*",
         "@craft-agent/shared": "workspace:*",
         "@craft-agent/ui": "workspace:*",
-        "@paper-design/shaders-react": "^0.0.68",
+        "@paper-design/shaders-react": "^0.0.69",
         "@pierre/diffs": "^1.0.4",
         "@radix-ui/react-context-menu": "^2.2.16",
         "@radix-ui/react-dialog": "^1.1.15",
@@ -102,6 +101,7 @@
         "sonner": "^2.0.7",
         "strip-markdown": "^6.0.0",
         "unist-util-visit": "^5.0.0",
+        "vaul": "^1.1.2",
       },
     },
     "apps/tui": {
@@ -552,9 +552,9 @@
 
     "@npmcli/fs": ["@npmcli/fs@4.0.0", "", { "dependencies": { "semver": "^7.3.5" } }, "sha512-/xGlezI6xfGO9NwuJlnwz/K14qD1kCSAGtacBHnGzeAIuJGazcp45KP5NuyARXoKb7cwulAGWVsbeSxdG/cb0Q=="],
 
-    "@paper-design/shaders": ["@paper-design/shaders@0.0.68", "", {}, "sha512-HWDb/mYfIDcwRGYjwTFEoupw4PgdmuoNONJ6TIXBaXWj3zdhS38iNehbAWQxWa1NHtOanOeQkbdG0wvaNKhvEw=="],
+    "@paper-design/shaders": ["@paper-design/shaders@0.0.69", "", {}, "sha512-DLO62CNzBhGQEbCGYmaajTzQdooXiuLF3CutF3Xff79PdHtnnG6/1IXw3YlcFC5JyaamenKkMx3kBCkY1dg1KA=="],
 
-    "@paper-design/shaders-react": ["@paper-design/shaders-react@0.0.68", "", { "dependencies": { "@paper-design/shaders": "0.0.68" }, "peerDependencies": { "@types/react": "^18 || ^19", "react": "^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-RaL/OCfaPVyVcPHJnemRuobfgseq1Pb5d4ktjclCmKprUe5Ac5WsexFuJBHpIfrMdYC/bV2ADJj24+dnthTpig=="],
+    "@paper-design/shaders-react": ["@paper-design/shaders-react@0.0.69", "", { "dependencies": { "@paper-design/shaders": "0.0.69" }, "peerDependencies": { "@types/react": "^18 || ^19", "react": "^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-iXZOzzc5u8RJYjXqcP0EU9Q74o0NeAXqIDgNR42c/txNN6BEHJYeEKKzZw7gyeEf5zE6edZ+iqXtj5ZgA6nTpA=="],
 
     "@photostructure/tz-lookup": ["@photostructure/tz-lookup@11.4.0", "", {}, "sha512-yrFaDbQQZVJIzpCTnoghWO8Rttu22Hg7/JkfP3CM8UKniXYzD80cuv4UAsFkzP5Z6XWceWNsQTqUJHKyGNXzLg=="],
 
@@ -2453,6 +2453,8 @@
     "validate-npm-package-license": ["validate-npm-package-license@3.0.4", "", { "dependencies": { "spdx-correct": "^3.0.0", "spdx-expression-parse": "^3.0.0" } }, "sha512-DpKm2Ui/xN7/HQKCtpZxoRWBhZ9Z0kqtygG8XCgNQ8ZlDnxuQmWhj566j8fN4Cu3/JmbhsDo7fcAJq4s9h27Ew=="],
 
     "vary": ["vary@1.1.2", "", {}, "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg=="],
+
+    "vaul": ["vaul@1.1.2", "", { "dependencies": { "@radix-ui/react-dialog": "^1.1.1" }, "peerDependencies": { "react": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-ZFkClGpWyI2WUQjdLJ/BaGuV6AVQiJ3uELGk3OYtP+B6yCO7Cmn9vPFXVJkRaGkOJu3m8bQMgtyzNHixULceQA=="],
 
     "verror": ["verror@1.10.1", "", { "dependencies": { "assert-plus": "^1.0.0", "core-util-is": "1.0.2", "extsprintf": "^1.2.0" } }, "sha512-veufcmxri4e3XSrT0xwfUR7kguIkaxBeosDg00yDWhk49wdwkSUrvvsm7nc75e1PUyvIeZj6nS8VQRYz2/S4Xg=="],
 

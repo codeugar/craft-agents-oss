@@ -473,10 +473,12 @@ export default function AppSettingsPage() {
                     onValueChange={setColorTheme}
                     options={[
                       { value: 'default', label: 'Default' },
-                      ...presetThemes.map(t => ({
-                        value: t.id,
-                        label: t.theme.name || t.id,
-                      })),
+                      ...presetThemes
+                        .filter(t => t.id !== 'default')
+                        .map(t => ({
+                          value: t.id,
+                          label: t.theme.name || t.id,
+                        })),
                     ]}
                   />
                 </SettingsRow>
