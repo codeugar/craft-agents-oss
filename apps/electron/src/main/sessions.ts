@@ -513,7 +513,9 @@ export class SessionManager {
     // In packaged app: use bundled Bun binary
     // In development: use system 'bun' command
     if (app.isPackaged) {
-      const bunPath = join(basePath, 'vendor', 'bun', 'bun')
+      // Use platform-specific binary name (bun.exe on Windows, bun on macOS/Linux)
+      const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun'
+      const bunPath = join(basePath, 'vendor', 'bun', bunBinary)
       if (!existsSync(bunPath)) {
         const error = `Bundled Bun runtime not found at ${bunPath}. The app package may be corrupted.`
         sessionLog.error(error)
