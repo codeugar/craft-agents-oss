@@ -142,4 +142,6 @@ export interface TutorialContextValue {
   isTutorialSkipped: (tutorialId: string) => boolean
   /** Reset progress for a tutorial (for testing) */
   resetTutorial: (tutorialId: string) => void
+  /** Dismiss completion celebration and return to idle */
+  dismissCompletion: () => void
 }

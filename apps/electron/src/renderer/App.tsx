@@ -25,6 +25,7 @@ import {
   TutorialProvider,
   TutorialOverlay,
   TutorialPrompt,
+  TutorialComplete,
   registerTutorial,
   sourceCreationTutorial,
 } from '@/tutorial'
@@ -1205,6 +1206,7 @@ export default function App() {
             {/* Tutorial system overlays */}
             <TutorialOverlay />
             <TutorialPrompt />
+            <TutorialComplete />
           </TutorialProvider>
         </NavigationProvider>
       </TooltipProvider>

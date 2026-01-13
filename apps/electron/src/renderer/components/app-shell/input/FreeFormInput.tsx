@@ -760,6 +760,7 @@ export function FreeFormInput({
                       sourceDropdownOpen && "bg-foreground/5"
                     )}
                     disabled={disabled}
+                    data-tutorial="source-selector-button"
                     onClick={() => {
                       if (!sourceDropdownOpen && sourceButtonRef.current) {
                         const rect = sourceButtonRef.current.getBoundingClientRect()
@@ -852,12 +853,13 @@ export function FreeFormInput({
                         <CommandPrimitive.List className="max-h-[240px] overflow-y-auto p-1">
                           {sources
                             .filter(source => source.config.name.toLowerCase().includes(sourceFilter.toLowerCase()))
-                            .map(source => {
+                            .map((source, index) => {
                               const isEnabled = optimisticSourceSlugs.includes(source.config.slug)
                               return (
                                 <CommandPrimitive.Item
                                   key={source.config.slug}
                                   value={source.config.slug}
+                                  data-tutorial={index === 0 ? "source-dropdown-item-first" : undefined}
                                   onSelect={() => {
                                     const newSlugs = isEnabled
                                       ? optimisticSourceSlugs.filter(slug => slug !== source.config.slug)

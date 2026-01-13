@@ -71,6 +71,9 @@ export function TutorialProvider({
   // Tutorial state
   const [state, setState] = useState<TutorialState>(defaultState)
 
+  // Whether tutorials are enabled for this workspace (loaded from settings)
+  const [tutorialsEnabled, setTutorialsEnabled] = useState(true)
+
   // Track previous workspace ID to detect changes
   const prevWorkspaceIdRef = useRef<string | null | undefined>(workspaceId)
 
@@ -83,6 +86,17 @@ export function TutorialProvider({
   useEffect(() => {
     storage.set(STORAGE_KEY, progress)
   }, [progress])
+
+  // Load tutorials enabled setting when workspace changes
+  useEffect(() => {
+    if (!workspaceId) {
+      setTutorialsEnabled(true) // Default to enabled
+      return
+    }
+    window.electronAPI.getWorkspaceSettings(workspaceId).then((settings) => {
+      setTutorialsEnabled(settings?.tutorialsEnabled ?? true)
+    })
+  }, [workspaceId])
 
   // Track target element position with ResizeObserver
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -143,13 +157,14 @@ export function TutorialProvider({
     })
 
     if (nextIndex >= currentTutorial.steps.length) {
-      // Tutorial complete
+      // Tutorial complete - show celebration
       setProgress((p) => ({
         ...p,
         completedTutorials: [...p.completedTutorials, state.activeTutorialId!],
       }))
       currentTutorial.onComplete?.()
-      setState(defaultState)
+      // Transition to completed status to show celebration popup
+      setState((s) => ({ ...s, status: 'completed', targetRect: null }))
     } else {
       setState((s) => ({ ...s, currentStepIndex: nextIndex, targetRect: null }))
     }
@@ -371,6 +386,8 @@ export function TutorialProvider({
    */
   useEffect(() => {
     if (disableAutoTrigger) return
+    // Don't trigger if tutorials are disabled in settings
+    if (!tutorialsEnabled) return
     // Don't trigger if already in a tutorial or prompting
     if (state.status !== 'idle') return
     // Need a valid workspace
@@ -391,7 +408,7 @@ export function TutorialProvider({
       }, 1000)
       return () => clearTimeout(timer)
     }
-  }, [sourcesCount, progress, state.status, disableAutoTrigger, workspaceId])
+  }, [sourcesCount, progress, state.status, disableAutoTrigger, workspaceId, tutorialsEnabled])
 
   /**
    * Skip/dismiss current tutorial
@@ -456,6 +473,13 @@ export function TutorialProvider({
     }))
   }, [])
 
+  /**
+   * Dismiss completion celebration and return to idle
+   */
+  const dismissCompletion = useCallback(() => {
+    setState(defaultState)
+  }, [])
+
   const value: TutorialContextValue = {
     state,
     currentStep,
@@ -469,6 +493,7 @@ export function TutorialProvider({
     isTutorialCompleted,
     isTutorialSkipped,
     resetTutorial,
+    dismissCompletion,
   }
 
   return (
@@ -493,6 +518,7 @@ const defaultContextValue: TutorialContextValue = {
   isTutorialCompleted: () => false,
   isTutorialSkipped: () => false,
   resetTutorial: () => {},
+  dismissCompletion: () => {},
 }
 
 /**

@@ -57,6 +57,7 @@ export { TutorialProvider, useTutorial, useIsTutorialActive } from './TutorialCo
 // Components
 export { TutorialOverlay } from './TutorialOverlay'
 export { TutorialPrompt } from './TutorialPrompt'
+export { TutorialComplete } from './TutorialComplete'
 
 // Tutorials
 export { sourceCreationTutorial } from './tutorials/source-creation'

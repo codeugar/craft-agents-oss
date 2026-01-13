@@ -1,7 +1,7 @@
 /**
  * Source Creation Tutorial
  *
- * Guides users through adding their first source.
+ * Guides users through adding their first source and using it in a chat.
  * Triggered when workspace has no sources.
  *
  * Flow:
@@ -14,6 +14,13 @@
  * 7. Select "Auto" mode
  * 8. Click Allow button
  * 9. Click Sign in with Google (OAuth)
+ * 10. Click Cloud Services to see the new source
+ * 11. Explain the source details with "Got it!" button
+ * 12. Click New Chat to start a conversation
+ * 13. Click source selector button
+ * 14. Select the Gmail source
+ * 15. Type "list my last 3 emails" - sending disabled
+ * 16. Click send to complete
  */
 
 import type { TutorialDefinition } from '../types'
@@ -144,6 +151,100 @@ export const sourceCreationTutorial: TutorialDefinition = {
       spotlightPadding: 8,
       spotlightRadius: 8,
       delay: 500, // Short delay, rely on MutationObserver to find the element when it appears
+    },
+    // Post-OAuth steps: Explore source and use it in a chat
+    {
+      id: 'click-cloud-services',
+      target: '[data-tutorial="cloud-services-nav"]',
+      title: 'Explore Your Sources',
+      description:
+        'Your Gmail source is now connected! Click "Cloud Services" to see it.',
+      position: 'right',
+      completionEvent: 'click',
+      showArrow: true,
+      spotlightPadding: 6,
+      spotlightRadius: 8,
+      delay: 2000, // Wait for OAuth to complete and source to appear
+    },
+    {
+      id: 'explain-source',
+      target: '[data-tutorial="source-item-first"]',
+      title: 'Your Connected Source',
+      description:
+        'This is your Gmail source. It shows the connection status, type, and available tools. You can click on any source to see its details and manage permissions.',
+      position: 'right',
+      completionEvent: 'custom',
+      nextButton: 'Got it!',
+      showArrow: true,
+      spotlightPadding: 8,
+      spotlightRadius: 8,
+      delay: 500,
+    },
+    {
+      id: 'click-new-chat',
+      target: '[data-tutorial="new-chat-button"]',
+      title: 'Start a Conversation',
+      description:
+        'Now let\'s use your new source! Click "New Chat" to start a conversation.',
+      position: 'right',
+      completionEvent: 'click',
+      showArrow: true,
+      spotlightPadding: 6,
+      spotlightRadius: 8,
+    },
+    {
+      id: 'click-source-selector',
+      target: '[data-tutorial="source-selector-button"]',
+      title: 'Enable Your Source',
+      description:
+        'Click the sources button to choose which sources to use in this chat.',
+      position: 'top',
+      completionEvent: 'click',
+      showArrow: true,
+      spotlightPadding: 6,
+      spotlightRadius: 8,
+      delay: 500,
+    },
+    {
+      id: 'select-gmail-source',
+      target: '[data-tutorial="source-dropdown-item-first"]',
+      title: 'Select Gmail',
+      description:
+        'Click on your Gmail source to enable it for this conversation.',
+      position: 'left',
+      completionEvent: 'click',
+      showArrow: true,
+      spotlightPadding: 4,
+      spotlightRadius: 6,
+      delay: 200,
+    },
+    {
+      id: 'type-query',
+      target: '[data-tutorial="chat-input"]',
+      title: 'Try It Out!',
+      description:
+        'Type "list my last 3 emails" to see your source in action.',
+      position: 'top',
+      completionEvent: 'input_match',
+      expectedInput: 'list my last 3 emails',
+      inputMatchDelay: 2000,
+      showArrow: true,
+      spotlightPadding: 12,
+      spotlightRadius: 8,
+      delay: 300,
+      disableSend: true, // Prevent sending before guided to do so
+    },
+    {
+      id: 'click-send-final',
+      target: '[data-tutorial="send-button"]',
+      title: 'Send Your Request',
+      description:
+        'Click send to ask Gmail for your recent emails!',
+      position: 'left',
+      completionEvent: 'click',
+      showArrow: true,
+      spotlightPadding: 6,
+      spotlightRadius: 8,
     },
   ],
   onComplete: () => {
