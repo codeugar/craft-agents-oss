@@ -1697,17 +1697,12 @@ export class CraftAgent {
           });
 
           // Get recovery actions based on diagnostic code
-          const actions = diagnostics.code === 'credits_exhausted'
-            ? [
-                { key: 'c', label: 'Top up credits', command: '/credits', action: 'credits' as const },
-                { key: 's', label: 'Switch to API key', command: '/settings', action: 'settings' as const },
-              ]
-            : diagnostics.code === 'token_expired' || diagnostics.code === 'mcp_unreachable'
+          const actions = diagnostics.code === 'token_expired' || diagnostics.code === 'mcp_unreachable'
             ? [
                 { key: 'w', label: 'Open workspace menu', command: '/workspace' },
                 { key: 'r', label: 'Retry', action: 'retry' as const },
               ]
-            : diagnostics.code === 'invalid_credentials'
+            : diagnostics.code === 'invalid_credentials' || diagnostics.code === 'insufficient_credits'
             ? [
                 { key: 's', label: 'Update credentials', command: '/settings', action: 'settings' as const },
               ]
@@ -1727,7 +1722,7 @@ export class CraftAgent {
                 ? [...(diagnostics.details || []), `SDK stderr: ${stderrContext}`]
                 : diagnostics.details,
               actions,
-              canRetry: diagnostics.code !== 'credits_exhausted' && diagnostics.code !== 'invalid_credentials',
+              canRetry: diagnostics.code !== 'insufficient_credits' && diagnostics.code !== 'invalid_credentials',
               retryDelayMs: 1000,
               originalError: stderrContext || rawErrorMsg,
             },

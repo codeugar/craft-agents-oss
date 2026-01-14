@@ -459,16 +459,7 @@ export class SessionManager {
 
       sessionLog.info('Reinitializing auth with billing type:', billing.type)
 
-      if (billing.type === 'craft_credits') {
-        const token = await getCraftToken()
-        setAnthropicOptionsEnv({
-          USE_CRAFT_AI_GATEWAY: 'true',
-          CRAFT_API_GATEWAY_TOKEN: token,
-        })
-        // Set placeholder API key so SDK starts
-        process.env.ANTHROPIC_API_KEY = 'craft-credits-placeholder'
-        sessionLog.info('Set Craft API Gateway Token')
-      } else if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
+      if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
         // Use Claude Max subscription via OAuth token
         process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
         delete process.env.ANTHROPIC_API_KEY
@@ -1920,16 +1911,10 @@ export class SessionManager {
         }
       }
 
-      // Inject skill context if skills are mentioned via @mentions
+      // Skills mentioned via @mentions are handled by the Agent SDK's Skill tool
+      // The @skill-name text remains in the message for the agent to process
       if (options?.skillSlugs?.length) {
-        const skillContext = await this.buildSkillContext(
-          managed.workspace.rootPath,
-          options.skillSlugs
-        )
-        if (skillContext) {
-          messageToSend = `${skillContext}\n\n${messageToSend}`
-          sessionLog.info(`Injected ${options.skillSlugs.length} skill(s) context: ${options.skillSlugs.join(', ')}`)
-        }
+        sessionLog.info(`Message contains ${options.skillSlugs.length} skill mention(s): ${options.skillSlugs.join(', ')}`)
       }
 
       sendSpan.mark('chat.starting')
@@ -2729,6 +2714,7 @@ To view this task's output:
   }
 
   /**
+   * @deprecated No longer used. Skills are now handled by the Agent SDK's Skill tool.
    * Build skill context from @mentioned skill slugs
    * Returns XML-formatted skill instructions to prepend to the message
    */
