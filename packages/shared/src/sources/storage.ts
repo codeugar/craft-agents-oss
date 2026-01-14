@@ -514,8 +514,6 @@ export function sourceExists(workspaceRootPath: string, sourceSlug: string): boo
  */
 export interface SourceWithContext {
   config: FolderSourceConfig;
-  /** Always false - agent-scoped sources are no longer supported */
-  isAgentScoped: false;
 }
 
 /**
@@ -527,10 +525,7 @@ export function loadSourceConfigWithFallback(
 ): SourceWithContext | null {
   const config = loadSourceConfig(workspaceRootPath, sourceSlug);
   if (config) {
-    return {
-      config,
-      isAgentScoped: false,
-    };
+    return { config };
   }
   return null;
 }

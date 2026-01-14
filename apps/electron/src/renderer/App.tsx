@@ -401,11 +401,9 @@ export default function App() {
   // Subscribe to theme change events (live updates when theme.json files change)
   useEffect(() => {
     const cleanupApp = window.electronAPI.onAppThemeChange((theme) => {
-      console.log('[App] App theme changed')
       setAppTheme(theme)
     })
     const cleanupWorkspace = window.electronAPI.onWorkspaceThemeChange((theme) => {
-      console.log('[App] Workspace theme changed')
       setWorkspaceTheme(theme)
     })
     // Note: Agent theme changes are not yet wired up (would need active agent tracking)

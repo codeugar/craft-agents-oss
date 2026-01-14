@@ -44,7 +44,7 @@ import {
   type MicrosoftOAuthOptions,
 } from '../auth/microsoft-oauth.ts';
 import { debug } from '../utils/debug.ts';
-import { markSourceAuthenticated } from './storage.ts';
+import { markSourceAuthenticated, loadSourceConfig, saveSourceConfig } from './storage.ts';
 
 /**
  * Result of authentication attempt
@@ -269,6 +269,22 @@ export class SourceCredentialManager {
     if (!credential.expiresAt) return false;
     const fiveMinutes = 5 * 60 * 1000;
     return Date.now() > credential.expiresAt - fiveMinutes;
+  }
+
+  /**
+   * Mark a source as needing re-authentication.
+   * Called when token is missing/expired or token refresh fails.
+   * Updates config.json so the UI shows "needs auth" and the agent gets proper context.
+   */
+  markSourceNeedsReauth(source: LoadedSource, errorMessage: string): void {
+    const config = loadSourceConfig(source.workspaceRootPath, source.config.slug);
+    if (config) {
+      config.isAuthenticated = false;
+      config.connectionStatus = 'needs_auth';
+      config.connectionError = errorMessage;
+      saveSourceConfig(source.workspaceRootPath, config);
+      debug(`[SourceCredentialManager] Marked ${source.config.slug} as needing re-auth: ${errorMessage}`);
+    }
   }
 
   /**
@@ -622,7 +638,9 @@ export class SourceCredentialManager {
       debug(`[SourceCredentialManager] Refreshed Google token for ${source.config.slug}`);
       return result.accessToken;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       debug(`[SourceCredentialManager] Google token refresh failed:`, error);
+      this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
       return null;
     }
   }
@@ -647,7 +665,9 @@ export class SourceCredentialManager {
       debug(`[SourceCredentialManager] Refreshed Slack token for ${source.config.slug}`);
       return result.accessToken;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       debug(`[SourceCredentialManager] Slack token refresh failed:`, error);
+      this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
       return null;
     }
   }
@@ -673,7 +693,9 @@ export class SourceCredentialManager {
       debug(`[SourceCredentialManager] Refreshed Microsoft token for ${source.config.slug}`);
       return result.accessToken;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       debug(`[SourceCredentialManager] Microsoft token refresh failed:`, error);
+      this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
       return null;
     }
   }
@@ -718,7 +740,9 @@ export class SourceCredentialManager {
       debug(`[SourceCredentialManager] Refreshed MCP token for ${source.config.slug}`);
       return tokens.accessToken;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
       debug(`[SourceCredentialManager] MCP token refresh failed:`, error);
+      this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
       return null;
     }
   }

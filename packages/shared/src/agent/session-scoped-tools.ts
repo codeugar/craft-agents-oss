@@ -47,6 +47,7 @@ import {
 import {
   loadSourceConfigWithFallback,
   saveSourceConfigWithContext,
+  getSourcePath,
 } from '../sources/storage.ts';
 import type { FolderSourceConfig, LoadedSource } from '../sources/types.ts';
 import { getSourceCredentialManager } from '../sources/index.ts';
@@ -1316,14 +1317,30 @@ After successful authentication, the tokens are stored and the source is marked 
           };
         }
 
+        // Check if source has valid credentials (not just isAuthenticated flag)
+        // The flag can be stale if token was deleted or expired
         if (source.isAuthenticated) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Source '${args.sourceSlug}' is already authenticated.`,
-            }],
-            isError: false,
+          const credManager = getSourceCredentialManager();
+          const workspaceId = basename(workspaceRootPath);
+          const loadedSource: LoadedSource = {
+            config: source,
+            guide: null,
+            folderPath: getSourcePath(workspaceRootPath, args.sourceSlug),
+            workspaceRootPath,
+            workspaceId,
           };
+          const token = await credManager.getToken(loadedSource);
+          if (token) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Source '${args.sourceSlug}' is already authenticated.`,
+              }],
+              isError: false,
+            };
+          }
+          // Token missing or expired - proceed with re-authentication
+          debug(`[source_google_oauth_trigger] Source '${args.sourceSlug}' marked as authenticated but no valid token found, triggering re-auth`);
         }
 
         // Determine service from config for new pattern
@@ -1467,14 +1484,30 @@ After successful authentication, the tokens are stored and the source is marked 
           };
         }
 
+        // Check if source has valid credentials (not just isAuthenticated flag)
+        // The flag can be stale if token was deleted or expired
         if (source.isAuthenticated) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Source '${args.sourceSlug}' is already authenticated.`,
-            }],
-            isError: false,
+          const credManager = getSourceCredentialManager();
+          const workspaceId = basename(workspaceRootPath);
+          const loadedSource: LoadedSource = {
+            config: source,
+            guide: null,
+            folderPath: getSourcePath(workspaceRootPath, args.sourceSlug),
+            workspaceRootPath,
+            workspaceId,
           };
+          const token = await credManager.getToken(loadedSource);
+          if (token) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Source '${args.sourceSlug}' is already authenticated.`,
+              }],
+              isError: false,
+            };
+          }
+          // Token missing or expired - proceed with re-authentication
+          debug(`[source_slack_oauth_trigger] Source '${args.sourceSlug}' marked as authenticated but no valid token found, triggering re-auth`);
         }
 
         // Determine service from config for new pattern
@@ -1603,14 +1636,30 @@ After successful authentication, the tokens are stored and the source is marked 
           };
         }
 
+        // Check if source has valid credentials (not just isAuthenticated flag)
+        // The flag can be stale if token was deleted or expired
         if (source.isAuthenticated) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `Source '${args.sourceSlug}' is already authenticated.`,
-            }],
-            isError: false,
+          const credManager = getSourceCredentialManager();
+          const workspaceId = basename(workspaceRootPath);
+          const loadedSource: LoadedSource = {
+            config: source,
+            guide: null,
+            folderPath: getSourcePath(workspaceRootPath, args.sourceSlug),
+            workspaceRootPath,
+            workspaceId,
           };
+          const token = await credManager.getToken(loadedSource);
+          if (token) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `Source '${args.sourceSlug}' is already authenticated.`,
+              }],
+              isError: false,
+            };
+          }
+          // Token missing or expired - proceed with re-authentication
+          debug(`[source_microsoft_oauth_trigger] Source '${args.sourceSlug}' marked as authenticated but no valid token found, triggering re-auth`);
         }
 
         // Determine service from config for new pattern

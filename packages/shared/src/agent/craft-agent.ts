@@ -424,6 +424,10 @@ export class CraftAgent {
   // Callback when config file validation fails
   public onConfigValidationError: ((file: string, errors: ValidationIssue[]) => void) | null = null;
 
+  // Callback when a source tool is called but the source isn't enabled in the session.
+  // The callback should enable the source and return true if successful, false otherwise.
+  // This enables auto-enabling sources when the agent tries to use their tools.
+  public onSourceActivationRequest: ((sourceSlug: string) => Promise<boolean>) | null = null;
 
   constructor(config: CraftAgentConfig) {
     this.config = config;
@@ -914,9 +918,10 @@ export class CraftAgent {
               }
 
               // ============================================================
-              // SOURCE BLOCKING: Block tools from disabled sources
+              // SOURCE BLOCKING & AUTO-ENABLE: Handle tools from sources
               // Sources can be disabled mid-conversation, so we check
-              // against the current active source set on each tool call
+              // against the current active source set on each tool call.
+              // If a source exists but isn't enabled, try to auto-enable it.
               // ============================================================
               if (input.tool_name.startsWith('mcp__')) {
                 // Extract server name from tool name (mcp__<server>__<tool>)
@@ -931,12 +936,52 @@ export class CraftAgent {
                     // Check if source server is active
                     const isActive = this.activeSourceServerNames.has(serverName);
                     if (!isActive) {
-                      this.onDebug?.(`BLOCKED source tool: ${input.tool_name} (source "${serverName}" is no longer available)`);
-                      return {
-                        continue: false,
-                        decision: 'block' as const,
-                        reason: `Source "${serverName}" is no longer available. The source may have been disabled or its credentials expired. Please check the source status and re-enable it if needed.`,
-                      };
+                      // Check if this source exists in workspace (just not enabled in session)
+                      const sourceExists = this.allSources.some(s => s.config.slug === serverName);
+
+                      if (sourceExists && this.onSourceActivationRequest) {
+                        // Try to auto-enable the source
+                        this.onDebug?.(`Source "${serverName}" not active, attempting auto-enable...`);
+                        try {
+                          const activated = await this.onSourceActivationRequest(serverName);
+                          if (activated) {
+                            this.onDebug?.(`Source "${serverName}" auto-enabled successfully`);
+                            // Source is now active, allow the tool call to proceed
+                            // (continue to other checks below)
+                          } else {
+                            // Activation failed (e.g., needs auth)
+                            this.onDebug?.(`Source "${serverName}" auto-enable failed (may need authentication)`);
+                            return {
+                              continue: false,
+                              decision: 'block' as const,
+                              reason: `Source "${serverName}" could not be activated. It may require authentication. Please check the source status and authenticate if needed.`,
+                            };
+                          }
+                        } catch (error) {
+                          this.onDebug?.(`Source "${serverName}" auto-enable error: ${error}`);
+                          return {
+                            continue: false,
+                            decision: 'block' as const,
+                            reason: `Failed to activate source "${serverName}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+                          };
+                        }
+                      } else if (sourceExists) {
+                        // Source exists but no activation handler - just inform
+                        this.onDebug?.(`BLOCKED source tool: ${input.tool_name} (source "${serverName}" exists but is not enabled)`);
+                        return {
+                          continue: false,
+                          decision: 'block' as const,
+                          reason: `Source "${serverName}" is available but not enabled for this session. Please enable it in the sources panel.`,
+                        };
+                      } else {
+                        // Source doesn't exist at all
+                        this.onDebug?.(`BLOCKED source tool: ${input.tool_name} (source "${serverName}" does not exist)`);
+                        return {
+                          continue: false,
+                          decision: 'block' as const,
+                          reason: `Source "${serverName}" is not available. The source may have been removed or its credentials expired.`,
+                        };
+                      }
                     }
                   }
                 }
@@ -1796,6 +1841,14 @@ export class CraftAgent {
       (s) => !this.knownSourceSlugs.has(s.config.slug)
     );
 
+    // Find active sources that need attention (needs_auth or failed status)
+    const activeSources = this.allSources.filter(
+      (s) => this.intendedActiveSlugs.has(s.config.slug)
+    );
+    const sourcesNeedingAttention = activeSources.filter(
+      (s) => s.config.connectionStatus === 'needs_auth' || s.config.connectionStatus === 'failed'
+    );
+
     // Check if this is the first message (no sources known yet)
     const isFirstMessage = this.knownSourceSlugs.size === 0;
 
@@ -1844,22 +1897,90 @@ export class CraftAgent {
 
     let output = `<sources>\n${parts.join('\n')}\n</sources>`;
 
-    // Inject service knowledge for active sources (from bundled guides)
-    // Only inject for sources not yet seen this session to avoid repetition
-    if (unseenSources.length > 0) {
-      const { getSourceKnowledge } = require('../docs/source-guides.ts');
-      for (const s of unseenSources) {
-        // Only inject for active sources
-        if (this.intendedActiveSlugs.has(s.config.slug)) {
-          const knowledge = getSourceKnowledge(s.config);
-          if (knowledge) {
-            output += `\n\n<source_context source="${s.config.slug}">\n${knowledge}\n</source_context>`;
-          }
+    // Import guide knowledge utility
+    const { getSourceKnowledge } = require('../docs/source-guides.ts');
+
+    // PRIORITY 1: Inject issue context for sources needing attention (auth failed, etc.)
+    // These are ALWAYS shown, regardless of "seen" status, to ensure agent can troubleshoot
+    for (const s of sourcesNeedingAttention) {
+      const knowledge = getSourceKnowledge(s.config);
+      const status = s.config.connectionStatus;
+      output += `\n\n<source_issue source="${s.config.slug}" status="${status}">`;
+      output += `\nThis source needs attention:`;
+      if (s.config.connectionError) {
+        output += `\nError: ${s.config.connectionError}`;
+      }
+      output += `\n\nGuide:\n${knowledge || 'No guide available'}`;
+
+      // Provide appropriate fix instructions based on auth type
+      const authTool = this.getAuthToolName(s);
+      if (authTool) {
+        output += `\n\nTo fix: Re-authenticate using ${authTool}.`;
+      } else {
+        // No-auth sources - suggest checking config/connectivity
+        output += `\n\nTo fix: This source does not require authentication. Check the server URL, network connectivity, or source configuration.`;
+      }
+      output += `\n</source_issue>`;
+    }
+
+    // PRIORITY 2: Inject service knowledge for new active sources (from bundled guides)
+    // Only inject for sources not yet seen this session AND not already shown above
+    const sourcesNeedingAttentionSlugs = new Set(sourcesNeedingAttention.map(s => s.config.slug));
+    for (const s of unseenSources) {
+      // Only inject for active sources that aren't already shown in source_issue blocks
+      if (this.intendedActiveSlugs.has(s.config.slug) && !sourcesNeedingAttentionSlugs.has(s.config.slug)) {
+        const knowledge = getSourceKnowledge(s.config);
+        if (knowledge) {
+          output += `\n\n<source_context source="${s.config.slug}">\n${knowledge}\n</source_context>`;
         }
       }
     }
 
     return output;
+  }
+
+  /**
+   * Get the correct authentication tool name for a source, or null if no auth is needed.
+   * Tool names are based on source type and provider, not the source slug.
+   */
+  private getAuthToolName(source: LoadedSource): string | null {
+    const { type, provider, mcp, api } = source.config;
+
+    // MCP sources
+    if (type === 'mcp') {
+      if (mcp?.authType === 'oauth') {
+        return 'source_oauth_trigger';
+      }
+      if (mcp?.authType === 'bearer') {
+        return 'source_credential_prompt';
+      }
+      // authType: 'none' or undefined (stdio) - no auth needed
+      return null;
+    }
+
+    // API sources: check provider for specific OAuth triggers
+    if (type === 'api') {
+      // Check for no-auth APIs first
+      if (api?.authType === 'none' || api?.authType === undefined) {
+        return null;
+      }
+
+      // OAuth providers have specific triggers
+      switch (provider) {
+        case 'google':
+          return 'source_google_oauth_trigger';
+        case 'slack':
+          return 'source_slack_oauth_trigger';
+        case 'microsoft':
+          return 'source_microsoft_oauth_trigger';
+        default:
+          // Non-OAuth API sources (api key, bearer, header, query) use credential prompt
+          return 'source_credential_prompt';
+      }
+    }
+
+    // Local sources or unknown - no auth
+    return null;
   }
 
   /**
@@ -2795,6 +2916,14 @@ export class CraftAgent {
   }
 
   /**
+   * Mark a source as unseen so its guide will be re-injected on next message.
+   * Call this after re-authentication or when source state changes significantly.
+   */
+  markSourceUnseen(slug: string): void {
+    this.knownSourceSlugs.delete(slug);
+  }
+
+  /**
    * Set temporary clarifications that are injected into the system prompt
    * but not yet persisted to the Craft document
    */
@@ -2872,6 +3001,7 @@ export class CraftAgent {
     this.onSourceChange = null;
     this.onSourcesListChange = null;
     this.onConfigValidationError = null;
+    this.onSourceActivationRequest = null;
 
     // Stop config watcher
     this.stopConfigWatcher();
