@@ -108,6 +108,64 @@ esac
 platform="${os}-${arch}"
 echo "Detected platform: $platform"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Linux Dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Install libsecret-tools on Linux for Claude Max OAuth credential reading
+# This provides 'secret-tool' which reads from GNOME Keyring or KDE Wallet
+if [ "$os" = "linux" ]; then
+    if ! command -v secret-tool >/dev/null 2>&1; then
+        info "Installing libsecret-tools for credential storage..."
+
+        # Detect package manager and install
+        if command -v apt-get >/dev/null 2>&1; then
+            # Debian/Ubuntu
+            if sudo -n true 2>/dev/null; then
+                sudo apt-get update -qq && sudo apt-get install -y -qq libsecret-tools
+            else
+                warn "libsecret-tools not installed (requires sudo)"
+                echo "  Install manually: sudo apt-get install libsecret-tools"
+                echo "  Or the app will fall back to ~/.claude/.credentials.json"
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            # Fedora/RHEL
+            if sudo -n true 2>/dev/null; then
+                sudo dnf install -y -q libsecret
+            else
+                warn "libsecret not installed (requires sudo)"
+                echo "  Install manually: sudo dnf install libsecret"
+            fi
+        elif command -v pacman >/dev/null 2>&1; then
+            # Arch Linux
+            if sudo -n true 2>/dev/null; then
+                sudo pacman -S --noconfirm --quiet libsecret
+            else
+                warn "libsecret not installed (requires sudo)"
+                echo "  Install manually: sudo pacman -S libsecret"
+            fi
+        elif command -v zypper >/dev/null 2>&1; then
+            # openSUSE
+            if sudo -n true 2>/dev/null; then
+                sudo zypper install -y -q libsecret-tools
+            else
+                warn "libsecret-tools not installed (requires sudo)"
+                echo "  Install manually: sudo zypper install libsecret-tools"
+            fi
+        else
+            warn "Could not detect package manager to install libsecret-tools"
+            echo "  The app will fall back to ~/.claude/.credentials.json for credentials"
+        fi
+
+        # Verify installation
+        if command -v secret-tool >/dev/null 2>&1; then
+            success "libsecret-tools installed"
+        fi
+    else
+        success "libsecret-tools already installed"
+    fi
+fi
+
 mkdir -p "$DOWNLOAD_DIR"
 
 # Get latest version

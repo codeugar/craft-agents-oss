@@ -8,6 +8,28 @@ This guide covers building the Craft Agent Electron desktop app for macOS, Windo
 - [Node.js](https://nodejs.org) 18+ (required for electron-builder)
 - Git
 
+### Platform-Specific Dependencies
+
+#### Linux
+
+For Claude Max OAuth credential reading, install `libsecret-tools`:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y libsecret-tools
+
+# Fedora/RHEL
+sudo dnf install -y libsecret
+
+# Arch Linux
+sudo pacman -S libsecret
+
+# openSUSE
+sudo zypper install -y libsecret-tools
+```
+
+This provides `secret-tool` which reads credentials from GNOME Keyring or KDE Wallet. If not installed, the app falls back to reading from `~/.claude/.credentials.json`.
+
 ### Install Bun
 
 ```bash
