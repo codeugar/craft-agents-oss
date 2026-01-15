@@ -307,7 +307,7 @@ html.dark[data-scenic]::after {
   content: '';
   position: fixed;
   inset: 0;
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1));
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4));
   z-index: -1;
   pointer-events: none;
 }
@@ -325,7 +325,7 @@ html[data-scenic][data-theme-override]::before {
 /* Scenic mode: Make background color semi-transparent for glass effect
    Panels with bg-background will become translucent glass */
 html[data-scenic] {
-  --background: oklch(0.2 0.005 270 / 0.45);
+  --background: oklch(0.2 0.005 270 / 0.55);
 }
 
 /* Inter Font - Opt-in via data-font="inter" attribute
