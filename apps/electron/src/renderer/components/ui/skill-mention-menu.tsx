@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
-import type { LoadedSkill } from '../../../../shared/types'
+import type { LoadedSkill } from '../../../shared/types'
 
 // ============================================================================
 // Types

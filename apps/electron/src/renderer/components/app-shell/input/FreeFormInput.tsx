@@ -22,10 +22,13 @@ import {
   type SlashCommandId,
 } from '@/components/ui/slash-command-menu'
 import {
-  InlineSkillMention,
-  useInlineSkillMention,
-} from '@/components/ui/skill-mention-menu'
-import { parseSkillMentions } from '@/lib/skill-mentions'
+  InlineMentionMenu,
+  useInlineMention,
+  type MentionItem,
+  type MentionItemType,
+} from '@/components/ui/mention-menu'
+import { ActiveMentionBadges, type ParsedMention } from '@/components/ui/mention-badge'
+import { parseMentions, removeMention } from '@/lib/mentions'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -337,12 +340,96 @@ export function FreeFormInput({
     activeCommands,
   })
 
-  // Inline skill mention hook (for @mentions)
-  const inlineSkill = useInlineSkillMention({
+  // Get recent folders and home directory for mention menu
+  const [recentFolders, setRecentFolders] = React.useState<string[]>([])
+  const [homeDir, setHomeDir] = React.useState<string>('')
+
+  React.useEffect(() => {
+    setRecentFolders(getRecentDirs())
+    window.electronAPI?.getHomeDir?.().then((dir: string) => {
+      if (dir) setHomeDir(dir)
+    })
+  }, [])
+
+  // Handle mention selection (sources, folders, skills)
+  const handleMentionSelect = React.useCallback((item: MentionItem) => {
+    // For sources: enable the source immediately
+    if (item.type === 'source' && item.source && onSourcesChange) {
+      const slug = item.source.config.slug
+      if (!optimisticSourceSlugs.includes(slug)) {
+        const newSlugs = [...optimisticSourceSlugs, slug]
+        setOptimisticSourceSlugs(newSlugs)
+        onSourcesChange(newSlugs)
+      }
+    }
+
+    // For folders: change working directory
+    if (item.type === 'folder' && item.path && onWorkingDirectoryChange) {
+      addRecentDir(item.path)
+      setRecentFolders(getRecentDirs())
+      onWorkingDirectoryChange(item.path)
+    }
+
+    // Skills don't need special handling - just the text insertion
+  }, [optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange])
+
+  // Inline mention hook (unified for skills, sources, and folders)
+  const inlineMention = useInlineMention({
     textareaRef: textareaRef as React.RefObject<HTMLTextAreaElement>,
     skills,
-    onSelect: () => {}, // Selection handled in handleInlineSkillSelect
+    sources,
+    recentFolders,
+    homeDir,
+    onSelect: handleMentionSelect,
   })
+
+  // Compute active mentions from input text for badge display
+  const activeMentions = React.useMemo((): ParsedMention[] => {
+    const skillSlugs = skills.map(s => s.slug)
+    const sourceSlugs = sources.map(s => s.config.slug)
+    const parsed = parseMentions(input, skillSlugs, sourceSlugs)
+
+    const mentions: ParsedMention[] = []
+
+    // Add skill mentions
+    for (const slug of parsed.skills) {
+      const skill = skills.find(s => s.slug === slug)
+      if (skill) {
+        mentions.push({
+          id: slug,
+          type: 'skill',
+          label: skill.metadata.name,
+          skill,
+        })
+      }
+    }
+
+    // Add source mentions
+    for (const slug of parsed.sources) {
+      const source = sources.find(s => s.config.slug === slug)
+      if (source) {
+        mentions.push({
+          id: slug,
+          type: 'source',
+          label: source.config.name,
+          source,
+        })
+      }
+    }
+
+    // Add folder mentions
+    for (const path of parsed.folders) {
+      const folderName = path.split('/').pop() || path
+      mentions.push({
+        id: path,
+        type: 'folder',
+        label: folderName,
+        path,
+      })
+    }
+
+    return mentions
+  }, [input, skills, sources])
 
   // Report height changes to parent (for external animation sync)
   React.useLayoutEffect(() => {
@@ -565,14 +652,37 @@ export function FreeFormInput({
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
-    // Parse @mentions to get skill slugs
-    const availableSlugs = skills.map(s => s.slug)
-    const mentionedSkillSlugs = parseSkillMentions(input, availableSlugs)
+    // Parse all @mentions (skills, sources, folders)
+    const skillSlugs = skills.map(s => s.slug)
+    const sourceSlugs = sources.map(s => s.config.slug)
+    const mentions = parseMentions(input, skillSlugs, sourceSlugs)
+
+    // Enable any mentioned sources that aren't already enabled
+    if (mentions.sources.length > 0 && onSourcesChange) {
+      const newSlugs = [...new Set([...optimisticSourceSlugs, ...mentions.sources])]
+      if (newSlugs.length > optimisticSourceSlugs.length) {
+        setOptimisticSourceSlugs(newSlugs)
+        onSourcesChange(newSlugs)
+      }
+    }
+
+    // Change working directory if a folder was mentioned (use the last one)
+    if (mentions.folders.length > 0 && onWorkingDirectoryChange) {
+      const lastFolder = mentions.folders[mentions.folders.length - 1]
+      // Expand ~ to home directory if needed
+      const expandedPath = lastFolder.startsWith('~/')
+        ? (homeDir || '') + lastFolder.slice(1)
+        : lastFolder
+      if (expandedPath) {
+        addRecentDir(expandedPath)
+        onWorkingDirectoryChange(expandedPath)
+      }
+    }
 
     onSubmit(
       input.trim(),
       attachments.length > 0 ? attachments : undefined,
-      mentionedSkillSlugs.length > 0 ? mentionedSkillSlugs : undefined
+      mentions.skills.length > 0 ? mentions.skills : undefined
     )
     setInput('')
     setAttachments([])
@@ -587,7 +697,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, disabled, disableSend, onInputChange, onSubmit, skills])
+  }, [input, attachments, disabled, disableSend, onInputChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -613,15 +723,15 @@ export function FreeFormInput({
       return
     }
 
-    // Don't submit when skill mention menu is open - let it handle the Enter key
-    if (inlineSkill.isOpen) {
+    // Don't submit when mention menu is open - let it handle the Enter key
+    if (inlineMention.isOpen) {
       if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // These keys are handled by the InlineSkillMention component
+        // These keys are handled by the InlineMentionMenu component
         return
       }
       if (e.key === 'Escape') {
         e.preventDefault()
-        inlineSkill.close()
+        inlineMention.close()
         return
       }
     }
@@ -661,8 +771,8 @@ export function FreeFormInput({
     // Update inline slash command state
     inlineSlash.handleInputChange(value, cursorPosition)
 
-    // Update inline skill mention state (for @mentions)
-    inlineSkill.handleInputChange(value, cursorPosition)
+    // Update inline mention state (for @mentions - skills, sources, folders)
+    inlineMention.handleInputChange(value, cursorPosition)
 
     // Auto-capitalize first letter (but not for slash commands or @mentions)
     if (value.length > 0 && value.charAt(0) !== '/' && value.charAt(0) !== '@') {
@@ -693,21 +803,24 @@ export function FreeFormInput({
     textareaRef.current?.focus()
   }, [inlineSlash, syncToParent, textareaRef])
 
-  // Handle inline skill mention selection (inserts @slug)
-  const handleInlineSkillSelect = React.useCallback((slug: string) => {
-    const newValue = inlineSkill.handleSelect(slug)
+  // Handle inline mention selection (inserts appropriate mention text)
+  const handleInlineMentionSelect = React.useCallback((item: MentionItem) => {
+    const newValue = inlineMention.handleSelect(item)
     setInput(newValue)
     syncToParent(newValue)
-    // Move cursor after the inserted @slug
+    // Focus textarea
     setTimeout(() => {
-      if (textareaRef.current) {
-        const cursorPos = newValue.indexOf('@' + slug) + slug.length + 2 // +2 for @ and space
-        textareaRef.current.selectionStart = cursorPos
-        textareaRef.current.selectionEnd = cursorPos
-        textareaRef.current.focus()
-      }
+      textareaRef.current?.focus()
     }, 0)
-  }, [inlineSkill, syncToParent, textareaRef])
+  }, [inlineMention, syncToParent, textareaRef])
+
+  // Handle removing a mention from the badge row
+  const handleRemoveMention = React.useCallback((id: string, type: MentionItemType) => {
+    const newValue = removeMention(input, type, id)
+    setInput(newValue)
+    syncToParent(newValue)
+    textareaRef.current?.focus()
+  }, [input, syncToParent, textareaRef])
 
   const hasContent = input.trim() || attachments.length > 0
 
@@ -738,15 +851,23 @@ export function FreeFormInput({
           position={inlineSlash.position}
         />
 
-        {/* Inline Skill Mention Autocomplete */}
-        <InlineSkillMention
-          open={inlineSkill.isOpen}
-          onOpenChange={(open) => !open && inlineSkill.close()}
-          skills={skills}
-          onSelect={handleInlineSkillSelect}
-          filter={inlineSkill.filter}
-          position={inlineSkill.position}
+        {/* Inline Mention Autocomplete (skills, sources, folders) */}
+        <InlineMentionMenu
+          open={inlineMention.isOpen}
+          onOpenChange={(open) => !open && inlineMention.close()}
+          sections={inlineMention.sections}
+          onSelect={handleInlineMentionSelect}
+          filter={inlineMention.filter}
+          position={inlineMention.position}
           workspaceId={workspaceId}
+          maxWidth={280}
+        />
+
+        {/* Active Mention Badges (shown when mentions exist in input) */}
+        <ActiveMentionBadges
+          mentions={activeMentions}
+          workspaceId={workspaceId}
+          onRemove={handleRemoveMention}
         />
 
         {/* Attachment Preview */}

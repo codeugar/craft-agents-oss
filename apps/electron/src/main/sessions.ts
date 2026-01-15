@@ -1,5 +1,4 @@
 import { app } from 'electron'
-import { FEATURE_FLAGS } from '../shared/feature-flags'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { rm, readFile } from 'fs/promises'
@@ -44,7 +43,7 @@ import { getCraftToken } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
-import { generateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, fetchRandomPexelsImage } from '@craft-agent/shared/utils'
+import { generateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf } from '@craft-agent/shared/utils'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
 
 /**
@@ -156,8 +155,6 @@ interface ManagedSession {
   sharedId?: string
   // Role/type of the last message (for badge display without loading messages)
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
-  // Background image URL (from Pexels)
-  backgroundImageUrl?: string
   // Message queue for handling new messages while processing
   // When a message arrives during processing, we interrupt and queue
   messageQueue: Array<{
@@ -577,7 +574,6 @@ export class SessionManager {
             workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
             sdkCwd: meta.sdkCwd,
             lastMessageRole: meta.lastMessageRole,
-            backgroundImageUrl: meta.backgroundImageUrl,
             messageQueue: [],
             backgroundShellCommands: new Map(),
             messagesLoaded: false,  // Mark as not loaded
@@ -902,6 +898,27 @@ export class SessionManager {
     return getWorkspaces()
   }
 
+  /**
+   * Reload all sessions from disk.
+   * Used after importing sessions to refresh the in-memory session list.
+   */
+  reloadSessions(): void {
+    this.loadSessionsFromDisk()
+  }
+
+  /**
+   * Find a session by its SDK session ID.
+   * Used for Claude Code resume deep links.
+   */
+  findSessionBySdkId(sdkSessionId: string): string | null {
+    for (const [id, session] of this.sessions) {
+      if (session.sdkSessionId === sdkSessionId) {
+        return id
+      }
+    }
+    return null
+  }
+
   getSessions(): Session[] {
     // Returns session metadata only - messages are NOT included to save memory
     // Use getSession(id) to load messages for a specific session
@@ -923,7 +940,6 @@ export class SessionManager {
         sharedUrl: m.sharedUrl,
         sharedId: m.sharedId,
         lastMessageRole: m.lastMessageRole,
-        backgroundImageUrl: m.backgroundImageUrl,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -958,7 +974,6 @@ export class SessionManager {
       sharedUrl: m.sharedUrl,
       sharedId: m.sharedId,
       lastMessageRole: m.lastMessageRole,
-      backgroundImageUrl: m.backgroundImageUrl,
     }
   }
 
@@ -999,7 +1014,6 @@ export class SessionManager {
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
-      managed.backgroundImageUrl = storedSession.backgroundImageUrl
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
     }
     managed.messagesLoaded = true
@@ -1026,23 +1040,10 @@ export class SessionManager {
     const wsConfig = loadWorkspaceConfig(workspaceRootPath)
     const defaultWorkingDir = wsConfig?.defaults?.workingDirectory || undefined
 
-    // Fetch a random Pexels background image (non-blocking, use null if fails)
-    // Only if feature flag is enabled
-    const pexelsApiKey = process.env.PEXELS_API_KEY
-    let backgroundImageUrl: string | undefined
-    if (FEATURE_FLAGS.PEXELS_BACKGROUNDS && pexelsApiKey) {
-      try {
-        backgroundImageUrl = await fetchRandomPexelsImage(pexelsApiKey) || undefined
-      } catch (error) {
-        sessionLog.warn('Failed to fetch Pexels background image:', error)
-      }
-    }
-
     // Use storage layer to create and persist the session
     const storedSession = createStoredSession(workspaceRootPath, {
       permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
-      backgroundImageUrl,
     })
 
     // Generate onboarding messages only if requested via options
@@ -1106,7 +1107,6 @@ export class SessionManager {
       todoState: undefined,  // User-controlled, defaults to undefined (treated as 'todo')
       workingDirectory: defaultWorkingDir,
       sessionFolderPath: getSessionStoragePath(workspaceRootPath, storedSession.id),
-      backgroundImageUrl,
     }
   }
 
