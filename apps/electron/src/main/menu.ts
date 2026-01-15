@@ -94,6 +94,7 @@ export async function rebuildMenu(): Promise<void> {
         { type: 'separator' as const },
         {
           label: 'Import Claude Code Sessions...',
+          accelerator: 'CmdOrCtrl+I',
           click: () => sendToRenderer(IPC_CHANNELS.MENU_IMPORT_CLAUDE_CODE)
         },
         { type: 'separator' as const },
