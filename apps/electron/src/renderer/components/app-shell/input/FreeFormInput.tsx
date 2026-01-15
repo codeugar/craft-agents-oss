@@ -22,10 +22,11 @@ import {
   type SlashCommandId,
 } from '@/components/ui/slash-command-menu'
 import {
-  InlineSkillMention,
-  useInlineSkillMention,
-} from '@/components/ui/skill-mention-menu'
-import { parseSkillMentions } from '@/lib/skill-mentions'
+  MentionMenu,
+  useMentionMenu,
+  type MentionableItem,
+} from '@/components/ui/mention-menu'
+import { parseMentions } from '@/lib/mentions'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
@@ -337,11 +338,12 @@ export function FreeFormInput({
     activeCommands,
   })
 
-  // Inline skill mention hook (for @mentions)
-  const inlineSkill = useInlineSkillMention({
+  // Unified @ mention hook (skills + sources)
+  const mentionMenu = useMentionMenu({
     textareaRef: textareaRef as React.RefObject<HTMLTextAreaElement>,
     skills,
-    onSelect: () => {}, // Selection handled in handleInlineSkillSelect
+    sources: sources || [],
+    onSelect: () => {}, // Selection handled in handleMentionSelect
   })
 
   // Report height changes to parent (for external animation sync)
@@ -565,14 +567,20 @@ export function FreeFormInput({
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
-    // Parse @mentions to get skill slugs
-    const availableSlugs = skills.map(s => s.slug)
-    const mentionedSkillSlugs = parseSkillMentions(input, availableSlugs)
+    // Parse @mentions to get both skill and source slugs
+    const { skillSlugs, sourceSlugs } = parseMentions(input, skills, sources || [])
+
+    // Auto-enable mentioned sources for this session
+    if (sourceSlugs.length > 0 && onSourcesChange) {
+      const currentSlugs = enabledSourceSlugs || []
+      const newSlugs = [...new Set([...currentSlugs, ...sourceSlugs])]
+      onSourcesChange(newSlugs)
+    }
 
     onSubmit(
       input.trim(),
       attachments.length > 0 ? attachments : undefined,
-      mentionedSkillSlugs.length > 0 ? mentionedSkillSlugs : undefined
+      skillSlugs.length > 0 ? skillSlugs : undefined
     )
     setInput('')
     setAttachments([])
@@ -587,7 +595,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, disabled, disableSend, onInputChange, onSubmit, skills])
+  }, [input, attachments, disabled, disableSend, onInputChange, onSubmit, skills, sources, enabledSourceSlugs, onSourcesChange])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -613,15 +621,15 @@ export function FreeFormInput({
       return
     }
 
-    // Don't submit when skill mention menu is open - let it handle the Enter key
-    if (inlineSkill.isOpen) {
+    // Don't submit when mention menu is open - let it handle the Enter key
+    if (mentionMenu.isOpen) {
       if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // These keys are handled by the InlineSkillMention component
+        // These keys are handled by the MentionMenu component
         return
       }
       if (e.key === 'Escape') {
         e.preventDefault()
-        inlineSkill.close()
+        mentionMenu.close()
         return
       }
     }
@@ -639,12 +647,8 @@ export function FreeFormInput({
       }
     }
 
+    // Submit on Enter (without Shift). CMD/Ctrl+Enter also works since it's Enter without Shift.
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      // Submit message - backend handles interruption if processing
-      submitMessage()
-    }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       // Submit message - backend handles interruption if processing
       submitMessage()
@@ -661,8 +665,8 @@ export function FreeFormInput({
     // Update inline slash command state
     inlineSlash.handleInputChange(value, cursorPosition)
 
-    // Update inline skill mention state (for @mentions)
-    inlineSkill.handleInputChange(value, cursorPosition)
+    // Update unified mention menu state (for @mentions - skills + sources)
+    mentionMenu.handleInputChange(value, cursorPosition)
 
     // Auto-capitalize first letter (but not for slash commands or @mentions)
     if (value.length > 0 && value.charAt(0) !== '/' && value.charAt(0) !== '@') {
@@ -693,21 +697,21 @@ export function FreeFormInput({
     textareaRef.current?.focus()
   }, [inlineSlash, syncToParent, textareaRef])
 
-  // Handle inline skill mention selection (inserts @slug)
-  const handleInlineSkillSelect = React.useCallback((slug: string) => {
-    const newValue = inlineSkill.handleSelect(slug)
+  // Handle mention selection (inserts @slug for both skills and sources)
+  const handleMentionSelect = React.useCallback((item: MentionableItem) => {
+    const newValue = mentionMenu.handleSelect(item)
     setInput(newValue)
     syncToParent(newValue)
     // Move cursor after the inserted @slug
     setTimeout(() => {
       if (textareaRef.current) {
-        const cursorPos = newValue.indexOf('@' + slug) + slug.length + 2 // +2 for @ and space
+        const cursorPos = newValue.indexOf('@' + item.slug) + item.slug.length + 2 // +2 for @ and space
         textareaRef.current.selectionStart = cursorPos
         textareaRef.current.selectionEnd = cursorPos
         textareaRef.current.focus()
       }
     }, 0)
-  }, [inlineSkill, syncToParent, textareaRef])
+  }, [mentionMenu, syncToParent, textareaRef])
 
   const hasContent = input.trim() || attachments.length > 0
 
@@ -738,14 +742,14 @@ export function FreeFormInput({
           position={inlineSlash.position}
         />
 
-        {/* Inline Skill Mention Autocomplete */}
-        <InlineSkillMention
-          open={inlineSkill.isOpen}
-          onOpenChange={(open) => !open && inlineSkill.close()}
-          skills={skills}
-          onSelect={handleInlineSkillSelect}
-          filter={inlineSkill.filter}
-          position={inlineSkill.position}
+        {/* Unified @ Mention Menu (Skills + Sources) */}
+        <MentionMenu
+          open={mentionMenu.isOpen}
+          onOpenChange={(open) => !open && mentionMenu.close()}
+          items={mentionMenu.items}
+          onSelect={handleMentionSelect}
+          filter={mentionMenu.filter}
+          position={mentionMenu.position}
           workspaceId={workspaceId}
         />
 
