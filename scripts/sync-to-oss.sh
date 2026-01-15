@@ -171,9 +171,26 @@ main() {
   git clone --depth=1 --branch="$BRANCH" "$TARGET_REPO" "$TEMP_DIR/target" 2>/dev/null || \
     git clone "$TARGET_REPO" "$TEMP_DIR/target"
 
-  # Remove all files in target (except .git)
-  echo "Cleaning target..."
-  find "$TEMP_DIR/target" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+  # Remove only files that are managed by allow-list (preserves OSS-only files like custom workflows)
+  echo "Cleaning managed files in target..."
+  for file in "${allowed_files[@]}"; do
+    local target_file="$TEMP_DIR/target/$file"
+    if [[ -f "$target_file" ]]; then
+      rm "$target_file"
+    fi
+  done
+
+  # Also remove directories that would be fully replaced
+  for pattern in "${patterns[@]}"; do
+    if [[ "$pattern" == *"/**/*" || "$pattern" == *"/**" ]]; then
+      local base="${pattern%/**/*}"
+      base="${base%/**}"
+      local target_dir="$TEMP_DIR/target/$base"
+      if [[ -d "$target_dir" ]]; then
+        rm -rf "$target_dir"
+      fi
+    fi
+  done
 
   # Copy allowed files
   echo "Copying allowed files..."
