@@ -191,6 +191,39 @@ try {
 
 # 7. Package with electron-builder
 Write-Host "Packaging app with electron-builder..."
+
+# Wait for file system to settle - Windows can hold file locks briefly after operations
+Write-Host "  Waiting for file system to settle..."
+Start-Sleep -Seconds 5
+
+# Verify bun.exe is accessible (not locked by another process)
+$BunExe = "$ElectronDir\vendor\bun\bun.exe"
+Write-Host "  Verifying $BunExe is accessible..."
+$retryCount = 0
+$maxRetries = 6
+while ($retryCount -lt $maxRetries) {
+    try {
+        # Try to open the file exclusively to verify no other process has it locked
+        $stream = [System.IO.File]::Open($BunExe, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        $stream.Close()
+        $stream.Dispose()
+        Write-Host "  File is accessible" -ForegroundColor Green
+        break
+    } catch {
+        $retryCount++
+        if ($retryCount -ge $maxRetries) {
+            Write-Host "  WARNING: File may be locked after $maxRetries attempts, proceeding anyway..." -ForegroundColor Yellow
+        } else {
+            Write-Host "  File locked, waiting 5 seconds (attempt $retryCount/$maxRetries)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 5
+        }
+    }
+}
+
+# Force garbage collection to release any managed file handles
+[System.GC]::Collect()
+[System.GC]::WaitForPendingFinalizers()
+
 Push-Location $ElectronDir
 npx electron-builder --win --x64
 if ($LASTEXITCODE -ne 0) {

@@ -4,7 +4,11 @@
   "description": "Electron desktop app for Craft Agent",
   "main": "dist/main.cjs",
   "private": true,
-  "author": "Luki Labs",
+  "author": {
+    "name": "Craft Docs Ltd.",
+    "email": "support@craft.do"
+  },
+  "homepage": "https://agents.craft.do",
   "license": "MIT",
   "type": "module",
   "engines": {

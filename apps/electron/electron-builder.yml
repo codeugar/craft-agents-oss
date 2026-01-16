@@ -1,7 +1,6 @@
 appId: com.lukilabs.craft-agent
 productName: Craft Agent
-copyright: Copyright © 2025 Luki Labs
-homepage: https://agents.craft.do
+copyright: Copyright © 2025 Craft Docs Ltd.
 
 electronVersion: "39.2.7"
 
@@ -105,13 +104,11 @@ nsis:
 linux:
   icon: resources/icon.png
   category: Utility
+  maintainer: "Craft Docs Ltd. <support@craft.do>"
   target:
     - target: AppImage
       arch:
         - x64
         - arm64
-    - target: deb
-      arch:
-        - x64
   # Use predictable naming: Craft-Agent-x64.AppImage, Craft-Agent-arm64.AppImage
   artifactName: "Craft-Agent-${arch}.${ext}"
