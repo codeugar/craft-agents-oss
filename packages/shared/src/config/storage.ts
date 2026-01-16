@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { getCredentialManager } from '../credentials/index.ts';
 import { isOpusModel } from './models.ts';
 import { getOrCreateLatestSession, type SessionConfig } from '../sessions/index.ts';
@@ -827,22 +827,22 @@ export function getAllSessionDrafts(): Record<string, string> {
 }
 
 // ============================================
-// Theme Storage (Cascading: app → workspace → agent)
+// Theme Storage (App-level only)
 // ============================================
 
 import type { ThemeOverrides, ThemeFile, PresetTheme } from './theme.ts';
 import { readdirSync } from 'fs';
-import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const APP_THEME_FILE = join(CONFIG_DIR, 'theme.json');
+const APP_THEMES_DIR = join(CONFIG_DIR, 'themes');
 
 /**
- * Get the preset themes directory for a workspace.
- * Themes are now workspace-scoped at ~/.craft-agent/workspaces/{id}/themes/
+ * Get the app-level themes directory.
+ * Preset themes are stored at ~/.craft-agent/themes/
  */
-function getWorkspaceThemesDir(workspaceRootPath: string): string {
-  return join(workspaceRootPath, 'themes');
+export function getAppThemesDir(): string {
+  return APP_THEMES_DIR;
 }
 
 // Get the directory where bundled themes are stored (in the package)
@@ -885,43 +885,19 @@ export function saveAppTheme(theme: ThemeOverrides): void {
   writeFileSync(APP_THEME_FILE, JSON.stringify(theme, null, 2), 'utf-8');
 }
 
-/**
- * Load workspace-level theme overrides
- */
-export function loadWorkspaceTheme(workspaceRootPath: string): ThemeOverrides | null {
-  try {
-    const themePath = join(workspaceRootPath, 'theme.json');
-    if (!existsSync(themePath)) {
-      return null;
-    }
-    const content = readFileSync(themePath, 'utf-8');
-    return JSON.parse(content) as ThemeOverrides;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Save workspace-level theme overrides
- */
-export function saveWorkspaceTheme(workspaceRootPath: string, theme: ThemeOverrides): void {
-  const themePath = join(workspaceRootPath, 'theme.json');
-  writeFileSync(themePath, JSON.stringify(theme, null, 2), 'utf-8');
-}
 
 // ============================================
-// Preset Themes (workspace-scoped)
+// Preset Themes (app-level)
 // ============================================
 
 /**
  * Ensure preset themes directory exists and has bundled themes.
- * Copies bundled themes from package to workspace themes dir on first run.
+ * Copies bundled themes from package to app themes dir on first run.
  * Only copies if theme doesn't exist (preserves user edits).
- * @param workspaceRootPath - Path to workspace root directory
  * @param externalBundledDir - Optional path to bundled themes (for Electron)
  */
-export function ensurePresetThemes(workspaceRootPath: string, externalBundledDir?: string): void {
-  const themesDir = getWorkspaceThemesDir(workspaceRootPath);
+export function ensurePresetThemes(externalBundledDir?: string): void {
+  const themesDir = getAppThemesDir();
 
   // Create themes directory if it doesn't exist
   if (!existsSync(themesDir)) {
@@ -934,7 +910,7 @@ export function ensurePresetThemes(workspaceRootPath: string, externalBundledDir
     return; // No bundled themes available
   }
 
-  // Copy each bundled theme if it doesn't exist in workspace themes dir
+  // Copy each bundled theme if it doesn't exist in app themes dir
   try {
     const bundledFiles = readdirSync(bundledDir).filter(f => f.endsWith('.json'));
     for (const file of bundledFiles) {
@@ -951,15 +927,14 @@ export function ensurePresetThemes(workspaceRootPath: string, externalBundledDir
 }
 
 /**
- * Load all preset themes from workspace themes directory.
+ * Load all preset themes from app themes directory.
  * Returns array of PresetTheme objects sorted by name.
- * @param workspaceRootPath - Path to workspace root directory
  * @param bundledThemesDir - Optional path to bundled themes (for Electron)
  */
-export function loadPresetThemes(workspaceRootPath: string, bundledThemesDir?: string): PresetTheme[] {
-  ensurePresetThemes(workspaceRootPath, bundledThemesDir);
+export function loadPresetThemes(bundledThemesDir?: string): PresetTheme[] {
+  ensurePresetThemes(bundledThemesDir);
 
-  const themesDir = getWorkspaceThemesDir(workspaceRootPath);
+  const themesDir = getAppThemesDir();
   if (!existsSync(themesDir)) {
     return [];
   }
@@ -974,7 +949,9 @@ export function loadPresetThemes(workspaceRootPath: string, bundledThemesDir?: s
       try {
         const content = readFileSync(path, 'utf-8');
         const theme = JSON.parse(content) as ThemeFile;
-        themes.push({ id, path, theme });
+        // Resolve relative backgroundImage paths to file:// URLs
+        const resolvedTheme = resolveThemeBackgroundImage(theme, path);
+        themes.push({ id, path, theme: resolvedTheme });
       } catch {
         // Skip invalid theme files
       }
@@ -992,12 +969,73 @@ export function loadPresetThemes(workspaceRootPath: string, bundledThemesDir?: s
 }
 
 /**
+ * Get MIME type from file extension for data URL encoding.
+ */
+function getMimeType(filePath: string): string {
+  const ext = filePath.toLowerCase().split('.').pop();
+  switch (ext) {
+    case 'png': return 'image/png';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'gif': return 'image/gif';
+    case 'webp': return 'image/webp';
+    case 'svg': return 'image/svg+xml';
+    default: return 'application/octet-stream';
+  }
+}
+
+/**
+ * Resolve relative backgroundImage paths to data URLs.
+ * If the backgroundImage is a relative path (no protocol), resolve it relative to the theme's directory,
+ * read the file, and convert it to a data URL. This is necessary because the renderer process
+ * cannot access file:// URLs directly when running on localhost in dev mode.
+ * @param theme - Theme object to process
+ * @param themePath - Absolute path to the theme's JSON file
+ */
+function resolveThemeBackgroundImage(theme: ThemeFile, themePath: string): ThemeFile {
+  if (!theme.backgroundImage) {
+    return theme;
+  }
+
+  // Check if it's already an absolute URL (has protocol like http://, https://, data:)
+  const hasProtocol = /^[a-z][a-z0-9+.-]*:/i.test(theme.backgroundImage);
+  if (hasProtocol) {
+    return theme;
+  }
+
+  // It's a relative path - resolve it relative to the theme's directory
+  const themeDir = dirname(themePath);
+  const absoluteImagePath = join(themeDir, theme.backgroundImage);
+
+  // Read the file and convert to data URL so renderer can use it
+  // (file:// URLs are blocked in renderer when running on localhost)
+  try {
+    if (!existsSync(absoluteImagePath)) {
+      console.warn(`Theme background image not found: ${absoluteImagePath}`);
+      return theme;
+    }
+
+    const imageBuffer = readFileSync(absoluteImagePath);
+    const base64 = imageBuffer.toString('base64');
+    const mimeType = getMimeType(absoluteImagePath);
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+    return {
+      ...theme,
+      backgroundImage: dataUrl,
+    };
+  } catch (error) {
+    console.warn(`Failed to read theme background image: ${absoluteImagePath}`, error);
+    return theme;
+  }
+}
+
+/**
  * Load a specific preset theme by ID.
- * @param workspaceRootPath - Path to workspace root directory
  * @param id - Theme ID (filename without .json)
  */
-export function loadPresetTheme(workspaceRootPath: string, id: string): PresetTheme | null {
-  const themesDir = getWorkspaceThemesDir(workspaceRootPath);
+export function loadPresetTheme(id: string): PresetTheme | null {
+  const themesDir = getAppThemesDir();
   const path = join(themesDir, `${id}.json`);
 
   if (!existsSync(path)) {
@@ -1007,35 +1045,35 @@ export function loadPresetTheme(workspaceRootPath: string, id: string): PresetTh
   try {
     const content = readFileSync(path, 'utf-8');
     const theme = JSON.parse(content) as ThemeFile;
-    return { id, path, theme };
+    // Resolve relative backgroundImage paths to file:// URLs
+    const resolvedTheme = resolveThemeBackgroundImage(theme, path);
+    return { id, path, theme: resolvedTheme };
   } catch {
     return null;
   }
 }
 
 /**
- * Get the path to the preset themes directory for a workspace.
- * @param workspaceRootPath - Path to workspace root directory
+ * Get the path to the app-level preset themes directory.
  */
-export function getPresetThemesDir(workspaceRootPath: string): string {
-  return getWorkspaceThemesDir(workspaceRootPath);
+export function getPresetThemesDir(): string {
+  return getAppThemesDir();
 }
 
 /**
  * Reset a preset theme to its bundled default.
  * Copies the bundled version over the user's version.
- * @param workspaceRootPath - Path to workspace root directory
  * @param id - Theme ID to reset
  * @param externalBundledDir - Optional path to bundled themes (for Electron)
  */
-export function resetPresetTheme(workspaceRootPath: string, id: string, externalBundledDir?: string): boolean {
+export function resetPresetTheme(id: string, externalBundledDir?: string): boolean {
   const bundledDir = externalBundledDir ?? getBundledThemesDir();
   if (!bundledDir) {
     return false; // Bundled themes not available in this environment
   }
 
   const bundledPath = join(bundledDir, `${id}.json`);
-  const themesDir = getWorkspaceThemesDir(workspaceRootPath);
+  const themesDir = getAppThemesDir();
   const destPath = join(themesDir, `${id}.json`);
 
   if (!existsSync(bundledPath)) {

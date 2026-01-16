@@ -893,6 +893,21 @@ export function ResponseCard({
   const [copied, setCopied] = useState(false)
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // Dark mode detection - scroll fade only shown in dark mode
+  const [isDarkMode, setIsDarkMode] = useState(false)
+
+  // Detect dark mode from document class and listen for changes
+  useEffect(() => {
+    const checkDarkMode = () => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'))
+    }
+    checkDarkMode()
+
+    // Observe class changes on documentElement for theme switches
+    const observer = new MutationObserver(checkDarkMode)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
+  }, [])
 
   const handleCopy = useCallback(async () => {
     try {
@@ -980,9 +995,17 @@ export function ResponseCard({
             </div>
           )}
 
+          {/* Scrollable content area with subtle fade at edges (dark mode only) */}
           <div
             className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto"
-            style={{ maxHeight: MAX_HEIGHT }}
+            style={{
+              maxHeight: MAX_HEIGHT,
+              // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
+              ...(isDarkMode && {
+                maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+              }),
+            }}
           >
             <Markdown
               mode="minimal"
@@ -1079,9 +1102,17 @@ export function ResponseCard({
   return (
     <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden">
       {/* Content area - uses displayedText (throttled) for performance */}
+      {/* Subtle fade at top and bottom edges (dark mode only) */}
       <div
         className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto"
-        style={{ maxHeight: MAX_HEIGHT }}
+        style={{
+          maxHeight: MAX_HEIGHT,
+          // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
+          ...(isDarkMode && {
+            maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+          }),
+        }}
       >
         <Markdown
           mode="minimal"
@@ -1289,6 +1320,26 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Don't render if nothing to show and turn is complete
   if (activities.length === 0 && !response && isComplete) {
+    return null
+  }
+
+  // Don't render turns that were interrupted before any meaningful work happened.
+  // Hide the turn if:
+  // - All tool activities are errors (nothing completed successfully)
+  // - Any intermediate activities have no meaningful content (empty or just whitespace)
+  // - No response text to show
+  // The "Response interrupted" info banner alone is sufficient feedback.
+  const hasNoMeaningfulWork = activities.length > 0
+    && activities.every(a => {
+      // Tool activities must be errors (interrupted/failed)
+      if (a.type === 'tool') return a.status === 'error'
+      // Intermediate activities must have no meaningful content
+      if (a.type === 'intermediate') return !a.content?.trim()
+      // Other activity types - consider as no meaningful work
+      return true
+    })
+    && !response
+  if (hasNoMeaningfulWork) {
     return null
   }
 

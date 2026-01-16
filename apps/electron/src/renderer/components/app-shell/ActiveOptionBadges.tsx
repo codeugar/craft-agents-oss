@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
 import { ChevronDown, X } from 'lucide-react'
-import { PERMISSION_MODE_CONFIG, hexToRgb, type PermissionMode } from '@craft-agent/shared/agent/modes'
+import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 
 // ============================================================================
@@ -136,10 +136,26 @@ function PermissionModeDropdown({ permissionMode, ultrathinkEnabled = false, onP
 
   // Get config for current mode (use optimistic state for instant UI update)
   const config = PERMISSION_MODE_CONFIG[optimisticMode]
-  // For allow-all mode, use CSS variable (accent) so theming works
-  // For other modes, use the hardcoded colors from config
-  const useAccentVar = optimisticMode === 'allow-all'
-  const color = config.colors.muted // Use muted color for text (darker variant)
+
+  // Mode-specific styling using CSS variables (theme-aware)
+  // - safe (Explore): foreground at 60% opacity - subtle, read-only feel
+  // - ask (Ask to Edit): info color - amber, prompts for edits
+  // - allow-all (Auto): accent color - purple, full autonomy
+  const modeStyles: Record<PermissionMode, { className: string; shadowVar: string }> = {
+    'safe': {
+      className: 'bg-foreground/5 text-foreground/60',
+      shadowVar: 'var(--foreground-rgb)',
+    },
+    'ask': {
+      className: 'bg-info/10 text-info',
+      shadowVar: 'var(--info-rgb)',
+    },
+    'allow-all': {
+      className: 'bg-accent/5 text-accent',
+      shadowVar: 'var(--accent-rgb)',
+    },
+  }
+  const currentStyle = modeStyles[optimisticMode]
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -149,16 +165,9 @@ function PermissionModeDropdown({ permissionMode, ultrathinkEnabled = false, onP
           data-tutorial="permission-mode-dropdown"
           className={cn(
             "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 shadow-tinted outline-none",
-            useAccentVar && "bg-accent/5 text-accent"
+            currentStyle.className
           )}
-          style={useAccentVar ? {
-            // Use accent color for shadow - defined in index.css alongside --accent
-            '--shadow-color': 'var(--accent-rgb)',
-          } as React.CSSProperties : {
-            backgroundColor: `${color}0D`, // 5% opacity
-            color: color,
-            '--shadow-color': hexToRgb(color),
-          } as React.CSSProperties}
+          style={{ '--shadow-color': currentStyle.shadowVar } as React.CSSProperties}
         >
           <PermissionModeIcon mode={optimisticMode} className="h-3.5 w-3.5" />
           <span>{config.displayName}</span>

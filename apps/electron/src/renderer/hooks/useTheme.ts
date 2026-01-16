@@ -13,19 +13,9 @@ import { useTheme as useThemeContext } from '@/context/ThemeContext'
 
 interface UseThemeOptions {
   /**
-   * Workspace ID for loading preset themes (required for preset theme loading)
-   */
-  workspaceId?: string | null
-
-  /**
-   * App-level theme (from ~/.craft-agent/theme.json)
+   * App-level theme override (from ~/.craft-agent/theme.json)
    */
   appTheme?: ThemeOverrides | null
-
-  /**
-   * Workspace-level theme (from workspace/theme.json)
-   */
-  workspaceTheme?: ThemeOverrides | null
 }
 
 interface UseThemeResult {
@@ -35,62 +25,73 @@ interface UseThemeResult {
   shikiConfig: ShikiThemeConfig
   presetTheme: ThemeFile | null
   isDark: boolean
+  /** Whether the theme is in scenic mode (background image with glass panels) */
+  isScenic: boolean
 }
 
 /**
- * Hook to manage cascading theme (preset → app → workspace).
+ * Hook to manage theme (preset → app override).
  * Resolves themes and injects CSS variables into document.
  * Also provides Shiki theme name for syntax highlighting.
  *
  * @example
  * ```tsx
  * const [appTheme] = useAtom(appThemeAtom)
- * const [workspaceTheme] = useAtom(workspaceThemeAtom)
  *
- * const { shikiTheme } = useTheme({ appTheme, workspaceTheme })
+ * const { shikiTheme } = useTheme({ appTheme })
  * ```
  */
-export function useTheme({ workspaceId, appTheme, workspaceTheme }: UseThemeOptions = {}): UseThemeResult {
+export function useTheme({ appTheme }: UseThemeOptions = {}): UseThemeResult {
   // Get resolved mode, system preference, and color theme from ThemeContext
-  const { resolvedMode, systemPreference, colorTheme } = useThemeContext()
+  // Use effectiveColorTheme which includes hover preview state
+  const { resolvedMode, systemPreference, colorTheme, effectiveColorTheme } = useThemeContext()
   const isDark = resolvedMode === 'dark'
 
-  // Load preset theme when colorTheme or workspaceId changes
+  // Load preset theme when effectiveColorTheme changes
+  // This allows hover preview to load and display themes immediately
   const [presetTheme, setPresetTheme] = useState<ThemeFile | null>(null)
 
   useEffect(() => {
-    if (!colorTheme || colorTheme === 'default' || !workspaceId) {
+    if (!effectiveColorTheme || effectiveColorTheme === 'default') {
       setPresetTheme(null)
       return
     }
 
-    // Load preset theme via IPC (workspace-scoped)
-    window.electronAPI?.loadPresetTheme?.(workspaceId, colorTheme).then((preset) => {
+    // Load preset theme via IPC (app-level)
+    window.electronAPI?.loadPresetTheme?.(effectiveColorTheme).then((preset) => {
       setPresetTheme(preset?.theme ?? null)
     }).catch(() => {
       setPresetTheme(null)
     })
-  }, [colorTheme, workspaceId])
+  }, [effectiveColorTheme])
 
-  // Resolve cascading theme (preset → app → workspace)
-  // Preset provides base, app/workspace can override
+  // Resolve theme (preset → app override)
+  // Preset provides base, app theme.json can override
   const resolvedTheme = useMemo(() => {
+    // First merge preset with app override, then apply resolveTheme for any final processing
     return resolveTheme(
-      presetTheme ?? undefined,
-      resolveTheme(appTheme ?? undefined, workspaceTheme ?? undefined)
+      presetTheme ? { ...presetTheme, ...(appTheme ?? {}) } : (appTheme ?? undefined)
     )
-  }, [presetTheme, appTheme, workspaceTheme])
+  }, [presetTheme, appTheme])
 
   // Get Shiki theme configuration
   const shikiConfig = useMemo(() => {
     return presetTheme?.shikiTheme || DEFAULT_SHIKI_THEME
   }, [presetTheme])
 
+  // Determine if theme is scenic mode (scenic themes force dark mode)
+  const isScenic = useMemo(() => {
+    return resolvedTheme.mode === 'scenic' && !!resolvedTheme.backgroundImage
+  }, [resolvedTheme])
+
+  // Scenic themes force dark mode for better contrast with background images
+  const effectiveIsDark = isScenic ? true : isDark
+
   // Get the current Shiki theme name based on mode
   // If theme doesn't support current mode, use the mode it does support
   const shikiTheme = useMemo(() => {
     const supportedModes = presetTheme?.supportedModes
-    const currentMode = isDark ? 'dark' : 'light'
+    const currentMode = effectiveIsDark ? 'dark' : 'light'
 
     // If theme has limited mode support and doesn't include current mode,
     // use the mode it does support for Shiki
@@ -100,8 +101,8 @@ export function useTheme({ workspaceId, appTheme, workspaceTheme }: UseThemeOpti
       return getShikiTheme(shikiConfig, effectiveMode)
     }
 
-    return getShikiTheme(shikiConfig, isDark)
-  }, [shikiConfig, isDark, presetTheme])
+    return getShikiTheme(shikiConfig, effectiveIsDark)
+  }, [shikiConfig, effectiveIsDark, presetTheme])
 
   // Generate CSS and inject into document
   useEffect(() => {
@@ -132,14 +133,38 @@ export function useTheme({ workspaceId, appTheme, workspaceTheme }: UseThemeOpti
       delete document.documentElement.dataset.themeMismatch
     }
 
+    // Set scenic mode data attribute for CSS targeting
+    // Scenic mode forces dark mode for better contrast with background images
+    if (isScenic) {
+      document.documentElement.dataset.scenic = 'true'
+      // Force dark class on document for scenic themes
+      document.documentElement.classList.add('dark')
+      // Set background image directly as CSS property (avoids style sheet size limits)
+      if (resolvedTheme.backgroundImage) {
+        document.documentElement.style.setProperty(
+          '--background-image',
+          `url("${resolvedTheme.backgroundImage}")`
+        )
+      }
+    } else {
+      delete document.documentElement.dataset.scenic
+      // Clear background image when not in scenic mode
+      document.documentElement.style.removeProperty('--background-image')
+      // Only remove dark class if we added it for scenic mode
+      // (don't interfere with user's actual dark mode preference)
+      if (!isDark) {
+        document.documentElement.classList.remove('dark')
+      }
+    }
+
     // When using default theme, clear custom CSS but keep theme-override and themeMismatch
-    if (!colorTheme || colorTheme === 'default') {
+    if (!effectiveColorTheme || effectiveColorTheme === 'default') {
       styleEl.textContent = ''
       return
     }
 
-    // Generate CSS variable declarations
-    const cssVars = themeToCSS(resolvedTheme, isDark)
+    // Generate CSS variable declarations (use effectiveIsDark for scenic mode)
+    const cssVars = themeToCSS(resolvedTheme, effectiveIsDark)
 
     // Inject CSS variables on :root
     if (cssVars) {
@@ -148,7 +173,7 @@ export function useTheme({ workspaceId, appTheme, workspaceTheme }: UseThemeOpti
       styleEl.textContent = ''
     }
 
-  }, [resolvedTheme, isDark, presetTheme, appTheme, workspaceTheme, colorTheme, resolvedMode, systemPreference])
+  }, [resolvedTheme, isDark, effectiveIsDark, presetTheme, appTheme, effectiveColorTheme, resolvedMode, systemPreference, isScenic])
 
   return {
     theme: resolvedTheme,
@@ -156,6 +181,7 @@ export function useTheme({ workspaceId, appTheme, workspaceTheme }: UseThemeOpti
     shikiTheme,
     shikiConfig,
     presetTheme,
-    isDark,
+    isDark: effectiveIsDark, // Scenic themes force dark mode
+    isScenic,
   }
 }

@@ -338,6 +338,17 @@ export class CraftAgent {
   private preferencesDriftNotified: boolean = false;
   // Captured stderr from SDK subprocess (for error diagnostics when process exits with code 1)
   private lastStderrOutput: string[] = [];
+  // Last assistant message usage (for accurate context window display)
+  // result.modelUsage is cumulative across the session (for billing), but we need per-message usage
+  // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/66
+  private lastAssistantUsage: {
+    input_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+  } | null = null;
+  // Cached context window size from modelUsage (for real-time usage_update events)
+  // This is captured from the first result message and reused for subsequent usage updates
+  private cachedContextWindow?: number;
 
   /**
    * Get the session ID for mode operations.
@@ -1669,7 +1680,6 @@ export class CraftAgent {
         const isBillingError =
           errorMsg.includes('402') ||
           errorMsg.includes('payment required') ||
-          errorMsg.includes('insufficient credits') ||
           errorMsg.includes('billing');
 
         if (isBillingError) {
@@ -1724,7 +1734,7 @@ export class CraftAgent {
                 { key: 'w', label: 'Open workspace menu', command: '/workspace' },
                 { key: 'r', label: 'Retry', action: 'retry' as const },
               ]
-            : diagnostics.code === 'invalid_credentials' || diagnostics.code === 'insufficient_credits'
+            : diagnostics.code === 'invalid_credentials' || diagnostics.code === 'billing_error'
             ? [
                 { key: 's', label: 'Update credentials', command: '/settings', action: 'settings' as const },
               ]
@@ -1744,7 +1754,7 @@ export class CraftAgent {
                 ? [...(diagnostics.details || []), `SDK stderr: ${stderrContext}`]
                 : diagnostics.details,
               actions,
-              canRetry: diagnostics.code !== 'insufficient_credits' && diagnostics.code !== 'invalid_credentials',
+              canRetry: diagnostics.code !== 'billing_error' && diagnostics.code !== 'invalid_credentials',
               retryDelayMs: 1000,
               originalError: stderrContext || rawErrorMsg,
             },
@@ -2195,12 +2205,12 @@ export class CraftAgent {
         retryDelayMs: 1000,
       },
       'billing_error': {
-        code: 'insufficient_credits',
+        code: 'billing_error',
         title: 'Billing Error',
-        message: 'Your account has insufficient credits or has billing issues.',
-        details: ['Check your Anthropic account billing status', 'Ensure you have available credits'],
+        message: 'Your account has a billing issue.',
+        details: ['Check your Anthropic account billing status'],
         actions: [
-          { key: 'c', label: 'Check credits', action: 'credits' },
+          { key: 's', label: 'Update credentials', action: 'settings' },
         ],
         canRetry: false,
       },
@@ -2301,6 +2311,33 @@ export class CraftAgent {
         // Skip replayed messages when resuming a session - they're historical
         if ('isReplay' in message && message.isReplay) {
           break;
+        }
+
+        // Track usage from non-sidechain assistant messages for accurate context window display
+        // Skip sidechain messages (from subagents) - only main chain affects primary context
+        const isSidechain = message.parent_tool_use_id !== null;
+        if (!isSidechain && message.message.usage) {
+          this.lastAssistantUsage = {
+            input_tokens: message.message.usage.input_tokens,
+            cache_read_input_tokens: message.message.usage.cache_read_input_tokens ?? 0,
+            cache_creation_input_tokens: message.message.usage.cache_creation_input_tokens ?? 0,
+          };
+
+          // Emit real-time usage update for context display
+          // inputTokens = context size actually sent to API (includes cache tokens)
+          const currentInputTokens =
+            this.lastAssistantUsage.input_tokens +
+            this.lastAssistantUsage.cache_read_input_tokens +
+            this.lastAssistantUsage.cache_creation_input_tokens;
+
+          events.push({
+            type: 'usage_update',
+            usage: {
+              inputTokens: currentInputTokens,
+              // contextWindow comes from modelUsage in result - use cached value if available
+              contextWindow: this.cachedContextWindow,
+            },
+          });
         }
 
         // Full assistant message with content blocks
@@ -2778,20 +2815,40 @@ export class CraftAgent {
         // Debug: log result message details (stderr to avoid SDK JSON pollution)
         console.error(`[CraftAgent] result message: subtype=${message.subtype}, errors=${'errors' in message ? JSON.stringify((message as any).errors) : 'none'}`);
 
-        // Extract authoritative usage from modelUsage (SDK provides per-model breakdown)
-        // modelUsage.inputTokens already includes cache tokens - don't double count!
+        // Get contextWindow from modelUsage (this is correct - it's the model's context window size)
         const modelUsageEntries = Object.values(message.modelUsage || {});
         const primaryModelUsage = modelUsageEntries[0];
 
-        // Cache tokens from top-level usage (for separate tracking)
-        const cacheRead = message.usage.cache_read_input_tokens ?? 0;
-        const cacheCreation = message.usage.cache_creation_input_tokens ?? 0;
+        // Cache contextWindow for real-time usage_update events in subsequent turns
+        if (primaryModelUsage?.contextWindow) {
+          this.cachedContextWindow = primaryModelUsage.contextWindow;
+        }
+
+        // Use lastAssistantUsage for context window display (per-message, not cumulative)
+        // result.modelUsage is cumulative across the entire session (for billing)
+        // but we need the actual current context size from the last assistant message
+        // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/66
+        let inputTokens: number;
+        let cacheRead: number;
+        let cacheCreation: number;
+
+        if (this.lastAssistantUsage) {
+          // Use tracked per-message usage (correct for context display)
+          inputTokens = this.lastAssistantUsage.input_tokens +
+                        this.lastAssistantUsage.cache_read_input_tokens +
+                        this.lastAssistantUsage.cache_creation_input_tokens;
+          cacheRead = this.lastAssistantUsage.cache_read_input_tokens;
+          cacheCreation = this.lastAssistantUsage.cache_creation_input_tokens;
+        } else {
+          // Fallback to result.usage if no assistant message was tracked
+          cacheRead = message.usage.cache_read_input_tokens ?? 0;
+          cacheCreation = message.usage.cache_creation_input_tokens ?? 0;
+          inputTokens = message.usage.input_tokens + cacheRead + cacheCreation;
+        }
 
         const usage = {
-          // Use modelUsage.inputTokens (authoritative, includes cache) for context size
-          // Fall back to manual calculation only if modelUsage unavailable
-          inputTokens: primaryModelUsage?.inputTokens ?? (message.usage.input_tokens + cacheRead + cacheCreation),
-          outputTokens: primaryModelUsage?.outputTokens ?? message.usage.output_tokens,
+          inputTokens,
+          outputTokens: message.usage.output_tokens,
           cacheReadTokens: cacheRead,
           cacheCreationTokens: cacheCreation,
           costUsd: message.total_cost_usd,

@@ -20,8 +20,6 @@ export interface SlashCommand {
   description: string
   icon: React.ReactNode
   shortcut?: string
-  /** Hex color for active state (derived from config) */
-  color?: string
 }
 
 /** Folder item for the slash menu */
@@ -86,7 +84,6 @@ const permissionModeCommands: SlashCommand[] = PERMISSION_MODE_ORDER.map(mode =>
     label: config.displayName,
     description: config.description,
     icon: <PermissionModeIcon mode={mode} className={MENU_ICON_SIZE} />,
-    color: config.colors.primary,
   }
 })
 
@@ -95,7 +92,6 @@ const ultrathinkCommand: SlashCommand = {
   label: 'Ultrathink',
   description: 'Extended reasoning for complex problems',
   icon: <Brain className={MENU_ICON_SIZE} />,
-  color: '#d946ef', // fuchsia-500
 }
 
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
@@ -137,10 +133,12 @@ function isFolder(item: SlashCommand | SlashFolderItem): item is SlashFolderItem
   return 'type' in item && item.type === 'folder'
 }
 
-/** Filter sections by label/id */
+/** Filter sections by label/id, keeping sections grouped */
 function filterSections(sections: SlashSection[], filter: string): SlashSection[] {
   if (!filter) return sections
   const lowerFilter = filter.toLowerCase()
+
+  // Filter items within each section, keeping section structure
   return sections
     .map(section => ({
       ...section,
@@ -446,10 +444,8 @@ export function InlineSlashCommand({
                       isSelected && MENU_ITEM_SELECTED
                     )}
                   >
-                    <div className="shrink-0">
-                      <div className="h-5 w-5 rounded-[4px] bg-foreground/5 flex items-center justify-center">
-                        <Icon_Folder className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} />
-                      </div>
+                    <div className="shrink-0 text-muted-foreground">
+                      <Icon_Folder className={MENU_ICON_SIZE} strokeWidth={1.75} />
                     </div>
                     <div className="flex-1 min-w-0 truncate">
                       <span className="font-medium">{item.label}</span>
@@ -654,17 +650,17 @@ export function useInlineSlashCommand({
 
   const handleSelectFolder = React.useCallback((path: string): string => {
     // Capture values BEFORE any state changes to avoid race conditions
+    // Folder selection directly changes working directory, doesn't insert text
     let result = ''
     if (slashStart >= 0) {
       const { value: currentValue, cursorPosition } = currentInputRef.current
       const before = currentValue.slice(0, slashStart)
       const after = currentValue.slice(cursorPosition)
-      // Insert [dir:/path] badge instead of just removing the /
-      const mentionText = `[dir:${path}] `
-      result = before + mentionText + after
+      // Just remove the /command text, no badge insertion
+      result = (before + after).trim()
     }
 
-    // Now safe to trigger state changes
+    // Trigger working directory change
     onSelectFolder(path)
     setIsOpen(false)
 

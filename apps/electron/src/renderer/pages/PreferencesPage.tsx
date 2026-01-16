@@ -220,7 +220,7 @@ export default function PreferencesPage() {
   )
 
   return (
-    <div className="h-full flex flex-col bg-surface-below">
+    <div className="h-full flex flex-col">
       <PanelHeader title="Preferences" actions={headerActions} />
       <Separator />
       <ScrollArea className="flex-1">

@@ -64,6 +64,25 @@ export interface MessageAttachment {
 }
 
 /**
+ * Content badge for inline display in user messages
+ * Badges are self-contained with all display data (label, icon)
+ */
+export interface ContentBadge {
+  /** Badge type - used for fallback icon if iconBase64 not available */
+  type: 'source' | 'skill';
+  /** Display label (e.g., "Linear", "Commit") */
+  label: string;
+  /** Original text pattern (e.g., "@linear", "@commit") */
+  rawText: string;
+  /** Icon as data URL (e.g., "data:image/png;base64,...") - preserves mime type */
+  iconDataUrl?: string;
+  /** Start position in content string */
+  start: number;
+  /** End position in content string */
+  end: number;
+}
+
+/**
  * Stored attachment metadata (persisted to disk, no base64)
  * Created when user sends a message with attachments
  */
@@ -108,6 +127,8 @@ export interface Message {
   isBackground?: boolean;   // Flag for UI differentiation
   // Stored attachments for user messages (persistent, no base64)
   attachments?: StoredAttachment[];
+  // Content badges for inline display (sources, skills)
+  badges?: ContentBadge[];
   isError?: boolean;
   isStreaming?: boolean;
   // Pending: streaming text where we don't yet know if it's intermediate
@@ -187,9 +208,13 @@ export interface StoredMessage {
   isError?: boolean;
   /** Stored attachments for user messages (persisted to disk) */
   attachments?: StoredAttachment[];
+  /** Content badges for inline display (sources, skills) */
+  badges?: ContentBadge[];
   // Turn grouping - critical for TurnCard rendering after reload
   isIntermediate?: boolean;
   turnId?: string;
+  // Status type for compaction messages (persisted for reload)
+  statusType?: 'compacting' | 'compaction_complete';
   // Error display fields
   errorCode?: string;
   errorTitle?: string;
@@ -246,18 +271,16 @@ export interface RecoveryAction {
   key: string;
   /** Description of the action */
   label: string;
-  /** Slash command to execute (e.g., '/credits') */
+  /** Slash command to execute (e.g., '/settings') */
   command?: string;
   /** Custom action type for special handling */
-  action?: 'retry' | 'settings' | 'credits' | 'reauth';
+  action?: 'retry' | 'settings' | 'reauth';
 }
 
 /**
  * Error codes for typed errors - must match AgentError.code in shared/agent/errors.ts
  */
 export type ErrorCode =
-  | 'insufficient_credits'
-  | 'credits_exhausted'
   | 'invalid_api_key'
   | 'invalid_credentials'
   | 'expired_oauth_token'
@@ -268,6 +291,7 @@ export type ErrorCode =
   | 'network_error'
   | 'mcp_auth_required'
   | 'mcp_unreachable'
+  | 'billing_error'
   | 'unknown_error';
 
 /**
@@ -286,7 +310,7 @@ export interface TypedError {
   canRetry: boolean;
   /** Retry delay in ms (if canRetry is true) */
   retryDelayMs?: number;
-  /** Diagnostic check results for debugging (e.g., "✓ Credits: 150") */
+  /** Diagnostic check results for debugging */
   details?: string[];
   /** Original error message for debugging */
   originalError?: string;
@@ -338,7 +362,8 @@ export type AgentEvent =
   | { type: 'shell_backgrounded'; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
   | { type: 'task_progress'; toolUseId: string; elapsedSeconds: number; turnId?: string }
   | { type: 'shell_killed'; shellId: string; turnId?: string }
-  | { type: 'source_activated'; sourceSlug: string; originalMessage: string };
+  | { type: 'source_activated'; sourceSlug: string; originalMessage: string }
+  | { type: 'usage_update'; usage: Pick<AgentEventUsage, 'inputTokens' | 'contextWindow'> };
 
 /**
  * Generate a unique message ID

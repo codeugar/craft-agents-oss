@@ -159,7 +159,6 @@ const api: ElectronAPI = {
   getBillingMethod: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_BILLING_METHOD),
   updateBillingMethod: (authType: AuthType, credential?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE_BILLING_METHOD, authType, credential),
-  getCreditsUrl: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_CREDITS_URL),
 
   // Settings - Model (global default)
   getModel: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_MODEL),
@@ -281,13 +280,11 @@ const api: ElectronAPI = {
     }
   },
 
-  // Theme (cascading: app → workspace)
+  // Theme (app-level only)
   getAppTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_APP),
-  getWorkspaceTheme: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_WORKSPACE, workspaceId),
-  // Preset themes (workspace-scoped)
-  loadPresetThemes: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_PRESETS, workspaceId),
-  loadPresetTheme: (workspaceId: string, themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_LOAD_PRESET, workspaceId, themeId),
+  // Preset themes (app-level)
+  loadPresetThemes: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_PRESETS),
+  loadPresetTheme: (themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_LOAD_PRESET, themeId),
   getColorTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_COLOR_THEME),
   setColorTheme: (themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_SET_COLOR_THEME, themeId),
 
@@ -303,15 +300,6 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.THEME_APP_CHANGED, handler)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.THEME_APP_CHANGED, handler)
-    }
-  },
-  onWorkspaceThemeChange: (callback: (theme: import('@craft-agent/shared/config').ThemeOverrides | null) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, theme: import('@craft-agent/shared/config').ThemeOverrides | null) => {
-      callback(theme)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, handler)
     }
   },
   // Theme preferences sync across windows (mode, colorTheme, font)

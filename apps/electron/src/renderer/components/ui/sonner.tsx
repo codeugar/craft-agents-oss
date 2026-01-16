@@ -23,11 +23,15 @@ const Toaster = ({ ...props }: ToasterProps) => {
         error: <OctagonXIcon className="size-4" />,
         loading: <Spinner className="text-base" />,
       }}
+      toastOptions={{
+        className:
+          "!rounded-xl !backdrop-blur-xl !bg-popover/80 !border-border",
+      }}
       style={
         {
-          "--normal-bg": "var(--popover)",
+          "--normal-bg": "transparent",
           "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          "--normal-border": "transparent",
         } as React.CSSProperties
       }
       {...props}

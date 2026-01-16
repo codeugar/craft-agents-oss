@@ -6,6 +6,50 @@
 @source "../../../../packages/ui/src/**/*.{tsx,ts,jsx,js}";
 
 /* =============================================================================
+   ANIMATABLE CSS CUSTOM PROPERTIES
+
+   Register theme color variables as animatable using @property.
+   This enables smooth transitions when themes change (e.g., hover preview).
+   Chromium/Electron has full support for @property.
+============================================================================= */
+
+@property --background {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.98 0.003 265);
+}
+
+@property --foreground {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.185 0.01 270);
+}
+
+@property --accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.62 0.13 293);
+}
+
+@property --info {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.65 0.16 70);
+}
+
+@property --success {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.55 0.17 145);
+}
+
+@property --destructive {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.55 0.22 27);
+}
+
+/* =============================================================================
    CRAFT AGENT THEME - 6 Color System
 
    Base colors:
@@ -58,9 +102,6 @@
   --foreground-80: color-mix(in srgb, var(--foreground) 80%, var(--background));
   --foreground-90: color-mix(in srgb, var(--foreground) 90%, var(--background));
   --foreground-95: color-mix(in srgb, var(--foreground) 95%, var(--background));
-
-  /* === SEMANTIC SURFACE COLORS === */
-  --surface-below: var(--foreground-1\.5);
 
   /* Success/destructive/info interpolated toward foreground (for tinted text) */
   /* Using oklab for perceptually uniform mixing without hue shifts */
@@ -124,7 +165,8 @@
      dropdown           100     Dropdowns, popovers, select menus
      tooltip            150     Tooltips (above dropdowns)
      modal              200     Dialogs, drawers
-     overlay            300     Full-screen overlays (settings)
+     overlay            300     Full-screen overlays (settings, app chrome)
+     fullscreen         350     Fullscreen content viewers (above app chrome)
      floating-backdrop  390     Backdrop for floating menus
      floating-menu      400     Floating menus above modals
      splash             600     Splash screen, workspace creation
@@ -138,10 +180,21 @@
   --z-tooltip: 150;
   --z-modal: 200;
   --z-overlay: 300;
+  --z-fullscreen: 350;
   --z-floating-backdrop: 390;
   --z-floating-menu: 400;
   --z-splash: 600;
 
+}
+
+/* Theme color transitions - smooth preview when hovering over themes in settings */
+:root,
+.dark {
+  transition:
+    background-color 500ms linear,
+    color 500ms linear,
+    border-color 500ms linear,
+    box-shadow 500ms linear;
 }
 
 /* Dark Mode */
@@ -176,9 +229,6 @@
   --foreground-90: color-mix(in srgb, var(--foreground) 90%, var(--background));
   --foreground-95: color-mix(in srgb, var(--foreground) 95%, var(--background));
 
-  /* === SEMANTIC SURFACE COLORS === */
-  --surface-below: var(--foreground-1\.5);
-
   /* Success/destructive/info interpolated toward foreground (for tinted text) */
   /* Using oklab for perceptually uniform mixing without hue shifts */
   --success-text: color-mix(in oklab, var(--success) 50%, var(--foreground));
@@ -211,6 +261,7 @@ html[data-theme-override]::before {
   background: color-mix(in srgb, var(--background) 50%, transparent);
   z-index: -1;
   pointer-events: none;
+  transition: background 500ms linear;
 }
 
 /* Theme Mismatch - Solid background when theme doesn't support current mode
@@ -222,6 +273,59 @@ html[data-theme-mismatch]::before {
   background: var(--foreground-10);
   z-index: -1;
   pointer-events: none;
+  transition: background 500ms linear;
+}
+
+/* =============================================================================
+   SCENIC THEME MODE
+
+   Full-window background images with glassmorphism UI panels.
+   - Background image covers entire window (fixed, centered, cover)
+   - In dark mode, a semi-transparent overlay darkens the image
+   - Panels use backdrop-blur for glass effect
+
+   Activated when theme has mode='scenic' and backgroundImage set.
+   Sets data-scenic="true" on <html> element.
+============================================================================= */
+
+/* Scenic mode: Background image layer */
+html[data-scenic]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: var(--background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: -2;
+  pointer-events: none;
+}
+
+/* Scenic mode dark: Dark overlay gradient to fade the background image
+   Stronger on left (sidebar area) for readability, lighter on right to show more image */
+html.dark[data-scenic]::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4));
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Override the theme-override background for scenic mode
+   We don't want the semi-transparent background layer on top of the image */
+html[data-scenic][data-theme-override]::before {
+  background: transparent;
+  background-image: var(--background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Scenic mode: Make background color semi-transparent for glass effect
+   Panels with bg-background will become translucent glass */
+html[data-scenic] {
+  --background: oklch(0.2 0.005 270 / 0.55);
 }
 
 /* Inter Font - Opt-in via data-font="inter" attribute
@@ -259,9 +363,6 @@ html[data-font="inter"] {
   --color-foreground-90: var(--foreground-90);
   --color-foreground-95: var(--foreground-95);
 
-  /* === SEMANTIC SURFACE COLORS === */
-  --color-surface-below: var(--surface-below);
-
   /* === LEGACY COMPATIBILITY === */
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -292,6 +393,7 @@ html[data-font="inter"] {
   --z-index-tooltip: var(--z-tooltip);
   --z-index-modal: var(--z-modal);
   --z-index-overlay: var(--z-overlay);
+  --z-index-fullscreen: var(--z-fullscreen);
   --z-index-floating-backdrop: var(--z-floating-backdrop);
   --z-index-floating-menu: var(--z-floating-menu);
   --z-index-splash: var(--z-splash);
@@ -477,6 +579,88 @@ html[data-font="inter"] {
 .titlebar-no-drag {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* =============================================================================
+   SCENIC MODE - GLASS PANEL EFFECTS
+
+   In scenic mode, panels become translucent with backdrop blur (glassmorphism).
+   The glass effect provides visual depth while showing the background image through.
+   Target panels by their shadow classes (shadow-middle, shadow-strong).
+============================================================================= */
+
+html[data-scenic] .shadow-middle,
+html[data-scenic] .shadow-strong {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  position: relative;
+  /* Ensure panels are above the titlebar drag region (z-titlebar: 40) so header buttons are clickable.
+     Without this, the position:relative creates a stacking context at z-index:auto which is below the fixed titlebar. */
+  z-index: var(--z-panel);
+}
+
+/* Scenic mode: Input field gets more transparency to show background through
+   Uses a much lighter overlay to let the blurred background image show through */
+html[data-scenic] .input-container {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* Scenic mode: Gradient border effect for glass panels
+   Uses a pseudo-element with a white linear gradient (40% at top, 5% at bottom).
+   The mask-composite technique creates a border-only effect from a filled gradient. */
+html[data-scenic] .shadow-middle::before,
+html[data-scenic] .shadow-strong::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.1)
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: soft-light;
+}
+
+/* Scenic mode: Ensure panel content is above the gradient border pseudo-element.
+   Without this, interactive elements (buttons, dropdowns) in the header area
+   can be visually obscured or have click issues due to stacking context with backdrop-filter.
+   Creates explicit stacking for direct children so they sit above ::before (z-index: 1). */
+html[data-scenic] .shadow-middle > *,
+html[data-scenic] .shadow-strong > * {
+  position: relative;
+  z-index: 2;
+}
+
+
+/* Scenic mode: Popovers get glass effect too */
+html[data-scenic] .popover-styled {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* Scenic mode: Fullscreen overlay background gets glass effect
+   Applied to the AI response fullscreen view background so it blends
+   with the scenic background image when viewing expanded content. */
+html[data-scenic] .fullscreen-overlay-background {
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+html[data-scenic]:not(.dark) .fullscreen-overlay-background {
+  background: color-mix(in srgb, var(--foreground-3) 70%, transparent);
+}
+
+html.dark[data-scenic] .fullscreen-overlay-background {
+  background: color-mix(in srgb, var(--foreground-3) 60%, transparent);
 }
 
 /* =============================================================================

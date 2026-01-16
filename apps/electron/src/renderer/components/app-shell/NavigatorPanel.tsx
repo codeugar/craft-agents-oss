@@ -18,6 +18,7 @@
 import * as React from 'react'
 import { Panel } from './Panel'
 import { PanelHeader } from './PanelHeader'
+import { cn } from '@/lib/utils'
 
 export interface NavigatorPanelProps {
   /** Panel title (e.g., "Conversations", "Sources") */

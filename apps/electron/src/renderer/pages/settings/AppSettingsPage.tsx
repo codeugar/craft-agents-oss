@@ -6,7 +6,7 @@
  * Settings:
  * - Appearance (Theme, Font)
  * - Notifications
- * - Billing (Craft Credits, API Key, Claude Max)
+ * - Billing (API Key, Claude Max)
  */
 
 import * as React from 'react'
@@ -279,7 +279,7 @@ function ClaudeOAuthDialogContent({
 // ============================================
 
 export default function AppSettingsPage() {
-  const { mode, setMode, colorTheme, setColorTheme, font, setFont } = useTheme()
+  const { mode, setMode, colorTheme, setColorTheme, setPreviewColorTheme, font, setFont } = useTheme()
 
   // Get workspace ID from context for loading preset themes
   const { activeWorkspaceId } = useAppShellContext()
@@ -342,14 +342,15 @@ export default function AppSettingsPage() {
   }, [])
 
   // Load preset themes when workspace changes (themes are workspace-scoped)
+  // Load preset themes (app-level, no workspace dependency)
   useEffect(() => {
     const loadThemes = async () => {
-      if (!window.electronAPI || !activeWorkspaceId) {
+      if (!window.electronAPI) {
         setPresetThemes([])
         return
       }
       try {
-        const themes = await window.electronAPI.loadPresetThemes(activeWorkspaceId)
+        const themes = await window.electronAPI.loadPresetThemes()
         setPresetThemes(themes)
       } catch (error) {
         console.error('Failed to load preset themes:', error)
@@ -357,7 +358,7 @@ export default function AppSettingsPage() {
       }
     }
     loadThemes()
-  }, [activeWorkspaceId])
+  }, [])
 
   // Check Claude OAuth availability when expanding oauth_token option
   useEffect(() => {
@@ -469,11 +470,9 @@ export default function AppSettingsPage() {
   }, [])
 
   return (
-    <div className="h-full flex flex-col bg-surface-below">
+    <div className="h-full flex flex-col">
       <PanelHeader title="App Settings" actions={<HeaderMenu route={routes.view.settings('app')} />} />
-      <div className="relative flex-1 min-h-0">
-        {/* Top fade gradient */}
-        <div className="absolute top-0 left-0 right-2 h-8 z-10 bg-gradient-to-b from-surface-below to-transparent pointer-events-none" />
+      <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
           <div className="space-y-6">
@@ -643,8 +642,6 @@ export default function AppSettingsPage() {
           </div>
         </div>
         </ScrollArea>
-        {/* Bottom fade gradient */}
-        <div className="absolute bottom-0 left-0 right-2 h-8 z-10 bg-gradient-to-t from-surface-below to-transparent pointer-events-none" />
       </div>
     </div>
   )

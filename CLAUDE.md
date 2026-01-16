@@ -194,7 +194,7 @@ Three-level permission system (SHIFT+TAB cycles):
 
 ### Theme System (`packages/shared/src/config/theme.ts`)
 
-Cascading: app → workspace. **6-color system:** background, foreground, accent, info, success, destructive
+App-level only. **6-color system:** background, foreground, accent, info, success, destructive. Preset themes at `~/.craft-agent/themes/`
 
 ## Key Patterns
 

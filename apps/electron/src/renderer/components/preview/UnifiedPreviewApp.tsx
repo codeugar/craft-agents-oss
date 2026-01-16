@@ -434,7 +434,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
   if (error) {
     return (
       <TooltipProvider delayDuration={0}>
-        <div className="h-screen w-screen flex flex-col bg-background">
+        <div className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview">
           <WindowHeader />
           <div className="flex-1 flex items-center justify-center text-destructive">
             Error: {error}
@@ -448,7 +448,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
   if (data?.mode === 'markdown') {
     return (
       <TooltipProvider delayDuration={0}>
-        <div className="h-screen w-screen flex flex-col bg-background">
+        <div className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview">
           {/* Toolbar / Title bar */}
           <div
             className="titlebar-drag-region h-[52px] shrink-0 flex items-center justify-between px-4 bg-background"
@@ -518,7 +518,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
     return (
       <TooltipProvider delayDuration={0}>
         <div
-          className="h-screen w-screen flex flex-col bg-background transition-opacity duration-200"
+          className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview transition-opacity duration-200"
           style={{ opacity: isReady ? 1 : 0 }}
         >
           <WindowHeader>
@@ -570,7 +570,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
     return (
       <TooltipProvider delayDuration={0}>
         <div
-          className="h-screen w-screen flex flex-col bg-background transition-opacity duration-200"
+          className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview transition-opacity duration-200"
           style={{ opacity: isReady ? 1 : 0 }}
         >
           <WindowHeader>
@@ -621,7 +621,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
 
     return (
       <TooltipProvider delayDuration={0}>
-        <div className="h-screen w-screen flex bg-background">
+        <div className="h-screen w-screen flex bg-background panel-fullscreen-preview">
           {/* Sidebar */}
           {showSidebar && (
             <div
@@ -735,7 +735,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
     return (
       <TooltipProvider delayDuration={0}>
         <div
-          className="h-screen w-screen flex flex-col bg-background transition-opacity duration-200"
+          className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview transition-opacity duration-200"
           style={{ color: textColor, opacity: isReady ? 1 : 0 }}
         >
           <WindowHeader>
@@ -901,7 +901,7 @@ export function UnifiedPreviewApp({ sessionId, previewId }: UnifiedPreviewAppPro
   // Loading state
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="h-screen w-screen flex flex-col bg-background opacity-0">
+      <div className="h-screen w-screen flex flex-col bg-background panel-fullscreen-preview opacity-0">
         <WindowHeader />
         <div className="flex-1" />
       </div>

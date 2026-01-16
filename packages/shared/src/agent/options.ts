@@ -24,7 +24,7 @@ export function setPathToClaudeCodeExecutable(path: string) {
 
 /**
  * Set the path to the cache-ttl-interceptor for the SDK subprocess.
- * This interceptor redirects requests to the Craft gateway when using Craft credits.
+ * This interceptor patches fetch for extended cache TTL.
  */
 export function setInterceptorPath(path: string) {
     customInterceptorPath = path;
@@ -52,10 +52,9 @@ export function getDefaultOptions(): Partial<Options> {
                 CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
             }
         };
-        // Add interceptor preload if path is set (needed for Craft gateway redirect)
+        // Add interceptor preload if path is set (needed for cache TTL patching)
         if (customInterceptorPath) {
             options.executableArgs = ['--preload', customInterceptorPath];
-            console.error('[Options] Using interceptor preload:', customInterceptorPath);
         }
         return options;
     }

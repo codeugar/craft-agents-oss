@@ -35,6 +35,8 @@ export interface SettingsMenuSelectProps {
   className?: string
   /** Width of the dropdown menu */
   menuWidth?: number
+  /** Called when hovering over an option (for live preview). Pass null on leave. */
+  onHover?: (value: string | null) => void
 }
 
 /**
@@ -51,6 +53,7 @@ export function SettingsMenuSelect({
   disabled,
   className,
   menuWidth = 280,
+  onHover,
 }: SettingsMenuSelectProps) {
   const [isOpen, setIsOpen] = React.useState(false)
 
@@ -59,10 +62,20 @@ export function SettingsMenuSelect({
   const handleSelect = (optionValue: string) => {
     onValueChange(optionValue)
     setIsOpen(false)
+    // Clear preview on selection since the actual value is now set
+    onHover?.(null)
+  }
+
+  // Clear preview when popover closes (via click outside, escape, etc.)
+  const handleOpenChange = (open: boolean) => {
+    setIsOpen(open)
+    if (!open) {
+      onHover?.(null)
+    }
   }
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild disabled={disabled}>
         <button
           type="button"
@@ -84,6 +97,7 @@ export function SettingsMenuSelect({
         collisionPadding={8}
         className="p-1.5"
         style={{ width: menuWidth }}
+        onMouseLeave={() => onHover?.(null)}
       >
         <div className="space-y-0.5">
           {options.map((option) => {
@@ -93,6 +107,7 @@ export function SettingsMenuSelect({
                 key={option.value}
                 type="button"
                 onClick={() => handleSelect(option.value)}
+                onMouseEnter={() => onHover?.(option.value)}
                 className={cn(
                   'w-full flex items-center justify-between px-2.5 py-2 rounded-lg',
                   'hover:bg-foreground/5 transition-colors text-left',
@@ -143,6 +158,8 @@ export interface SettingsMenuSelectRowProps {
   inCard?: boolean
   /** Width of the dropdown menu */
   menuWidth?: number
+  /** Called when hovering over an option (for live preview). Pass null on leave. */
+  onHover?: (value: string | null) => void
 }
 
 export function SettingsMenuSelectRow({
@@ -156,6 +173,7 @@ export function SettingsMenuSelectRow({
   className,
   inCard = true,
   menuWidth = 280,
+  onHover,
 }: SettingsMenuSelectRowProps) {
   return (
     <div
@@ -179,6 +197,7 @@ export function SettingsMenuSelectRow({
           placeholder={placeholder}
           disabled={disabled}
           menuWidth={menuWidth}
+          onHover={onHover}
         />
       </div>
     </div>

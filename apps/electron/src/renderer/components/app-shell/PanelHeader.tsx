@@ -63,6 +63,8 @@ export interface PanelHeaderProps {
   paddingLeft?: string
   /** Optional className for additional styling */
   className?: string
+  /** Whether title is being regenerated (shows shimmer effect) */
+  isRegeneratingTitle?: boolean
 }
 
 /**
@@ -77,6 +79,7 @@ export function PanelHeader({
   compensateForStoplight,
   paddingLeft,
   className,
+  isRegeneratingTitle,
 }: PanelHeaderProps) {
   // Use context as fallback when prop is not explicitly set
   const contextCompensate = useCompensateForStoplight()
@@ -86,6 +89,7 @@ export function PanelHeader({
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
   // Title content - either static or interactive with dropdown
+  // Shimmer effect shows during title regeneration
   const titleContent = (
     <motion.div
       initial={false}
@@ -93,7 +97,10 @@ export function PanelHeader({
       transition={{ duration: 0.15 }}
       className="flex items-center gap-1"
     >
-      <h1 className="text-sm font-semibold truncate font-sans leading-tight">{title}</h1>
+      <h1 className={cn(
+        "text-sm font-semibold truncate font-sans leading-tight",
+        isRegeneratingTitle && "animate-shimmer-text"
+      )}>{title}</h1>
       {badge}
     </motion.div>
   )

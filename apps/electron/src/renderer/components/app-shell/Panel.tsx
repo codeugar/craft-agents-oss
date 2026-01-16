@@ -49,7 +49,8 @@ export function Panel({
       className={cn(
         // Base styles shared by all panels
         // Note: No rounded corners here - parent container handles clipping via overflow-hidden
-        'h-full flex flex-col min-w-0 overflow-hidden bg-background',
+        // Note: No background color here - panel-specific CSS classes handle backgrounds
+        'h-full flex flex-col min-w-0 overflow-hidden',
         // Variant-specific styles
         variant === 'grow' && 'flex-1',
         variant === 'shrink' && 'shrink-0',

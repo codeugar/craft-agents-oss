@@ -282,7 +282,7 @@ export default function WorkspaceSettingsPage() {
   // Show empty state if no workspace is active
   if (!activeWorkspaceId) {
     return (
-      <div className="h-full flex flex-col bg-surface-below">
+      <div className="h-full flex flex-col">
         <PanelHeader title="Workspace Settings" actions={<HeaderMenu route={routes.view.settings('workspace')} />} />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-muted-foreground">No workspace selected</p>
@@ -294,7 +294,7 @@ export default function WorkspaceSettingsPage() {
   // Show loading state
   if (isLoadingWorkspace) {
     return (
-      <div className="h-full flex flex-col bg-surface-below">
+      <div className="h-full flex flex-col">
         <PanelHeader title="Workspace Settings" actions={<HeaderMenu route={routes.view.settings('workspace')} />} />
         <div className="flex-1 flex items-center justify-center">
           <Spinner className="text-muted-foreground" />
@@ -304,11 +304,9 @@ export default function WorkspaceSettingsPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-surface-below">
+    <div className="h-full flex flex-col">
       <PanelHeader title="Workspace Settings" actions={<HeaderMenu route={routes.view.settings('workspace')} />} />
-      <div className="relative flex-1 min-h-0">
-        {/* Top fade gradient */}
-        <div className="absolute top-0 left-0 right-2 h-8 z-10 bg-gradient-to-b from-surface-below to-transparent pointer-events-none" />
+      <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
           <div className="space-y-6">
@@ -494,8 +492,6 @@ export default function WorkspaceSettingsPage() {
           </div>
         </div>
         </ScrollArea>
-        {/* Bottom fade gradient */}
-        <div className="absolute bottom-0 left-0 right-2 h-8 z-10 bg-gradient-to-t from-surface-below to-transparent pointer-events-none" />
       </div>
     </div>
   )
