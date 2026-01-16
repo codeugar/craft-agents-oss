@@ -1,6 +1,7 @@
 {
   "name": "@craft-agent/shared",
   "version": "0.2.14",
+  "license": "Apache-2.0",
   "description": "Shared business logic for Craft Agent - agent, auth, config, credentials, MCP integration",
   "type": "module",
   "main": "src/index.ts",
@@ -17,7 +18,6 @@
     "./auth": "./src/auth/index.ts",
     "./auth/callback-page": "./src/auth/callback-page.ts",
     "./auth/types": "./src/auth/types.ts",
-    "./clients": "./src/clients/index.ts",
     "./config": "./src/config/index.ts",
     "./config/types": "./src/config/types.ts",
     "./credentials": "./src/credentials/index.ts",
@@ -27,7 +27,6 @@
     "./sessions": "./src/sessions/index.ts",
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
-    "./subscription": "./src/subscription/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/toolNames": "./src/utils/toolNames.ts",

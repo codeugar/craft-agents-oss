@@ -255,21 +255,15 @@ export default function App() {
     initialSetupNeeds: setupNeeds || undefined,
   })
 
-  // Reauth login handler - re-authenticate with Craft when session expired
+  // Reauth login handler - placeholder (reauth is not currently used)
   const handleReauthLogin = useCallback(async () => {
-    const result = await window.electronAPI.startCraftOAuth()
-    if (result.success) {
-      // Re-check setup needs after successful login
-      const needs = await window.electronAPI.getSetupNeeds()
-      if (needs.isFullyConfigured) {
-        setAppState('ready')
-      } else {
-        // Still needs more setup (shouldn't happen normally, but handle gracefully)
-        setSetupNeeds(needs)
-        setAppState('onboarding')
-      }
+    // Re-check setup needs
+    const needs = await window.electronAPI.getSetupNeeds()
+    if (needs.isFullyConfigured) {
+      setAppState('ready')
     } else {
-      throw new Error(result.error || 'Login failed')
+      setSetupNeeds(needs)
+      setAppState('onboarding')
     }
   }, [])
 
@@ -408,7 +402,8 @@ export default function App() {
   useEffect(() => {
     // Handoff events signal end of streaming - need to sync back to React state
     // Also includes todo_state_changed so status updates immediately reflect in sidebar
-    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed', 'title_generated'])
+    // async_operation included so shimmer effect on session titles updates in real-time
+    const handoffEventTypes = new Set(['complete', 'error', 'interrupted', 'typed_error', 'todo_state_changed', 'title_generated', 'async_operation'])
 
     // Helper to handle side effects (same logic for both paths)
     const handleEffects = (effects: Effect[], sessionId: string, eventType: string) => {

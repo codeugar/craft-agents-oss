@@ -190,32 +190,6 @@ export interface Plan {
 // ============================================
 
 /**
- * Craft space from user's profile
- */
-export interface CraftSpace {
-  id: string
-  name: string
-  teamId?: string | null
-  iconUrl?: string | null
-}
-
-/**
- * Craft OAuth result with profile info
- */
-export interface CraftOAuthResult {
-  success: boolean
-  error?: string
-  token?: string
-  profile?: {
-    userId: string
-    firstName: string
-    lastName: string
-    spaces: CraftSpace[]
-    teams: Array<{ id: string; name: string; isPrivate: boolean; role: string; tier?: string | null }>
-  }
-}
-
-/**
  * Result of saving onboarding configuration
  */
 export interface OnboardingSaveResult {
@@ -508,8 +482,6 @@ export const IPC_CHANNELS = {
 
   // Onboarding
   ONBOARDING_GET_AUTH_STATE: 'onboarding:getAuthState',
-  ONBOARDING_START_CRAFT_OAUTH: 'onboarding:startCraftOAuth',
-  ONBOARDING_GET_CRAFT_PROFILE: 'onboarding:getCraftProfile',
   ONBOARDING_VALIDATE_MCP: 'onboarding:validateMcp',
   ONBOARDING_START_MCP_OAUTH: 'onboarding:startMcpOAuth',
   ONBOARDING_SAVE_CONFIG: 'onboarding:saveConfig',
@@ -551,6 +523,8 @@ export const IPC_CHANNELS = {
   
   // Source permissions config
   SOURCES_GET_PERMISSIONS: 'sources:getPermissions',
+  // Workspace permissions config (for Explore mode)
+  WORKSPACE_GET_PERMISSIONS: 'workspace:getPermissions',
   // MCP tools listing
   SOURCES_GET_MCP_TOOLS: 'sources:getMcpTools',
 
@@ -572,13 +546,6 @@ export const IPC_CHANNELS = {
   // Generic workspace image loading/saving (for icons, etc.)
   WORKSPACE_READ_IMAGE: 'workspace:readImage',
   WORKSPACE_WRITE_IMAGE: 'workspace:writeImage',
-
-  // Unified preview window (all modes: markdown, view, diff, multi-diff, terminal)
-  PREVIEW_OPEN: 'preview:open',
-  PREVIEW_GET_DATA: 'preview:getData',
-  PREVIEW_SAVE: 'preview:save',
-  PREVIEW_FILE_SAVED: 'preview:fileSaved', // Broadcast: { filePath: string }
-  PREVIEW_READ_FILE: 'preview:readFile',
 
   // Workspace settings (per-workspace configuration)
   WORKSPACE_SETTINGS_GET: 'workspaceSettings:get',
@@ -613,168 +580,6 @@ export const IPC_CHANNELS = {
   WINDOW_FOCUS_STATE: 'window:focusState',  // Broadcast: boolean (isFocused)
   WINDOW_GET_FOCUS_STATE: 'window:getFocusState',
 } as const
-
-/**
- * Data for terminal preview (Bash/Grep/Glob tools)
- */
-export interface TerminalPreviewData {
-  command: string
-  output: string
-  /** Optional description of what the command does */
-  description?: string
-  /** Exit status if available */
-  exitCode?: number
-  /** Tool type for badge display */
-  toolType?: 'bash' | 'grep' | 'glob'
-}
-
-/**
- * A single file change (Edit or Write) for the session diff view
- */
-export interface FileChange {
-  /** Unique ID for this change */
-  id: string
-  /** Absolute file path */
-  filePath: string
-  /** Tool type: Edit or Write */
-  toolType: 'Edit' | 'Write'
-  /** For Edit: the old_string; For Write: empty or previous content if available */
-  original: string
-  /** For Edit: the new_string; For Write: the written content */
-  modified: string
-  /** Error message if the operation failed */
-  error?: string
-}
-
-// ============================================
-// Unified Preview Types
-// ============================================
-
-/**
- * View mode data - for Read/Write tool results
- */
-export interface FilePreviewViewData {
-  filePath: string
-  content: string
-  language?: string
-  /** 'read' for Read tool, 'write' for Write tool */
-  toolType: 'read' | 'write'
-  /** File metadata from Read tool */
-  startLine?: number
-  numLines?: number
-  totalLines?: number
-  /** Error message if the operation failed */
-  error?: string
-}
-
-/**
- * Diff mode data - for single Edit tool result
- */
-export interface FilePreviewDiffData {
-  filePath: string
-  original: string
-  modified: string
-  language?: string
-  /** Error message if the edit failed */
-  error?: string
-}
-
-/**
- * Multi-diff mode data - for multiple edits/writes in a turn
- */
-export interface FilePreviewMultiDiffData {
-  turnId: string
-  changes: FileChange[]
-  /** If true (default), group changes by file. If false, show each change separately */
-  consolidated?: boolean
-  /** ID of the change to auto-focus (only used when consolidated=false) */
-  focusedChangeId?: string
-}
-
-/**
- * Data for markdown preview window
- * - readOnly mode: view-only, no save button
- * - readWrite mode: editable with save functionality (requires filePath)
- */
-export type MarkdownPreviewData =
-  | {
-      /** Read-only mode - content from memory (no save) */
-      mode: 'readOnly'
-      /** Raw markdown content to display */
-      content: string
-      /** Optional title for the window */
-      title?: string
-    }
-  | {
-      /** Read-only mode - content from file (no save) */
-      mode: 'readOnly'
-      /** File path to read content from */
-      filePath: string
-      /** Optional title for the window */
-      title?: string
-    }
-  | {
-      /** Read-write mode - editable with save to file */
-      mode: 'readWrite'
-      /** File path to read from and save to */
-      filePath: string
-      /** Optional title for the window */
-      title?: string
-    }
-
-// ============================================
-// Unified Preview Window Types
-// ============================================
-
-/**
- * Base fields shared by all preview data types
- */
-interface PreviewDataBase {
-  sessionId: string
-  previewId: string
-  /**
-   * Resolved theme from the main window ('light' or 'dark').
-   * Passed via URL params to ensure preview windows use the same theme
-   * as the app, not re-evaluating system preference.
-   */
-  resolvedTheme?: 'light' | 'dark'
-}
-
-/**
- * Unified preview data - supports all preview modes in a single window
- * Uses discriminated union for type-safe mode handling
- */
-export type PreviewData =
-  | (PreviewDataBase & {
-      /** Markdown preview - view or edit markdown content */
-      mode: 'markdown'
-      markdown: MarkdownPreviewData
-    })
-  | (PreviewDataBase & {
-      /** Code view - Read/Write tool results */
-      mode: 'view'
-      view: FilePreviewViewData
-    })
-  | (PreviewDataBase & {
-      /** Diff view - single Edit tool result */
-      mode: 'diff'
-      diff: FilePreviewDiffData
-    })
-  | (PreviewDataBase & {
-      /** Multi-diff view - multiple edits/writes in a turn */
-      mode: 'multi-diff'
-      multiDiff: FilePreviewMultiDiffData
-    })
-  | (PreviewDataBase & {
-      /** Terminal view - Bash/Grep/Glob tool output */
-      mode: 'terminal'
-      terminal: TerminalPreviewData
-    })
-
-/**
- * Preview mode type for discriminated union
- */
-export type PreviewMode = PreviewData['mode']
 
 // Re-import types for ElectronAPI
 import type { Workspace, SessionMetadata, StoredAttachment as StoredAttachmentType } from '@craft-agent/core/types';
@@ -859,8 +664,6 @@ export interface ElectronAPI {
   // Onboarding
   getAuthState(): Promise<AuthState>
   getSetupNeeds(): Promise<SetupNeeds>
-  startCraftOAuth(): Promise<CraftOAuthResult>
-  getCraftProfile(): Promise<CraftOAuthResult>  // Get profile using existing stored token
   startWorkspaceMcpOAuth(mcpUrl: string): Promise<OAuthResult & { accessToken?: string; clientId?: string }>
   saveOnboardingConfig(config: {
     authType?: AuthType  // Optional - if not provided, preserves existing auth type (for add workspace)
@@ -895,13 +698,6 @@ export interface ElectronAPI {
   readPreferences(): Promise<{ content: string; exists: boolean }>
   writePreferences(content: string): Promise<{ success: boolean; error?: string }>
 
-  // Unified preview window (all modes: markdown, view, diff, multi-diff, terminal)
-  openPreview(data: PreviewData): Promise<void>
-  getPreviewData(sessionId: string, previewId: string): Promise<PreviewData | null>
-  savePreview(sessionId: string, previewId: string, content: string): Promise<void>
-  onPreviewFileSaved(callback: (data: { filePath: string }) => void): () => void
-  readFileForPreview(filePath: string): Promise<string | null>
-
   // Session Drafts (persisted input text)
   getDraft(sessionId: string): Promise<string | null>
   setDraft(sessionId: string, text: string): Promise<void>
@@ -920,6 +716,7 @@ export interface ElectronAPI {
   startSourceOAuth(workspaceId: string, sourceSlug: string): Promise<{ success: boolean; error?: string; accessToken?: string }>
   saveSourceCredentials(workspaceId: string, sourceSlug: string, credential: string): Promise<void>
   getSourcePermissionsConfig(workspaceId: string, sourceSlug: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
+  getWorkspacePermissionsConfig(workspaceId: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
 
   // Sources change listener (live updates when sources are added/removed)
@@ -1070,7 +867,7 @@ export type ChatFilter =
 /**
  * Settings subpage options
  */
-export type SettingsSubpage = 'app' | 'workspace' | 'shortcuts' | 'preferences'
+export type SettingsSubpage = 'app' | 'workspace' | 'permissions' | 'shortcuts' | 'preferences'
 
 /**
  * Chats navigation state - shows SessionList in navigator
