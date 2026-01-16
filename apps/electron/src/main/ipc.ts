@@ -651,6 +651,18 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return installUpdate()
   })
 
+  // Dismiss update for this version (persists across restarts)
+  ipcMain.handle(IPC_CHANNELS.UPDATE_DISMISS, async (_event, version: string) => {
+    const { setDismissedUpdateVersion } = await import('@craft-agent/shared/config')
+    setDismissedUpdateVersion(version)
+  })
+
+  // Get dismissed version
+  ipcMain.handle(IPC_CHANNELS.UPDATE_GET_DISMISSED, async () => {
+    const { getDismissedUpdateVersion } = await import('@craft-agent/shared/config')
+    return getDismissedUpdateVersion()
+  })
+
   // Shell operations - open URL in external browser (or handle craftagents:// internally)
   ipcMain.handle(IPC_CHANNELS.OPEN_URL, async (_event, url: string) => {
     ipcLog.info('[OPEN_URL] Received request:', url)
@@ -902,17 +914,16 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       permissionMode: config?.defaults?.permissionMode,
       workingDirectory: config?.defaults?.workingDirectory,
       localMcpEnabled: config?.localMcpServers?.enabled ?? true,
-      tutorialsEnabled: config?.tutorialsEnabled ?? true,
     }
   })
 
   // Update a workspace setting
-  // Valid keys: 'name', 'model', 'enabledSourceSlugs', 'permissionMode', 'workingDirectory', 'localMcpEnabled', 'tutorialsEnabled'
+  // Valid keys: 'name', 'model', 'enabledSourceSlugs', 'permissionMode', 'workingDirectory', 'localMcpEnabled'
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SETTINGS_UPDATE, async (_event, workspaceId: string, key: string, value: unknown) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
 
     // Validate key is a known workspace setting
-    const validKeys = ['name', 'model', 'enabledSourceSlugs', 'permissionMode', 'workingDirectory', 'localMcpEnabled', 'tutorialsEnabled']
+    const validKeys = ['name', 'model', 'enabledSourceSlugs', 'permissionMode', 'workingDirectory', 'localMcpEnabled']
     if (!validKeys.includes(key)) {
       throw new Error(`Invalid workspace setting key: ${key}. Valid keys: ${validKeys.join(', ')}`)
     }
@@ -930,9 +941,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       // Store in localMcpServers.enabled (top-level, not in defaults)
       config.localMcpServers = config.localMcpServers || { enabled: true }
       config.localMcpServers.enabled = Boolean(value)
-    } else if (key === 'tutorialsEnabled') {
-      // Store as top-level config property
-      config.tutorialsEnabled = Boolean(value)
     } else {
       // Update the setting in defaults
       config.defaults = config.defaults || {}
