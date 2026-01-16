@@ -107,10 +107,11 @@ win:
 
 nsis:
   oneClick: false
-  # Install to %LOCALAPPDATA% instead of Program Files to avoid EPERM issues
-  # when bun.exe tries to write files (Program Files requires admin elevation)
+  # IMPORTANT: Must install to %LOCALAPPDATA%, NOT Program Files!
+  # Bun.exe needs write access to its directory which Program Files blocks.
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  # Don't allow changing install dir - Program Files would break bun
+  allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: true
 
 linux:
