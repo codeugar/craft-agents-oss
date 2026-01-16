@@ -20,13 +20,24 @@ export interface ClaudeOAuthCredential {
 }
 
 /**
- * Read Claude OAuth credentials from macOS Keychain
+ * Read Claude OAuth credentials from system credential store
+ * Dispatches to platform-specific implementation
  */
 function readFromKeychain(): ClaudeOAuthCredential | null {
-  if (process.platform !== 'darwin') {
-    return null;
+  if (process.platform === 'darwin') {
+    return readFromMacOSKeychain();
+  } else if (process.platform === 'win32') {
+    return readFromWindowsCredentialManager();
+  } else if (process.platform === 'linux') {
+    return readFromLinuxSecretService();
   }
+  return null;
+}
 
+/**
+ * Read Claude OAuth credentials from macOS Keychain
+ */
+function readFromMacOSKeychain(): ClaudeOAuthCredential | null {
   try {
     const result = execSync(
       'security find-generic-password -s "Claude Code-credentials" -w',
@@ -47,6 +58,84 @@ function readFromKeychain(): ClaudeOAuthCredential | null {
   } catch {
     // Keychain entry not found or parse error
   }
+  return null;
+}
+
+/**
+ * Read Claude OAuth credentials from Windows Credential Manager
+ * Falls back to credentials file which Claude Code uses on Windows
+ */
+function readFromWindowsCredentialManager(): ClaudeOAuthCredential | null {
+  try {
+    // Read from the credentials file location that Claude Code uses on Windows
+    const credentialsPath = join(homedir(), '.claude', '.credentials.json');
+    if (existsSync(credentialsPath)) {
+      const content = readFileSync(credentialsPath, 'utf-8');
+      const credentials: ClaudeCredentials = JSON.parse(content);
+      if (credentials.claudeAiOauth) {
+        return {
+          accessToken: credentials.claudeAiOauth.accessToken,
+          refreshToken: credentials.claudeAiOauth.refreshToken,
+          expiresAt: credentials.claudeAiOauth.expiresAt,
+          scopes: credentials.claudeAiOauth.scopes,
+        };
+      }
+    }
+  } catch {
+    // Credential Manager read failed
+  }
+  return null;
+}
+
+/**
+ * Read Claude OAuth credentials from Linux Secret Service (libsecret)
+ * Uses secret-tool CLI which interfaces with GNOME Keyring or KDE Wallet
+ */
+function readFromLinuxSecretService(): ClaudeOAuthCredential | null {
+  try {
+    // Try secret-tool (works with GNOME Keyring, KDE Wallet via libsecret)
+    const result = execSync(
+      'secret-tool lookup service "Claude Code" account "credentials" 2>/dev/null',
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+
+    if (result) {
+      const credentials: ClaudeCredentials = JSON.parse(result);
+      if (credentials.claudeAiOauth) {
+        return {
+          accessToken: credentials.claudeAiOauth.accessToken,
+          refreshToken: credentials.claudeAiOauth.refreshToken,
+          expiresAt: credentials.claudeAiOauth.expiresAt,
+          scopes: credentials.claudeAiOauth.scopes,
+        };
+      }
+    }
+  } catch {
+    // secret-tool not available or entry not found
+  }
+
+  // Fallback: try pass (password-store)
+  try {
+    const result = execSync(
+      'pass show claude-code/credentials 2>/dev/null',
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+
+    if (result) {
+      const credentials: ClaudeCredentials = JSON.parse(result);
+      if (credentials.claudeAiOauth) {
+        return {
+          accessToken: credentials.claudeAiOauth.accessToken,
+          refreshToken: credentials.claudeAiOauth.refreshToken,
+          expiresAt: credentials.claudeAiOauth.expiresAt,
+          scopes: credentials.claudeAiOauth.scopes,
+        };
+      }
+    }
+  } catch {
+    // pass not available or entry not found
+  }
+
   return null;
 }
 
@@ -79,7 +168,7 @@ function readFromCredentialsFile(): ClaudeOAuthCredential | null {
  * Get existing Claude OAuth credentials from keychain or credentials file
  */
 export function getExistingClaudeCredentials(): ClaudeOAuthCredential | null {
-  // Try keychain first (macOS)
+  // Try keychain first (macOS, Windows, Linux)
   const keychainCreds = readFromKeychain();
   if (keychainCreds) {
     return keychainCreds;
@@ -152,11 +241,13 @@ export function isTokenExpired(expiresAt?: number): boolean {
 }
 
 /**
- * Check if Claude CLI is installed
+ * Check if Claude CLI is installed (cross-platform)
  */
 export function isClaudeCliInstalled(): boolean {
   try {
-    execSync('which claude', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    // Use 'where' on Windows, 'which' on Unix-like systems
+    const command = process.platform === 'win32' ? 'where claude' : 'which claude';
+    execSync(command, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     return true;
   } catch {
     return false;

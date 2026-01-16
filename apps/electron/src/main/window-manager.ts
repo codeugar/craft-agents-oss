@@ -2,11 +2,37 @@ import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
 import { windowLog } from './logger'
 import { join } from 'path'
 import { existsSync } from 'fs'
+import { release } from 'os'
 import { IPC_CHANNELS } from '../shared/types'
 import type { SavedWindow } from './window-state'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+/**
+ * Get the appropriate background material for Windows transparency effects
+ * - Windows 11 (build 22000+): Mica effect
+ * - Windows 10 1809+ (build 17763+): Acrylic effect
+ * - Older versions: No transparency
+ */
+function getWindowsBackgroundMaterial(): 'mica' | 'acrylic' | undefined {
+  if (process.platform !== 'win32') return undefined
+
+  // os.release() returns "10.0.xxxxx" where xxxxx is the build number
+  const buildNumber = parseInt(release().split('.')[2] || '0', 10)
+
+  if (buildNumber >= 22000) {
+    windowLog.info('Windows 11 detected (build ' + buildNumber + '), using Mica')
+    return 'mica'
+  } else if (buildNumber >= 17763) {
+    windowLog.info('Windows 10 1809+ detected (build ' + buildNumber + '), using Acrylic')
+    return 'acrylic'
+  }
+
+  windowLog.info('Older Windows detected (build ' + buildNumber + '), no transparency')
+  return undefined
+}
+
 
 interface ManagedWindow {
   window: BrowserWindow
@@ -58,6 +84,11 @@ export class WindowManager {
     const windowWidth = focused ? 900 : 1400
     const windowHeight = focused ? 700 : 900
 
+    // Platform-specific window options
+    const isMac = process.platform === 'darwin'
+    const isWindows = process.platform === 'win32'
+    const windowsBackgroundMaterial = getWindowsBackgroundMaterial()
+
     const window = new BrowserWindow({
       width: windowWidth,
       height: windowHeight,
@@ -66,10 +97,27 @@ export class WindowManager {
       show: false, // Don't show until ready-to-show event (faster perceived startup)
       title: '',
       icon: iconExists ? iconPath : undefined,
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 18, y: 18 },
-      vibrancy: 'under-window',
-      visualEffectState: 'active',
+      // macOS-specific: hidden title bar with inset traffic lights
+      ...(isMac && {
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 18, y: 18 },
+        vibrancy: 'under-window',
+        visualEffectState: 'active',
+      }),
+      // Windows: use native frame with Mica/Acrylic transparency (Windows 10/11)
+      ...(isWindows && {
+        frame: true, // Keep native frame for better UX
+        autoHideMenuBar: true, // Hide menu bar but accessible via Alt key
+        ...(windowsBackgroundMaterial && {
+          transparent: true,
+          backgroundMaterial: windowsBackgroundMaterial,
+        }),
+      }),
+      // Linux: use native frame
+      ...(!isMac && !isWindows && {
+        frame: true,
+        autoHideMenuBar: true,
+      }),
       webPreferences: {
         preload: join(__dirname, 'preload.cjs'),
         contextIsolation: true,

@@ -15,13 +15,9 @@ files:
   - package.json
   # Include SDK for subprocess execution
   - node_modules/@anthropic-ai/claude-agent-sdk/**/*
-  # Exclude SDK ripgrep binaries for other platforms (keep only current platform)
-  - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux"
-  - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux"
-  - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32"
   # Include interceptor for cache TTL
   - packages/shared/src/cache-ttl-interceptor.ts
-  # Include bundled Bun runtime
+  # Include bundled Bun runtime (platform-specific, set by build script)
   - vendor/bun/**/*
   # Exclude everything else from node_modules
   - "!node_modules/**/*"
@@ -50,6 +46,11 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Exclude ripgrep binaries for other platforms
+  files:
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32"
   # Code signing & notarization (disabled by default for local builds)
   # To enable: set CSC_LINK, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
   # notarize:
@@ -77,6 +78,12 @@ win:
         - x64
   # Use predictable naming: Craft-Agent-x64.exe
   artifactName: "Craft-Agent-${arch}.${ext}"
+  # Exclude ripgrep binaries for other platforms
+  files:
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-linux"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-darwin"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-darwin"
 
 nsis:
   oneClick: false
