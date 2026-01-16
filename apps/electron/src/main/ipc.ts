@@ -1188,6 +1188,27 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
+  // Get permissions config for a workspace (raw format for UI display)
+  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_PERMISSIONS, async (_event, workspaceId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return null
+
+    // Load raw JSON file (not normalized) for UI display
+    const { existsSync, readFileSync } = await import('fs')
+    const { getWorkspacePermissionsPath } = await import('@craft-agent/shared/agent')
+    const path = getWorkspacePermissionsPath(workspace.rootPath)
+
+    if (!existsSync(path)) return null
+
+    try {
+      const content = readFileSync(path, 'utf-8')
+      return JSON.parse(content)
+    } catch (error) {
+      ipcLog.error('Error reading workspace permissions config:', error)
+      return null
+    }
+  })
+
   // Get MCP tools for a source with permission status
   ipcMain.handle(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS, async (_event, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)

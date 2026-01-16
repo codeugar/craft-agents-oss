@@ -483,6 +483,12 @@ html[data-font="inter"] {
     display: none;
   }
 
+  /* Mask fade utilities - for fading content at edges over transparent/image backgrounds */
+  .mask-fade-y {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 32px, black calc(100% - 32px), transparent 100%);
+  }
+
   /* Custom shadow utilities
      - Border layer (1px ring) uses foreground color with --shadow-border-opacity
      - Blur/spread layers use black with --shadow-blur-opacity

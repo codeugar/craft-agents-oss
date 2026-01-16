@@ -1010,7 +1010,8 @@ function ErrorMessage({ message }: { message: Message }) {
   const [detailsOpen, setDetailsOpen] = React.useState(false)
 
   return (
-    <div className="flex justify-start">
+    // ml-3 aligns with TurnCard header left padding for visual consistency
+    <div className="flex justify-start ml-3">
       {/* Subtle bg (3% opacity) + tinted shadow for softer error appearance */}
       <div
         className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"

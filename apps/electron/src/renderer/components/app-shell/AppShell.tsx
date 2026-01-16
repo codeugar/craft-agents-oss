@@ -971,6 +971,11 @@ function AppShellContent({
       return 'Sources'
     }
 
+    // Skills navigator
+    if (isSkillsNavigation(navState)) {
+      return 'All Skills'
+    }
+
     // Settings navigator
     if (isSettingsNavigation(navState)) return 'Settings'
 
