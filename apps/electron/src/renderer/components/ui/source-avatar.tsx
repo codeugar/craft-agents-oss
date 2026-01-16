@@ -22,6 +22,12 @@
 import * as React from 'react'
 import { CrossfadeAvatar } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
+import {
+  sourceIconCache,
+  logoUrlCache,
+  clearIconCaches,
+  svgToThemedDataUrl,
+} from '@/lib/icon-cache'
 import { Mail, Plug, Globe, HardDrive } from 'lucide-react'
 import { McpIcon } from '@/components/icons/McpIcon'
 import { deriveServiceUrl } from '@craft-agent/shared/utils/service-url'
@@ -111,23 +117,17 @@ const STATUS_SIZE_CONFIG: Record<SourceAvatarSize, 'xs' | 'sm' | 'md'> = {
   lg: 'sm',
 }
 
-// Cache for loaded workspace images (to avoid repeated IPC calls)
-const imageCache = new Map<string, string>()
-
-// Cache for logo URLs resolved via IPC
-const logoUrlCache = new Map<string, string | null>()
-
 /**
- * Clear the image cache (useful when sources are updated)
+ * Clear the source icon cache (useful when sources are updated)
  */
 export function clearSourceIconCache(): void {
-  imageCache.clear()
-  logoUrlCache.clear()
+  clearIconCaches()
 }
 
 /**
  * Hook to load a workspace image via IPC
  * Returns the loaded image URL (data URL for binary, raw content for SVG)
+ * Uses shared sourceIconCache from lib/icon-cache
  */
 function useWorkspaceImage(
   workspaceId: string | undefined,
@@ -137,7 +137,7 @@ function useWorkspaceImage(
     // Check cache on initial render
     if (workspaceId && relativePath) {
       const cacheKey = `${workspaceId}:${relativePath}`
-      return imageCache.get(cacheKey) ?? null
+      return sourceIconCache.get(cacheKey) ?? null
     }
     return null
   })
@@ -151,7 +151,7 @@ function useWorkspaceImage(
     const cacheKey = `${workspaceId}:${relativePath}`
 
     // Check cache first
-    const cached = imageCache.get(cacheKey)
+    const cached = sourceIconCache.get(cacheKey)
     if (cached) {
       setImageUrl(cached)
       return
@@ -163,13 +163,14 @@ function useWorkspaceImage(
       .then((result) => {
         if (cancelled) return
 
-        // For SVG, convert to data URL for use in img src
+        // For SVG, theme and convert to data URL
+        // This injects foreground color since currentColor doesn't work in background-image
         let url = result
         if (relativePath.endsWith('.svg')) {
-          url = `data:image/svg+xml;base64,${btoa(result)}`
+          url = svgToThemedDataUrl(result)
         }
 
-        imageCache.set(cacheKey, url)
+        sourceIconCache.set(cacheKey, url)
         setImageUrl(url)
       })
       .catch((error) => {

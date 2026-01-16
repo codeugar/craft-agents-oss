@@ -74,9 +74,7 @@ export function SessionMetadataPanel({ sessionId, closeButton }: SessionMetadata
 
   // Initialize name from session
   useEffect(() => {
-    if (session?.name) {
-      setName(session.name)
-    }
+    setName(session?.name || '')
   }, [session?.name])
 
   // Load notes when session changes

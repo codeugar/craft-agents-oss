@@ -1,13 +1,17 @@
 /**
- * Utilities for parsing @mentions from chat messages
+ * Utilities for parsing [bracket] mentions from chat messages
  *
  * Mention types:
- * - Skills:  @skill-slug
- * - Sources: @src:source-slug
- * - Folders: @dir:/path/to/folder
+ * - Skills:  [skill:slug]
+ * - Sources: [source:slug]
+ *
+ * Bracket syntax allows mentions anywhere in text without word boundaries.
  */
 
+import type { ContentBadge } from '@craft-agent/core'
 import type { MentionItemType } from '@/components/ui/mention-menu'
+import type { LoadedSkill, LoadedSource } from '../../shared/types'
+import { getSourceIconSync, getSkillIconSync } from './icon-cache'
 
 // ============================================================================
 // Types
@@ -18,8 +22,6 @@ export interface ParsedMentions {
   skills: string[]
   /** Source slugs mentioned via @src:slug */
   sources: string[]
-  /** Folder paths mentioned via @dir:/path */
-  folders: string[]
 }
 
 export interface MentionMatch {
@@ -44,8 +46,8 @@ export interface MentionMatch {
  * @returns Parsed mentions by type
  *
  * @example
- * parseMentions('@commit @src:linear @dir:~/Projects/app', ['commit'], ['linear'])
- * // Returns: { skills: ['commit'], sources: ['linear'], folders: ['~/Projects/app'] }
+ * parseMentions('[skill:commit] [source:linear]', ['commit'], ['linear'])
+ * // Returns: { skills: ['commit'], sources: ['linear'] }
  */
 export function parseMentions(
   text: string,
@@ -55,11 +57,10 @@ export function parseMentions(
   const result: ParsedMentions = {
     skills: [],
     sources: [],
-    folders: [],
   }
 
-  // Match source mentions: @src:slug
-  const sourcePattern = /(?:^|\s)@src:([\w-]+)/g
+  // Match source mentions: [source:slug]
+  const sourcePattern = /\[source:([\w-]+)\]/g
   let match
   while ((match = sourcePattern.exec(text)) !== null) {
     const slug = match[1]
@@ -68,22 +69,10 @@ export function parseMentions(
     }
   }
 
-  // Match folder mentions: @dir:/path or @dir:~/path
-  const folderPattern = /(?:^|\s)@dir:(~?\/[^\s]+)/g
-  while ((match = folderPattern.exec(text)) !== null) {
-    const path = match[1]
-    if (!result.folders.includes(path)) {
-      result.folders.push(path)
-    }
-  }
-
-  // Match skill mentions: @slug (must be after source/folder to avoid conflicts)
-  // Skill mentions are bare @slug that don't have src: or dir: prefix
-  const skillPattern = /(?:^|\s)@([\w-]+)(?!\s*:)/g
+  // Match skill mentions: [skill:slug]
+  const skillPattern = /\[skill:([\w-]+)\]/g
   while ((match = skillPattern.exec(text)) !== null) {
     const slug = match[1]
-    // Skip if it's "src" or "dir" (prefixes)
-    if (slug === 'src' || slug === 'dir') continue
     if (availableSkillSlugs.includes(slug) && !result.skills.includes(slug)) {
       result.skills.push(slug)
     }
@@ -107,8 +96,8 @@ export function findMentionMatches(
 ): MentionMatch[] {
   const matches: MentionMatch[] = []
 
-  // Match source mentions: @src:slug
-  const sourcePattern = /(?:^|\s)(@src:([\w-]+))/g
+  // Match source mentions: [source:slug]
+  const sourcePattern = /(\[source:([\w-]+)\])/g
   let match
   while ((match = sourcePattern.exec(text)) !== null) {
     const slug = match[2]
@@ -117,34 +106,21 @@ export function findMentionMatches(
         type: 'source',
         id: slug,
         fullMatch: match[1],
-        startIndex: match.index + (match[0].length - match[1].length),
+        startIndex: match.index,
       })
     }
   }
 
-  // Match folder mentions: @dir:/path
-  const folderPattern = /(?:^|\s)(@dir:(~?\/[^\s]+))/g
-  while ((match = folderPattern.exec(text)) !== null) {
-    const path = match[2]
-    matches.push({
-      type: 'folder',
-      id: path,
-      fullMatch: match[1],
-      startIndex: match.index + (match[0].length - match[1].length),
-    })
-  }
-
-  // Match skill mentions: @slug
-  const skillPattern = /(?:^|\s)(@([\w-]+))(?!\s*:)/g
+  // Match skill mentions: [skill:slug]
+  const skillPattern = /(\[skill:([\w-]+)\])/g
   while ((match = skillPattern.exec(text)) !== null) {
     const slug = match[2]
-    if (slug === 'src' || slug === 'dir') continue
     if (availableSkillSlugs.includes(slug)) {
       matches.push({
         type: 'skill',
         id: slug,
         fullMatch: match[1],
-        startIndex: match.index + (match[0].length - match[1].length),
+        startIndex: match.index,
       })
     }
   }
@@ -166,19 +142,16 @@ export function removeMention(text: string, type: MentionItemType, id: string): 
 
   switch (type) {
     case 'source':
-      pattern = new RegExp(`(^|\\s)@src:${escapeRegExp(id)}(?=\\s|$)`, 'g')
-      break
-    case 'folder':
-      pattern = new RegExp(`(^|\\s)@dir:${escapeRegExp(id)}(?=\\s|$)`, 'g')
+      pattern = new RegExp(`\\[source:${escapeRegExp(id)}\\]`, 'g')
       break
     case 'skill':
     default:
-      pattern = new RegExp(`(^|\\s)@${escapeRegExp(id)}(?=\\s|$)`, 'g')
+      pattern = new RegExp(`\\[skill:${escapeRegExp(id)}\\]`, 'g')
       break
   }
 
   return text
-    .replace(pattern, '$1')
+    .replace(pattern, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -187,16 +160,14 @@ export function removeMention(text: string, type: MentionItemType, id: string): 
  * Strip all mentions from text
  *
  * @param text - The message text with mentions
- * @returns Text with all @mentions removed
+ * @returns Text with all [bracket] mentions removed
  */
 export function stripAllMentions(text: string): string {
   return text
-    // Remove @src:slug
-    .replace(/(?:^|\s)@src:[\w-]+/g, ' ')
-    // Remove @dir:/path
-    .replace(/(?:^|\s)@dir:~?\/[^\s]+/g, ' ')
-    // Remove @slug (but not email-like patterns)
-    .replace(/(?:^|\s)@[\w-]+(?=\s|$)/g, ' ')
+    // Remove [source:slug]
+    .replace(/\[source:[\w-]+\]/g, '')
+    // Remove [skill:slug]
+    .replace(/\[skill:[\w-]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -210,9 +181,7 @@ export function hasMentions(
   availableSourceSlugs: string[]
 ): boolean {
   const mentions = parseMentions(text, availableSkillSlugs, availableSourceSlugs)
-  return mentions.skills.length > 0 ||
-         mentions.sources.length > 0 ||
-         mentions.folders.length > 0
+  return mentions.skills.length > 0 || mentions.sources.length > 0
 }
 
 // ============================================================================
@@ -220,7 +189,7 @@ export function hasMentions(
 // ============================================================================
 
 /**
- * Extract valid @skill mentions from message text (legacy API)
+ * Extract valid [skill:...] mentions from message text (legacy API)
  *
  * @deprecated Use parseMentions() instead
  */
@@ -229,15 +198,67 @@ export function parseSkillMentions(text: string, availableSlugs: string[]): stri
 }
 
 /**
- * Remove @mentions from message text (legacy API)
+ * Remove [bracket] mentions from message text (legacy API)
  *
  * @deprecated Use stripAllMentions() instead
  */
 export function stripSkillMentions(text: string): string {
-  return text
-    .replace(/(?:^|\s)@[\w-]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return stripAllMentions(text)
+}
+
+// ============================================================================
+// Badge Extraction
+// ============================================================================
+
+/**
+ * Extract ContentBadge array from message text.
+ * Used when sending messages to store badge metadata for display.
+ *
+ * Each badge is self-contained with label, icon (base64), and position.
+ *
+ * @param text - Message text with mentions
+ * @param skills - Available skills (for label lookup)
+ * @param sources - Available sources (for label lookup)
+ * @param workspaceId - Workspace ID (for icon lookup)
+ * @returns Array of ContentBadge objects
+ */
+export function extractBadges(
+  text: string,
+  skills: LoadedSkill[],
+  sources: LoadedSource[],
+  workspaceId: string
+): ContentBadge[] {
+  const skillSlugs = skills.map(s => s.slug)
+  const sourceSlugs = sources.map(s => s.config.slug)
+  const matches = findMentionMatches(text, skillSlugs, sourceSlugs)
+
+  return matches.map(match => {
+    let label = match.id
+    let iconDataUrl: string | undefined
+
+    if (match.type === 'skill') {
+      const skill = skills.find(s => s.slug === match.id)
+      label = skill?.metadata.name || match.id
+
+      // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
+      iconDataUrl = getSkillIconSync(workspaceId, match.id) ?? undefined
+    } else if (match.type === 'source') {
+      const source = sources.find(s => s.config.slug === match.id)
+      label = source?.config.name || match.id
+
+      // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
+      iconDataUrl = getSourceIconSync(workspaceId, match.id) ?? undefined
+    }
+
+    return {
+      type: match.type as 'source' | 'skill',
+      label,
+      rawText: match.fullMatch,
+      iconDataUrl,
+      start: match.startIndex,
+      end: match.startIndex + match.fullMatch.length,
+    }
+  })
 }
 
 // ============================================================================

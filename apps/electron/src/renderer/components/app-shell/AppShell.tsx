@@ -7,10 +7,8 @@ import {
   Settings,
   ChevronRight,
   ChevronDown,
-  FolderOpen,
   MoreHorizontal,
   RotateCw,
-  Globe,
   Flag,
   ListFilter,
   Check,
@@ -21,7 +19,6 @@ import {
   Zap,
   Inbox,
 } from "lucide-react"
-import { McpIcon } from "../icons/McpIcon"
 import { PanelRightRounded } from "../icons/PanelRightRounded"
 import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 // TodoStateIcons no longer used - icons come from dynamic todoStates
@@ -55,6 +52,7 @@ import { LeftSidebar } from "./LeftSidebar"
 import { useSession } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
 import { AppShellProvider, type AppShellContextType } from "@/context/AppShellContext"
+import { EscapeInterruptProvider, useEscapeInterrupt } from "@/context/EscapeInterruptContext"
 import { useTheme } from "@/context/ThemeContext"
 import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useFocusZone, useGlobalShortcuts } from "@/hooks/keyboard"
@@ -79,7 +77,6 @@ import {
   isSkillsNavigation,
   type NavigationState,
   type ChatFilter,
-  type SourceCategory,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
@@ -112,6 +109,12 @@ interface AppShellProps {
 }
 
 /**
+ * Panel spacing constants (in pixels)
+ */
+const PANEL_WINDOW_EDGE_SPACING = 6 // Padding between panels and window edge
+const PANEL_PANEL_SPACING = 5 // Gap between adjacent panels
+
+/**
  * AppShell - Main 3-panel layout container
  *
  * Layout: [LeftSidebar 20%] | [NavigatorPanel 32%] | [MainContentPanel 48%]
@@ -121,7 +124,20 @@ interface AppShellProps {
  * - 'flagged': Shows flagged sessions
  * - 'state': Shows sessions with a specific todo state
  */
-export function AppShell({
+export function AppShell(props: AppShellProps) {
+  // Wrap with EscapeInterruptProvider so AppShellContent can use useEscapeInterrupt
+  return (
+    <EscapeInterruptProvider>
+      <AppShellContent {...props} />
+    </EscapeInterruptProvider>
+  )
+}
+
+/**
+ * AppShellContent - Inner component that contains all the AppShell logic
+ * Separated to allow useEscapeInterrupt hook to work (must be inside provider)
+ */
+function AppShellContent({
   contextValue,
   defaultLayout = [20, 32, 48],
   defaultCollapsed = false,
@@ -195,6 +211,9 @@ export function AppShell({
   const [session, setSession] = useSession()
   const { resolvedMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward } = useNavigation()
+
+  // Double-Esc interrupt feature: first Esc shows warning, second Esc interrupts
+  const { handleEscapePress } = useEscapeInterrupt()
 
   // UNIFIED NAVIGATION STATE - single source of truth from NavigationContext
   // All sidebar/navigator/main panel state is derived from this
@@ -399,10 +418,8 @@ export function AppShell({
   // Handle selecting a source from the list
   const handleSourceSelect = React.useCallback((source: LoadedSource) => {
     if (!activeWorkspaceId) return
-    // Preserve current category when navigating to a source
-    const currentCategory = isSourcesNavigation(navState) ? navState.category : undefined
-    navigate(routes.view.sources({ sourceSlug: source.config.slug, category: currentCategory }))
-  }, [activeWorkspaceId, navigate, navState])
+    navigate(routes.view.sources({ sourceSlug: source.config.slug }))
+  }, [activeWorkspaceId, navigate])
 
   // Handle selecting a skill from the list
   const handleSkillSelect = React.useCallback((skill: LoadedSkill) => {
@@ -454,14 +471,19 @@ export function AppShell({
       // History navigation
       { key: '[', cmd: true, action: goBack },
       { key: ']', cmd: true, action: goForward },
-      // ESC to stop processing (like clicking Stop button)
+      // ESC to stop processing - requires double-press within 1 second
+      // First press shows warning overlay, second press interrupts
       { key: 'Escape', action: () => {
         if (session.selected) {
           const meta = sessionMetaMap.get(session.selected)
           if (meta?.isProcessing) {
-            window.electronAPI.cancelProcessing(session.selected, false).catch(err => {
-              console.error('[AppShell] Failed to cancel processing:', err)
-            })
+            // handleEscapePress returns true on second press (within timeout)
+            const shouldInterrupt = handleEscapePress()
+            if (shouldInterrupt) {
+              window.electronAPI.cancelProcessing(session.selected, false).catch(err => {
+                console.error('[AppShell] Failed to cancel processing:', err)
+              })
+            }
           }
         }
       }, when: () => {
@@ -487,9 +509,13 @@ export function AppShell({
       const files = e.clipboardData?.files
       if (!files || files.length === 0) return
 
-      // Skip if the active element is an input/textarea (let it handle paste directly)
-      const activeElement = document.activeElement
-      if (activeElement?.tagName === 'TEXTAREA' || activeElement?.tagName === 'INPUT') {
+      // Skip if the active element is an input/textarea/contenteditable (let it handle paste directly)
+      const activeElement = document.activeElement as HTMLElement | null
+      if (
+        activeElement?.tagName === 'TEXTAREA' ||
+        activeElement?.tagName === 'INPUT' ||
+        activeElement?.isContentEditable
+      ) {
         return
       }
 
@@ -666,6 +692,7 @@ export function AppShell({
           icon={<PanelRightRounded className="h-5 w-6" />}
           onClick={() => setIsRightSidebarVisible(true)}
           tooltip="Open sidebar"
+          className="text-foreground"
         />
       </motion.div>
     )
@@ -740,30 +767,6 @@ export function AppShell({
   const handleSourcesClick = useCallback(() => {
     navigate(routes.view.sources())
   }, [])
-
-  // Handler for source category click - uses navigate() for proper auto-selection
-  const handleSourceCategoryClick = useCallback((category: SourceCategory) => {
-    navigate(routes.view.sources({ category }))
-  }, [])
-
-  // Compute source category counts
-  const sourceCounts = React.useMemo(() => {
-    let localFiles = 0, onlineSources = 0, localMcp = 0
-    for (const s of sources) {
-      if (s.config.type === 'local') {
-        localFiles++
-      } else if (s.config.type === 'mcp') {
-        if (s.config.mcp?.transport === 'stdio') {
-          localMcp++
-        } else {
-          onlineSources++
-        }
-      } else if (s.config.type === 'api') {
-        onlineSources++
-      }
-    }
-    return { localFiles, onlineSources, localMcp }
-  }, [sources])
 
   // Handler for skills view
   const handleSkillsClick = useCallback(() => {
@@ -842,17 +845,17 @@ export function AppShell({
       result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleTodoStateClick(state.id) })
     }
 
-    // 2.5. Sources nav items (parent and categories)
+    // 2.5. Sources nav item
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
-    result.push({ id: 'nav:sources:local-files', type: 'nav', action: () => handleSourceCategoryClick('local-files') })
-    result.push({ id: 'nav:sources:online-sources', type: 'nav', action: () => handleSourceCategoryClick('online-sources') })
-    result.push({ id: 'nav:sources:local-mcp', type: 'nav', action: () => handleSourceCategoryClick('local-mcp') })
 
-    // 2.6. Settings nav item
+    // 2.6. Skills nav item
+    result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+
+    // 2.7. Settings nav item
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick('app') })
 
     return result
-  }, [handleAllChatsClick, handleFlaggedClick, handleTodoStateClick, todoStates, handleSourcesClick, handleSourceCategoryClick, handleSettingsClick])
+  }, [handleAllChatsClick, handleFlaggedClick, handleTodoStateClick, todoStates, handleSourcesClick, handleSkillsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -961,11 +964,8 @@ export function AppShell({
 
   // Get title based on navigation state
   const listTitle = React.useMemo(() => {
-    // Sources navigator - with category-specific titles
+    // Sources navigator
     if (isSourcesNavigation(navState)) {
-      if (navState.category === 'local-files') return 'Local Folders'
-      if (navState.category === 'online-sources') return 'Cloud Services'
-      if (navState.category === 'local-mcp') return 'Local Tools'
       return 'Sources'
     }
 
@@ -991,17 +991,17 @@ export function AppShell({
       <TooltipProvider delayDuration={0}>
         {/*
           Draggable title bar region for transparent window (macOS)
-          - Fixed overlay at z-40 allows window dragging from the top bar area
+          - Fixed overlay at z-titlebar allows window dragging from the top bar area
           - Interactive elements (buttons, dropdowns) must use:
             1. titlebar-no-drag: prevents drag behavior on clickable elements
-            2. relative z-50: ensures elements render above this drag overlay
+            2. relative z-panel: ensures elements render above this drag overlay
         */}
-        <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-40" />
+        <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar" />
 
       {/* App Menu - fixed position, always visible (hidden in focused mode) */}
       {!isFocusedMode && (
         <div
-          className="fixed left-[86px] top-0 h-[50px] z-[60] flex items-center titlebar-no-drag pr-2"
+          className="fixed left-[86px] top-0 h-[50px] z-overlay flex items-center titlebar-no-drag pr-2"
           style={{ width: sidebarWidth - 86 }}
         >
           <AppMenu
@@ -1101,39 +1101,9 @@ export function AppShell({
                       title: "Sources",
                       label: String(sources.length),
                       icon: DatabaseZap,
-                      variant: isSourcesNavigation(navState) && !navState.category ? "default" : "ghost",
+                      variant: isSourcesNavigation(navState) ? "default" : "ghost",
                       onClick: handleSourcesClick,
-                      expandable: true,
-                      expanded: isExpanded('nav:sources'),
-                      onToggle: () => toggleExpanded('nav:sources'),
                       dataTutorial: "sources-nav",
-                      items: [
-                        {
-                          id: "nav:sources:local-files",
-                          title: "Local Folders",
-                          label: String(sourceCounts.localFiles),
-                          icon: FolderOpen,
-                          variant: isSourcesNavigation(navState) && navState.category === 'local-files' ? "default" : "ghost",
-                          onClick: () => handleSourceCategoryClick('local-files'),
-                        },
-                        {
-                          id: "nav:sources:online-sources",
-                          title: "Cloud Services",
-                          label: String(sourceCounts.onlineSources),
-                          icon: Globe,
-                          variant: isSourcesNavigation(navState) && navState.category === 'online-sources' ? "default" : "ghost",
-                          onClick: () => handleSourceCategoryClick('online-sources'),
-                          dataTutorial: "cloud-services-nav",
-                        },
-                        {
-                          id: "nav:sources:local-mcp",
-                          title: "Local Tools",
-                          label: String(sourceCounts.localMcp),
-                          icon: <McpIcon className="h-4 w-4" />,
-                          variant: isSourcesNavigation(navState) && navState.category === 'local-mcp' ? "default" : "ghost",
-                          onClick: () => handleSourceCategoryClick('local-mcp'),
-                        },
-                      ],
                     },
                     {
                       id: "nav:skills",
@@ -1184,7 +1154,7 @@ export function AppShell({
             }
           }}
           onMouseLeave={() => { if (!isResizing) setSidebarHandleY(null) }}
-          className="absolute top-0 w-3 h-full cursor-col-resize z-50 flex justify-center"
+          className="absolute top-0 w-3 h-full cursor-col-resize z-panel flex justify-center"
           style={{
             left: isSidebarVisible ? sidebarWidth - 6 : -6,
             transition: isResizing === 'sidebar' ? undefined : 'left 0.15s ease-out',
@@ -1200,24 +1170,19 @@ export function AppShell({
 
         {/* === MAIN CONTENT (Right) ===
             Flex layout: Session List | Chat Display */}
-        <div className={cn(
-          "flex-1 overflow-hidden min-w-0 flex h-full pl-1.5 pb-2 pt-[6px] gap-[3px]",
-          // Reduce right padding when inline sidebar is hidden to compensate for gap before 0-width motion.div
-          !isFocusedMode && !shouldUseOverlay && !isRightSidebarVisible ? "pr-0.75" : "pr-1.5"
-        )}>
+        <div
+          className="flex-1 overflow-hidden min-w-0 flex h-full"
+          style={{ padding: PANEL_WINDOW_EDGE_SPACING, gap: PANEL_PANEL_SPACING / 2 }}
+        >
           {/* === SESSION LIST PANEL === (hidden in focused mode) */}
           {!isFocusedMode && (
           <div
-            className={cn(
-              "h-full flex flex-col min-w-0 bg-background shrink-0 shadow-middle overflow-hidden",
-              isSidebarVisible ? "rounded-l-[14px] rounded-r-[10px]" : "rounded-l-[14px] rounded-r-[10px]"
-            )}
+            className="h-full flex flex-col min-w-0 bg-background shrink-0 shadow-middle overflow-hidden rounded-l-[14px] rounded-r-[10px]"
             style={{ width: sessionListWidth }}
           >
             <PanelHeader
               title={isSidebarVisible ? listTitle : undefined}
               compensateForStoplight={!isSidebarVisible}
-              className="bg-background"
               actions={
                 <>
                   {/* Filter dropdown - allows filtering by todo states (only in All Chats view) */}
@@ -1321,7 +1286,6 @@ export function AppShell({
                 onSourceClick={handleSourceSelect}
                 selectedSourceSlug={isSourcesNavigation(navState) && navState.details ? navState.details.sourceSlug : null}
                 localMcpEnabled={localMcpEnabled}
-                category={navState.category}
               />
             )}
             {isSkillsNavigation(navState) && activeWorkspaceId && (
@@ -1419,7 +1383,7 @@ export function AppShell({
 
           {/* === MAIN CONTENT PANEL === */}
           <div className={cn(
-            "flex-1 overflow-hidden min-w-0 bg-background shadow-middle",
+            "flex-1 overflow-hidden min-w-0 bg-foreground-1.5 shadow-middle",
             isFocusedMode ? "rounded-[14px]" : (isRightSidebarVisible ? "rounded-l-[10px] rounded-r-[10px]" : "rounded-l-[10px] rounded-r-[14px]")
           )}>
             <MainContentPanel isFocusedMode={isFocusedMode} />
@@ -1457,18 +1421,19 @@ export function AppShell({
                 initial={false}
                 animate={{
                   width: isRightSidebarVisible ? rightSidebarWidth : 0,
+                  marginLeft: isRightSidebarVisible ? 0 : -PANEL_PANEL_SPACING / 2,
                 }}
                 transition={isResizing === 'right-sidebar' || skipRightSidebarAnimation ? { duration: 0 } : springTransition}
-                className="h-full shrink-0 overflow-hidden"
+                className="h-full shrink-0 overflow-visible"
               >
                 <motion.div
                   initial={false}
                   animate={{
-                    x: isRightSidebarVisible ? 0 : rightSidebarWidth,
+                    x: isRightSidebarVisible ? 0 : rightSidebarWidth + PANEL_PANEL_SPACING / 2,
                     opacity: isRightSidebarVisible ? 1 : 0,
                   }}
                   transition={isResizing === 'right-sidebar' || skipRightSidebarAnimation ? { duration: 0 } : springTransition}
-                  className="h-full bg-surface-below shadow-middle rounded-l-[10px] rounded-r-[14px]"
+                  className="h-full bg-foreground-1.5 shadow-middle rounded-l-[10px] rounded-r-[14px]"
                   style={{ width: rightSidebarWidth }}
                 >
                   <RightSidebar
@@ -1492,7 +1457,7 @@ export function AppShell({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={skipRightSidebarAnimation ? { duration: 0 } : { duration: 0.2 }}
-                    className="fixed inset-0 bg-black/25 z-60"
+                    className="fixed inset-0 bg-black/25 z-overlay"
                     onClick={() => setIsRightSidebarVisible(false)}
                   />
                   {/* Drawer panel */}
@@ -1501,9 +1466,9 @@ export function AppShell({
                     animate={{ x: 0 }}
                     exit={{ x: 316 }}
                     transition={skipRightSidebarAnimation ? { duration: 0 } : springTransition}
-                    className="fixed inset-y-0 right-0 w-[316px] h-screen z-60 p-1.5"
+                    className="fixed inset-y-0 right-0 w-[316px] h-screen z-overlay p-1.5"
                   >
-                    <div className="h-full bg-surface-below overflow-hidden shadow-strong rounded-[12px]">
+                    <div className="h-full bg-foreground-1.5 overflow-hidden shadow-strong rounded-[12px]">
                       <RightSidebar
                         panel={{ type: 'sessionMetadata' }}
                         sessionId={isChatsNavigation(navState) && navState.details ? navState.details.sessionId : undefined}

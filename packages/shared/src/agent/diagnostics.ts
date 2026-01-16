@@ -8,7 +8,7 @@ import { getLastApiError } from '../cache-ttl-interceptor.ts';
 import { getAnthropicApiKey, getClaudeOAuthToken, type AuthType } from '../config/storage.ts';
 
 export type DiagnosticCode =
-  | 'insufficient_credits'  // HTTP 402 from Anthropic API
+  | 'billing_error'         // HTTP 402 from Anthropic API
   | 'token_expired'
   | 'invalid_credentials'
   | 'rate_limited'          // HTTP 429 from Anthropic API
@@ -20,7 +20,7 @@ export interface DiagnosticResult {
   code: DiagnosticCode;
   title: string;
   message: string;
-  /** Diagnostic check results for debugging (e.g., "✓ Credits: 150") */
+  /** Diagnostic check results for debugging */
   details: string[];
 }
 
@@ -56,14 +56,14 @@ async function checkCapturedApiError(): Promise<CheckResult> {
     return { ok: true, detail: '✓ API error: None captured' };
   }
 
-  // HTTP 402 - Payment Required / Insufficient Credits
+  // HTTP 402 - Payment Required
   if (apiError.status === 402) {
     return {
       ok: false,
       detail: `✗ API error: 402 ${apiError.message}`,
-      failCode: 'insufficient_credits',
+      failCode: 'billing_error',
       failTitle: 'Payment Required',
-      failMessage: apiError.message || 'Your Anthropic API account requires payment or has insufficient credits.',
+      failMessage: apiError.message || 'Your Anthropic API account has a billing issue.',
     };
   }
 

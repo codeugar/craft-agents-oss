@@ -9,9 +9,15 @@ interface ThemeContextType {
   resolvedMode: 'light' | 'dark'
   systemPreference: 'light' | 'dark'
   colorTheme: string
+  /** Effective color theme for rendering (previewColorTheme ?? colorTheme) */
+  effectiveColorTheme: string
+  /** Temporary preview theme (hover state) - not persisted */
+  previewColorTheme: string | null
   font: FontFamily
   setMode: (mode: ThemeMode) => void
   setColorTheme: (theme: string) => void
+  /** Set temporary preview theme for hover preview. Pass null to clear. */
+  setPreviewColorTheme: (theme: string | null) => void
   setFont: (font: FontFamily) => void
 }
 
@@ -90,6 +96,8 @@ export function ThemeProvider({
   const [colorTheme, setColorThemeState] = useState<string>(stored?.colorTheme ?? defaultColorTheme)
   const [font, setFontState] = useState<FontFamily>(stored?.font ?? defaultFont)
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark'>(getSystemPreference)
+  // Preview theme state for hover preview - ephemeral, not persisted or broadcast
+  const [previewColorTheme, setPreviewColorTheme] = useState<string | null>(null)
 
   // Track if we're receiving an external update to prevent echo broadcasts
   const isExternalUpdate = useRef(false)
@@ -97,10 +105,13 @@ export function ThemeProvider({
   // Resolve the actual mode to apply
   const resolvedMode = mode === 'system' ? systemPreference : mode
 
+  // Effective color theme: preview takes precedence for immediate visual feedback
+  const effectiveColorTheme = previewColorTheme ?? colorTheme
+
   // Apply theme to DOM whenever resolved mode, color theme, or font changes
   useEffect(() => {
-    applyThemeToDOM(resolvedMode, colorTheme, mode, font, systemPreference)
-  }, [resolvedMode, colorTheme, mode, font, systemPreference])
+    applyThemeToDOM(resolvedMode, effectiveColorTheme, mode, font, systemPreference)
+  }, [resolvedMode, effectiveColorTheme, mode, font, systemPreference])
 
   // Listen for system preference changes
   useEffect(() => {
@@ -192,9 +203,12 @@ export function ThemeProvider({
         resolvedMode,
         systemPreference,
         colorTheme,
+        effectiveColorTheme,
+        previewColorTheme,
         font,
         setMode,
         setColorTheme,
+        setPreviewColorTheme,
         setFont
       }}
     >

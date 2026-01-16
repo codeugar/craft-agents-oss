@@ -54,11 +54,6 @@ export function createApplicationMenu(windowManager: WindowManager): void {
           }
         },
         { type: 'separator' as const },
-        {
-          label: 'Import Claude Code Sessions...',
-          click: () => sendToRenderer(IPC_CHANNELS.MENU_IMPORT_CLAUDE_CODE)
-        },
-        { type: 'separator' as const },
         isMac ? { role: 'close' as const } : { role: 'quit' as const }
       ]
     },

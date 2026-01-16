@@ -18,7 +18,6 @@ import {
   type PermissionMode,
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
-  hexToRgb,
 } from './mode-types.ts';
 
 // Re-export types and config from mode-types (single source of truth)
@@ -26,7 +25,6 @@ export {
   type PermissionMode,
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
-  hexToRgb,
 };
 
 /**

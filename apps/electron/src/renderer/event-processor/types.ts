@@ -94,6 +94,7 @@ export interface ParentUpdateEvent {
 export interface CompleteEvent {
   type: 'complete'
   sessionId: string
+  tokenUsage?: Session['tokenUsage']
 }
 
 /**
@@ -183,6 +184,17 @@ export interface TitleGeneratedEvent {
   type: 'title_generated'
   sessionId: string
   title: string
+  preview?: string  // First user message preview for sidebar fallback
+}
+
+/**
+ * Title regenerating event - indicates title regeneration has started/finished
+ * Used to show shimmer effect on title during regeneration
+ */
+export interface TitleRegeneratingEvent {
+  type: 'title_regenerating'
+  sessionId: string
+  isRegenerating: boolean
 }
 
 /**
@@ -201,6 +213,15 @@ export interface PermissionModeChangedEvent {
   type: 'permission_mode_changed'
   sessionId: string
   permissionMode: PermissionMode
+}
+
+/**
+ * Session model changed event
+ */
+export interface SessionModelChangedEvent {
+  type: 'session_model_changed'
+  sessionId: string
+  model: string | null
 }
 
 /**
@@ -312,6 +333,19 @@ export interface SourceActivatedEvent {
 }
 
 /**
+ * Usage update event - real-time context usage during processing
+ * Allows UI to show growing context as agent processes, not just on complete
+ */
+export interface UsageUpdateEvent {
+  type: 'usage_update'
+  sessionId: string
+  tokenUsage: {
+    inputTokens: number
+    contextWindow?: number
+  }
+}
+
+/**
  * Union of all agent events
  */
 export type AgentEvent =
@@ -331,8 +365,10 @@ export type AgentEvent =
   | InfoEvent
   | InterruptedEvent
   | TitleGeneratedEvent
+  | TitleRegeneratingEvent
   | WorkingDirectoryChangedEvent
   | PermissionModeChangedEvent
+  | SessionModelChangedEvent
   | TaskBackgroundedEvent
   | ShellBackgroundedEvent
   | TaskProgressEvent
@@ -342,6 +378,7 @@ export type AgentEvent =
   | AuthRequestEvent
   | AuthCompletedEvent
   | SourceActivatedEvent
+  | UsageUpdateEvent
 
 /**
  * Side effects that need to be handled outside the pure processor

@@ -121,16 +121,6 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MENU_OPEN_HELP, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_OPEN_HELP, handler)
   },
-  onMenuImportClaudeCode: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_IMPORT_CLAUDE_CODE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_IMPORT_CLAUDE_CODE, handler)
-  },
-
-  // Claude Code import
-  discoverClaudeCodeSessions: () => ipcRenderer.invoke(IPC_CHANNELS.IMPORT_DISCOVER_SESSIONS),
-  importClaudeCodeSessions: (filePaths: string[]) => ipcRenderer.invoke(IPC_CHANNELS.IMPORT_SESSIONS, filePaths),
-  findSessionBySdkId: (sdkSessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.FIND_SESSION_BY_SDK_ID, sdkSessionId),
 
   // Deep link navigation listener (for external craftagents:// URLs)
   onDeepLinkNavigate: (callback: (nav: import('../shared/types').DeepLinkNavigation) => void) => {
@@ -167,11 +157,15 @@ const api: ElectronAPI = {
   getBillingMethod: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_BILLING_METHOD),
   updateBillingMethod: (authType: AuthType, credential?: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_UPDATE_BILLING_METHOD, authType, credential),
-  getCreditsUrl: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_CREDITS_URL),
 
-  // Settings - Model
+  // Settings - Model (global default)
   getModel: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_MODEL),
   setModel: (model: string) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_MODEL, model),
+  // Session-specific model (overrides global)
+  getSessionModel: (sessionId: string, workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET_MODEL, sessionId, workspaceId),
+  setSessionModel: (sessionId: string, workspaceId: string, model: string | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SESSION_SET_MODEL, sessionId, workspaceId, model),
 
   // Workspace Settings (per-workspace configuration)
   getWorkspaceSettings: (workspaceId: string) =>
@@ -284,11 +278,9 @@ const api: ElectronAPI = {
     }
   },
 
-  // Theme (cascading: app → workspace)
+  // Theme (app-level only)
   getAppTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_APP),
-  getWorkspaceTheme: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_WORKSPACE, workspaceId),
-  // Preset themes
+  // Preset themes (app-level)
   loadPresetThemes: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_PRESETS),
   loadPresetTheme: (themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_LOAD_PRESET, themeId),
   getColorTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_COLOR_THEME),
@@ -306,15 +298,6 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.THEME_APP_CHANGED, handler)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.THEME_APP_CHANGED, handler)
-    }
-  },
-  onWorkspaceThemeChange: (callback: (theme: import('@craft-agent/shared/config').ThemeOverrides | null) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, theme: import('@craft-agent/shared/config').ThemeOverrides | null) => {
-      callback(theme)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, handler)
     }
   },
   // Theme preferences sync across windows (mode, colorTheme, font)

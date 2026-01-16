@@ -6,8 +6,6 @@
  */
 
 export type ErrorCode =
-  | 'insufficient_credits'
-  | 'credits_exhausted'      // Craft credits specifically ran out (from diagnostics)
   | 'invalid_api_key'
   | 'invalid_credentials'    // Generic credential issue (from diagnostics)
   | 'expired_oauth_token'
@@ -18,6 +16,7 @@ export type ErrorCode =
   | 'network_error'
   | 'mcp_auth_required'
   | 'mcp_unreachable'        // MCP server unreachable (from diagnostics)
+  | 'billing_error'          // HTTP 402 Payment Required
   | 'unknown_error';
 
 export interface RecoveryAction {
@@ -25,10 +24,10 @@ export interface RecoveryAction {
   key: string;
   /** Description of the action */
   label: string;
-  /** Slash command to execute (e.g., '/credits') */
+  /** Slash command to execute (e.g., '/settings') */
   command?: string;
   /** Custom action type for special handling */
-  action?: 'retry' | 'settings' | 'credits' | 'reauth';
+  action?: 'retry' | 'settings' | 'reauth';
 }
 
 export interface AgentError {
@@ -46,7 +45,7 @@ export interface AgentError {
   retryDelayMs?: number;
   /** Original error message for debugging */
   originalError?: string;
-  /** Diagnostic check results for debugging (e.g., "✓ Credits: 150") */
+  /** Diagnostic check results for debugging */
   details?: string[];
 }
 
@@ -54,23 +53,6 @@ export interface AgentError {
  * Error definitions with user-friendly messages and recovery actions
  */
 const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalError' | 'details'>> = {
-  insufficient_credits: {
-    title: 'Insufficient Credits',
-    message: 'Your Craft Credits balance is empty.',
-    actions: [
-      { key: 'c', label: 'Check and top-up credits if needed', command: '/credits', action: 'credits' },
-    ],
-    canRetry: false,
-  },
-  credits_exhausted: {
-    title: 'Craft Credits Exhausted',
-    message: 'Your Craft AI credits have run out. Add more credits or switch to an API key.',
-    actions: [
-      { key: 'c', label: 'Top up credits', command: '/credits', action: 'credits' },
-      { key: 's', label: 'Switch to API key', command: '/settings', action: 'settings' },
-    ],
-    canRetry: false,
-  },
   invalid_api_key: {
     title: 'Invalid API Key',
     message: 'Your Anthropic API key was rejected. It may be invalid or expired.',
@@ -157,6 +139,14 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     canRetry: true,
     retryDelayMs: 2000,
   },
+  billing_error: {
+    title: 'Payment Required',
+    message: 'Your account has a billing issue. Check your Anthropic account status.',
+    actions: [
+      { key: 's', label: 'Update credentials', command: '/settings', action: 'settings' },
+    ],
+    canRetry: false,
+  },
   unknown_error: {
     title: 'Error',
     message: 'An unexpected error occurred.',
@@ -206,8 +196,8 @@ export function parseError(error: unknown): AgentError {
   let code: ErrorCode = 'unknown_error';
 
   // Check for specific HTTP status codes or patterns
-  if (lowerMessage.includes('402') || lowerMessage.includes('payment required') || lowerMessage.includes('insufficient credits')) {
-    code = 'insufficient_credits';
+  if (lowerMessage.includes('402') || lowerMessage.includes('payment required')) {
+    code = 'billing_error';
   } else if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid api key') || lowerMessage.includes('invalid x-api-key') || lowerMessage.includes('authentication failed')) {
     // Distinguish between API key and OAuth errors
     if (lowerMessage.includes('oauth') || lowerMessage.includes('token') || lowerMessage.includes('session')) {
@@ -243,10 +233,10 @@ export function parseError(error: unknown): AgentError {
 }
 
 /**
- * Check if an error is a billing/credits error that blocks usage
+ * Check if an error is a billing/auth error that blocks usage
  */
 export function isBillingError(error: AgentError): boolean {
-  return error.code === 'insufficient_credits' || error.code === 'invalid_api_key' || error.code === 'expired_oauth_token';
+  return error.code === 'billing_error' || error.code === 'invalid_api_key' || error.code === 'expired_oauth_token';
 }
 
 /**

@@ -1,5 +1,9 @@
 /**
  * FullscreenOverlay - Fullscreen view for reading AI responses
+ *
+ * Z-Index: Uses z-fullscreen (350) from the electron app's z-index registry.
+ * Falls back to 350 when CSS variable is not available.
+ * See: apps/electron/src/renderer/index.css for the full z-index scale.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -7,6 +11,11 @@ import ReactDOM from 'react-dom'
 import { Check, Copy, ListTodo, X } from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import { Markdown } from '../../markdown'
+
+// Z-index for fullscreen overlays - must be above app chrome (z-overlay: 300)
+// Uses CSS variable when available, falls back to hardcoded value
+const Z_FULLSCREEN = 'var(--z-fullscreen, 350)'
+const Z_FULLSCREEN_HEADER = 'var(--z-fullscreen, 350)'
 
 export interface FullscreenOverlayProps {
   /** The content to display (markdown) */
@@ -62,9 +71,15 @@ export function FullscreenOverlay({
   if (!isOpen) return null
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 z-[70] flex flex-col">
+    <div
+      className="fixed inset-0 flex flex-col"
+      style={{ zIndex: Z_FULLSCREEN }}
+    >
       {/* Fixed header buttons */}
-      <div className="fixed top-4 right-4 z-[80] flex items-center gap-2 [-webkit-app-region:no-drag]">
+      <div
+        className="fixed top-4 right-4 flex items-center gap-2 [-webkit-app-region:no-drag]"
+        style={{ zIndex: Z_FULLSCREEN_HEADER }}
+      >
         {/* Copy button */}
         <button
           onClick={handleCopy}
@@ -94,11 +109,11 @@ export function FullscreenOverlay({
         </button>
       </div>
 
-      {/* Main scrollable area */}
-      <div className="flex-1 min-h-0 bg-foreground-3 overflow-y-auto">
-        <div className="min-h-full flex justify-center pt-16 px-6 pb-24">
-          {/* Content card */}
-          <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[960px] h-fit">
+      {/* Main scrollable area - fullscreen-overlay-background class enables scenic mode blur via CSS */}
+      <div className="flex-1 min-h-0 bg-foreground-3 overflow-y-auto fullscreen-overlay-background">
+        <div className="min-h-full flex flex-col justify-center px-6 py-16">
+          {/* Content card - my-auto centers vertically when content is small, flows naturally when large */}
+          <div className="bg-background rounded-[16px] shadow-strong w-full max-w-[960px] h-fit mx-auto my-auto">
             {/* Plan header (variant="plan" only) */}
             {variant === 'plan' && (
               <div className="px-4 py-2 border-b border-border/30 flex items-center gap-2 bg-success/5 rounded-t-[16px]">

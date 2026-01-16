@@ -12,7 +12,6 @@ import { AppShell } from '@/components/app-shell/AppShell'
 import type { AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
-import { ImportClaudeCodeDialog } from '@/components/import/ImportClaudeCodeDialog'
 import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FocusProvider } from '@/context/FocusContext'
@@ -46,7 +45,10 @@ import {
   type SessionMeta,
 } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
+import { skillsAtom } from '@/atoms/skills'
+import { extractBadges } from '@/lib/mentions'
 import { getDefaultStore } from 'jotai'
+import { ShikiThemeProvider } from '@craft-agent/ui'
 
 // Register tutorials at module load
 registerTutorial(sourceCreationTutorial)
@@ -190,13 +192,10 @@ export default function App() {
   // All session-scoped options in one place (ultrathink, permissionMode)
   const [sessionOptions, setSessionOptions] = useState<Map<string, SessionOptions>>(new Map())
 
-  // Theme state (cascading: app → workspace → agent)
+  // Theme state (app-level only)
   const [appTheme, setAppTheme] = useState<ThemeOverrides | null>(null)
-  const [workspaceTheme, setWorkspaceTheme] = useState<ThemeOverrides | null>(null)
   // Reset confirmation dialog
   const [showResetDialog, setShowResetDialog] = useState(false)
-  // Claude Code import dialog
-  const [showImportDialog, setShowImportDialog] = useState(false)
 
   // Auto-update state
   const updateChecker = useUpdateChecker()
@@ -209,8 +208,9 @@ export default function App() {
   // Notifications enabled state (from app settings)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
 
-  // Sources for tutorial trigger condition
+  // Sources and skills for tutorial trigger condition and badge extraction
   const sources = useAtomValue(sourcesAtom)
+  const skills = useAtomValue(skillsAtom)
 
   // Compute if app is fully ready (all data loaded)
   const isFullyReady = appState === 'ready' && sessionsLoaded
@@ -228,7 +228,9 @@ export default function App() {
   }, [])
 
   // Apply theme via hook (injects CSS variables)
-  useTheme({ appTheme, workspaceTheme })
+  // shikiTheme is passed to ShikiThemeProvider to ensure correct syntax highlighting
+  // theme for dark-only themes in light system mode
+  const { shikiTheme } = useTheme({ appTheme })
 
   // Ref for sessionOptions to access current value in event handlers without re-registering
   const sessionOptionsRef = useRef(sessionOptions)
@@ -394,25 +396,13 @@ export default function App() {
     window.electronAPI.getAppTheme().then(setAppTheme)
   }, [appState, initialSessionId, windowWorkspaceId, setSession, initializeSessions])
 
-  // Load workspace theme when window's workspace is set
-  useEffect(() => {
-    if (windowWorkspaceId) {
-      window.electronAPI.getWorkspaceTheme(windowWorkspaceId).then(setWorkspaceTheme)
-    }
-  }, [windowWorkspaceId])
-
-  // Subscribe to theme change events (live updates when theme.json files change)
+  // Subscribe to theme change events (live updates when theme.json changes)
   useEffect(() => {
     const cleanupApp = window.electronAPI.onAppThemeChange((theme) => {
       setAppTheme(theme)
     })
-    const cleanupWorkspace = window.electronAPI.onWorkspaceThemeChange((theme) => {
-      setWorkspaceTheme(theme)
-    })
-    // Note: Agent theme changes are not yet wired up (would need active agent tracking)
     return () => {
       cleanupApp()
-      cleanupWorkspace()
     }
   }, [])
 
@@ -597,16 +587,11 @@ export default function App() {
       // Open help documentation URL
       window.electronAPI.openUrl('https://craft.do/help')
     })
-    const unsubImport = window.electronAPI.onMenuImportClaudeCode(() => {
-      setShowImportDialog(true)
-    })
-
     return () => {
       unsubNewChat()
       unsubSettings()
       unsubShortcuts()
       unsubHelp()
-      unsubImport()
     }
   }, [])
 
@@ -641,8 +626,8 @@ export default function App() {
       // (closures would retain the full sessions array with all messages)
       const metaMap = store.get(sessionMetaMapAtom)
       const meta = metaMap.get(sessionId)
-      // Session is empty if it has no lastFinalMessageId (no assistant responses) and no preview (no user messages)
-      const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.preview)
+      // Session is empty if it has no lastFinalMessageId (no assistant responses) and no name (set on first user message)
+      const isEmpty = !meta || (!meta.lastFinalMessageId && !meta.name)
 
       if (!isEmpty) {
         const confirmed = await window.electronAPI.showDeleteSessionConfirmation(meta?.name || 'Untitled')
@@ -740,6 +725,7 @@ export default function App() {
         // - Office files: Convert to text with markdown content
         // - Others: Use original FileAttachment
         // - All: Include storedPath so agent knows where files are stored
+        // - Resized images: Use resizedBase64 instead of original large base64
         processedAttachments = await Promise.all(
           successfulAttachments.map(async (att, i) => {
             const stored = storedAttachments?.[i]
@@ -749,10 +735,13 @@ export default function App() {
             }
             // Include storedPath and markdownPath for all attachment types
             // Agent will use Read tool to access text/office files via these paths
+            // If image was resized, use the resized base64 for Claude API
             return {
               ...att,
               storedPath: stored.storedPath,
               markdownPath: stored.markdownPath,
+              // Use resized base64 if available (for images that exceeded size limits)
+              base64: stored.resizedBase64 ?? att.base64,
             }
           })
         )
@@ -761,7 +750,13 @@ export default function App() {
       // Step 3: Check if ultrathink is enabled for this session
       const isUltrathink = sessionOptions.get(sessionId)?.ultrathinkEnabled ?? false
 
-      // Step 4: Create user message with StoredAttachments (for UI display)
+      // Step 4: Extract badges from mentions (sources/skills) with embedded icons
+      // Badges are self-contained for display in UserMessageBubble and viewer
+      const badges = windowWorkspaceId
+        ? extractBadges(message, skills, sources, windowWorkspaceId)
+        : []
+
+      // Step 5: Create user message with StoredAttachments (for UI display)
       // Mark as isPending for optimistic UI - will be confirmed by user_message event
       const userMessage: Message = {
         id: generateMessageId(),
@@ -769,6 +764,7 @@ export default function App() {
         content: message,
         timestamp: Date.now(),
         attachments: storedAttachments,
+        badges: badges.length > 0 ? badges : undefined,
         ultrathink: isUltrathink || undefined,  // Only set if true
         isPending: true,  // Optimistic - will be confirmed by backend
       }
@@ -780,10 +776,11 @@ export default function App() {
         lastMessageAt: Date.now()
       }))
 
-      // Step 5: Send to Claude with processed attachments + stored attachments for persistence
+      // Step 6: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
         ultrathinkEnabled: isUltrathink,
         skillSlugs,
+        badges: badges.length > 0 ? badges : undefined,
       })
 
       // Auto-disable ultrathink after sending (single-shot activation)
@@ -805,7 +802,7 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById])
+  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
 
   const handleModelChange = useCallback((model: string) => {
     setCurrentModel(model)
@@ -1002,20 +999,6 @@ export default function App() {
     setShowResetDialog(true)
   }, [])
 
-  // Handle Claude Code import completion - refresh sessions and navigate to first imported
-  const handleImportComplete = useCallback(async (sessionIds: string[]) => {
-    if (sessionIds.length === 0) return
-
-    // Reload sessions to get the imported ones
-    const loadedSessions = await window.electronAPI.getSessions()
-    initializeSessions(loadedSessions)
-
-    // Navigate to the first imported session
-    if (sessionIds[0]) {
-      navigate(routes.view.allChats(sessionIds[0]))
-    }
-  }, [initializeSessions])
-
   // Execute reset after user confirms in dialog
   const executeReset = useCallback(async () => {
     try {
@@ -1204,8 +1187,9 @@ export default function App() {
 
   // Ready state - main app with splash overlay during data loading
   return (
-    <FocusProvider>
-      <TooltipProvider>
+    <ShikiThemeProvider shikiTheme={shikiTheme}>
+      <FocusProvider>
+        <TooltipProvider>
         <NavigationProvider
           workspaceId={windowWorkspaceId}
           onCreateSession={handleCreateSession}
@@ -1245,11 +1229,6 @@ export default function App() {
                 onConfirm={executeReset}
                 onCancel={() => setShowResetDialog(false)}
               />
-              <ImportClaudeCodeDialog
-                open={showImportDialog}
-                onOpenChange={setShowImportDialog}
-                onImportComplete={handleImportComplete}
-              />
             </div>
 
             {/* Tutorial system overlays */}
@@ -1258,7 +1237,8 @@ export default function App() {
             <TutorialComplete />
           </TutorialProvider>
         </NavigationProvider>
-      </TooltipProvider>
-    </FocusProvider>
+        </TooltipProvider>
+      </FocusProvider>
+    </ShikiThemeProvider>
   )
 }

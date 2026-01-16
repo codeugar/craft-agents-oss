@@ -27,13 +27,16 @@ import {
   handleInfo,
   handleInterrupted,
   handleTitleGenerated,
+  handleTitleRegenerating,
   handleWorkingDirectoryChanged,
   handlePermissionModeChanged,
+  handleSessionModelChanged,
   handleUserMessage,
   handleSessionShared,
   handleSessionUnshared,
   handleAuthRequest,
   handleAuthCompleted,
+  handleUsageUpdate,
 } from './handlers/session'
 
 /**
@@ -112,11 +115,17 @@ export function processEvent(
     case 'title_generated':
       return handleTitleGenerated(state, event)
 
+    case 'title_regenerating':
+      return handleTitleRegenerating(state, event)
+
     case 'working_directory_changed':
       return handleWorkingDirectoryChanged(state, event)
 
     case 'permission_mode_changed':
       return handlePermissionModeChanged(state, event)
+
+    case 'session_model_changed':
+      return handleSessionModelChanged(state, event)
 
     case 'sources_changed':
       return handleSourcesChanged(state, event)
@@ -156,6 +165,9 @@ export function processEvent(
           sourceSlug: event.sourceSlug,
         }],
       }
+
+    case 'usage_update':
+      return handleUsageUpdate(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

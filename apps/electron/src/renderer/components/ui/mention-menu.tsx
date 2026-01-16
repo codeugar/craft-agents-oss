@@ -1,5 +1,4 @@
 import * as React from 'react'
-import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
@@ -9,7 +8,7 @@ import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 // Types
 // ============================================================================
 
-export type MentionItemType = 'skill' | 'source' | 'folder'
+export type MentionItemType = 'skill' | 'source'
 
 export interface MentionItem {
   id: string
@@ -19,7 +18,6 @@ export interface MentionItem {
   // Type-specific data
   skill?: LoadedSkill
   source?: LoadedSource
-  path?: string
 }
 
 export interface MentionSection {
@@ -54,19 +52,57 @@ const MENU_SECTION_HEADER = 'px-3 py-1.5 text-[10px] font-medium text-muted-fore
 // Filter utilities
 // ============================================================================
 
+/**
+ * Get match priority score for filtering (higher = better match)
+ * 3 = starts with filter (first word)
+ * 2 = word boundary match (2nd+ word after space/hyphen/underscore)
+ * 1 = contains filter (mid-word)
+ * 0 = no match
+ */
+function getMatchScore(text: string, filter: string): number {
+  const lowerText = text.toLowerCase()
+  // Best: starts with filter (first word)
+  if (lowerText.startsWith(filter)) return 3
+  // Good: word boundary match (after space/hyphen/underscore)
+  const escapedFilter = filter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const wordBoundaryPattern = new RegExp(`[\\s\\-_]${escapedFilter}`)
+  if (wordBoundaryPattern.test(lowerText)) return 2
+  // OK: contains filter anywhere
+  if (lowerText.includes(filter)) return 1
+  return 0
+}
+
 function filterSections(sections: MentionSection[], filter: string): MentionSection[] {
   if (!filter) return sections
   const lowerFilter = filter.toLowerCase()
-  return sections
-    .map(section => ({
-      ...section,
-      items: section.items.filter(item =>
-        item.label.toLowerCase().includes(lowerFilter) ||
-        item.id.toLowerCase().includes(lowerFilter) ||
-        item.description?.toLowerCase().includes(lowerFilter)
-      ),
-    }))
-    .filter(section => section.items.length > 0)
+
+  // Collect all matching items across sections
+  const allItems = sections.flatMap(section => section.items)
+  const matchingItems = allItems.filter(item =>
+    item.label.toLowerCase().includes(lowerFilter) ||
+    item.id.toLowerCase().includes(lowerFilter) ||
+    item.description?.toLowerCase().includes(lowerFilter)
+  )
+
+  // Sort by match priority: first word > later word > contains
+  matchingItems.sort((a, b) => {
+    const aLabelScore = getMatchScore(a.label, lowerFilter)
+    const bLabelScore = getMatchScore(b.label, lowerFilter)
+    const aIdScore = getMatchScore(a.id, lowerFilter)
+    const bIdScore = getMatchScore(b.id, lowerFilter)
+
+    // Compare by best score (label or id)
+    const aScore = Math.max(aLabelScore, aIdScore)
+    const bScore = Math.max(bLabelScore, bIdScore)
+    if (aScore !== bScore) return bScore - aScore
+
+    // Same score tier: alphabetical by label
+    return a.label.localeCompare(b.label)
+  })
+
+  // Return as flat list in a single virtual section (headers hidden when filtering)
+  if (matchingItems.length === 0) return []
+  return [{ id: 'results', label: 'Results', items: matchingItems }]
 }
 
 function flattenItems(sections: MentionSection[]): MentionItem[] {
@@ -89,6 +125,7 @@ export function InlineMentionMenu({
   className,
 }: InlineMentionMenuProps) {
   const menuRef = React.useRef<HTMLDivElement>(null)
+  const listRef = React.useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = React.useState(0)
   const filteredSections = filterSections(sections, filter)
   const flatItems = flattenItems(filteredSections)
@@ -145,6 +182,15 @@ export function InlineMentionMenu({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open, onOpenChange])
 
+  // Scroll selected item into view when navigating with keyboard
+  React.useEffect(() => {
+    if (!listRef.current) return
+    const selectedEl = listRef.current.querySelector('[data-selected="true"]')
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selectedIndex])
+
   // Hide if no results or not open
   if (!open || flatItems.length === 0) return null
 
@@ -159,7 +205,7 @@ export function InlineMentionMenu({
   return (
     <div
       ref={menuRef}
-      className={cn('fixed z-50', MENU_CONTAINER_STYLE, className)}
+      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
       style={{
         left: Math.round(position.x) - 10,
         bottom: bottomPosition,
@@ -167,13 +213,15 @@ export function InlineMentionMenu({
         maxWidth,
       }}
     >
-      <div className={MENU_LIST_STYLE}>
+      <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
           <React.Fragment key={section.id}>
-            {/* Section header */}
-            <div className={MENU_SECTION_HEADER}>
-              {section.label}
-            </div>
+            {/* Section header - hide when filtering for better prefix match relevance */}
+            {!filter && (
+              <div className={MENU_SECTION_HEADER}>
+                {section.label}
+              </div>
+            )}
 
             {/* Section items */}
             {section.items.map((item) => {
@@ -183,6 +231,7 @@ export function InlineMentionMenu({
               return (
                 <div
                   key={`${section.id}-${item.id}`}
+                  data-selected={isSelected}
                   onClick={() => {
                     onSelect(item)
                     onOpenChange(false)
@@ -201,18 +250,13 @@ export function InlineMentionMenu({
                     {item.type === 'source' && item.source && (
                       <SourceAvatar source={item.source} size="sm" />
                     )}
-                    {item.type === 'folder' && (
-                      <div className="h-5 w-5 rounded-[4px] bg-foreground/5 flex items-center justify-center">
-                        <Icon_Folder className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} />
-                      </div>
-                    )}
                   </div>
 
                   {/* Label and description */}
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 leading-tight">
                     <div className="font-medium truncate">{item.label}</div>
                     {item.description && (
-                      <div className="text-[11px] text-foreground/50 truncate">
+                      <div className="text-[11px] text-foreground/50 truncate mt-px">
                         {item.description}
                       </div>
                     )}
@@ -221,8 +265,8 @@ export function InlineMentionMenu({
               )
             })}
 
-            {/* Separator between sections (not after last) */}
-            {sectionIndex < filteredSections.length - 1 && (
+            {/* Separator between sections (not after last, hide when filtering) */}
+            {!filter && sectionIndex < filteredSections.length - 1 && (
               <div className="h-px bg-border/50 my-1 mx-2" />
             )}
           </React.Fragment>
@@ -239,6 +283,7 @@ export function InlineMentionMenu({
 /** Interface for elements that can be used with useInlineMention */
 export interface MentionInputElement {
   getBoundingClientRect: () => DOMRect
+  getCaretRect?: () => DOMRect | null
   value: string
   selectionStart: number
 }
@@ -248,8 +293,6 @@ export interface UseInlineMentionOptions {
   inputRef: React.RefObject<MentionInputElement | null>
   skills: LoadedSkill[]
   sources: LoadedSource[]
-  recentFolders: string[]
-  homeDir?: string
   onSelect: (item: MentionItem) => void
 }
 
@@ -260,32 +303,13 @@ export interface UseInlineMentionReturn {
   sections: MentionSection[]
   handleInputChange: (value: string, cursorPosition: number) => void
   close: () => void
-  handleSelect: (item: MentionItem) => string
-}
-
-/**
- * Format path for display, shortening home directory
- */
-function formatPathForDisplay(path: string, homeDir?: string): string {
-  if (homeDir && path.startsWith(homeDir)) {
-    return '~' + path.slice(homeDir.length)
-  }
-  return path
-}
-
-/**
- * Get folder name from path
- */
-function getFolderName(path: string): string {
-  return path.split('/').pop() || path
+  handleSelect: (item: MentionItem) => { value: string; cursorPosition: number }
 }
 
 export function useInlineMention({
   inputRef,
   skills,
   sources,
-  recentFolders,
-  homeDir,
   onSelect,
 }: UseInlineMentionOptions): UseInlineMentionReturn {
   const [isOpen, setIsOpen] = React.useState(false)
@@ -295,7 +319,7 @@ export function useInlineMention({
   // Store current input state for handleSelect
   const currentInputRef = React.useRef({ value: '', cursorPosition: 0 })
 
-  // Build sections from available data
+  // Build sections from available data (skills and sources only - folders moved to slash menu)
   const sections = React.useMemo((): MentionSection[] => {
     const result: MentionSection[] = []
 
@@ -314,7 +338,7 @@ export function useInlineMention({
       })
     }
 
-    // Sources section (only show sources that need enabling or have tools)
+    // Sources section
     if (sources.length > 0) {
       result.push({
         id: 'sources',
@@ -329,31 +353,17 @@ export function useInlineMention({
       })
     }
 
-    // Recent folders section
-    if (recentFolders.length > 0) {
-      result.push({
-        id: 'folders',
-        label: 'Recent Folders',
-        items: recentFolders.slice(0, 4).map(path => ({
-          id: path,
-          type: 'folder' as const,
-          label: getFolderName(path),
-          description: formatPathForDisplay(path, homeDir),
-          path,
-        })),
-      })
-    }
-
     return result
-  }, [skills, sources, recentFolders, homeDir])
+  }, [skills, sources])
 
   const handleInputChange = React.useCallback((value: string, cursorPosition: number) => {
     // Store current state for handleSelect
     currentInputRef.current = { value, cursorPosition }
 
     const textBeforeCursor = value.slice(0, cursorPosition)
-    // Match @ at start of text or after whitespace, followed by optional word chars, hyphens, and slashes
-    const atMatch = textBeforeCursor.match(/(?:^|\s)@([\w\-/]*)$/)
+    // Match @ anywhere, followed by optional word chars, hyphens, and slashes
+    // This triggers on typing @ and shows menu while typing the filter
+    const atMatch = textBeforeCursor.match(/@([\w\-/]*)$/)
 
     // Only show menu if we have at least one section with items
     const hasItems = sections.some(s => s.items.length > 0)
@@ -361,23 +371,29 @@ export function useInlineMention({
     if (atMatch && hasItems) {
       const matchStart = textBeforeCursor.lastIndexOf('@')
       setAtStart(matchStart)
+      // Filter by the content after @
       setFilter(atMatch[1] || '')
 
       if (inputRef.current) {
-        const rect = inputRef.current.getBoundingClientRect()
+        // Try to get actual caret position from the input element
+        const caretRect = inputRef.current.getCaretRect?.()
 
-        // For position calculation, use a simplified approach:
-        // Position menu at bottom-left of input, with slight offset for the @ position
-        // A more accurate position would require measuring text, but this works well enough
-        const lineHeight = 20 // Approximate line height
-        const charWidth = 8 // Approximate character width
-        const linesBeforeCursor = textBeforeCursor.split('\n').length - 1
-        const charsOnCurrentLine = textBeforeCursor.split('\n').pop()?.length || 0
-
-        setPosition({
-          x: rect.left + Math.min(charsOnCurrentLine * charWidth, rect.width - 100),
-          y: rect.top + (linesBeforeCursor + 1) * lineHeight,
-        })
+        if (caretRect && caretRect.x > 0) {
+          // Use actual caret position
+          setPosition({
+            x: caretRect.x,
+            y: caretRect.y,
+          })
+        } else {
+          // Fallback: position at input element's left edge
+          const rect = inputRef.current.getBoundingClientRect()
+          const lineHeight = 20
+          const linesBeforeCursor = textBeforeCursor.split('\n').length - 1
+          setPosition({
+            x: rect.left,
+            y: rect.top + (linesBeforeCursor + 1) * lineHeight,
+          })
+        }
       }
 
       setIsOpen(true)
@@ -388,32 +404,33 @@ export function useInlineMention({
     }
   }, [inputRef, sections])
 
-  const handleSelect = React.useCallback((item: MentionItem): string => {
+  const handleSelect = React.useCallback((item: MentionItem): { value: string; cursorPosition: number } => {
     let result = ''
+    let newCursorPosition = 0
+
     if (atStart >= 0) {
       const { value: currentValue, cursorPosition } = currentInputRef.current
       const before = currentValue.slice(0, atStart)
       const after = currentValue.slice(cursorPosition)
 
-      // Build the mention text based on type
+      // Build the mention text based on type using bracket syntax
       let mentionText: string
       if (item.type === 'skill') {
-        mentionText = `@${item.id} `
+        mentionText = `[skill:${item.id}] `
       } else if (item.type === 'source') {
-        mentionText = `@src:${item.id} `
-      } else if (item.type === 'folder') {
-        mentionText = `@dir:${item.path} `
+        mentionText = `[source:${item.id}] `
       } else {
-        mentionText = `@${item.id} `
+        mentionText = `[skill:${item.id}] `
       }
 
       result = before + mentionText + after
+      newCursorPosition = before.length + mentionText.length
     }
 
     onSelect(item)
     setIsOpen(false)
 
-    return result
+    return { value: result, cursorPosition: newCursorPosition }
   }, [onSelect, atStart])
 
   const close = React.useCallback(() => {

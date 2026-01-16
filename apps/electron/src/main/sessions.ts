@@ -43,7 +43,7 @@ import { getCraftToken } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
-import { generateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf } from '@craft-agent/shared/utils'
+import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf } from '@craft-agent/shared/utils'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
 
 /**
@@ -145,6 +145,8 @@ interface ManagedSession {
     costUsd: number
     cacheReadTokens?: number
     cacheCreationTokens?: number
+    /** Model's context window size in tokens (from SDK modelUsage) */
+    contextWindow?: number
   }
   // Todo state (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
@@ -162,8 +164,12 @@ interface ManagedSession {
   sharedUrl?: string
   // Shared session ID in viewer (for revoke)
   sharedId?: string
+  // Model to use for this session (overrides global config if set)
+  model?: string
   // Role/type of the last message (for badge display without loading messages)
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
+  // Preview of first user message (for sidebar display fallback)
+  preview?: string
   // Message queue for handling new messages while processing
   // When a message arrives during processing, we interrupt and queue
   messageQueue: Array<{
@@ -357,10 +363,6 @@ export class SessionManager {
         sessionLog.info(`App theme changed`)
         this.broadcastAppThemeChanged(theme)
       },
-      onWorkspaceThemeChange: (theme) => {
-        sessionLog.info(`Workspace theme changed in ${workspaceRootPath}`)
-        this.broadcastWorkspaceThemeChanged(theme)
-      },
       onSkillsListChange: async (skills) => {
         sessionLog.info(`Skills list changed in ${workspaceRootPath} (${skills.length} skills)`)
         this.broadcastSkillsChanged(skills)
@@ -404,15 +406,6 @@ export class SessionManager {
     if (!this.windowManager) return
     sessionLog.info(`Broadcasting app theme changed`)
     this.windowManager.broadcastToAll(IPC_CHANNELS.THEME_APP_CHANGED, theme)
-  }
-
-  /**
-   * Broadcast workspace theme changed event to all windows
-   */
-  private broadcastWorkspaceThemeChanged(theme: import('@craft-agent/shared/config').ThemeOverrides | null): void {
-    if (!this.windowManager) return
-    sessionLog.info(`Broadcasting workspace theme changed`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.THEME_WORKSPACE_CHANGED, theme)
   }
 
   /**
@@ -466,15 +459,11 @@ export class SessionManager {
         // Use Claude Max subscription via OAuth token
         process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
         delete process.env.ANTHROPIC_API_KEY
-        delete process.env.USE_CRAFT_AI_GATEWAY
-        delete process.env.CRAFT_API_GATEWAY_TOKEN
         sessionLog.info('Set Claude Max OAuth Token')
       } else if (billing.apiKey) {
         // Use API key (pay-as-you-go)
         process.env.ANTHROPIC_API_KEY = billing.apiKey
         delete process.env.CLAUDE_CODE_OAUTH_TOKEN
-        delete process.env.USE_CRAFT_AI_GATEWAY
-        delete process.env.CRAFT_API_GATEWAY_TOKEN
         sessionLog.info('Set Anthropic API Key')
       } else {
         sessionLog.error('No authentication configured!')
@@ -500,8 +489,8 @@ export class SessionManager {
     sessionLog.info('Setting pathToClaudeCodeExecutable:', cliPath)
     setPathToClaudeCodeExecutable(cliPath)
 
-    // Set path to cache-ttl-interceptor for SDK subprocess
-    // This interceptor redirects requests to the Craft gateway when using Craft credits
+    // Set path to fetch interceptor for SDK subprocess
+    // This interceptor captures API errors and adds metadata to MCP tool schemas
     const interceptorPath = join(basePath, 'packages', 'shared', 'src', 'cache-ttl-interceptor.ts')
     if (!existsSync(interceptorPath)) {
       const error = `Cache TTL interceptor not found at ${interceptorPath}. The app package may be corrupted.`
@@ -574,6 +563,7 @@ export class SessionManager {
             toolToParentMap: new Map(),
             pendingTextParent: undefined,
             name: meta.name,
+            preview: meta.preview,
             isFlagged: meta.isFlagged ?? false,
             permissionMode: meta.permissionMode,
             sdkSessionId: meta.sdkSessionId,
@@ -583,6 +573,7 @@ export class SessionManager {
             enabledSourceSlugs: undefined,  // Loaded with messages
             workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
             sdkCwd: meta.sdkCwd,
+            model: meta.model,
             lastMessageRole: meta.lastMessageRole,
             messageQueue: [],
             backgroundShellCommands: new Map(),
@@ -921,19 +912,6 @@ export class SessionManager {
     this.loadSessionsFromDisk()
   }
 
-  /**
-   * Find a session by its SDK session ID.
-   * Used for Claude Code resume deep links.
-   */
-  findSessionBySdkId(sdkSessionId: string): string | null {
-    for (const [id, session] of this.sessions) {
-      if (session.sdkSessionId === sdkSessionId) {
-        return id
-      }
-    }
-    return null
-  }
-
   getSessions(): Session[] {
     // Returns session metadata only - messages are NOT included to save memory
     // Use getSession(id) to load messages for a specific session
@@ -943,6 +921,7 @@ export class SessionManager {
         workspaceId: m.workspace.id,
         workspaceName: m.workspace.name,
         name: m.name,
+        preview: m.preview,
         lastMessageAt: m.lastMessageAt,
         messages: [],  // Never send all messages - use getSession(id) for specific session
         isProcessing: m.isProcessing,
@@ -951,6 +930,7 @@ export class SessionManager {
         todoState: m.todoState,
         lastReadMessageId: m.lastReadMessageId,
         workingDirectory: m.workingDirectory,
+        model: m.model,
         enabledSourceSlugs: m.enabledSourceSlugs,
         sharedUrl: m.sharedUrl,
         sharedId: m.sharedId,
@@ -976,6 +956,7 @@ export class SessionManager {
       workspaceId: m.workspace.id,
       workspaceName: m.workspace.name,
       name: m.name,
+      preview: m.preview,  // Include preview for title fallback consistency with getSessions()
       lastMessageAt: m.lastMessageAt,
       messages: m.messages,
       isProcessing: m.isProcessing,
@@ -984,11 +965,13 @@ export class SessionManager {
       todoState: m.todoState,
       lastReadMessageId: m.lastReadMessageId,
       workingDirectory: m.workingDirectory,
+      model: m.model,
       sessionFolderPath: getSessionStoragePath(m.workspace.rootPath, m.id),
       enabledSourceSlugs: m.enabledSourceSlugs,
       sharedUrl: m.sharedUrl,
       sharedId: m.sharedId,
       lastMessageRole: m.lastMessageRole,
+      tokenUsage: m.tokenUsage,
     }
   }
 
@@ -1029,6 +1012,8 @@ export class SessionManager {
       managed.enabledSourceSlugs = storedSession.enabledSourceSlugs
       managed.sharedUrl = storedSession.sharedUrl
       managed.sharedId = storedSession.sharedId
+      // Sync name from disk - ensures title persistence across lazy loading
+      managed.name = storedSession.name
       sessionLog.debug(`Lazy-loaded ${managed.messages.length} messages for session ${managed.id}`)
     }
     managed.messagesLoaded = true
@@ -1098,6 +1083,7 @@ export class SessionManager {
       isFlagged: false,
       permissionMode: defaultPermissionMode,
       workingDirectory: defaultWorkingDir,
+      model: storedSession.model,
       messageQueue: [],
       backgroundShellCommands: new Map(),
       messagesLoaded: true,  // New sessions don't need to load messages from disk
@@ -1121,6 +1107,7 @@ export class SessionManager {
       permissionMode: defaultPermissionMode,
       todoState: undefined,  // User-controlled, defaults to undefined (treated as 'todo')
       workingDirectory: defaultWorkingDir,
+      model: managed.model,
       sessionFolderPath: getSessionStoragePath(workspaceRootPath, storedSession.id),
     }
   }
@@ -1134,7 +1121,8 @@ export class SessionManager {
       const config = loadStoredConfig()
       managed.agent = new CraftAgent({
         workspace: managed.workspace,
-        model: config?.model,
+        // Session model takes priority, fallback to global config
+        model: managed.model || config?.model,
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         // Always pass session object - id is required for plan mode callbacks
         // sdkSessionId is optional and used for conversation resumption
@@ -1145,6 +1133,17 @@ export class SessionManager {
           createdAt: managed.lastMessageAt,
           lastUsedAt: managed.lastMessageAt,
           workingDirectory: managed.workingDirectory,
+          model: managed.model,
+        },
+        // Critical: Immediately persist SDK session ID when captured to prevent loss on crash.
+        // Without this, the ID is only saved via debounced persistSession() which may not
+        // complete before app crash/quit, causing session resumption to fail.
+        onSdkSessionIdUpdate: (sdkSessionId: string) => {
+          managed.sdkSessionId = sdkSessionId
+          sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
+          // Persist immediately and flush - critical for resumption reliability
+          this.persistSession(managed)
+          sessionPersistenceQueue.flush(managed.id)
         },
         // Debug mode - enables log file path injection into system prompt
         debugMode: isDebugMode ? {
@@ -1223,8 +1222,8 @@ export class SessionManager {
             managed.toolToParentMap.clear()
             managed.pendingTextParent = undefined
 
-            // Send complete event so renderer knows processing stopped
-            this.sendEvent({ type: 'complete', sessionId: managed.id }, managed.workspace.id)
+            // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
+            this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
 
             // Persist session state
             this.persistSession(managed)
@@ -1278,8 +1277,8 @@ export class SessionManager {
           managed.toolToParentMap.clear()
           managed.pendingTextParent = undefined
 
-          // Send complete event so renderer knows processing stopped
-          this.sendEvent({ type: 'complete', sessionId: managed.id }, managed.workspace.id)
+          // Send complete event so renderer knows processing stopped (include tokenUsage for real-time updates)
+          this.sendEvent({ type: 'complete', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
         }
 
         // Emit auth_request event to renderer
@@ -1691,6 +1690,65 @@ export class SessionManager {
   }
 
   /**
+   * Regenerate the session title based on recent messages.
+   * Uses the last few user messages to capture what the session has evolved into.
+   */
+  async refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }> {
+    sessionLog.info(`refreshTitle called for session ${sessionId}`)
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`refreshTitle: Session ${sessionId} not found`)
+      return { success: false, error: 'Session not found' }
+    }
+
+    // Get recent user messages (last 3) for context
+    const userMessages = managed.messages
+      .filter((m) => m.role === 'user')
+      .slice(-3)
+      .map((m) => m.content)
+
+    sessionLog.info(`refreshTitle: Found ${userMessages.length} user messages`)
+
+    if (userMessages.length === 0) {
+      sessionLog.warn(`refreshTitle: No user messages found`)
+      return { success: false, error: 'No user messages to generate title from' }
+    }
+
+    // Get the most recent assistant response
+    const lastAssistantMsg = managed.messages
+      .filter((m) => m.role === 'assistant' && !m.isIntermediate)
+      .slice(-1)[0]
+
+    const assistantResponse = lastAssistantMsg?.content ?? ''
+    sessionLog.info(`refreshTitle: Calling regenerateSessionTitle...`)
+
+    // Notify renderer that title regeneration has started (for shimmer effect)
+    this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: true }, managed.workspace.id)
+
+    try {
+      const title = await regenerateSessionTitle(userMessages, assistantResponse)
+      sessionLog.info(`refreshTitle: regenerateSessionTitle returned: ${title ? `"${title}"` : 'null'}`)
+      if (title) {
+        managed.name = title
+        this.persistSession(managed)
+        // title_generated will also clear isRegeneratingTitle via the event handler
+        this.sendEvent({ type: 'title_generated', sessionId, title }, managed.workspace.id)
+        sessionLog.info(`Refreshed title for session ${sessionId}: "${title}"`)
+        return { success: true, title }
+      }
+      // Failed to generate - clear regenerating state
+      this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: false }, managed.workspace.id)
+      return { success: false, error: 'Failed to generate title' }
+    } catch (error) {
+      // Error occurred - clear regenerating state
+      this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: false }, managed.workspace.id)
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      sessionLog.error(`Failed to refresh title for session ${sessionId}:`, error)
+      return { success: false, error: message }
+    }
+  }
+
+  /**
    * Update the working directory for a session
    */
   updateWorkingDirectory(sessionId: string, path: string): void {
@@ -1704,6 +1762,27 @@ export class SessionManager {
       this.persistSession(managed)
       // Notify renderer of the working directory change
       this.sendEvent({ type: 'working_directory_changed', sessionId, workingDirectory: path }, managed.workspace.id)
+    }
+  }
+
+  /**
+   * Update the model for a session
+   * Pass null to clear the session-specific model (will use global config)
+   */
+  async updateSessionModel(sessionId: string, workspaceId: string, model: string | null): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (managed) {
+      managed.model = model ?? undefined
+      // Persist to disk
+      updateSessionMetadata(managed.workspace.rootPath, sessionId, { model: model ?? undefined })
+      // Update agent model if it already exists (takes effect on next query)
+      if (managed.agent) {
+        const effectiveModel = model ?? loadStoredConfig()?.model ?? DEFAULT_MODEL
+        managed.agent.setModel(effectiveModel)
+      }
+      // Notify renderer of the model change
+      this.sendEvent({ type: 'session_model_changed', sessionId, model }, managed.workspace.id)
+      sessionLog.info(`Session ${sessionId} model updated to: ${model ?? '(global config)'}`)
     }
   }
 
@@ -1804,6 +1883,7 @@ export class SessionManager {
         content: message,
         timestamp: Date.now(),
         attachments: storedAttachments,
+        badges: options?.badges,
       }
 
       // Add to messages immediately so it's persisted
@@ -1845,6 +1925,7 @@ export class SessionManager {
         content: message,
         timestamp: Date.now(),
         attachments: storedAttachments, // Include for persistence (has thumbnailBase64)
+        badges: options?.badges,  // Include content badges (sources, skills with embedded icons)
       }
       managed.messages.push(userMessage)
 
@@ -1859,16 +1940,23 @@ export class SessionManager {
         status: 'accepted'
       }, managed.workspace.id)
 
-      // If this is the first user message and no name exists, immediately update title
-      // with the message preview. The AI-generated title will replace this when it arrives.
+      // If this is the first user message and no title exists, set one immediately
+      // AI generation will enhance it later, but we always have a title from the start
       const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
       if (isFirstUserMessage && !managed.name) {
-        const previewTitle = message.slice(0, 50) + (message.length > 50 ? '…' : '')
+        const initialTitle = message.slice(0, 50) + (message.length > 50 ? '…' : '')
+        managed.name = initialTitle
+        this.persistSession(managed)
+        // Flush immediately so disk is authoritative before notifying renderer
+        await this.flushSession(managed.id)
         this.sendEvent({
           type: 'title_generated',
           sessionId,
-          title: previewTitle,
+          title: initialTitle,
         }, managed.workspace.id)
+
+        // Generate AI title asynchronously (will update the initial title)
+        this.generateTitle(managed, message)
       }
     }
 
@@ -1976,12 +2064,18 @@ export class SessionManager {
         // Process the event first
         this.processEvent(managed, event)
 
-        // Capture SDK session ID after first event (for conversation continuity)
+        // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
+        // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
+        // which immediately flushes to disk. This fallback handles edge cases where the
+        // callback might not fire (e.g., SDK version mismatch, callback not supported).
         if (!managed.sdkSessionId) {
           const sdkId = agent.getSessionId()
           if (sdkId) {
             managed.sdkSessionId = sdkId
-            sessionLog.info(`Captured SDK session ID: ${sdkId}`)
+            sessionLog.info(`Captured SDK session ID via fallback: ${sdkId}`)
+            // Also flush here since we're in fallback mode
+            this.persistSession(managed)
+            sessionPersistenceQueue.flush(managed.id)
           }
         }
 
@@ -1989,6 +2083,20 @@ export class SessionManager {
         // This is the central place where processing ends
         if (event.type === 'complete') {
           sessionLog.info('Chat completed via complete event')
+
+          // Check if we got an assistant response in this turn
+          // If not, the SDK may have hit context limits or other issues
+          const lastAssistantMsg = [...managed.messages].reverse().find(m =>
+            m.role === 'assistant' && !m.isIntermediate
+          )
+          const lastUserMsg = [...managed.messages].reverse().find(m => m.role === 'user')
+
+          // If the last user message is newer than any assistant response, we got no reply
+          // This can happen due to context overflow or API issues - log for debugging but don't show UI warning
+          if (lastUserMsg && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)) {
+            sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
+          }
+
           sendSpan.mark('chat.complete')
           sendSpan.end()
           this.onProcessingStopped(sessionId, 'complete')
@@ -2098,8 +2206,8 @@ export class SessionManager {
       this.sendEvent({ type: 'interrupted', sessionId }, managed.workspace.id)
     }
 
-    // Emit complete since we're stopping and queue is cleared
-    this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+    // Emit complete since we're stopping and queue is cleared (include tokenUsage for real-time updates)
+    this.sendEvent({ type: 'complete', sessionId, tokenUsage: managed.tokenUsage }, managed.workspace.id)
 
     // Persist session
     this.persistSession(managed)
@@ -2133,8 +2241,8 @@ export class SessionManager {
       // Has queued messages - process next
       this.processNextQueuedMessage(sessionId)
     } else {
-      // No queue - emit complete to UI
-      this.sendEvent({ type: 'complete', sessionId }, managed.workspace.id)
+      // No queue - emit complete to UI (include tokenUsage for real-time updates)
+      this.sendEvent({ type: 'complete', sessionId, tokenUsage: managed.tokenUsage }, managed.workspace.id)
     }
 
     // 3. Always persist
@@ -2357,18 +2465,25 @@ To view this task's output:
   }
 
   /**
-   * Generate an AI title for a session based on the first exchange
-   * Called asynchronously after the first assistant response
+   * Generate an AI title for a session from the user's first message.
+   * Called asynchronously when the first user message is received.
    */
-  private async generateTitle(managed: ManagedSession, userMessage: string, assistantResponse: string): Promise<void> {
+  private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
+    sessionLog.info(`Starting title generation for session ${managed.id}`)
     try {
-      const title = await generateSessionTitle(userMessage, assistantResponse)
+      const title = await generateSessionTitle(userMessage)
       if (title) {
         managed.name = title
         this.persistSession(managed)
-        // Notify renderer of the generated title
+        // Flush immediately to ensure disk is up-to-date before notifying renderer.
+        // This prevents race condition where lazy loading reads stale disk data
+        // (the persistence queue has a 500ms debounce).
+        await this.flushSession(managed.id)
+        // Now safe to notify renderer - disk is authoritative
         this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
         sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
+      } else {
+        sessionLog.warn(`Title generation returned null for session ${managed.id}`)
       }
     } catch (error) {
       sessionLog.error(`Failed to generate title for session ${managed.id}:`, error)
@@ -2397,10 +2512,6 @@ To view this task's output:
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
-        // Check if this is the first assistant message and no name exists yet
-        const existingAssistantCount = managed.messages.filter(m => m.role === 'assistant').length
-        const shouldGenerateTitle = existingAssistantCount === 0 && !managed.name
-
         // Use the parent that was active when text STARTED streaming (captured in text_delta)
         // This prevents text from being nested under tools that started after the text began
         const textParentToolUseId = event.isIntermediate ? managed.pendingTextParent : undefined
@@ -2424,14 +2535,6 @@ To view this task's output:
         }
 
         this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: textParentToolUseId }, workspaceId)
-
-        // Generate title asynchronously after first assistant response
-        if (shouldGenerateTitle) {
-          const firstUserMsg = managed.messages.find(m => m.role === 'user')
-          if (firstUserMsg) {
-            this.generateTitle(managed, firstUserMsg.content, event.text)
-          }
-        }
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -2663,14 +2766,30 @@ To view this task's output:
         }, workspaceId)
         break
 
-      case 'info':
+      case 'info': {
+        const isCompactionComplete = event.message.startsWith('Compacted')
+
+        // Persist compaction messages so they survive reload
+        // Other info messages are transient (just sent to renderer)
+        if (isCompactionComplete) {
+          const compactionMessage: Message = {
+            id: generateMessageId(),
+            role: 'info',
+            content: event.message,
+            timestamp: Date.now(),
+            statusType: 'compaction_complete',
+          }
+          managed.messages.push(compactionMessage)
+        }
+
         this.sendEvent({
           type: 'info',
           sessionId,
           message: event.message,
-          statusType: event.message.startsWith('Compacted') ? 'compaction_complete' : undefined
+          statusType: isCompactionComplete ? 'compaction_complete' : undefined
         }, workspaceId)
         break
+      }
 
       case 'error':
         // Skip abort errors - these are expected when force-aborting via AbortController
@@ -2755,8 +2874,65 @@ To view this task's output:
         break
 
       case 'complete':
-        // Complete event from CraftAgent - actual 'complete' sent to renderer
-        // comes from the finally block in sendMessage, not here
+        // Complete event from CraftAgent - accumulate usage from this turn
+        // Actual 'complete' sent to renderer comes from the finally block in sendMessage
+        if (event.usage) {
+          // Initialize tokenUsage if not set
+          if (!managed.tokenUsage) {
+            managed.tokenUsage = {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+              contextTokens: 0,
+              costUsd: 0,
+            }
+          }
+          // inputTokens = current context size (full conversation sent this turn), NOT accumulated
+          // Each API call sends the full conversation history, so we use the latest value
+          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          // outputTokens and costUsd are accumulated across all turns (total session usage)
+          managed.tokenUsage.outputTokens += event.usage.outputTokens
+          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
+          managed.tokenUsage.costUsd += event.usage.costUsd ?? 0
+          // Cache tokens reflect current state, not accumulated
+          managed.tokenUsage.cacheReadTokens = event.usage.cacheReadTokens ?? 0
+          managed.tokenUsage.cacheCreationTokens = event.usage.cacheCreationTokens ?? 0
+          // Update context window (use latest value - may change if model switches)
+          if (event.usage.contextWindow) {
+            managed.tokenUsage.contextWindow = event.usage.contextWindow
+          }
+        }
+        break
+
+      case 'usage_update':
+        // Real-time usage update for context display during processing
+        // Update managed session's tokenUsage with latest context size
+        if (event.usage) {
+          if (!managed.tokenUsage) {
+            managed.tokenUsage = {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+              contextTokens: 0,
+              costUsd: 0,
+            }
+          }
+          // Update only inputTokens (current context size) - other fields accumulate on complete
+          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          if (event.usage.contextWindow) {
+            managed.tokenUsage.contextWindow = event.usage.contextWindow
+          }
+
+          // Send to renderer for immediate UI update
+          this.sendEvent({
+            type: 'usage_update',
+            sessionId: managed.id,
+            tokenUsage: {
+              inputTokens: event.usage.inputTokens,
+              contextWindow: event.usage.contextWindow,
+            },
+          }, workspaceId)
+        }
         break
 
       // Note: working_directory_changed is user-initiated only (via updateWorkingDirectory),

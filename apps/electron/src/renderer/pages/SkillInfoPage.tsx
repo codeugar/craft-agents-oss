@@ -184,7 +184,6 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
           <SkillMenu
             skillSlug={skillSlug}
             skillName={skillName}
-            onEdit={handleEdit}
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenInFinder}
             onDelete={handleDelete}
@@ -234,7 +233,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
 
               {/* File Patterns (globs) */}
               {skill.metadata.globs && skill.metadata.globs.length > 0 && (
-                <div>
+                <div className="px-4 pb-2">
                   <p className="text-sm font-medium mb-1">File Patterns</p>
                   <p className="text-xs text-muted-foreground mb-2">
                     When working with matching files, this skill may be suggested.
@@ -254,7 +253,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
 
               {/* Always Allowed Tools */}
               {skill.metadata.alwaysAllow && skill.metadata.alwaysAllow.length > 0 && (
-                <div>
+                <div className="px-4 pb-2">
                   <p className="text-sm font-medium mb-1">Always Allowed Tools</p>
                   <p className="text-xs text-muted-foreground mb-2">
                     These tools run without permission prompts when skill is active.
@@ -274,7 +273,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
 
               {/* Show message if no configuration */}
               {!skill.metadata.globs?.length && !skill.metadata.alwaysAllow?.length && !skill.iconPath && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground px-4 pb-2">
                   No file patterns or tool permissions configured.
                 </p>
               )}
@@ -343,7 +342,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
               </button>
             }
           >
-            <Info_Markdown maxHeight={540}>
+            <Info_Markdown maxHeight={540} fullscreen>
               {skill.content || '*No instructions provided.*'}
             </Info_Markdown>
           </Info_Section>

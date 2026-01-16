@@ -14,6 +14,7 @@
 
 import * as React from 'react'
 import { Panel } from './Panel'
+import { cn } from '@/lib/utils'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {

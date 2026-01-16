@@ -19,13 +19,16 @@ import type {
   InfoEvent,
   InterruptedEvent,
   TitleGeneratedEvent,
+  TitleRegeneratingEvent,
   WorkingDirectoryChangedEvent,
   PermissionModeChangedEvent,
+  SessionModelChangedEvent,
   UserMessageEvent,
   SessionSharedEvent,
   SessionUnsharedEvent,
   AuthRequestEvent,
   AuthCompletedEvent,
+  UsageUpdateEvent,
 } from '../types'
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
@@ -38,7 +41,7 @@ import { generateMessageId, appendMessage } from '../helpers'
  */
 export function handleComplete(
   state: SessionState,
-  _event: CompleteEvent
+  event: CompleteEvent
 ): ProcessResult {
   const { session } = state
 
@@ -64,6 +67,8 @@ export function handleComplete(
         messages: updatedMessages,
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        // Update tokenUsage from complete event (for real-time context counter updates)
+        tokenUsage: event.tokenUsage ?? session.tokenUsage,
       },
       streaming: null,
     },
@@ -248,17 +253,21 @@ export function handleInterrupted(
 
   // Clear transient streaming state (isPending, isStreaming) and mark running tools as interrupted
   // These fields are not persisted, so this matches the state after a reload
-  const updatedMessages = session.messages.map(m => {
-    // Mark running tools as interrupted
-    if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
-      return { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
-    }
-    // Clear pending state on assistant messages (transient streaming state)
-    if (m.role === 'assistant' && m.isPending) {
-      return { ...m, isPending: false, isStreaming: false }
-    }
-    return m
-  })
+  // Also filter out status messages - they are transient UI state that shouldn't persist after interruption
+  // (similar to isPending/isStreaming, and they're not persisted to disk anyway)
+  const updatedMessages = session.messages
+    .filter(m => m.role !== 'status')  // Remove transient status messages
+    .map(m => {
+      // Mark running tools as interrupted
+      if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
+        return { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
+      }
+      // Clear pending state on assistant messages (transient streaming state)
+      if (m.role === 'assistant' && m.isPending) {
+        return { ...m, isPending: false, isStreaming: false }
+      }
+      return m
+    })
 
   // Only add the "Response interrupted" message if provided (not a silent redirect)
   const messages = event.message
@@ -280,7 +289,7 @@ export function handleInterrupted(
 }
 
 /**
- * Handle title_generated - update session title
+ * Handle title_generated - update session title and clear regenerating state
  */
 export function handleTitleGenerated(
   state: SessionState,
@@ -290,7 +299,33 @@ export function handleTitleGenerated(
 
   return {
     state: {
-      session: { ...session, name: event.title },
+      session: {
+        ...session,
+        name: event.title,
+        // Clear regenerating state - title generation completed
+        isRegeneratingTitle: false,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle title_regenerating - set regenerating state for shimmer effect
+ */
+export function handleTitleRegenerating(
+  state: SessionState,
+  event: TitleRegeneratingEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        isRegeneratingTitle: event.isRegenerating,
+      },
       streaming,
     },
     effects: [],
@@ -329,6 +364,24 @@ export function handlePermissionModeChanged(
       sessionId: event.sessionId,
       permissionMode: event.permissionMode,
     }],
+  }
+}
+
+/**
+ * Handle session_model_changed - update session model
+ */
+export function handleSessionModelChanged(
+  state: SessionState,
+  event: SessionModelChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: { ...session, model: event.model ?? undefined },
+      streaming,
+    },
+    effects: [],
   }
 }
 
@@ -569,6 +622,35 @@ export function handleAuthCompleted(
       session: {
         ...session,
         messages: updatedMessages,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle usage_update - real-time context usage during processing
+ * Merges usage update into existing tokenUsage (preserves outputTokens, costUsd, etc.)
+ */
+export function handleUsageUpdate(
+  state: SessionState,
+  event: UsageUpdateEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  // Merge usage update into existing tokenUsage
+  const updatedTokenUsage = {
+    ...session.tokenUsage,
+    inputTokens: event.tokenUsage.inputTokens,
+    ...(event.tokenUsage.contextWindow && { contextWindow: event.tokenUsage.contextWindow }),
+  }
+
+  return {
+    state: {
+      session: {
+        ...session,
+        tokenUsage: updatedTokenUsage,
       },
       streaming,
     },

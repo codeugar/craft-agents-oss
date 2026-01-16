@@ -711,10 +711,6 @@ Without this, you'll get: `Error: The "path" argument must be of type string...`
 ### 2. Authentication Environment
 Authentication env vars must be set BEFORE creating agents:
 ```typescript
-// Craft Credits
-setAnthropicOptionsEnv({ USE_CRAFT_AI_GATEWAY: 'true', CRAFT_API_GATEWAY_TOKEN: token })
-process.env.ANTHROPIC_API_KEY = 'craft-credits-placeholder'
-
 // Claude Max OAuth
 process.env.CLAUDE_CODE_OAUTH_TOKEN = token
 
@@ -882,9 +878,8 @@ The Electron app has two logging systems:
 bun run electron:start
 
 # Logs appear in:
-# 1. Terminal console - immediate visibility
+# 1. Terminal console (stderr) - immediate visibility
 # 2. File: ~/Library/Logs/Craft Agents/main.log - JSON Lines format
-# 3. File: /tmp/craft-debug.log - shared code debug logs
 ```
 
 ### Main Process Loggers (electron-log)
@@ -917,7 +912,7 @@ log.info('Connected to server')
 log.error('Connection failed', error)
 ```
 
-The utility auto-detects Electron and outputs to both console and `/tmp/craft-debug.log`.
+The utility auto-detects Electron and outputs to stderr (console).
 
 ### Log Scopes Reference
 
@@ -947,10 +942,7 @@ The utility auto-detects Electron and outputs to both console and `/tmp/craft-de
 # Watch electron-log output
 tail -f ~/Library/Logs/Craft\ Agents/main.log
 
-# Watch shared debug output
-tail -f /tmp/craft-debug.log
-
-# Search by scope (electron-log)
+# Search by scope
 grep '"scope":"session"' ~/Library/Logs/Craft\ Agents/main.log
 
 # Parse with jq
@@ -1321,7 +1313,7 @@ bash scripts/build-dmg.sh x64
 **What the script does:**
 1. Downloads pinned Bun runtime (v1.3.5) with SHA256 checksum verification
 2. Copies SDK from root `node_modules` (monorepo hoisting workaround)
-3. Copies `cache-ttl-interceptor.ts` for Craft gateway redirect
+3. Copies `cache-ttl-interceptor.ts` for cache TTL patching
 4. Builds the Electron app (`bun run electron:build`)
 5. Packages with `electron-packager` (no ASAR for subprocess compatibility)
 6. Creates compressed DMG via `hdiutil`

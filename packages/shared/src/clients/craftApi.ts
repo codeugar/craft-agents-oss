@@ -92,31 +92,6 @@ export class CraftApi {
         });
     }
 
-    async generateAiCreditCheckoutToken(params: { authToken: string, teamId: string }) {
-        const { authToken, teamId } = params;
-        return this.fetch({
-            method: 'GET',
-            path: '/subscription/teams/generate-ai-credit-checkout-token',
-            queryParams: { teamId },
-            authToken,
-            responseParser: async (response) => {
-                return aiCreditCheckoutTokenResponseSchema.parse(JSON.parse(response));
-            },
-        });
-    }
-
-    async getAiCreditsBalance(params: { authToken: string, teamId: string }) {
-        const { authToken, teamId } = params;
-        return this.fetch({
-            method: 'GET',
-            path: `/ai-usage/balance/${teamId}`,
-            authToken,
-            responseParser: async (response) => {
-                return aiCreditsBalanceResponseSchema.parse(JSON.parse(response));
-            },
-        });
-    }
-
     async createStripeCheckout(params: {
         authToken: string;
         priceId: string;
@@ -160,21 +135,6 @@ const profileResponseSchema = z.object({
         role: z.string(),
         name: z.string(),
         tier: z.string().nullable().optional(),
-    })),
-});
-
-const aiCreditCheckoutTokenResponseSchema = z.object({
-    token: z.string(),
-    expirationTime: z.number(),
-});
-
-const aiCreditsBalanceResponseSchema = z.object({
-    teamId: z.string(),
-    credits: z.number(),
-    details: z.array(z.object({
-        source: z.string(),
-        credits: z.number(),
-        expiresAt: z.number().optional().nullable(),
     })),
 });
 
