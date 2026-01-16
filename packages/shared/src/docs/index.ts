@@ -1587,6 +1587,12 @@ Place SVG in \`statuses/icons/\` directory.
 { "type": "emoji", "value": "🔥" }
 \`\`\`
 
+**⚠️ Icon Sourcing Rules:**
+- **NEVER** use Lucide icons or any code-level icon libraries (they may not be imported)
+- **DO** generate custom SVG files following the guidelines below
+- **DO** download icons from the web (e.g., Heroicons, Feather, Simple Icons)
+- **DO** use emoji for quick, universal icons
+
 ## Adding Custom Statuses
 
 Edit the workspace's \`statuses/config.json\`:
