@@ -204,9 +204,6 @@ if ($env:SLACK_OAUTH_CLIENT_SECRET) {
 if ($env:MICROSOFT_OAUTH_CLIENT_ID) {
     $MainArgs += "--define:process.env.MICROSOFT_OAUTH_CLIENT_ID=`"'$env:MICROSOFT_OAUTH_CLIENT_ID'`""
 }
-if ($env:MICROSOFT_OAUTH_CLIENT_SECRET) {
-    $MainArgs += "--define:process.env.MICROSOFT_OAUTH_CLIENT_SECRET=`"'$env:MICROSOFT_OAUTH_CLIENT_SECRET'`""
-}
 Push-Location $RootDir
 try {
     & npx esbuild @MainArgs

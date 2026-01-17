@@ -26,10 +26,8 @@ export type { MicrosoftService };
 // Microsoft OAuth configuration - must be set via environment variables
 // These are baked into the build at compile time
 // Used for all Microsoft services (Outlook, OneDrive, Calendar, Teams, etc.)
+// Uses pure PKCE flow - no client_secret needed for public clients (desktop/mobile apps)
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_OAUTH_CLIENT_ID || '';
-// Note: Microsoft recommends using PKCE without client secret for public clients (desktop/mobile apps)
-// Client secret is optional for public clients using PKCE
-const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_OAUTH_CLIENT_SECRET || '';
 
 // Microsoft OAuth endpoints (using "common" tenant for multi-tenant support)
 // "common" supports both personal Microsoft accounts and work/school accounts
@@ -137,11 +135,6 @@ async function exchangeCodeForTokens(
     redirect_uri: redirectUri,
   });
 
-  // Only include client secret if configured (optional for public clients with PKCE)
-  if (MICROSOFT_CLIENT_SECRET) {
-    params.set('client_secret', MICROSOFT_CLIENT_SECRET);
-  }
-
   const response = await fetch(MICROSOFT_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -201,11 +194,6 @@ export async function refreshMicrosoftToken(refreshToken: string): Promise<{
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   });
-
-  // Only include client secret if configured
-  if (MICROSOFT_CLIENT_SECRET) {
-    params.set('client_secret', MICROSOFT_CLIENT_SECRET);
-  }
 
   const response = await fetch(MICROSOFT_TOKEN_URL, {
     method: 'POST',

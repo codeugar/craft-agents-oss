@@ -23,6 +23,7 @@ export type { GoogleService };
 // Google OAuth configuration - must be set via environment variables
 // These are baked into the build at compile time
 // Used for all Google services (Gmail, Calendar, Drive, etc.)
+// Note: Google requires client_secret for Desktop apps despite PKCE support
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 

@@ -726,19 +726,20 @@ process.env.ANTHROPIC_API_KEY = apiKey
 
 ### Google OAuth Environment Variables
 
-To enable Google API connections (Gmail, Calendar, Drive), set these environment variables before building:
+To enable Google API connections (Gmail, Calendar, Drive), set this environment variable before building:
 
 ```bash
 export GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
-export GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
 bun run electron:build
 ```
 
 Get credentials from [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials → Create OAuth Client ID (Desktop app).
 
+**Important:** The OAuth client must be of type "Desktop app" (not "Web application"). This enables PKCE authentication which does not require a client_secret.
+
 **Scopes are automatically selected** based on the Google service being connected (Gmail, Calendar, or Drive).
 
-These are baked into `dist/main.cjs` at build time via esbuild `--define` flags in `package.json`.
+The client ID is baked into `dist/main.cjs` at build time via esbuild `--define` flags in `package.json`.
 
 ## Theming
 
