@@ -1124,6 +1124,7 @@ export class SessionManager {
       isFlagged: false,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
+      sdkCwd: storedSession.sdkCwd,
       model: storedSession.model,
       thinkingLevel: defaultThinkingLevel,
       messageQueue: [],
@@ -1173,6 +1174,7 @@ export class SessionManager {
           createdAt: managed.lastMessageAt,
           lastUsedAt: managed.lastMessageAt,
           workingDirectory: managed.workingDirectory,
+          sdkCwd: managed.sdkCwd,
           model: managed.model,
         },
         // Critical: Immediately persist SDK session ID when captured to prevent loss on crash.

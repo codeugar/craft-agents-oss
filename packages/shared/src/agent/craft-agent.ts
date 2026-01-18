@@ -2212,7 +2212,8 @@ Please continue the conversation naturally from where we left off.
     const effectiveWorkingDir = this.config.session?.workingDirectory ??
       (this.modeSessionId ? getSessionPath(this.workspaceRootPath, this.modeSessionId) : undefined);
     const isSessionRoot = !this.config.session?.workingDirectory && !!this.modeSessionId;
-    const workingDirContext = getWorkingDirectoryContext(effectiveWorkingDir, isSessionRoot);
+    // Pass sdkCwd so agent knows if bash runs from a different directory than workingDirectory
+    const workingDirContext = getWorkingDirectoryContext(effectiveWorkingDir, isSessionRoot, this.config.session?.sdkCwd);
     if (workingDirContext) {
       parts.push(workingDirContext);
     }
@@ -2268,7 +2269,8 @@ Please continue the conversation naturally from where we left off.
     const effectiveWorkingDirSdk = this.config.session?.workingDirectory ??
       (this.modeSessionId ? getSessionPath(this.workspaceRootPath, this.modeSessionId) : undefined);
     const isSessionRootSdk = !this.config.session?.workingDirectory && !!this.modeSessionId;
-    const workingDirContextSdk = getWorkingDirectoryContext(effectiveWorkingDirSdk, isSessionRootSdk);
+    // Pass sdkCwd so agent knows if bash runs from a different directory than workingDirectory
+    const workingDirContextSdk = getWorkingDirectoryContext(effectiveWorkingDirSdk, isSessionRootSdk, this.config.session?.sdkCwd);
     if (workingDirContextSdk) {
       contentBlocks.push({ type: 'text', text: workingDirContextSdk });
     }
