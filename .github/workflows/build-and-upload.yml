@@ -14,7 +14,7 @@ on:
         type: boolean
         default: true
       build_linux:
-        description: 'Build Linux (x64 + arm64 AppImage)'
+        description: 'Build Linux (x64 AppImage)'
         required: false
         type: boolean
         default: true
@@ -94,12 +94,6 @@ jobs:
           if [ "${{ inputs.build_linux }}" = "true" ]; then
             if [ "$FIRST" = true ]; then FIRST=false; else MATRIX+=','; fi
             MATRIX+='{"os":"ubuntu-latest","platform":"linux","arch":"x64","script":"build-linux.sh","ext":"AppImage"}'
-          fi
-
-          # Linux arm64
-          if [ "${{ inputs.build_linux }}" = "true" ]; then
-            if [ "$FIRST" = true ]; then FIRST=false; else MATRIX+=','; fi
-            MATRIX+='{"os":"ubuntu-24.04-arm64","platform":"linux","arch":"arm64","script":"build-linux.sh","ext":"AppImage"}'
           fi
 
           MATRIX+=']}'

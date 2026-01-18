@@ -139,19 +139,33 @@ echo "Packaging app with electron-builder..."
 cd "$ELECTRON_DIR"
 
 # Run electron-builder
+# Note: electron-builder may build both archs due to config, but we only use the requested one
 npx electron-builder --linux --${ARCH}
 
 # 8. Verify the AppImage was built
-# electron-builder.yml uses artifactName to output: Craft-Agent-${arch}.AppImage
-APPIMAGE_NAME="Craft-Agent-${ARCH}.AppImage"
-APPIMAGE_PATH="$ELECTRON_DIR/release/$APPIMAGE_NAME"
+# electron-builder uses Linux-style arch names: x86_64 for x64, aarch64 for arm64
+if [ "$ARCH" = "x64" ]; then
+    LINUX_ARCH="x86_64"
+else
+    LINUX_ARCH="aarch64"
+fi
 
-if [ ! -f "$APPIMAGE_PATH" ]; then
-    echo "ERROR: Expected AppImage not found at $APPIMAGE_PATH"
+# electron-builder outputs: Craft-Agent-x86_64.AppImage or Craft-Agent-aarch64.AppImage
+BUILT_APPIMAGE_NAME="Craft-Agent-${LINUX_ARCH}.AppImage"
+BUILT_APPIMAGE_PATH="$ELECTRON_DIR/release/$BUILT_APPIMAGE_NAME"
+
+if [ ! -f "$BUILT_APPIMAGE_PATH" ]; then
+    echo "ERROR: Expected AppImage not found at $BUILT_APPIMAGE_PATH"
     echo "Contents of release directory:"
     ls -la "$ELECTRON_DIR/release/"
     exit 1
 fi
+
+# Rename to our standard naming convention: Craft-Agent-x64.AppImage, Craft-Agent-arm64.AppImage
+APPIMAGE_NAME="Craft-Agent-${ARCH}.AppImage"
+APPIMAGE_PATH="$ELECTRON_DIR/release/$APPIMAGE_NAME"
+mv "$BUILT_APPIMAGE_PATH" "$APPIMAGE_PATH"
+echo "Renamed $BUILT_APPIMAGE_NAME -> $APPIMAGE_NAME"
 
 echo ""
 echo "=== Build Complete ==="

@@ -4,8 +4,6 @@ set -e
 
 VERSIONS_URL="https://agents.craft.do/electron"
 DOWNLOAD_DIR="$HOME/.craft-agent/downloads"
-APP_NAME="Craft Agent.app"
-INSTALL_DIR="/Applications"
 
 # Colors for output
 RED='\033[0;31m'
@@ -20,10 +18,13 @@ success() { printf "%b\n" "${GREEN}>${NC} $1"; }
 warn() { printf "%b\n" "${YELLOW}!${NC} $1"; }
 error() { printf "%b\n" "${RED}x${NC} $1"; exit 1; }
 
-# Check for macOS
-if [ "$(uname -s)" != "Darwin" ]; then
-    error "This installer is for macOS only. Linux is not currently supported."
-fi
+# Detect OS
+OS="$(uname -s)"
+case "$OS" in
+    Darwin) OS_TYPE="darwin" ;;
+    Linux)  OS_TYPE="linux" ;;
+    *)      error "Unsupported operating system: $OS" ;;
+esac
 
 # Check for required dependencies
 DOWNLOADER=""
@@ -114,11 +115,28 @@ case "$(uname -m)" in
     *) error "Unsupported architecture: $(uname -m)" ;;
 esac
 
-platform="darwin-${arch}"
+# Set platform-specific variables
+if [ "$OS_TYPE" = "darwin" ]; then
+    platform="darwin-${arch}"
+    APP_NAME="Craft Agent.app"
+    INSTALL_DIR="/Applications"
+    ext="dmg"
+else
+    # Linux only supports x64 currently
+    if [ "$arch" != "x64" ]; then
+        error "Linux currently only supports x64 architecture. Your architecture: $arch"
+    fi
+    platform="linux-${arch}"
+    APP_NAME="Craft-Agent-x64.AppImage"
+    INSTALL_DIR="$HOME/.local/bin"
+    ext="AppImage"
+fi
+
 echo ""
 info "Detected platform: $platform"
 
 mkdir -p "$DOWNLOAD_DIR"
+mkdir -p "$INSTALL_DIR"
 
 # Get latest version
 info "Fetching latest version..."
@@ -146,7 +164,7 @@ if [ "$HAS_JQ" = true ]; then
 else
     checksum=$(get_checksum_from_manifest "$manifest_json" "$platform")
     # Fallback filename if not using jq
-    filename="Craft-Agent-${arch}.dmg"
+    filename="Craft-Agent-${arch}.${ext}"
 fi
 
 # Validate checksum format (SHA256 = 64 hex characters)
@@ -156,100 +174,159 @@ fi
 
 # Use default filename if not in manifest
 if [ -z "$filename" ]; then
-    filename="Craft-Agent-${arch}.dmg"
+    filename="Craft-Agent-${arch}.${ext}"
 fi
 
 info "Expected checksum: ${checksum:0:16}..."
 
-# Download DMG
-dmg_url="$VERSIONS_URL/$version/$filename"
-dmg_path="$DOWNLOAD_DIR/$filename"
+# Download installer
+installer_url="$VERSIONS_URL/$version/$filename"
+installer_path="$DOWNLOAD_DIR/$filename"
 
 info "Downloading $filename..."
 echo ""
-if ! download_file "$dmg_url" "$dmg_path" true; then
-    rm -f "$dmg_path"
+if ! download_file "$installer_url" "$installer_path" true; then
+    rm -f "$installer_path"
     error "Download failed"
 fi
 echo ""
 
 # Verify checksum
 info "Verifying checksum..."
-actual=$(shasum -a 256 "$dmg_path" | cut -d' ' -f1)
+if [ "$OS_TYPE" = "darwin" ]; then
+    actual=$(shasum -a 256 "$installer_path" | cut -d' ' -f1)
+else
+    actual=$(sha256sum "$installer_path" | cut -d' ' -f1)
+fi
 
 if [ "$actual" != "$checksum" ]; then
-    rm -f "$dmg_path"
+    rm -f "$installer_path"
     error "Checksum verification failed\n  Expected: $checksum\n  Actual:   $actual"
 fi
 
 success "Checksum verified!"
 
-# Quit the app if it's running (use bundle ID for reliability)
-APP_BUNDLE_ID="com.lukilabs.craft-agent"
-if pgrep -x "Craft Agent" >/dev/null 2>&1; then
-    info "Quitting Craft Agent..."
-    osascript -e "tell application id \"$APP_BUNDLE_ID\" to quit" 2>/dev/null || true
-    # Wait for app to quit (max 5 seconds) - POSIX compatible loop
-    i=0
-    while [ $i -lt 10 ]; do
-        if ! pgrep -x "Craft Agent" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 0.5
-        i=$((i + 1))
-    done
-    # Force kill if still running
+# Platform-specific installation
+if [ "$OS_TYPE" = "darwin" ]; then
+    # macOS installation
+    dmg_path="$installer_path"
+
+    # Quit the app if it's running (use bundle ID for reliability)
+    APP_BUNDLE_ID="com.lukilabs.craft-agent"
     if pgrep -x "Craft Agent" >/dev/null 2>&1; then
-        warn "App didn't quit gracefully. Force quitting (unsaved data may be lost)..."
-        pkill -9 -x "Craft Agent" 2>/dev/null || true
-        # Wait longer for macOS to release file handles
-        sleep 3
+        info "Quitting Craft Agent..."
+        osascript -e "tell application id \"$APP_BUNDLE_ID\" to quit" 2>/dev/null || true
+        # Wait for app to quit (max 5 seconds) - POSIX compatible loop
+        i=0
+        while [ $i -lt 10 ]; do
+            if ! pgrep -x "Craft Agent" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.5
+            i=$((i + 1))
+        done
+        # Force kill if still running
+        if pgrep -x "Craft Agent" >/dev/null 2>&1; then
+            warn "App didn't quit gracefully. Force quitting (unsaved data may be lost)..."
+            pkill -9 -x "Craft Agent" 2>/dev/null || true
+            # Wait longer for macOS to release file handles
+            sleep 3
+        fi
     fi
-fi
 
-# Remove existing installation if present
-if [ -d "$INSTALL_DIR/$APP_NAME" ]; then
-    info "Removing previous installation..."
-    rm -rf "$INSTALL_DIR/$APP_NAME"
-fi
+    # Remove existing installation if present
+    if [ -d "$INSTALL_DIR/$APP_NAME" ]; then
+        info "Removing previous installation..."
+        rm -rf "$INSTALL_DIR/$APP_NAME"
+    fi
 
-# Mount DMG
-info "Mounting disk image..."
-mount_point=$(hdiutil attach "$dmg_path" -nobrowse -mountrandom /tmp 2>/dev/null | tail -1 | awk '{print $NF}')
+    # Mount DMG
+    info "Mounting disk image..."
+    mount_point=$(hdiutil attach "$dmg_path" -nobrowse -mountrandom /tmp 2>/dev/null | tail -1 | awk '{print $NF}')
 
-if [ -z "$mount_point" ] || [ ! -d "$mount_point" ]; then
-    rm -f "$dmg_path"
-    error "Failed to mount DMG"
-fi
+    if [ -z "$mount_point" ] || [ ! -d "$mount_point" ]; then
+        rm -f "$dmg_path"
+        error "Failed to mount DMG"
+    fi
 
-# Find the .app in the mounted volume
-app_source=$(find "$mount_point" -maxdepth 1 -name "*.app" -type d | head -1)
+    # Find the .app in the mounted volume
+    app_source=$(find "$mount_point" -maxdepth 1 -name "*.app" -type d | head -1)
 
-if [ -z "$app_source" ]; then
+    if [ -z "$app_source" ]; then
+        hdiutil detach "$mount_point" -quiet 2>/dev/null || true
+        rm -f "$dmg_path"
+        error "No .app found in DMG"
+    fi
+
+    # Copy app to /Applications
+    info "Installing to $INSTALL_DIR..."
+    cp -R "$app_source" "$INSTALL_DIR/$APP_NAME"
+
+    # Unmount DMG
+    info "Cleaning up..."
     hdiutil detach "$mount_point" -quiet 2>/dev/null || true
     rm -f "$dmg_path"
-    error "No .app found in DMG"
+
+    # Remove quarantine attribute if present
+    xattr -rd com.apple.quarantine "$INSTALL_DIR/$APP_NAME" 2>/dev/null || true
+
+    echo ""
+    echo "─────────────────────────────────────────────────────────────────────────"
+    echo ""
+    success "Installation complete!"
+    echo ""
+    printf "%b\n" "  Craft Agent has been installed to ${BOLD}$INSTALL_DIR/$APP_NAME${NC}"
+    echo ""
+    printf "%b\n" "  You can launch it from ${BOLD}Applications${NC} or by running:"
+    printf "%b\n" "    ${BOLD}open -a 'Craft Agent'${NC}"
+    echo ""
+
+else
+    # Linux installation
+    appimage_path="$installer_path"
+    install_path="$INSTALL_DIR/$APP_NAME"
+
+    # Kill the app if it's running
+    if pgrep -f "Craft-Agent.*AppImage" >/dev/null 2>&1; then
+        info "Stopping Craft Agent..."
+        pkill -f "Craft-Agent.*AppImage" 2>/dev/null || true
+        sleep 2
+    fi
+
+    # Remove existing installation if present
+    if [ -f "$install_path" ]; then
+        info "Removing previous installation..."
+        rm -f "$install_path"
+    fi
+
+    # Move AppImage to install directory
+    info "Installing to $INSTALL_DIR..."
+    mv "$appimage_path" "$install_path"
+
+    # Make executable
+    chmod +x "$install_path"
+
+    echo ""
+    echo "─────────────────────────────────────────────────────────────────────────"
+    echo ""
+    success "Installation complete!"
+    echo ""
+    printf "%b\n" "  Craft Agent has been installed to ${BOLD}$install_path${NC}"
+    echo ""
+    printf "%b\n" "  You can launch it by running:"
+    printf "%b\n" "    ${BOLD}$install_path${NC}"
+    echo ""
+    printf "%b\n" "  To add to your PATH, run:"
+    printf "%b\n" "    ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
+    echo ""
+
+    # Check if FUSE is available (required for AppImage)
+    if ! command -v fusermount >/dev/null 2>&1; then
+        echo ""
+        warn "FUSE is required to run AppImage files but was not detected."
+        printf "%b\n" "  Install it with:"
+        printf "%b\n" "    ${BOLD}sudo apt install fuse libfuse2${NC}  (Debian/Ubuntu)"
+        printf "%b\n" "    ${BOLD}sudo dnf install fuse fuse-libs${NC}  (Fedora)"
+        echo ""
+    fi
 fi
-
-# Copy app to /Applications
-info "Installing to $INSTALL_DIR..."
-cp -R "$app_source" "$INSTALL_DIR/$APP_NAME"
-
-# Unmount DMG
-info "Cleaning up..."
-hdiutil detach "$mount_point" -quiet 2>/dev/null || true
-rm -f "$dmg_path"
-
-# Remove quarantine attribute if present
-xattr -rd com.apple.quarantine "$INSTALL_DIR/$APP_NAME" 2>/dev/null || true
-
-echo ""
-echo "─────────────────────────────────────────────────────────────────────────"
-echo ""
-success "Installation complete!"
-echo ""
-printf "%b\n" "  Craft Agent has been installed to ${BOLD}$INSTALL_DIR/$APP_NAME${NC}"
-echo ""
-printf "%b\n" "  You can launch it from ${BOLD}Applications${NC} or by running:"
-printf "%b\n" "    ${BOLD}open -a 'Craft Agent'${NC}"
-echo ""
