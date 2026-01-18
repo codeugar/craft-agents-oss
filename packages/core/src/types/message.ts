@@ -68,7 +68,7 @@ export interface MessageAttachment {
  */
 export interface ContentBadge {
   /** Badge type - used for fallback icon if iconBase64 not available */
-  type: 'source' | 'skill' | 'context' | 'command';
+  type: 'source' | 'skill' | 'context' | 'command' | 'file';
   /** Display label (e.g., "Linear", "Commit") */
   label: string;
   /** Original text pattern (e.g., "@linear", "@commit") */
@@ -85,6 +85,11 @@ export interface ContentBadge {
    * and hides the original content
    */
   collapsedLabel?: string;
+  /**
+   * File path for file badges - stores the full path for click handler
+   * Used when the badge represents a clickable file reference
+   */
+  filePath?: string;
 }
 
 /**

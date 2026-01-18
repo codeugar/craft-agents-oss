@@ -34,18 +34,22 @@ export function AcceptPlanDropdown({
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Calculate menu position relative to trigger
-  // Opens above the button (side="top") to avoid overlapping chat content below
+  // Prefers below the button, falls back to above if insufficient space
   const updatePosition = useCallback(() => {
     if (!triggerRef.current) return
 
     const rect = triggerRef.current.getBoundingClientRect()
     const menuWidth = 280
     const menuHeight = 120 // Approximate height for 2 items with subtitles
+    const gap = 4
 
-    // Position above the trigger (side="top")
+    // Check if there's enough space below the button
+    const spaceBelow = window.innerHeight - rect.bottom
+    const top = spaceBelow >= menuHeight + gap
+      ? rect.bottom + gap  // Position below
+      : rect.top - menuHeight - gap  // Position above
+
     let left = rect.right - menuWidth
-    const top = rect.top - menuHeight - 4
-
     // Keep menu within viewport horizontally
     if (left < 8) left = 8
     if (left + menuWidth > window.innerWidth - 8) {
@@ -64,8 +68,13 @@ export function AcceptPlanDropdown({
         const rect = triggerRef.current.getBoundingClientRect()
         const menuWidth = 280
         const menuHeight = 120
+        const gap = 4
+        // Prefer below, fall back to above if no space
+        const spaceBelow = window.innerHeight - rect.bottom
+        const top = spaceBelow >= menuHeight + gap
+          ? rect.bottom + gap
+          : rect.top - menuHeight - gap
         let left = rect.right - menuWidth
-        const top = rect.top - menuHeight - 4
         if (left < 8) left = 8
         if (left + menuWidth > window.innerWidth - 8) {
           left = window.innerWidth - menuWidth - 8

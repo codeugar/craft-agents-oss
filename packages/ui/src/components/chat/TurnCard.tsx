@@ -22,7 +22,7 @@ import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
-import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, type ActivityGroup } from './turn-utils'
+import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
 import { FullscreenOverlay } from './fullscreen'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 
@@ -1251,7 +1251,18 @@ export const TurnCard = React.memo(function TurnCard({
   onAcceptPlanWithCompact,
   isLastResponse,
 }: TurnCardProps) {
-  const hasRunning = activities.some(a => a.status === 'running')
+  // Derive the turn phase from props using the state machine.
+  // This provides a single source of truth for lifecycle state,
+  // replacing the old ad-hoc boolean combinations.
+  const turnPhase = useMemo(() => {
+    // Construct a minimal turn-like object for deriveTurnPhase
+    const turnData: Pick<AssistantTurn, 'isComplete' | 'response' | 'activities'> = {
+      isComplete,
+      response,
+      activities,
+    }
+    return deriveTurnPhase(turnData as AssistantTurn)
+  }, [isComplete, response, activities])
 
   // Use local state if no controlled state provided
   const [localExpandedTurns, setLocalExpandedTurns] = useState<Set<string>>(() => defaultExpanded ? new Set([turnId]) : new Set())
@@ -1347,9 +1358,10 @@ export const TurnCard = React.memo(function TurnCard({
 
   const hasActivities = activities.length > 0
 
-  // Detect "thinking" state - streaming but no running activities and no ready response
-  // This covers the gap between tool completion and response starting
-  const isThinking = isStreaming && !isComplete && !hasRunning && (!response || isBuffering)
+  // Determine if thinking indicator should show using the phase-based state machine.
+  // This properly handles the "gap" state (awaiting) between tool completion and next action,
+  // which was previously causing the turn card to "disappear".
+  const isThinking = shouldShowThinkingIndicator(turnPhase, isBuffering)
 
   return (
     <div className="space-y-1">

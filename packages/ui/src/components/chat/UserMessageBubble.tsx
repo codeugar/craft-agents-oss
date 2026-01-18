@@ -13,6 +13,7 @@
 
 import type { ReactNode } from 'react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
+import { FileText } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
@@ -23,6 +24,7 @@ const SKILL_ICON_TEXT = '✦'
 const SOURCE_ICON_TEXT = '⊕'
 const CONTEXT_ICON_TEXT = '⚙'
 const COMMAND_ICON_TEXT = '/'
+const FILE_ICON_TEXT = '📄'
 
 /**
  * Check if a badge is an edit_request badge (identified by XML tag in rawText)
@@ -128,6 +130,31 @@ function ContextBadge({ badge }: { badge: ContentBadge }) {
 }
 
 /**
+ * InlineFileBadge - Smaller file badge for inline display within text
+ * Styled to match other inline badges (22px height) but clickable
+ * Used for plan execution messages where the file path appears inline
+ */
+function InlineFileBadge({
+  badge,
+  onFileClick
+}: {
+  badge: ContentBadge
+  onFileClick?: (path: string) => void
+}) {
+  return (
+    <button
+      onClick={() => badge.filePath && onFileClick?.(badge.filePath)}
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle hover:bg-foreground/5 transition-colors cursor-pointer"
+      style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
+      title={badge.filePath}
+    >
+      <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate max-w-[200px]">{badge.label}</span>
+    </button>
+  )
+}
+
+/**
  * Render content with badges inserted at their positions.
  * Text segments between badges are rendered as Markdown.
  *
@@ -135,6 +162,9 @@ function ContextBadge({ badge }: { badge: ContentBadge }) {
  * - They completely hide the marked content range
  * - They show a collapsed badge with the collapsedLabel
  * - Used for EditPopover metadata that shouldn't be visible to users
+ *
+ * File badges (type='file') render inline as clickable badges:
+ * - Used for plan execution messages where file path appears inline with text
  */
 function renderContentWithBadges(
   content: string,
@@ -176,12 +206,15 @@ function renderContentWithBadges(
 
     // Context badges hide content and show collapsed label
     // Command badges show SDK commands like /compact
+    // File badges show clickable file references inline
     // Source/skill badges show inline with the original text
     // Note: edit_request badges are filtered out and rendered above the bubble separately
     if (badge.type === 'context') {
       elements.push(<ContextBadge key={`badge-${i}`} badge={badge} />)
     } else if (badge.type === 'command') {
       elements.push(<CommandBadge key={`badge-${i}`} badge={badge} />)
+    } else if (badge.type === 'file') {
+      elements.push(<InlineFileBadge key={`badge-${i}`} badge={badge} onFileClick={onFileClick} />)
     } else {
       elements.push(<InlineBadge key={`badge-${i}`} badge={badge} />)
     }

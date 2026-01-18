@@ -33,6 +33,30 @@ export interface StdioMcpClientConfig {
  */
 export type McpClientConfig = HttpMcpClientConfig | StdioMcpClientConfig;
 
+/**
+ * Sensitive environment variables that should NOT be passed to MCP subprocesses.
+ * These could contain API keys, tokens, or credentials that MCP servers don't need
+ * and shouldn't have access to.
+ */
+const BLOCKED_ENV_VARS = [
+  // Craft Agent auth (set by the app itself)
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+
+  // AWS credentials
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+
+  // Common API keys/tokens
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'OPENAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'STRIPE_SECRET_KEY',
+  'NPM_TOKEN',
+];
+
 export class CraftMcpClient {
   private client: Client;
   private transport: Transport;
@@ -46,10 +70,11 @@ export class CraftMcpClient {
 
     // Create transport based on config type
     if (config.transport === 'stdio') {
-      // Stdio transport for local MCP servers - merge with process env
+      // Stdio transport for local MCP servers - merge with process env,
+      // but filter out sensitive credentials to prevent leaking secrets to subprocesses
       const processEnv: Record<string, string> = {};
       for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) {
+        if (value !== undefined && !BLOCKED_ENV_VARS.includes(key)) {
           processEnv[key] = value;
         }
       }

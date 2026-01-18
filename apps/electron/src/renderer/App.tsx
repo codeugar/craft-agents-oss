@@ -762,6 +762,25 @@ export default function App() {
         })
       }
 
+      // Step 4.2: Detect plan execution messages and create file badges
+      // Pattern: "Read the plan at <path> and execute it."
+      // This is sent after compaction when accepting a plan, displays as clickable file badge
+      // Only the file path is replaced with a badge - surrounding text remains visible
+      const planExecuteMatch = message.match(/^(Read the plan at )(.+?)( and execute it\.?)$/i)
+      if (planExecuteMatch) {
+        const prefix = planExecuteMatch[1]      // "Read the plan at "
+        const filePath = planExecuteMatch[2]    // the actual path
+        const fileName = filePath.split('/').pop() || 'plan.md'
+        badges.push({
+          type: 'file',
+          label: fileName,
+          rawText: filePath,
+          filePath: filePath,
+          start: prefix.length,
+          end: prefix.length + filePath.length,
+        })
+      }
+
       // Step 5: Create user message with StoredAttachments (for UI display)
       // Mark as isPending for optimistic UI - will be confirmed by user_message event
       const userMessage: Message = {

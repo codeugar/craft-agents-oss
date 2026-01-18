@@ -219,6 +219,8 @@ source_apikey::{workspaceId}::{sourceSlug}   # API keys
 
 **Local MCP Control:** `localMcpServers.enabled` in workspace config or `CRAFT_LOCAL_MCP_ENABLED` env var.
 
+**Env Var Isolation:** Stdio MCP subprocesses do NOT receive sensitive env vars (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, AWS/GitHub/OpenAI keys). To explicitly pass a var, use `config.env`.
+
 ### Skills (`packages/shared/src/skills/`)
 
 **Skills** are specialized instructions at `~/.craft-agent/workspaces/{ws}/skills/{slug}/`:
