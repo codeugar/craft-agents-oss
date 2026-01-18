@@ -6,7 +6,7 @@ import { getSystemPrompt, getDateTimeContext, getWorkingDirectoryContext } from 
 // Plan types are used by UI components; not needed in craft-agent.ts since Safe Mode is user-controlled
 import { parseError, type AgentError } from './errors.ts';
 import { runErrorDiagnostics } from './diagnostics.ts';
-import { loadStoredConfig, getDefaultPermissionMode, type Workspace } from '../config/storage.ts';
+import { loadStoredConfig, loadConfigDefaults, type Workspace } from '../config/storage.ts';
 import { isLocalMcpEnabled } from '../workspaces/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { DEFAULT_MODEL } from '../config/models.ts';
@@ -439,7 +439,8 @@ export class CraftAgent {
     // Initialize permission mode state with callbacks
     const sessionId = this.modeSessionId;
     // Get initial mode: from session, or from global default
-    const initialMode: PermissionMode = config.session?.permissionMode ?? getDefaultPermissionMode();
+    const globalDefaults = loadConfigDefaults();
+    const initialMode: PermissionMode = config.session?.permissionMode ?? globalDefaults.workspaceDefaults.permissionMode;
 
     initializeModeState(sessionId, initialMode, {
       onStateChange: (state) => {
@@ -1475,8 +1476,27 @@ export class CraftAgent {
         abortController: this.currentQueryAbortController,
       };
 
-      // Create the query - use AsyncIterable for messages with binary attachments
-      if (hasBinaryAttachments) {
+      // Known SDK slash commands that bypass context wrapping.
+      // These are sent directly to the SDK without date/session/source context.
+      // Currently only 'compact' is supported - add more here as needed.
+      const SDK_SLASH_COMMANDS = ['compact'] as const;
+
+      // Detect SDK slash commands - must be sent directly without context wrapping.
+      // Pattern: /command or /command <instructions>
+      const trimmedMessage = userMessage.trim();
+      const commandMatch = trimmedMessage.match(/^\/([a-z]+)(\s|$)/i);
+      const commandName = commandMatch?.[1]?.toLowerCase();
+      const isSlashCommand = commandName &&
+        SDK_SLASH_COMMANDS.includes(commandName as typeof SDK_SLASH_COMMANDS[number]) &&
+        !attachments?.length;
+
+      // Create the query - handle slash commands, binary attachments, or regular messages
+      if (isSlashCommand) {
+        // Send slash commands directly to SDK without context wrapping.
+        // The SDK processes these as internal commands (e.g., /compact triggers compaction).
+        debug(`[chat] Detected SDK slash command: ${trimmedMessage}`);
+        this.currentQuery = query({ prompt: trimmedMessage, options: optionsWithAbort });
+      } else if (hasBinaryAttachments) {
         const sdkMessage = this.buildSDKUserMessage(userMessage, attachments);
         async function* singleMessage(): AsyncIterable<SDKUserMessage> {
           yield sdkMessage;

@@ -11,6 +11,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={resolvedMode as ToasterProps["theme"]}
       position="top-right"
+      closeButton
+      swipeDirection="right"
       className="toaster group"
       icons={{
         success: <NoIcon />,
@@ -20,7 +22,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         loading: <NoIcon />,
       }}
       toastOptions={{
-        className: "!rounded-xl !backdrop-blur-xl",
+        className: "!rounded-xl !backdrop-blur-xl group",
       }}
       style={
         {

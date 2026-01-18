@@ -329,6 +329,52 @@ export function FreeFormInput({
     return () => window.removeEventListener('craft:approve-plan', handleApprovePlan as EventListener)
   }, [sessionId, permissionMode, onPermissionModeChange, onSubmit])
 
+  // Listen for craft:approve-plan-with-compact events (Accept & Compact option)
+  // This compacts the conversation first, then executes the plan
+  React.useEffect(() => {
+    const handleApprovePlanWithCompact = (e: CustomEvent<{ sessionId?: string; planPath?: string }>) => {
+      // Only handle if this event is for our session
+      if (e.detail?.sessionId && e.detail.sessionId !== sessionId) {
+        return
+      }
+
+      const planPath = e.detail?.planPath
+
+      // Switch to allow-all (Auto) mode if in Explore mode
+      if (permissionMode === 'safe') {
+        onPermissionModeChange?.('allow-all')
+      }
+
+      // Send /compact to trigger compaction
+      onSubmit('/compact', undefined)
+
+      // Set up a one-time listener for compaction complete
+      // After compaction, Claude loses context so we need to tell it which plan to read
+      const handleCompactionComplete = (compactEvent: CustomEvent<{ sessionId?: string }>) => {
+        // Only handle if this is for our session
+        if (compactEvent.detail?.sessionId !== sessionId) {
+          return
+        }
+
+        // Remove the listener (one-time use)
+        window.removeEventListener('craft:compaction-complete', handleCompactionComplete as EventListener)
+
+        // Send the execution message with explicit plan path
+        // After compaction, Claude doesn't automatically remember the plan file
+        if (planPath) {
+          onSubmit(`Read the plan at ${planPath} and execute it.`, undefined)
+        } else {
+          onSubmit('Plan approved, please execute.', undefined)
+        }
+      }
+
+      window.addEventListener('craft:compaction-complete', handleCompactionComplete as EventListener)
+    }
+
+    window.addEventListener('craft:approve-plan-with-compact', handleApprovePlanWithCompact as EventListener)
+    return () => window.removeEventListener('craft:approve-plan-with-compact', handleApprovePlanWithCompact as EventListener)
+  }, [sessionId, permissionMode, onPermissionModeChange, onSubmit])
+
   // Listen for craft:focus-input events (restore focus after popover/dropdown closes)
   React.useEffect(() => {
     const handleFocusInput = () => {

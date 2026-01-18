@@ -24,6 +24,7 @@ import { Spinner } from '../ui/LoadingIndicator'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, type ActivityGroup } from './turn-utils'
 import { FullscreenOverlay } from './fullscreen'
+import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 
 // ============================================================================
 // Utilities
@@ -182,6 +183,8 @@ export interface TurnCardProps {
   renderActionsMenu?: () => React.ReactNode
   /** Callback when user accepts the plan (plan responses only) */
   onAcceptPlan?: () => void
+  /** Callback when user accepts the plan with compaction (compact conversation first, then execute) */
+  onAcceptPlanWithCompact?: () => void
   /** Whether this is the last response in the session (shows Accept Plan button only for last response) */
   isLastResponse?: boolean
 }
@@ -852,6 +855,8 @@ export interface ResponseCardProps {
   variant?: 'response' | 'plan'
   /** Callback when user accepts the plan (plan variant only) */
   onAccept?: () => void
+  /** Callback when user accepts the plan with compaction (compact first, then execute) */
+  onAcceptWithCompact?: () => void
   /** Whether this is the last response in the session (shows Accept Plan button only for last response) */
   isLastResponse?: boolean
   /** Whether to show the Accept Plan button (default: true) */
@@ -883,6 +888,7 @@ export function ResponseCard({
   onPopOut,
   variant = 'response',
   onAccept,
+  onAcceptWithCompact,
   isLastResponse = true,
   showAcceptPlan = true,
 }: ResponseCardProps) {
@@ -1058,8 +1064,8 @@ export function ResponseCard({
               )}
             </div>
 
-            {/* Right side - Accept Plan (only shown for plan variant when it's the last response) */}
-            {isPlan && showAcceptPlan && (
+            {/* Right side - Accept Plan dropdown (only shown for plan variant when it's the last response) */}
+            {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
               <div
                 className={cn(
                   "flex items-center gap-3 transition-all duration-200",
@@ -1071,15 +1077,10 @@ export function ResponseCard({
                 <span className="text-xs text-muted-foreground">
                   Type your feedback in chat or
                 </span>
-                <button
-                  type="button"
-                  onClick={onAccept}
-                  className="h-[28px] pl-2.5 pr-2.5 text-xs font-medium rounded-[6px] flex items-center gap-1.5 transition-all bg-success/5 text-success hover:bg-success/10 shadow-tinted"
-                  style={{ '--shadow-color': '34, 136, 82' } as React.CSSProperties}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  <span>Accept Plan</span>
-                </button>
+                <AcceptPlanDropdown
+                  onAccept={onAccept}
+                  onAcceptWithCompact={onAcceptWithCompact}
+                />
               </div>
             )}
           </div>
@@ -1247,6 +1248,7 @@ export const TurnCard = React.memo(function TurnCard({
   todos,
   renderActionsMenu,
   onAcceptPlan,
+  onAcceptPlanWithCompact,
   isLastResponse,
 }: TurnCardProps) {
   const hasRunning = activities.some(a => a.status === 'running')
@@ -1520,6 +1522,7 @@ export const TurnCard = React.memo(function TurnCard({
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
             onAccept={onAcceptPlan}
+            onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
           />
         </div>

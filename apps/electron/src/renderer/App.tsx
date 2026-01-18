@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -482,6 +482,14 @@ export default function App() {
       const workspaceId = windowWorkspaceId ?? ''
       const agentEvent = event as unknown as AgentEvent
 
+      // Dispatch window event when compaction completes
+      // This allows FreeFormInput to sequence the plan execution message after compaction
+      if (event.type === 'info' && event.statusType === 'compaction_complete') {
+        window.dispatchEvent(new CustomEvent('craft:compaction-complete', {
+          detail: { sessionId }
+        }))
+      }
+
       // Check if session is currently streaming (atom is source of truth)
       const atomSession = store.get(sessionAtomFamily(sessionId))
       const isStreaming = atomSession?.isProcessing === true
@@ -570,15 +578,10 @@ export default function App() {
     const unsubShortcuts = window.electronAPI.onMenuKeyboardShortcuts(() => {
       navigate(routes.view.settings('shortcuts'))
     })
-    const unsubHelp = window.electronAPI.onMenuOpenHelp(() => {
-      // Open help documentation URL
-      window.electronAPI.openUrl('https://craft.do/help')
-    })
     return () => {
       unsubNewChat()
       unsubSettings()
       unsubShortcuts()
-      unsubHelp()
     }
   }, [])
 
@@ -741,9 +744,23 @@ export default function App() {
 
       // Step 4: Extract badges from mentions (sources/skills) with embedded icons
       // Badges are self-contained for display in UserMessageBubble and viewer
-      const badges = windowWorkspaceId
+      const badges: ContentBadge[] = windowWorkspaceId
         ? extractBadges(message, skills, sources, windowWorkspaceId)
         : []
+
+      // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
+      // This makes /compact render as an inline badge rather than raw text
+      const commandMatch = message.match(/^\/([a-z]+)(\s|$)/i)
+      if (commandMatch && commandMatch[1].toLowerCase() === 'compact') {
+        const commandText = commandMatch[0].trimEnd() // "/compact" without trailing space
+        badges.unshift({
+          type: 'command',
+          label: 'Compact',
+          rawText: commandText,
+          start: 0,
+          end: commandText.length,
+        })
+      }
 
       // Step 5: Create user message with StoredAttachments (for UI display)
       // Mark as isPending for optimistic UI - will be confirmed by user_message event
@@ -1182,7 +1199,6 @@ export default function App() {
     return (
       <OnboardingWizard
         state={onboarding.state}
-        onCancel={handleOnboardingCancel}
         onContinue={onboarding.handleContinue}
         onBack={onboarding.handleBack}
         onSelectBillingMethod={onboarding.handleSelectBillingMethod}

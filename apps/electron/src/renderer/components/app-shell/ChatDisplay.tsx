@@ -701,6 +701,19 @@ export function ChatDisplay({
                             detail: { text: 'Plan approved, please execute.', sessionId: session?.id }
                           }))
                         }}
+                        onAcceptPlanWithCompact={() => {
+                          // Find the most recent plan message to get its path
+                          // After compaction, Claude needs to know which plan file to read
+                          const planMessage = session?.messages.findLast(m => m.role === 'plan')
+                          const planPath = planMessage?.planPath
+
+                          // Dispatch event to compact conversation first, then execute plan
+                          // FreeFormInput handles this by sending /compact, waiting for completion,
+                          // then sending a message with the plan path for Claude to read and execute
+                          window.dispatchEvent(new CustomEvent('craft:approve-plan-with-compact', {
+                            detail: { sessionId: session?.id, planPath }
+                          }))
+                        }}
                         onPopOut={(text) => {
                           // Open response text in markdown overlay
                           setOverlayState({
