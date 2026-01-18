@@ -123,6 +123,10 @@ linux:
     - target: AppImage
       arch:
         - x64
-        - arm64
-  # Use predictable naming: Craft-Agent-x64.AppImage, Craft-Agent-arm64.AppImage
   artifactName: "Craft-Agent-${arch}.${ext}"
+  # Exclude ripgrep binaries for other platforms
+  files:
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-darwin"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-darwin"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/x64-win32"
+    - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/ripgrep/arm64-linux"
