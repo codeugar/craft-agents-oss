@@ -1475,8 +1475,27 @@ export class CraftAgent {
         abortController: this.currentQueryAbortController,
       };
 
-      // Create the query - use AsyncIterable for messages with binary attachments
-      if (hasBinaryAttachments) {
+      // Known SDK slash commands that bypass context wrapping.
+      // These are sent directly to the SDK without date/session/source context.
+      // Currently only 'compact' is supported - add more here as needed.
+      const SDK_SLASH_COMMANDS = ['compact'] as const;
+
+      // Detect SDK slash commands - must be sent directly without context wrapping.
+      // Pattern: /command or /command <instructions>
+      const trimmedMessage = userMessage.trim();
+      const commandMatch = trimmedMessage.match(/^\/([a-z]+)(\s|$)/i);
+      const commandName = commandMatch?.[1]?.toLowerCase();
+      const isSlashCommand = commandName &&
+        SDK_SLASH_COMMANDS.includes(commandName as typeof SDK_SLASH_COMMANDS[number]) &&
+        !attachments?.length;
+
+      // Create the query - handle slash commands, binary attachments, or regular messages
+      if (isSlashCommand) {
+        // Send slash commands directly to SDK without context wrapping.
+        // The SDK processes these as internal commands (e.g., /compact triggers compaction).
+        debug(`[chat] Detected SDK slash command: ${trimmedMessage}`);
+        this.currentQuery = query({ prompt: trimmedMessage, options: optionsWithAbort });
+      } else if (hasBinaryAttachments) {
         const sdkMessage = this.buildSDKUserMessage(userMessage, attachments);
         async function* singleMessage(): AsyncIterable<SDKUserMessage> {
           yield sdkMessage;

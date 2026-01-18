@@ -17,3 +17,6 @@ export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attach
 
 // Fullscreen overlay
 export { FullscreenOverlay, type FullscreenOverlayProps } from './fullscreen'
+
+// Accept plan dropdown (for plan cards)
+export { AcceptPlanDropdown } from './AcceptPlanDropdown'

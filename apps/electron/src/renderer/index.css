@@ -973,6 +973,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 [data-sonner-toast] {
   box-shadow: var(--shadow-modal-small) !important;
   background-color: oklch(from var(--popover) l c h / 0.8) !important;
+  -webkit-app-region: no-drag !important;
 }
 
 /* Hide icon container to remove leftover padding */
@@ -1004,6 +1005,28 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 [data-sonner-toast] [data-button]:hover,
 [data-sonner-toast] [data-cancel]:hover {
   color: var(--foreground) !important;
+}
+
+/* Close button styling - move to top right, show only on hover */
+[data-sonner-toast] [data-close-button] {
+  left: unset !important;
+  right: -14px !important;
+  opacity: 0 !important;
+  transition: opacity 0.15s ease !important;
+  background-color: var(--background) !important;
+  border: none !important;
+  box-shadow:
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(0, 0, 0, 0) 0px 0px 0px 0px,
+    rgba(var(--foreground-rgb), 0.06) 0px 0px 0px 1px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 1px 1px -0.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 3px 3px -1.5px,
+    rgba(0, 0, 0, var(--shadow-blur-opacity)) 0px 6px 6px -3px !important;
+}
+
+[data-sonner-toast].group:hover [data-close-button],
+[data-sonner-toast]:hover [data-close-button] {
+  opacity: 1 !important;
 }
 
 /* Tinted backgrounds for toast states - use linear-gradient to layer

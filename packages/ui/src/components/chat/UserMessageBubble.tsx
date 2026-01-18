@@ -22,6 +22,7 @@ import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
 const SKILL_ICON_TEXT = '✦'
 const SOURCE_ICON_TEXT = '⊕'
 const CONTEXT_ICON_TEXT = '⚙'
+const COMMAND_ICON_TEXT = '/'
 
 /**
  * Check if a badge is an edit_request badge (identified by XML tag in rawText)
@@ -81,6 +82,24 @@ function InlineBadge({ badge }: { badge: ContentBadge }) {
           {badge.type === 'skill' ? SKILL_ICON_TEXT : badge.type === 'context' ? CONTEXT_ICON_TEXT : SOURCE_ICON_TEXT}
         </span>
       )}
+      <span className="truncate max-w-[200px]">{badge.label}</span>
+    </span>
+  )
+}
+
+/**
+ * CommandBadge - Renders a slash command badge inline with text
+ * Styled similarly to InlineBadge but indicates a SDK command (e.g., /compact)
+ */
+function CommandBadge({ badge }: { badge: ContentBadge }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 h-[22px] px-1.5 mx-0.5 rounded-[5px] bg-background shadow-minimal text-[12px] align-middle"
+      style={{ verticalAlign: 'middle', transform: 'translateY(-1px)' }}
+    >
+      <span className="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0 text-[10px] font-medium">
+        {COMMAND_ICON_TEXT}
+      </span>
       <span className="truncate max-w-[200px]">{badge.label}</span>
     </span>
   )
@@ -156,10 +175,13 @@ function renderContentWithBadges(
     }
 
     // Context badges hide content and show collapsed label
+    // Command badges show SDK commands like /compact
     // Source/skill badges show inline with the original text
     // Note: edit_request badges are filtered out and rendered above the bubble separately
     if (badge.type === 'context') {
       elements.push(<ContextBadge key={`badge-${i}`} badge={badge} />)
+    } else if (badge.type === 'command') {
+      elements.push(<CommandBadge key={`badge-${i}`} badge={badge} />)
     } else {
       elements.push(<InlineBadge key={`badge-${i}`} badge={badge} />)
     }
