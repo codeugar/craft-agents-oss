@@ -637,8 +637,8 @@ async function testApiSource(
       if (credValue) {
         // Apply credential based on authType config
         if (source.api.authType === 'bearer' || isApiOAuthProvider(source.provider)) {
-          const scheme = source.api.authScheme || 'Bearer';
-          headers['Authorization'] = `${scheme} ${credValue}`;
+          const scheme = source.api.authScheme ?? 'Bearer';
+          headers['Authorization'] = scheme ? `${scheme} ${credValue}` : credValue;
         } else if (source.api.authType === 'header' && source.api.headerName) {
           headers[source.api.headerName] = credValue;
         } else if (source.api.authType === 'basic') {

@@ -73,8 +73,8 @@ function buildHeaders(
   if (auth.type === 'header') {
     headers[auth.headerName || 'x-api-key'] = apiKey;
   } else if (auth.type === 'bearer') {
-    const scheme = auth.authScheme || 'Bearer';
-    headers['Authorization'] = `${scheme} ${apiKey}`;
+    const scheme = auth.authScheme ?? 'Bearer';
+    headers['Authorization'] = scheme ? `${scheme} ${apiKey}` : apiKey;
   }
   // Query type is handled in buildUrl
 
