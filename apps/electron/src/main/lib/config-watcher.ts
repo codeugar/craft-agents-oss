@@ -528,9 +528,14 @@ export class ConfigWatcher {
       if (this.knownSources.has(slug)) {
         this.knownSources.delete(slug);
         this.callbacks.onSourceChange?.(slug, null);
-        // Also notify list change
-        const allSources = loadWorkspaceSources(this.workspaceDir);
-        this.callbacks.onSourcesListChange?.(allSources);
+        // Notify list change - wrap in try/catch since folder state may have changed
+        try {
+          const allSources = loadWorkspaceSources(this.workspaceDir);
+          this.callbacks.onSourcesListChange?.(allSources);
+        } catch (error) {
+          debug('[ConfigWatcher] Error loading sources after deletion:', error);
+          this.callbacks.onError?.(`sources/${slug}`, error as Error);
+        }
       }
       return;
     }

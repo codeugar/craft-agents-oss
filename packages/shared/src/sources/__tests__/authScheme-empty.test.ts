@@ -1,46 +1,35 @@
 /**
- * Test that authScheme: "" correctly sends token without prefix
+ * Test that buildAuthorizationHeader correctly handles empty authScheme
+ *
+ * This tests the actual exported function from api-tools.ts to ensure
+ * the production code behaves correctly.
  */
 
 import { describe, it, expect } from 'bun:test';
+import { buildAuthorizationHeader } from '../api-tools.ts';
 
-// Replicate the buildHeaders logic
-function buildHeadersOld(authScheme: string | undefined, token: string): string {
-  const scheme = authScheme || 'Bearer';  // OLD: treats "" as falsy
-  return `${scheme} ${token}`;
-}
-
-function buildHeadersNew(authScheme: string | undefined, token: string): string {
-  const scheme = authScheme ?? 'Bearer';  // NEW: only undefined/null fallback
-  return scheme ? `${scheme} ${token}` : token;
-}
-
-describe('authScheme empty string behavior', () => {
+describe('buildAuthorizationHeader', () => {
   const token = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test';
 
-  it('OLD behavior: empty string incorrectly defaults to Bearer', () => {
-    // This demonstrates the bug
-    expect(buildHeadersOld('', token)).toBe(`Bearer ${token}`);
-    expect(buildHeadersOld(undefined, token)).toBe(`Bearer ${token}`);
-    expect(buildHeadersOld('Token', token)).toBe(`Token ${token}`);
+  it('defaults to Bearer prefix when authScheme is undefined', () => {
+    expect(buildAuthorizationHeader(undefined, token)).toBe(`Bearer ${token}`);
   });
 
-  it('NEW behavior: empty string sends token without prefix', () => {
-    // This is the fixed behavior
-    expect(buildHeadersNew('', token)).toBe(token);  // No prefix!
-    expect(buildHeadersNew(undefined, token)).toBe(`Bearer ${token}`);
-    expect(buildHeadersNew('Token', token)).toBe(`Token ${token}`);
+  it('uses custom prefix when authScheme is provided', () => {
+    expect(buildAuthorizationHeader('Token', token)).toBe(`Token ${token}`);
+    expect(buildAuthorizationHeader('ApiKey', token)).toBe(`ApiKey ${token}`);
   });
 
-  it('demonstrates the difference', () => {
-    const emptyScheme = '';
+  it('sends token without prefix when authScheme is empty string', () => {
+    // This is the critical case: empty string should NOT add a prefix
+    // Some APIs (GraphQL endpoints, internal services) expect raw tokens
+    expect(buildAuthorizationHeader('', token)).toBe(token);
+    expect(buildAuthorizationHeader('', token)).not.toContain('Bearer');
+    expect(buildAuthorizationHeader('', token)).not.toContain(' ');
+  });
 
-    console.log('\n--- authScheme: "" ---');
-    console.log('OLD (||):', buildHeadersOld(emptyScheme, token));
-    console.log('NEW (??):', buildHeadersNew(emptyScheme, token));
-
-    // The key assertion: empty string should NOT add a prefix
-    expect(buildHeadersNew(emptyScheme, token)).not.toContain('Bearer');
-    expect(buildHeadersNew(emptyScheme, token)).toBe(token);
+  it('handles null by defaulting to Bearer (via nullish coalescing)', () => {
+    // TypeScript wouldn't allow null, but test runtime behavior
+    expect(buildAuthorizationHeader(null as unknown as undefined, token)).toBe(`Bearer ${token}`);
   });
 });
