@@ -192,6 +192,13 @@ const api: ElectronAPI = {
   getSessionFiles: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_FILES, sessionId),
   getSessionNotes: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_NOTES, sessionId),
   setSessionNotes: (sessionId: string, content: string) => ipcRenderer.invoke(IPC_CHANNELS.SET_SESSION_NOTES, sessionId, content),
+  watchSessionFiles: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.WATCH_SESSION_FILES, sessionId),
+  unwatchSessionFiles: () => ipcRenderer.invoke(IPC_CHANNELS.UNWATCH_SESSION_FILES),
+  onSessionFilesChanged: (callback: (sessionId: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, sessionId: string) => callback(sessionId)
+    ipcRenderer.on(IPC_CHANNELS.SESSION_FILES_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.SESSION_FILES_CHANGED, handler)
+  },
 
   // Sources
   getSources: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET, workspaceId),

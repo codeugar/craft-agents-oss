@@ -1,5 +1,5 @@
 import { Markdown } from '@craft-agent/ui/markdown'
-import { BayerDitherBackground } from './components/BayerDitherBackground'
+import { CardBeamAnimation } from './components/CardBeamAnimation'
 
 const article = `
 # Craft Agent
@@ -25,25 +25,30 @@ curl -fsSL https://agents.craft.do/install-app.sh | bash
 
 export default function App() {
   return (
-    <main className="relative min-h-screen bg-foreground-2 flex flex-col items-center justify-center p-6">
-      <BayerDitherBackground
-        color={[0.45, 0.28, 0.65]}
-        bgColor={[0.08, 0.08, 0.10]}
-        pixelSize={4}
-        shape="square"
-      />
-      {/* Craft colorful C logo */}
-      <svg className="w-12 h-12 mt-8 mb-16" viewBox="0 0 299 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M137.879,300.001 L137.875,300.001 C62.3239,300.001 0.966154,239.232 0.0117188,163.908 L0,162.126 L137.879,162.126 L137.879,300.001 Z" fill="#06367A"/>
-        <path d="M137.879,0 L137.875,0 C61.729,0 0,61.729 0,137.875 L0,137.878 L137.879,137.878 L137.879,0 Z" fill="#FF51FF"/>
-        <path d="M160.558,137.883 L160.561,137.883 C236.707,137.883 298.436,76.1537 298.436,0.00758561 L298.436,0.00562043 L160.558,0.00562043 L160.558,137.883 Z" fill="#007CFF"/>
-        <path d="M160.558,162.123 L160.561,162.123 C236.112,162.123 297.471,222.891 298.426,298.216 L298.436,299.998 L160.558,299.998 L160.558,162.123 Z" fill="#0A377B"/>
-      </svg>
-      <div className="rounded-[20px] max-w-2xl w-full p-8 md:p-12 text-[14px]">
-        <Markdown>
-          {article}
-        </Markdown>
-      </div>
+    <main className="relative min-h-screen bg-foreground-2 flex flex-col items-center">
+      {/* Hero section with card beam animation */}
+      <section className="relative w-full pt-16 pb-8">
+        {/* Craft Agent logo */}
+        <div className="flex justify-center mb-8">
+          <svg className="w-[72px] h-[72px]" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g transform="translate(107, 101)" fill="#9570BE">
+              <polygon points="46.4162423 305 46.4160764 247.039024 0 247.039062 0 61.9609375 46.4160764 61.9600509 46.4162423 4 270 4 270 106.8625 157.110868 106.862192 157.110868 202.136883 270 202.1375 270 305" />
+            </g>
+          </svg>
+        </div>
+
+        {/* Card beam animation */}
+        <CardBeamAnimation />
+      </section>
+
+      {/* Content section */}
+      <section className="w-full max-w-2xl px-6 py-12">
+        <div className="text-[14px]">
+          <Markdown>
+            {article}
+          </Markdown>
+        </div>
+      </section>
     </main>
   )
 }

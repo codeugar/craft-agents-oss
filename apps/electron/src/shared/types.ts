@@ -61,12 +61,14 @@ export interface SkillFile {
 
 /**
  * File/directory entry in a session folder
+ * Supports recursive tree structure with children for directories
  */
 export interface SessionFile {
   name: string
   path: string
   type: 'file' | 'directory'
   size?: number
+  children?: SessionFile[]  // Recursive children for directories
 }
 
 // Import auth request types for unified auth flow
@@ -466,6 +468,9 @@ export const IPC_CHANNELS = {
   GET_SESSION_FILES: 'sessions:getFiles',
   GET_SESSION_NOTES: 'sessions:getNotes',
   SET_SESSION_NOTES: 'sessions:setNotes',
+  WATCH_SESSION_FILES: 'sessions:watchFiles',      // Start watching session directory
+  UNWATCH_SESSION_FILES: 'sessions:unwatchFiles',  // Stop watching
+  SESSION_FILES_CHANGED: 'sessions:filesChanged',  // Event: main → renderer
 
   // Theme
   GET_SYSTEM_THEME: 'theme:getSystemPreference',
@@ -735,6 +740,9 @@ export interface ElectronAPI {
   getSessionFiles(sessionId: string): Promise<SessionFile[]>
   getSessionNotes(sessionId: string): Promise<string>
   setSessionNotes(sessionId: string, content: string): Promise<void>
+  watchSessionFiles(sessionId: string): Promise<void>
+  unwatchSessionFiles(): Promise<void>
+  onSessionFilesChanged(callback: (sessionId: string) => void): () => void
 
   // Sources
   getSources(workspaceId: string): Promise<LoadedSource[]>

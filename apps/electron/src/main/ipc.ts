@@ -1027,38 +1027,128 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // ============================================================
-  // Session Info Panel (files, notes)
+  // Session Info Panel (files, notes, file watching)
   // ============================================================
 
-  // Get files in session directory
+  // Recursive directory scanner for session files
+  // Filters out internal files (session.jsonl) and hidden files (. prefix)
+  // Returns only non-empty directories
+  async function scanSessionDirectory(dirPath: string): Promise<import('../shared/types').SessionFile[]> {
+    const { readdir, stat } = await import('fs/promises')
+    const entries = await readdir(dirPath, { withFileTypes: true })
+    const files: import('../shared/types').SessionFile[] = []
+
+    for (const entry of entries) {
+      // Skip internal and hidden files
+      if (entry.name === 'session.jsonl' || entry.name.startsWith('.')) continue
+
+      const fullPath = join(dirPath, entry.name)
+
+      if (entry.isDirectory()) {
+        // Recursively scan subdirectory
+        const children = await scanSessionDirectory(fullPath)
+        // Only include non-empty directories
+        if (children.length > 0) {
+          files.push({
+            name: entry.name,
+            path: fullPath,
+            type: 'directory',
+            children,
+          })
+        }
+      } else {
+        const stats = await stat(fullPath)
+        files.push({
+          name: entry.name,
+          path: fullPath,
+          type: 'file',
+          size: stats.size,
+        })
+      }
+    }
+
+    // Sort: directories first, then alphabetically
+    return files.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  // Get files in session directory (recursive tree structure)
   ipcMain.handle(IPC_CHANNELS.GET_SESSION_FILES, async (_event, sessionId: string) => {
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return []
 
     try {
-      const { readdir, stat } = await import('fs/promises')
-      const entries = await readdir(sessionPath, { withFileTypes: true })
-      const files: import('../shared/types').SessionFile[] = []
-
-      for (const entry of entries) {
-        // Skip session.jsonl as it's the internal session storage
-        if (entry.name === 'session.jsonl') continue
-
-        const fullPath = join(sessionPath, entry.name)
-        const stats = entry.isFile() ? await stat(fullPath) : null
-
-        files.push({
-          name: entry.name,
-          path: fullPath,
-          type: entry.isDirectory() ? 'directory' : 'file',
-          size: stats?.size,
-        })
-      }
-
-      return files
+      return await scanSessionDirectory(sessionPath)
     } catch (error) {
       ipcLog.error('Failed to get session files:', error)
       return []
+    }
+  })
+
+  // Session file watcher state - only one session watched at a time
+  let sessionFileWatcher: import('fs').FSWatcher | null = null
+  let watchedSessionId: string | null = null
+  let fileChangeDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Start watching a session directory for file changes
+  ipcMain.handle(IPC_CHANNELS.WATCH_SESSION_FILES, async (_event, sessionId: string) => {
+    const sessionPath = sessionManager.getSessionPath(sessionId)
+    if (!sessionPath) return
+
+    // Close existing watcher if watching a different session
+    if (sessionFileWatcher) {
+      sessionFileWatcher.close()
+      sessionFileWatcher = null
+    }
+    if (fileChangeDebounceTimer) {
+      clearTimeout(fileChangeDebounceTimer)
+      fileChangeDebounceTimer = null
+    }
+
+    watchedSessionId = sessionId
+
+    try {
+      const { watch } = await import('fs')
+      sessionFileWatcher = watch(sessionPath, { recursive: true }, (eventType, filename) => {
+        // Ignore internal files and hidden files
+        if (filename && (filename.includes('session.jsonl') || filename.startsWith('.'))) {
+          return
+        }
+
+        // Debounce: wait 100ms before notifying to batch rapid changes
+        if (fileChangeDebounceTimer) {
+          clearTimeout(fileChangeDebounceTimer)
+        }
+        fileChangeDebounceTimer = setTimeout(() => {
+          // Notify all windows that session files changed
+          const { BrowserWindow } = require('electron')
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send(IPC_CHANNELS.SESSION_FILES_CHANGED, watchedSessionId)
+          }
+        }, 100)
+      })
+
+      ipcLog.info(`Watching session files: ${sessionId}`)
+    } catch (error) {
+      ipcLog.error('Failed to start session file watcher:', error)
+    }
+  })
+
+  // Stop watching session files
+  ipcMain.handle(IPC_CHANNELS.UNWATCH_SESSION_FILES, async () => {
+    if (sessionFileWatcher) {
+      sessionFileWatcher.close()
+      sessionFileWatcher = null
+    }
+    if (fileChangeDebounceTimer) {
+      clearTimeout(fileChangeDebounceTimer)
+      fileChangeDebounceTimer = null
+    }
+    if (watchedSessionId) {
+      ipcLog.info(`Stopped watching session files: ${watchedSessionId}`)
+      watchedSessionId = null
     }
   })
 
