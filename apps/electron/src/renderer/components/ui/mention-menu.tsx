@@ -370,6 +370,19 @@ export function useInlineMention({
 
     if (atMatch && hasItems) {
       const matchStart = textBeforeCursor.lastIndexOf('@')
+
+      // Only trigger menu if @ is at start or preceded by whitespace
+      // This prevents triggering on email addresses like test@example.com
+      const charBefore = matchStart > 0 ? textBeforeCursor[matchStart - 1] : null
+      const isValidTrigger = matchStart === 0 || (charBefore && /\s/.test(charBefore))
+
+      if (!isValidTrigger) {
+        setIsOpen(false)
+        setFilter('')
+        setAtStart(-1)
+        return
+      }
+
       setAtStart(matchStart)
       // Filter by the content after @
       setFilter(atMatch[1] || '')
