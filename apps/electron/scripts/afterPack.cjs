@@ -20,6 +20,12 @@ module.exports = async function afterPack(context) {
     return;
   }
 
+  // Skip in CI - macOS 26 SDK not available on current GitHub Actions runners
+  if (process.env.CI) {
+    console.log('Skipping Liquid Glass icon compilation (CI environment - macOS 26 SDK not available)');
+    return;
+  }
+
   const appPath = context.appOutDir;
   const resourcesDir = path.join(appPath, 'Craft Agent.app', 'Contents', 'Resources');
   const iconSourceDir = path.join(context.packager.projectDir, 'resources', 'icon.icon');
@@ -55,7 +61,7 @@ module.exports = async function afterPack(context) {
     ].join(' ');
 
     console.log('Running actool...');
-    execSync(actoolCmd, { stdio: 'inherit' });
+    execSync(actoolCmd, { stdio: 'inherit', timeout: 30000 }); // 30 second timeout
 
     // Check if Assets.car was created
     const assetsCar = path.join(tempDir, 'Assets.car');
