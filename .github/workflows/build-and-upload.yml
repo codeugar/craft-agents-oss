@@ -103,7 +103,7 @@ jobs:
   # Build jobs run in parallel
   build:
     needs: prepare
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
