@@ -732,10 +732,11 @@ export function createSourceTestTool(sessionId: string, workspaceRootPath: strin
     'source_test',
     `Validate and test a source configuration.
 
-**This tool performs three checks:**
+**This tool performs four checks:**
 1. **Schema validation**: Validates config.json against the schema
 2. **Icon caching**: Downloads and caches icon if not already local
 3. **Connection test**: Tests if the source is reachable
+4. **Completeness check**: Checks for missing description and icon
 
 **Supports:**
 - **MCP sources**: Validates server URL, authentication, tool availability
@@ -748,12 +749,15 @@ After creating or editing a source's config.json, run this tool to:
 - Auto-download icons from service URLs
 - Verify the connection works
 
+**Note:** Returns all errors and warnings at once (doesn't stop on first error).
+
 **Reference:** See \`${DOC_REFS.sources}\` for config format.
 
 **Returns:**
 - Validation status with specific errors if invalid
 - Icon status (cached, downloaded, or failed)
-- Connection status with server info (MCP) or HTTP status (API)`,
+- Connection status with server info (MCP) or HTTP status (API)
+- Completeness suggestions for missing description/icon`,
     {
       sourceSlug: z.string().describe('The slug of the source to test'),
     },
@@ -774,12 +778,14 @@ After creating or editing a source's config.json, run this tool to:
         }
         
         const results: string[] = [];
+        const warnings: string[] = [];
         let hasErrors = false;
 
         // ============================================================
         // Step 1: Schema Validation
         // ============================================================
         const validationResult = validateSource(workspaceRootPath, args.sourceSlug);
+        // Collect schema errors but continue to show all issues at once
         if (!validationResult.valid) {
           hasErrors = true;
           results.push('**❌ Schema Validation Failed**\n');
@@ -791,16 +797,9 @@ After creating or editing a source's config.json, run this tool to:
           }
           results.push('');
           results.push(`See \`${DOC_REFS.sources}\` for config format.`);
-
-          return {
-            content: [{
-              type: 'text' as const,
-              text: results.join('\n'),
-            }],
-            isError: true,
-          };
+        } else {
+          results.push('**✓ Schema Valid**');
         }
-        results.push('**✓ Schema Valid**');
 
         // ============================================================
         // Step 2: Icon Handling
@@ -849,6 +848,28 @@ After creating or editing a source's config.json, run this tool to:
           } else {
             results.push('**○ No Icon**');
           }
+        }
+
+        // ============================================================
+        // Step 2b: Completeness Checks (warnings, not errors)
+        // These help the agent understand when/how to use this source
+        // ============================================================
+
+        // Check for description/tagline - helps Claude understand the source's purpose
+        if (!source.tagline) {
+          warnings.push('**⚠ Missing Description**');
+          warnings.push('  Add a `tagline` field to describe this source\'s purpose.');
+          warnings.push('  This helps Claude understand when and how to use this source.');
+          warnings.push('  Example: `"tagline": "Issue tracking for the iOS team"`');
+        }
+
+        // Check for icon (supports .svg, .png, .jpg, .jpeg)
+        // Only warn if no icon was found/downloaded in the previous step
+        if (!localIcon && !source.icon) {
+          warnings.push('**⚠ Missing Icon**');
+          warnings.push('  Use `WebSearch` to find an icon for this service:');
+          warnings.push(`  WebSearch({ query: "${source.provider || source.name} logo icon" })`);
+          warnings.push('  Save as `icon.svg`, `icon.png`, or `icon.jpg` in the source folder.');
         }
 
         // ============================================================
@@ -1096,9 +1117,21 @@ After creating or editing a source's config.json, run this tool to:
           results.push(`**❌ Unknown source type**: '${source.type}'`);
         }
 
+        // Add completeness warnings if any
+        if (warnings.length > 0) {
+          results.push('');
+          results.push('---');
+          results.push('**Completeness Suggestions:**');
+          results.push(...warnings);
+        }
+
         // Add summary
         results.push('');
-        if (!hasErrors) {
+        if (hasErrors) {
+          results.push(`**Source '${source.name}' has issues to fix.**`);
+        } else if (warnings.length > 0) {
+          results.push(`**Source '${source.name}' is ready** (with suggestions above).`);
+        } else {
           results.push(`**Source '${source.name}' is ready.**`);
         }
 

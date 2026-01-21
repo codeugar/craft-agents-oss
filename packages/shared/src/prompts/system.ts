@@ -244,20 +244,26 @@ Each source has:
 
 ## Source Setup - MANDATORY Guide Lookup
 
-**CRITICAL:** Before creating or modifying ANY source, you MUST:
-
-### Step 1: Search for Setup Guide
-\`\`\`
-mcp__craft-agents-docs__search({ query: "github source setup guide", _displayName: "Search Docs", _intent: "Finding setup guide for GitHub" })
-\`\`\`
-
-### Step 2: ALWAYS Verify Current API Endpoints via Web Search
-
-**This is NOT optional.** API endpoints and authentication methods change frequently. The setup guide provides patterns, but you MUST validate current URLs via web search:
+**CRITICAL:** Before creating or modifying ANY source, you MUST search for the setup guide on the docs site:
 
 \`\`\`
+WebSearch({ query: "site:agents.craft.do {service} source setup guide" })
+\`\`\`
+
+Example: \`WebSearch({ query: "site:agents.craft.do github source setup guide" })\`
+
+If no guide exists for a service, search for general patterns: \`"site:agents.craft.do MCP source"\` or \`"site:agents.craft.do API source"\`
+
+### ALWAYS Verify Current Endpoints
+
+**This is NOT optional.** Endpoints and authentication methods change frequently. The setup guide provides patterns, but you MUST validate current URLs via web search:
+
+\`\`\`
+WebSearch({ query: "{service} MCP server URL 2026" })
 WebSearch({ query: "{service} API endpoint 2026" })
 \`\`\`
+
+Search for MCP or API depending on context. Follow the user's intention on which type to use. If unclear, ask which approach they prefer.
 
 **Why this is critical:**
 - API base URLs migrate (api.example.com → v2-api.example.com)
@@ -274,10 +280,6 @@ Source setup without guide lookup AND endpoint verification will likely FAIL due
 - Wrong authentication method (e.g., Slack MUST use native API, not MCP)
 - Outdated or incorrect API URLs
 - Missing OAuth scopes or configuration
-
-**Available guides:** GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Craft, Filesystem, Brave Search, Memory
-
-If no guide exists for a service, search for general patterns: \`"MCP source authentication"\` or \`"API source configuration"\`
 
 **Workspace structure:**
 - Sources: \`${workspacePath}/sources/{slug}/\`

@@ -82,18 +82,22 @@ GitHub's MCP server requires OAuth with a pre-registered client app. Craft Agent
 }
 ```
 
-**Alternative - Local MCP Server:**
+**Alternative - Local MCP Server (Docker):**
 ```json
 {
   "type": "mcp",
   "mcp": {
     "transport": "stdio",
-    "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "command": "docker",
+    "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
     "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
   }
 }
 ```
+
+<Note>
+The `@modelcontextprotocol/server-github` npm package is deprecated. Use the official GitHub MCP server Docker image (`ghcr.io/github/github-mcp-server`) or the remote endpoint at `https://api.githubcopilot.com/mcp/` instead.
+</Note>
 
 ### Rate Limits
 - 5000 requests per hour for authenticated users

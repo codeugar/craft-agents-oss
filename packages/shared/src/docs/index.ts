@@ -161,7 +161,7 @@ When a user wants to add a new source, follow this conversational setup process 
 **Before doing anything else**, search for a specialized guide using the craft-agents-docs MCP:
 
 \`\`\`
-mcp__craft-agents-docs__search({ query: "{service} source setup guide" })
+mcp__craft-agents-docs__SearchCraftAgents({ query: "{service} source setup" })
 \`\`\`
 
 **Available guides:** GitHub, Linear, Slack, Gmail, Google Calendar, Google Drive, Google Docs, Google Sheets, Outlook, Microsoft Calendar, Teams, SharePoint, Craft, Filesystem, Brave Search, Memory
@@ -198,10 +198,14 @@ Use available tools to learn about the service:
 
 ### 3. Configure Intelligently
 
-Based on research and user intent:
-- Create \`config.json\` with appropriate settings
-- Choose the right authentication method
-- Download/cache icon for visual identification
+Based on research and user intent, create \`config.json\` with **ALL required fields**:
+
+**Required fields:**
+- \`name\`, \`slug\`, \`provider\`, \`type\` - Basic identification
+- \`icon\` - **REQUIRED**: URL to the service's favicon, logo, or app icon. Search the web to find an appropriate icon that looks like an app icon. The icon is auto-downloaded and cached locally. Use an emoji as fallback.
+- \`tagline\` - **REQUIRED**: Short description for agent context (e.g., "Issue tracking, sprint planning, and project management")
+- Type-specific config (\`mcp\`, \`api\`, or \`local\`)
+- Authentication method appropriate for the service
 
 ### 4. Configure Explore Mode Permissions (REQUIRED)
 
@@ -255,13 +259,28 @@ Create a guide.md tailored to the user's context:
 - Add usage examples tailored to their tasks
 - Note rate limits, quotas, or limitations
 
-### 6. Test and Validate
+### 6. Test and Validate (MANDATORY)
 
-Complete the setup:
-- Run \`source_test\` to validate configuration
-- Trigger appropriate auth flow (\`source_oauth_trigger\`, \`source_credential_prompt\`, etc.)
-- Verify connection works
-- Confirm the source appears in their workspace
+**You MUST use the \`source_test\` tool after creating any source.** This applies to ALL source types - MCP, API, and local filesystem sources. This is not optional.
+
+\`\`\`
+mcp__session__source_test({ sourceSlug: "{slug}" })
+\`\`\`
+
+The \`source_test\` tool:
+1. **Validates config.json** against the schema
+2. **Downloads and caches the icon** if a URL was provided
+3. **Tests the connection** to verify the source is reachable
+4. **Reports missing fields** (icon, tagline) that should be added
+
+After validation passes, trigger the appropriate auth flow:
+- OAuth sources: \`source_oauth_trigger({ sourceSlug: "{slug}" })\`
+- Bearer/API key: \`source_credential_prompt({ sourceSlug: "{slug}", mode: "bearer" })\`
+- Google services: \`source_google_oauth_trigger({ sourceSlug: "{slug}" })\`
+- Microsoft services: \`source_microsoft_oauth_trigger({ sourceSlug: "{slug}" })\`
+- Slack: \`source_slack_oauth_trigger({ sourceSlug: "{slug}" })\`
+
+**Do NOT skip validation** - it catches config errors before they cause runtime failures.
 
 ## guide.md Best Practices
 
@@ -308,19 +327,27 @@ Concrete examples tailored to the user's workflow:
 \`\`\`
 User: I want to add Linear
 
-Agent: I'd be happy to help set up Linear! A few questions:
+Agent: [FIRST: Searches for Linear guide]
+       mcp__craft-agents-docs__SearchCraftAgents({ query: "linear source setup" })
+
+Agent: I found the Linear setup guide! A few questions:
 1. What will you primarily use Linear for? (issue tracking, sprint planning, reporting?)
 2. Are there specific teams or projects you want to focus on?
 3. Should I set it up for read-only exploration or full access?
 
 User: Issue tracking for my iOS team, project called "Craft iOS"
 
-Agent: [Uses WebSearch to research Linear MCP capabilities]
-Agent: [Creates config.json with OAuth authentication]
+Agent: [Uses WebSearch to verify current Linear MCP URL]
+Agent: [Creates config.json with:
+        - icon: (searches web for app icon or uses favicon)
+        - tagline: "Issue tracking for the Craft iOS team"
+        - OAuth authentication]
 Agent: [Writes guide.md mentioning "Craft iOS" project and iOS team context]
 Agent: [Sets up permissions.json for read-only listing in Explore mode]
-Agent: [Runs source_test to validate]
+Agent: [MANDATORY: Runs source_test to validate]
+       mcp__session__source_test({ sourceSlug: "linear" })
 Agent: [Triggers source_oauth_trigger for authentication]
+       mcp__session__source_oauth_trigger({ sourceSlug: "linear" })
 
 Agent: Linear is now set up! I've configured it to focus on the "Craft iOS" project.
 You can use it to:
@@ -352,6 +379,10 @@ Each source folder contains:
   "enabled": true,
   "provider": "provider-name",
   "type": "mcp" | "api" | "local",
+
+  // REQUIRED: Icon and tagline for UI and agent context
+  "icon": "https://example.com/favicon.ico",  // URL (auto-downloaded) or emoji
+  "tagline": "Brief description for agent context",
 
   // For MCP sources:
   "mcp": {
@@ -599,6 +630,8 @@ Filesystem access for local folders.
   }
 }
 \`\`\`
+
+**After creating, run \`source_test\`** to validate the path exists and is accessible.
 
 ## guide.md Format
 

@@ -60,6 +60,12 @@ Text blocks can serve as:
 
 ## Setup Guide
 
+### Prerequisites
+
+1. Open the Craft app
+2. Go to Space Settings → MCP Link
+3. Generate an MCP link - you'll get a URL like `https://mcp.craft.do/links/ABC123/mcp`
+
 ### Configuration
 
 **Required config.json:**
@@ -71,14 +77,16 @@ Text blocks can serve as:
   "provider": "craft",
   "type": "mcp",
   "mcp": {
-    "url": "https://mcp.craft.do/my/mcp",
-    "authType": "oauth"
+    "url": "https://mcp.craft.do/links/{linkId}/mcp",
+    "authType": "none"
   }
 }
 ```
 
+Replace `{linkId}` with your actual link ID from the Craft app.
+
 ### Authentication
-Use `source_oauth_trigger` to start the Craft OAuth flow.
+MCP links are pre-authenticated - no OAuth required. The link itself provides access to the space.
 
 ### Recommended Questions
 - What types of documents do you primarily work with?

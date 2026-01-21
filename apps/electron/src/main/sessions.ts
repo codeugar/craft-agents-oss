@@ -463,7 +463,7 @@ export class SessionManager {
     const workspaceRootPath = managed.workspace.rootPath
     sessionLog.info(`Reloading sources for session ${managed.id}`)
 
-    // Reload all sources (disk + built-in sources like craft-agents-docs)
+    // Reload all sources from disk (craft-agents-docs is always available as MCP server)
     const allSources = loadAllSources(workspaceRootPath)
     managed.agent.setAllSources(allSources)
 

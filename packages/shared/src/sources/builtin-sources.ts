@@ -5,105 +5,73 @@
  * These sources are not shown in the sources list UI but are available
  * for the agent to use.
  *
- * Currently includes:
- * - craft-agents-docs: Mintlify documentation MCP server for searching setup guides
+ * NOTE: craft-agents-docs is now an always-available MCP server configured
+ * directly in craft-agent.ts, not a source. This file is kept for backwards
+ * compatibility but returns empty results.
  */
 
 import type { LoadedSource, FolderSourceConfig } from './types.ts';
 
 /**
- * Craft Agents documentation MCP source.
+ * Get all built-in sources for a workspace.
  *
- * This connects to the Mintlify MCP server that provides search over the
- * online documentation at agents.craft.do. The agent uses this to look up
- * source setup guides before creating or modifying sources.
+ * Currently returns empty array - craft-agents-docs has been moved to
+ * an always-available MCP server in craft-agent.ts.
  *
- * The Mintlify MCP server exposes a `search` tool that returns relevant
- * documentation pages based on the query.
+ * @param _workspaceId - The workspace ID (unused)
+ * @param _workspaceRootPath - Absolute path to workspace root folder (unused)
+ * @returns Empty array (no built-in sources)
  */
-const DOCS_SOURCE_CONFIG: FolderSourceConfig = {
-  id: 'builtin-craft-agents-docs',
-  name: 'Craft Agents Docs',
-  slug: 'craft-agents-docs',
-  enabled: true,
-  provider: 'mintlify',
-  type: 'mcp',
-  mcp: {
-    transport: 'http',
-    url: 'https://agents.craft.do/docs/mcp',
-    authType: 'none',
-  },
-  // Mark as internal so it's not shown in the sources list UI
-  // but still available for the agent to use
-  tagline: 'Search Craft Agents documentation and source setup guides',
-  icon: '📚',
-  // Connection status - assume connected (public server, no auth needed)
-  isAuthenticated: true,
-  connectionStatus: 'connected',
-};
+export function getBuiltinSources(_workspaceId: string, _workspaceRootPath: string): LoadedSource[] {
+  return [];
+}
 
 /**
  * Get the built-in Craft Agents docs source.
  *
- * This source connects to the Mintlify MCP server at agents.craft.do/docs/mcp
- * and provides search functionality for the agent to look up setup guides
- * before creating or modifying sources.
- *
- * @param workspaceId - The workspace ID (used for source context)
- * @param workspaceRootPath - Absolute path to workspace root folder
- * @returns LoadedSource for the docs MCP server
+ * @deprecated craft-agents-docs is now an always-available MCP server
+ * configured directly in craft-agent.ts. This function is kept for
+ * backwards compatibility but returns a placeholder.
  */
 export function getDocsSource(workspaceId: string, workspaceRootPath: string): LoadedSource {
+  // Return a placeholder - this shouldn't be called anymore
+  const placeholderConfig: FolderSourceConfig = {
+    id: 'builtin-craft-agents-docs',
+    name: 'Craft Agents Docs',
+    slug: 'craft-agents-docs',
+    enabled: false,
+    provider: 'mintlify',
+    type: 'mcp',
+    mcp: {
+      transport: 'http',
+      url: 'https://agents.craft.do/docs/mcp',
+      authType: 'none',
+    },
+    tagline: 'Search Craft Agents documentation and source setup guides',
+    icon: '📚',
+    isAuthenticated: true,
+    connectionStatus: 'connected',
+  };
+
   return {
     workspaceId,
     workspaceRootPath,
-    folderPath: '', // Built-in sources don't have a filesystem path
-    config: DOCS_SOURCE_CONFIG,
-    guide: {
-      raw: `# Craft Agents Documentation
-
-Search the official Craft Agents documentation for setup guides, configuration reference, and troubleshooting help.
-
-## Usage
-
-Use the \`search\` tool to find relevant documentation:
-
-\`\`\`
-mcp__craft-agents-docs__search({ query: "github source setup guide" })
-\`\`\`
-
-## Available Content
-
-- **Source Setup Guides**: Step-by-step instructions for GitHub, Linear, Slack, Gmail, and more
-- **Configuration Reference**: Detailed config.json schemas and options
-- **Authentication**: OAuth, bearer tokens, API keys
-- **Troubleshooting**: Common issues and solutions
-`,
-    },
-    isBuiltin: true, // Flag to identify built-in sources
+    folderPath: '',
+    config: placeholderConfig,
+    guide: { raw: '' },
+    isBuiltin: true,
   };
-}
-
-/**
- * Get all built-in sources for a workspace.
- *
- * Currently returns:
- * - craft-agents-docs: Documentation search via Mintlify MCP
- *
- * @param workspaceId - The workspace ID
- * @param workspaceRootPath - Absolute path to workspace root folder
- * @returns Array of built-in LoadedSource objects
- */
-export function getBuiltinSources(workspaceId: string, workspaceRootPath: string): LoadedSource[] {
-  return [getDocsSource(workspaceId, workspaceRootPath)];
 }
 
 /**
  * Check if a source slug is a built-in source.
  *
- * @param slug - Source slug to check
- * @returns true if this is a built-in source
+ * Returns false - craft-agents-docs is now an always-available MCP server,
+ * not a source in the sources system.
+ *
+ * @param _slug - Source slug to check (unused)
+ * @returns false (no built-in sources)
  */
-export function isBuiltinSource(slug: string): boolean {
-  return slug === 'craft-agents-docs';
+export function isBuiltinSource(_slug: string): boolean {
+  return false;
 }

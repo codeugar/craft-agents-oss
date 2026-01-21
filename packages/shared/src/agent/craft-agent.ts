@@ -789,6 +789,12 @@ export class CraftAgent {
         preferences: getPreferencesServer(false),
         // Session-scoped tools (SubmitPlan, source_test, etc.)
         session: getSessionScopedTools(sessionId, this.workspaceRootPath),
+        // Craft Agents documentation - always available for searching setup guides
+        // This is a public Mintlify MCP server, no auth needed
+        'craft-agents-docs': {
+          type: 'http',
+          url: 'https://agents.craft.do/docs/mcp',
+        },
         // Add user-defined source servers (MCP and API, filtered by local MCP setting)
         // Note: Craft MCP server is now added via sources system
         ...sourceMcpResult.servers,
@@ -947,8 +953,11 @@ export class CraftAgent {
                 const parts = input.tool_name.split('__');
                 const serverName = parts[1];
                 if (parts.length >= 3 && serverName) {
-                  // Built-in MCP servers that are always available (session-scoped tools)
-                  const builtInMcpServers = new Set(['preferences', 'session']);
+                  // Built-in MCP servers that are always available (not user sources)
+                  // - preferences: user preferences storage
+                  // - session: session-scoped tools (SubmitPlan, source_test, etc.)
+                  // - craft-agents-docs: always-available documentation search
+                  const builtInMcpServers = new Set(['preferences', 'session', 'craft-agents-docs']);
 
                   // Check if this is a source server (not built-in)
                   if (!builtInMcpServers.has(serverName)) {
