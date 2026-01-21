@@ -17,7 +17,7 @@ on:
         type: boolean
         default: true
       create_release:
-        description: 'Create GitHub release with binaries'
+        description: 'Create GitHub release on OSS repo with binaries'
         required: false
         type: boolean
         default: true
@@ -311,41 +311,6 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git tag -a "$TAG" -m "Release $TAG"
             git push origin "$TAG"
-          fi
-
-      - name: Create GitHub Release
-        if: inputs.create_release != false
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-
-          # Collect available artifacts (some platforms may not have built)
-          ARTIFACTS=""
-          for ext in dmg exe AppImage; do
-            for file in apps/electron/release/*.$ext; do
-              if [[ -f "$file" ]]; then
-                ARTIFACTS="$ARTIFACTS $file"
-              fi
-            done
-          done
-
-          if [[ -z "$ARTIFACTS" ]]; then
-            echo "WARNING: No artifacts found to upload"
-          fi
-
-          if gh release view "v${VERSION}" &>/dev/null; then
-            echo "Release v${VERSION} exists, uploading artifacts..."
-            if [[ -n "$ARTIFACTS" ]]; then
-              gh release upload "v${VERSION}" $ARTIFACTS --clobber
-            fi
-          else
-            echo "Creating release v${VERSION}..."
-            if [[ -n "$ARTIFACTS" ]]; then
-              gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes $ARTIFACTS
-            else
-              gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
-            fi
           fi
 
   # Sync to OSS repository
