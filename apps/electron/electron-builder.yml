@@ -51,9 +51,6 @@ mac:
   # The value must match --app-icon used in actool (see afterPack.js)
   extendInfo:
     CFBundleIconName: AppIcon
-    NSAppleEventsUsageDescription: "Craft Agent needs access to Apple Events to automate tasks in other applications."
-    NSCalendarsUsageDescription: "Craft Agent needs access to your calendars to create and manage calendar events."
-    NSRemindersUsageDescription: "Craft Agent needs access to your reminders to create and manage tasks."
   target:
     - target: dmg
       arch:
