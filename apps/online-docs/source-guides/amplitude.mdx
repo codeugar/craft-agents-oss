@@ -1,0 +1,174 @@
+---
+title: "Amplitude"
+description: "Connect Amplitude Analytics Dashboard API for querying analytics data"
+---
+
+# Amplitude
+
+Analytics data access via the Dashboard REST API for read-only querying of user behavior, events, and metrics.
+
+## Capabilities
+
+- **Events List** - Query all visible events with their totals for a date range
+- **Event Segmentation** - Get metrics for specific events with segmentation options
+- **Composition Analysis** - Query event composition data (what events users trigger)
+- **Session Metrics** - Get average session length for specified date ranges
+
+## Key Concepts
+
+### Projects and API Keys
+- Each Amplitude project has its own API Key and Secret Key
+- Credentials are project-specific
+- Authentication uses Basic auth (API Key as username, Secret Key as password)
+
+### Date Ranges
+- All queries require start and end dates in YYYYMMDD format
+- The API timezone matches your Amplitude project's timezone
+- Example: `start=20260115&end=20260122`
+
+### Rate Limits
+- Concurrent limit: up to 1000 cost within a five minute period
+- Rate limit: up to 108,000 cost per hour
+- Different endpoints have different cost values
+- Monitor usage to avoid hitting limits
+
+---
+
+## Setup Guide
+
+<Note>
+This is an **API source** using Amplitude's Dashboard REST API with Basic authentication.
+</Note>
+
+### Configuration
+
+**Required config.json:**
+```json
+{
+  "name": "Amplitude",
+  "slug": "amplitude",
+  "enabled": true,
+  "provider": "amplitude",
+  "type": "api",
+  "icon": "https://amplitude.com/favicon.ico",
+  "tagline": "Query analytics data from the Dashboard API",
+  "api": {
+    "baseUrl": "https://amplitude.com/api/2/",
+    "authType": "basic",
+    "testEndpoint": {
+      "method": "GET",
+      "path": "events/list",
+      "params": {
+        "start": "20260101",
+        "end": "20260131"
+      }
+    }
+  }
+}
+```
+
+### Getting API Credentials
+
+1. Log into Amplitude Analytics
+2. Go to **Organization Settings** (upper right)
+3. Click **Projects**
+4. Find your target project in the list
+5. Copy the **API Key** and **Secret Key**
+
+<Warning>
+API Key and Secret Key are project-specific. Make sure you're using credentials from the correct project.
+</Warning>
+
+### Authentication
+
+After creating the source, use:
+```
+source_credential_prompt({
+  sourceSlug: "amplitude",
+  mode: "basic",
+  labels: {
+    username: "API Key",
+    password: "Secret Key"
+  },
+  description: "Enter your Amplitude project credentials",
+  hint: "Find these in Organization Settings → Projects"
+})
+```
+
+### Permissions for Explore Mode
+
+```json
+{
+  "allowedApiEndpoints": [
+    {
+      "method": "GET",
+      "path": ".*",
+      "comment": "All GET requests are read-only and safe for Explore mode"
+    }
+  ]
+}
+```
+
+### Key Endpoints
+
+**Events List**
+```
+GET events/list?start=YYYYMMDD&end=YYYYMMDD
+```
+Returns all visible events with their totals.
+
+**Event Segmentation**
+```
+GET events/segmentation
+```
+Query metrics for a specific event with segmentation options.
+
+**Composition**
+```
+GET composition
+```
+Query event composition data.
+
+**Sessions Average**
+```
+GET sessions/average?start=YYYYMMDD&end=YYYYMMDD
+```
+Get average session length (in seconds) for each day in the range.
+
+### Best Practices
+
+- **Use specific date ranges** to limit data volume and reduce costs
+- **Cache results when possible** to reduce API calls
+- **Test queries with small date ranges first** before expanding
+- **Monitor rate limits** to avoid hitting concurrent/hourly quotas
+- **Sessions have a max length of 1 day** (86,400,000 ms)
+
+### Recommended Questions
+
+- What will you primarily use Amplitude for? (event tracking, session analysis, etc.)
+- Which Amplitude project should we connect to?
+- What date ranges do you typically analyze?
+- Do you need read-only access or will you need to query multiple projects?
+
+### Common Use Cases
+
+**Querying recent events:**
+```
+GET events/list?start=20260101&end=20260122
+```
+
+**Analyzing event segmentation:**
+```
+GET events/segmentation
+```
+
+**Getting session metrics:**
+```
+GET sessions/average?start=20260115&end=20260122
+```
+
+### Reference
+
+- Official documentation: https://amplitude.com/docs/apis/analytics/dashboard-rest
+- API authentication: https://amplitude.com/docs/apis/authentication
+- Keys and tokens: https://amplitude.com/docs/apis/keys-and-tokens

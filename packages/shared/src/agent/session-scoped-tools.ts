@@ -582,18 +582,17 @@ async function testApiSource(
     // Get credentials if needed
     if (requiresAuth) {
       const workspaceId = basename(workspaceRootPath);
+      const sourceCredManager = getSourceCredentialManager();
+      const loadedSource: LoadedSource = {
+        config: source,
+        guide: null,
+        folderPath: '',
+        workspaceRootPath,
+        workspaceId,
+      };
 
       if (isApiOAuthProvider(source.provider)) {
         // Use SourceCredentialManager for OAuth providers - handles expiry checking and refresh
-        const sourceCredManager = getSourceCredentialManager();
-        const loadedSource: LoadedSource = {
-          config: source,
-          guide: null,
-          folderPath: '',
-          workspaceRootPath,
-          workspaceId,
-        };
-
         // getToken() returns null if expired
         let token = await sourceCredManager.getToken(loadedSource);
 
@@ -611,57 +610,38 @@ async function testApiSource(
           debug(`[testApiSource] No valid OAuth token for ${source.slug}`);
         }
       } else {
-        // For non-OAuth auth types, use direct credential lookup
-        const credentialManager = getCredentialManager();
+        // For non-OAuth auth types, use getApiCredential which handles basic auth JSON parsing
+        debug(`[testApiSource] Looking up credentials for source=${source.slug}, authType=${source.api.authType}`);
+        const apiCred = await sourceCredManager.getApiCredential(loadedSource);
+        if (apiCred) {
+          // Determine credential type for reporting
+          if (source.api.authType === 'bearer') {
+            credentialType = 'source_bearer';
+          } else if (source.api.authType === 'basic') {
+            credentialType = 'source_basic';
+          } else {
+            credentialType = 'source_apikey';
+          }
 
-        let credType: 'source_bearer' | 'source_apikey' | 'source_basic';
-        if (source.api.authType === 'bearer') {
-          credType = 'source_bearer';
-        } else if (source.api.authType === 'basic') {
-          credType = 'source_basic';
-        } else {
-          // 'header', 'query', or other → stored as apikey
-          credType = 'source_apikey';
-        }
-
-        debug(`[testApiSource] Looking up credentials for source=${source.slug}, authType=${source.api.authType}, credType=${credType}`);
-        const cred = await credentialManager.get({ type: credType, workspaceId, sourceId: source.slug });
-        if (cred?.value) {
-          credValue = cred.value;
-          credentialType = credType;
+          // Apply credential based on authType config
+          if (source.api.authType === 'bearer') {
+            credValue = typeof apiCred === 'string' ? apiCred : '';
+            headers['Authorization'] = buildAuthorizationHeader(source.api.authScheme, credValue);
+          } else if (source.api.authType === 'header' && source.api.headerName) {
+            credValue = typeof apiCred === 'string' ? apiCred : '';
+            headers[source.api.headerName] = credValue;
+          } else if (source.api.authType === 'basic') {
+            // getApiCredential returns BasicAuthCredential {username, password} for basic auth
+            if (typeof apiCred === 'object' && 'username' in apiCred && 'password' in apiCred) {
+              const basicAuth = Buffer.from(`${apiCred.username}:${apiCred.password}`).toString('base64');
+              headers['Authorization'] = `Basic ${basicAuth}`;
+              credValue = '[basic-auth]'; // Don't expose actual credentials in logs
+            }
+          }
           debug(`[testApiSource] Found credential for ${source.slug}`);
         } else {
           debug(`[testApiSource] No credential found for ${source.slug}`);
         }
-      }
-
-      if (credValue) {
-        // Apply credential based on authType config
-        if (source.api.authType === 'bearer' || isApiOAuthProvider(source.provider)) {
-          headers['Authorization'] = buildAuthorizationHeader(source.api.authScheme, credValue);
-        } else if (source.api.authType === 'header' && source.api.headerName) {
-          headers[source.api.headerName] = credValue;
-        } else if (source.api.authType === 'basic') {
-          // Basic auth - credValue is stored as JSON {"username":"...", "password":"..."}
-          // Parse and base64 encode as username:password
-          try {
-            const parsed = JSON.parse(credValue);
-            if (parsed.username && parsed.password) {
-              const basicAuth = Buffer.from(`${parsed.username}:${parsed.password}`).toString('base64');
-              headers['Authorization'] = `Basic ${basicAuth}`;
-            } else {
-              // Fallback: assume it's already base64 encoded
-              headers['Authorization'] = `Basic ${credValue}`;
-            }
-          } catch {
-            // Not JSON, assume it's already base64 encoded or raw user:pass
-            const basicAuth = credValue.includes(':')
-              ? Buffer.from(credValue).toString('base64')
-              : credValue;
-            headers['Authorization'] = `Basic ${basicAuth}`;
-          }
-        }
-        // Query param auth would need URL modification, skip for now
       }
     }
 
