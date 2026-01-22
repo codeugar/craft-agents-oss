@@ -89,13 +89,30 @@ async function buildServersFromSources(sources: LoadedSource[]) {
   span.mark('credentials.loaded')
 
   // Build token getter for OAuth sources (Google, Slack, Microsoft use OAuth)
+  // Automatically refreshes expired or expiring tokens before API calls
   const getTokenForSource = (source: LoadedSource) => {
     const provider = source.config.provider
     if (isApiOAuthProvider(provider)) {
       return async () => {
-        const token = await credManager.getToken(source)
-        if (!token) throw new Error(`No token for ${source.config.slug}`)
-        return token
+        // Load credential with expiry info
+        const cred = await credManager.load(source)
+
+        // Refresh if expired or expiring soon (within 5 min)
+        if (!cred || credManager.isExpired(cred) || credManager.needsRefresh(cred)) {
+          sessionLog.debug(`[OAuth] Refreshing token for ${source.config.slug}`)
+          try {
+            const token = await credManager.refresh(source)
+            if (token) return token
+          } catch (err) {
+            sessionLog.warn(`[OAuth] Refresh failed for ${source.config.slug}: ${err}`)
+          }
+        }
+
+        // Use cached token if still valid
+        if (cred?.value) return cred.value
+
+        // No valid token after refresh attempt
+        throw new Error(`No token for ${source.config.slug}`)
       }
     }
     return undefined
