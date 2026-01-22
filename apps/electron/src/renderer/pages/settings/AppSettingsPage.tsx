@@ -736,7 +736,7 @@ export default function AppSettingsPage() {
                       )}
                       Advanced Settings
                       {(baseUrlValue || opusModelValue || sonnetModelValue || haikuModelValue) && (
-                        <span className="text-xs bg-accent px-1.5 py-0.5 rounded">configured</span>
+                        <span className="text-xs bg-green-500/20 text-green-600 dark:text-green-400 px-1.5 py-0.5 rounded">configured</span>
                       )}
                     </button>
                   </div>
