@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import { Check, CreditCard, Key } from "lucide-react"
+import { Check, CreditCard, Key, Settings2 } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
 
 export type BillingMethod = 'api_key' | 'claude_oauth' | 'custom_endpoint'
@@ -8,7 +8,7 @@ interface BillingOption {
   id: BillingMethod
   name: string
   description: string
-  icon?: React.ReactNode
+  icon: React.ReactNode
   recommended?: boolean
 }
 
@@ -30,6 +30,7 @@ const BILLING_OPTIONS: BillingOption[] = [
     id: 'custom_endpoint',
     name: 'Custom Endpoint',
     description: 'OpenRouter, Ollama, or other compatible APIs.',
+    icon: <Settings2 className="size-4" />,
   },
 ]
 
@@ -83,17 +84,15 @@ export function BillingMethodStep({
                   : "bg-foreground-2"
               )}
             >
-              {/* Icon (optional) */}
-              {option.icon && (
-                <div
-                  className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-lg",
-                    isSelected ? "bg-foreground/10 text-foreground" : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {option.icon}
-                </div>
-              )}
+              {/* Icon */}
+              <div
+                className={cn(
+                  "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                  isSelected ? "bg-foreground/10 text-foreground" : "bg-muted text-muted-foreground"
+                )}
+              >
+                {option.icon}
+              </div>
 
               {/* Content */}
               <div className="flex-1 min-w-0">

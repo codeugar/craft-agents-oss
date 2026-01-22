@@ -7,9 +7,9 @@
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { Upload, CheckCircle2, XCircle, Settings2, ExternalLink } from "lucide-react"
+import { Upload, ExternalLink } from "lucide-react"
 import { Spinner } from "@craft-agent/ui"
-import { StepFormLayout, BackButton, ContinueButton, type StepIconVariant } from "./primitives"
+import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
 import { Button } from "@/components/ui/button"
 import type { CustomEndpointUploadResult } from "../../../shared/types"
 
@@ -21,24 +21,6 @@ interface CustomEndpointStepProps {
   onUploadConfig: (jsonContent: string) => Promise<CustomEndpointUploadResult>
   onBack: () => void
   onContinue: () => void
-}
-
-function getIcon(status: CustomEndpointStatus): React.ReactNode {
-  switch (status) {
-    case 'idle': return <Settings2 />
-    case 'validating': return <Spinner className="text-2xl" />
-    case 'success': return <CheckCircle2 />
-    case 'error': return <XCircle />
-  }
-}
-
-function getIconVariant(status: CustomEndpointStatus): StepIconVariant {
-  switch (status) {
-    case 'idle': return 'primary'
-    case 'validating': return 'loading'
-    case 'success': return 'success'
-    case 'error': return 'error'
-  }
 }
 
 const STATUS_CONTENT: Record<CustomEndpointStatus, { title: string; description: string }> = {
@@ -113,8 +95,6 @@ export function CustomEndpointStep({
   if (status === 'success') {
     return (
       <StepFormLayout
-        icon={getIcon(status)}
-        iconVariant={getIconVariant(status)}
         title={content.title}
         description={content.description}
         actions={
@@ -130,8 +110,6 @@ export function CustomEndpointStep({
   if (status === 'error') {
     return (
       <StepFormLayout
-        icon={getIcon(status)}
-        iconVariant={getIconVariant(status)}
         title={content.title}
         description={errorMessage || 'Something went wrong. Please try again.'}
         actions={
@@ -150,8 +128,6 @@ export function CustomEndpointStep({
   if (status === 'validating') {
     return (
       <StepFormLayout
-        icon={getIcon(status)}
-        iconVariant={getIconVariant(status)}
         title={content.title}
         description={content.description}
         actions={
@@ -164,8 +140,6 @@ export function CustomEndpointStep({
   // Idle state - show upload UI
   return (
     <StepFormLayout
-      icon={getIcon(status)}
-      iconVariant={getIconVariant(status)}
       title={content.title}
       description={content.description}
       actions={
