@@ -366,6 +366,8 @@ function AppShellContent({
   // Subscribe to live source updates (when sources are added/removed dynamically)
   React.useEffect(() => {
     const cleanup = window.electronAPI.onSourcesChanged((updatedSources) => {
+      // Clear icon cache so updated source icons are re-fetched on render
+      clearSourceIconCaches()
       setSources(updatedSources || [])
     })
     return cleanup
