@@ -1,14 +1,48 @@
 /**
- * Windows-specific build logic
+ * Windows-specific build logic (Node.js only - no Bun dependencies)
  *
  * Note: This contains extensive workarounds for Windows Defender and file locking issues.
  * These are necessary for reliable CI builds on Windows.
  */
 
-import { $ } from 'bun';
-import { existsSync, rmSync, readdirSync } from 'fs';
+import { execSync } from 'child_process';
+import { existsSync, rmSync, readdirSync, statSync, cpSync } from 'fs';
 import { join } from 'path';
 import type { BuildConfig } from './common';
+
+/**
+ * Sleep helper (Node.js replacement for Bun.sleep)
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run a shell command with proper Windows handling
+ */
+function run(command: string, cwd: string): void {
+  console.log(`    > ${command}`);
+  execSync(command, {
+    cwd,
+    stdio: 'inherit',
+    shell: true,
+  });
+}
+
+/**
+ * Run a shell command silently, ignoring errors
+ */
+function runQuiet(command: string, cwd: string): void {
+  try {
+    execSync(command, {
+      cwd,
+      stdio: 'pipe',
+      shell: true,
+    });
+  } catch {
+    // Ignore errors
+  }
+}
 
 /**
  * Kill processes that might lock files
@@ -17,16 +51,11 @@ async function killLockingProcesses(): Promise<void> {
   const processesToKill = ['node', 'npm', 'electron', 'electron-builder'];
 
   for (const procName of processesToKill) {
-    try {
-      // This is Windows-specific, use taskkill
-      await $`taskkill /F /IM ${procName}.exe 2>nul`.quiet().nothrow();
-    } catch {
-      // Process might not exist, that's fine
-    }
+    runQuiet(`taskkill /F /IM ${procName}.exe 2>nul`, process.cwd());
   }
 
   // Give processes time to fully terminate
-  await Bun.sleep(2000);
+  await sleep(2000);
 }
 
 /**
@@ -51,7 +80,7 @@ async function safeRmDir(dir: string, maxRetries = 5): Promise<void> {
     // Exponential backoff: 500ms, 1s, 2s, 4s, 8s
     const delay = 500 * Math.pow(2, attempt);
     console.log(`    Directory still locked, retrying in ${delay}ms...`);
-    await Bun.sleep(delay);
+    await sleep(delay);
   }
 
   if (existsSync(dir)) {
@@ -62,8 +91,8 @@ async function safeRmDir(dir: string, maxRetries = 5): Promise<void> {
 /**
  * Build main process with OAuth defines (Windows-specific inline build)
  */
-async function buildMainProcess(config: BuildConfig): Promise<void> {
-  const { rootDir, electronDir } = config;
+function buildMainProcess(config: BuildConfig): void {
+  const { rootDir } = config;
 
   console.log('  Building main process...');
 
@@ -91,8 +120,8 @@ async function buildMainProcess(config: BuildConfig): Promise<void> {
     }
   }
 
-  // Use bunx instead of npx to avoid Windows path space issues
-  await $`cd ${rootDir} && bunx esbuild ${mainArgs}`;
+  // Use node to run esbuild directly
+  run(`node ./node_modules/esbuild/bin/esbuild ${mainArgs.join(' ')}`, rootDir);
 }
 
 /**
@@ -104,20 +133,22 @@ export async function buildElectronAppWindows(config: BuildConfig): Promise<void
   console.log('Building Electron app...');
 
   // Build main process with OAuth defines
-  await buildMainProcess(config);
+  buildMainProcess(config);
 
-  // Build preload
+  // Build preload - invoke esbuild directly via node
   console.log('  Building preload...');
-  await $`cd ${rootDir} && bun run electron:build:preload`;
+  run(
+    'node ./node_modules/esbuild/bin/esbuild apps/electron/src/preload/index.ts --bundle --platform=node --format=cjs --outfile=apps/electron/dist/preload.cjs --external:electron',
+    rootDir
+  );
 
-  // Build renderer
+  // Build renderer - invoke vite directly via node
   console.log('  Building renderer...');
   const rendererDir = join(electronDir, 'dist', 'renderer');
   if (existsSync(rendererDir)) {
     rmSync(rendererDir, { recursive: true, force: true });
   }
-  // Use bunx to avoid Windows path space issues
-  await $`cd ${rootDir} && bunx vite build --config apps/electron/vite.config.ts`;
+  run('node ./node_modules/vite/bin/vite.js build --config apps/electron/vite.config.ts', rootDir);
 
   // Verify renderer was built
   if (!existsSync(join(rendererDir, 'index.html'))) {
@@ -132,9 +163,6 @@ export async function buildElectronAppWindows(config: BuildConfig): Promise<void
   if (existsSync(resourcesDst)) {
     rmSync(resourcesDst, { recursive: true, force: true });
   }
-
-  // Use Bun's file copying
-  const { cpSync } = await import('fs');
   cpSync(resourcesSrc, resourcesDst, { recursive: true });
 }
 
@@ -163,8 +191,8 @@ export async function packageWindows(config: BuildConfig): Promise<string> {
     }
 
     try {
-      // Use bunx to avoid Windows path space issues
-      await $`cd ${electronDir} && bunx electron-builder --win --x64`;
+      // Use node to run electron-builder directly
+      run('node ./node_modules/electron-builder/out/cli/cli.js --win --x64', electronDir);
       console.log(`  electron-builder succeeded on attempt ${attempt} ✓`);
       lastError = null;
       break;
@@ -175,7 +203,7 @@ export async function packageWindows(config: BuildConfig): Promise<string> {
       if (attempt < maxRetries) {
         console.log('  Waiting 10 seconds before retry...');
         await killLockingProcesses();
-        await Bun.sleep(10000);
+        await sleep(10000);
       }
     }
   }
@@ -197,9 +225,9 @@ export async function packageWindows(config: BuildConfig): Promise<string> {
 
   const exePath = join(releaseDir, exeFile);
 
-  // Get file size
-  const file = Bun.file(exePath);
-  const sizeMB = ((await file.size) / 1024 / 1024).toFixed(2);
+  // Get file size using Node.js fs
+  const stats = statSync(exePath);
+  const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
 
   console.log(`\n=== Build Complete ===`);
   console.log(`Installer: ${exePath}`);
