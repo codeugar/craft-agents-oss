@@ -52,7 +52,11 @@ export function getModelDisplayName(modelId: string): string {
 export function getModelShortName(modelId: string): string {
   const model = MODELS.find(m => m.id === modelId);
   if (model) return model.shortName;
-  // Fallback: strip prefix and date suffix
+  // For provider-prefixed IDs (e.g. "openai/gpt-5"), show just the model part
+  if (modelId.includes('/')) {
+    return modelId.split('/').pop() || modelId;
+  }
+  // Fallback: strip claude- prefix and date suffix
   return modelId.replace('claude-', '').replace(/-[\d.-]+$/, '');
 }
 

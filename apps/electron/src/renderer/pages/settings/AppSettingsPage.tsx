@@ -34,6 +34,7 @@ import {
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { OnboardingWizard } from '@/components/onboarding'
+import { useAppShellContext } from '@/context/AppShellContext'
 import type { PresetTheme } from '@config/theme'
 
 export const meta: DetailsPageMeta = {
@@ -47,6 +48,7 @@ export const meta: DetailsPageMeta = {
 
 export default function AppSettingsPage() {
   const { mode, setMode, colorTheme, setColorTheme, font, setFont } = useTheme()
+  const { refreshCustomModel } = useAppShellContext()
 
   // Preset themes state
   const [presetThemes, setPresetThemes] = useState<PresetTheme[]>([])
@@ -129,6 +131,7 @@ export default function AppSettingsPage() {
     onComplete: () => {
       closeApiSetup()
       loadConnectionInfo()
+      refreshCustomModel()
       apiSetupOnboarding.reset()
     },
     onDismiss: () => {
@@ -141,8 +144,9 @@ export default function AppSettingsPage() {
   const handleApiSetupFinish = useCallback(() => {
     closeApiSetup()
     loadConnectionInfo()
+    refreshCustomModel()
     apiSetupOnboarding.reset()
-  }, [closeApiSetup, loadConnectionInfo, apiSetupOnboarding])
+  }, [closeApiSetup, loadConnectionInfo, refreshCustomModel, apiSetupOnboarding])
 
   const handleNotificationsEnabledChange = useCallback(async (enabled: boolean) => {
     setNotificationsEnabled(enabled)

@@ -169,6 +169,9 @@ export default function App() {
   // Window's workspace ID - fixed for this window (multi-window architecture)
   const [windowWorkspaceId, setWindowWorkspaceId] = useState<string | null>(null)
   const [currentModel, setCurrentModel] = useState(DEFAULT_MODEL)
+  // Custom model override from API connection settings (OpenRouter, Ollama, etc.)
+  // When set, the Anthropic model selector is hidden and this model is shown instead.
+  const [customModel, setCustomModel] = useState<string | null>(null)
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
@@ -236,6 +239,10 @@ export default function App() {
 
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
+    // Refresh custom model state (user may have configured OpenRouter/Ollama)
+    const billing = await window.electronAPI.getBillingMethod()
+    setCustomModel(billing.customModel || null)
+
     // Reload workspaces after onboarding
     const ws = await window.electronAPI.getWorkspaces()
     if (ws.length > 0) {
@@ -368,6 +375,10 @@ export default function App() {
       if (storedModel) {
         setCurrentModel(storedModel)
       }
+    })
+    // Load custom model override from API connection settings
+    window.electronAPI.getBillingMethod().then((billing) => {
+      setCustomModel(billing.customModel || null)
     })
     // Load persisted input drafts into ref (no re-render needed)
     window.electronAPI.getAllDrafts().then((drafts) => {
@@ -851,6 +862,12 @@ export default function App() {
     window.electronAPI.setModel(model)
   }, [])
 
+  // Re-fetch custom model from billing config (called after API connection changes)
+  const refreshCustomModel = useCallback(async () => {
+    const billing = await window.electronAPI.getBillingMethod()
+    setCustomModel(billing.customModel || null)
+  }, [])
+
   /**
    * Unified handler for all session option changes.
    * Handles persistence and backend sync for each option type.
@@ -1125,6 +1142,7 @@ export default function App() {
     workspaces,
     activeWorkspaceId: windowWorkspaceId,
     currentModel,
+    customModel,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1147,6 +1165,7 @@ export default function App() {
     onOpenUrl: handleOpenUrl,
     // Model
     onModelChange: handleModelChange,
+    refreshCustomModel,
     // Workspace
     onSelectWorkspace: handleSelectWorkspace,
     onRefreshWorkspaces: handleRefreshWorkspaces,
@@ -1165,6 +1184,7 @@ export default function App() {
     workspaces,
     windowWorkspaceId,
     currentModel,
+    customModel,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1184,6 +1204,7 @@ export default function App() {
     handleOpenFile,
     handleOpenUrl,
     handleModelChange,
+    refreshCustomModel,
     handleSelectWorkspace,
     handleRefreshWorkspaces,
     handleOpenSettings,

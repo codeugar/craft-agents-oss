@@ -36,6 +36,8 @@ export interface AppShellContextType {
   workspaces: Workspace[]
   activeWorkspaceId: string | null
   currentModel: string
+  /** When set, a custom model overrides the Anthropic model selector (e.g. OpenRouter) */
+  customModel: string | null
   pendingPermissions: Map<string, PermissionRequest[]>
   pendingCredentials: Map<string, CredentialRequest[]>
   /** Get draft input text for a session - reads from ref without triggering re-renders */
@@ -87,6 +89,8 @@ export interface AppShellContextType {
 
   // Model
   onModelChange: (model: string) => void
+  /** Re-fetch custom model from billing config (call after API connection changes) */
+  refreshCustomModel: () => Promise<void>
 
   // Workspace
   onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void
