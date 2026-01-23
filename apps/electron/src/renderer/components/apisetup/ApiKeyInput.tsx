@@ -98,16 +98,15 @@ export function ApiKeyInput({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (apiKey.trim()) {
-      // Don't send baseUrl if it's the Anthropic default
-      const effectiveBaseUrl = baseUrl.trim()
-      const isDefault = effectiveBaseUrl === PRESETS[0].url || !effectiveBaseUrl
-      onSubmit({
-        apiKey: apiKey.trim(),
-        baseUrl: isDefault ? undefined : effectiveBaseUrl,
-        customModel: customModel.trim() || undefined,
-      })
-    }
+    // Always call onSubmit — the hook decides whether an empty key is valid
+    // (custom endpoints like Ollama don't require API keys)
+    const effectiveBaseUrl = baseUrl.trim()
+    const isDefault = effectiveBaseUrl === PRESETS[0].url || !effectiveBaseUrl
+    onSubmit({
+      apiKey: apiKey.trim(),
+      baseUrl: isDefault ? undefined : effectiveBaseUrl,
+      customModel: customModel.trim() || undefined,
+    })
   }
 
   return (

@@ -18,17 +18,18 @@ When you launch Craft Agents for the first time, a setup wizard configures authe
     If you signed in, select which Craft space to connect. This becomes your first source—the agent can read and write documents in that space.
   </Step>
 
-  <Step title="Set up billing">
-    Choose how to pay for Claude usage:
+  <Step title="Set up API connection">
+    Choose how to connect to an AI model:
 
     | Option | Best For |
     |--------|----------|
-    | **Craft Credits** | Easiest. Buy credits in-app, no external accounts needed. |
-    | **Anthropic API Key** | Direct billing. Get a key from [console.anthropic.com](https://console.anthropic.com). |
-    | **Claude Pro/Max** | Use your existing Claude subscription. |
+    | **Claude Pro/Max** | Use your existing Claude subscription via OAuth. |
+    | **API Key** | Direct API access. Supports Anthropic, [OpenRouter](https://openrouter.ai), [Vercel AI Gateway](https://vercel.com/docs/ai-gateway), Ollama, or any compatible endpoint. |
+
+    If you choose **API Key**, you'll see a Base URL preset selector with options for Anthropic, OpenRouter, Vercel AI Gateway, or a custom endpoint. For non-Anthropic providers, you can also specify a model name (e.g. `anthropic/claude-sonnet-4` for OpenRouter).
 
     <Tip>
-    **Not sure which to pick?** Start with Craft Credits—you can switch later. If you already have an Anthropic API key or Claude subscription, use that.
+    **Not sure which to pick?** If you have a Claude Pro or Max subscription, use that. Otherwise, get an API key from [Anthropic](https://console.anthropic.com) or [OpenRouter](https://openrouter.ai/keys). You can change your connection method later in Settings.
     </Tip>
   </Step>
 

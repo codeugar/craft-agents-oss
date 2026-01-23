@@ -1,186 +1,159 @@
 ---
-title: "Custom Endpoint"
-description: "Connect to OpenRouter, Ollama, or other compatible API providers"
+title: "API Providers"
+description: "Connect to Anthropic, OpenRouter, Ollama, Vercel AI Gateway, or any compatible endpoint"
 ---
 
-Craft Agents can connect to any API provider that's compatible with the Anthropic API format. This includes OpenRouter, Ollama, AWS Bedrock, Azure OpenAI, and other providers.
+Craft Agents supports multiple API providers through a built-in preset system. You can connect to Anthropic directly, use aggregators like OpenRouter, run local models via Ollama, or point to any API endpoint compatible with the Anthropic Messages format.
 
-## Configuration File
+## Supported Providers
 
-Create a JSON configuration file with the following structure:
+| Provider | Base URL | API Key Required | Notes |
+|----------|----------|-----------------|-------|
+| **Anthropic** | `https://api.anthropic.com` | Yes | Default provider. No model override needed. |
+| **OpenRouter** | `https://openrouter.ai/api` | Yes | Access multiple AI providers through one API. |
+| **Vercel AI Gateway** | `https://ai-gateway.vercel.sh` | Yes | Unified gateway for AI model routing. |
+| **Ollama** | `http://localhost:11434` | No | Run models locally. Requires Ollama 0.14+. |
+| **Custom** | Any URL | Depends on provider | Any Anthropic-compatible endpoint. |
 
-```json
-{
-  "baseUrl": "https://openrouter.ai/api",
-  "apiKey": "sk-or-v1-your-api-key-here",
-  "models": {
-    "sonnet": "anthropic/claude-sonnet-4",
-    "opus": "anthropic/claude-opus-4",
-    "haiku": "anthropic/claude-3-haiku"
-  }
-}
-```
+## Setting Up a Provider
 
-## Fields
+### During First Launch
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `baseUrl` | string | Yes | API endpoint URL |
-| `apiKey` | string | No | API key or bearer token |
-| `models` | object | No | Model name mappings |
-| `models.sonnet` | string | No | Primary model for most tasks |
-| `models.opus` | string | No | Most capable model for complex reasoning |
-| `models.haiku` | string | No | Fast model for quick tasks |
-
-## Provider Examples
-
-### OpenRouter
-
-```json
-{
-  "baseUrl": "https://openrouter.ai/api",
-  "apiKey": "sk-or-v1-your-openrouter-key",
-  "models": {
-    "sonnet": "anthropic/claude-sonnet-4",
-    "opus": "anthropic/claude-opus-4",
-    "haiku": "anthropic/claude-3-haiku"
-  }
-}
-```
-
-OpenRouter gives you access to multiple AI providers through a single API. Get your API key at [openrouter.ai/keys](https://openrouter.ai/keys).
-
-### Ollama (Local)
-
-```json
-{
-  "baseUrl": "http://localhost:11434/v1",
-  "models": {
-    "sonnet": "llama3.2",
-    "haiku": "llama3.2"
-  }
-}
-```
-
-Ollama runs models locally on your machine. No API key required. Install from [ollama.ai](https://ollama.ai).
-
-<Note>
-Ollama requires the model to be pulled first: `ollama pull llama3.2`
-</Note>
-
-### AWS Bedrock
-
-```json
-{
-  "baseUrl": "https://bedrock-runtime.us-east-1.amazonaws.com",
-  "apiKey": "your-aws-access-key",
-  "models": {
-    "sonnet": "anthropic.claude-3-sonnet-20240229-v1:0",
-    "opus": "anthropic.claude-3-opus-20240229-v1:0",
-    "haiku": "anthropic.claude-3-haiku-20240307-v1:0"
-  }
-}
-```
-
-<Note>
-AWS Bedrock requires additional IAM configuration. See [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/).
-</Note>
-
-### Azure OpenAI
-
-```json
-{
-  "baseUrl": "https://your-resource.openai.azure.com/openai/deployments/your-deployment",
-  "apiKey": "your-azure-api-key",
-  "models": {
-    "sonnet": "gpt-4o",
-    "haiku": "gpt-4o-mini"
-  }
-}
-```
-
-## How to Configure
-
-### During Setup
-
-1. In the setup wizard, select **Custom Endpoint**
-2. Click **Upload Configuration**
-3. Select your JSON configuration file
-4. The configuration will be validated automatically
+1. In the setup wizard, select **API Key**
+2. Enter your API key
+3. Select a **Base URL** preset from the dropdown (Anthropic, OpenRouter, Vercel AI Gateway, or Custom)
+4. Optionally specify a **Model** name (required for non-Anthropic providers)
+5. The connection is tested automatically before saving
 
 ### In Settings
 
 1. Open **Settings** (gear icon or `Cmd+,`)
-2. Under **Billing**, select **Custom Endpoint**
-3. Click **Upload Configuration**
-4. Select your JSON configuration file
+2. Click on the **API Connection** section
+3. Change your API key, base URL, or model as needed
 
-## Validation
+## Model Names
 
-When you upload a configuration, Craft Agents validates:
+For **Anthropic**, no model override is needed — Craft Agents uses its built-in model routing (Sonnet, Opus, Haiku) automatically.
 
-1. **JSON syntax** - The file must be valid JSON
-2. **Schema** - Required fields must be present with correct types
-3. **Connection test** - A test request is made to verify the endpoint works
+For **OpenRouter** and **Vercel AI Gateway**, models use the `provider/model-name` format:
 
-If validation fails, you'll see specific error messages explaining what needs to be fixed.
+```
+anthropic/claude-sonnet-4
+anthropic/claude-opus-4
+openai/gpt-4o
+google/gemini-2.5-pro
+meta-llama/llama-4-maverick
+```
 
-## Model Tiers
+For **Ollama**, use the local model name directly:
 
-Craft Agents uses three model tiers for different types of tasks:
+```
+llama3.2
+qwen3-coder
+deepseek-r1
+```
 
-| Tier | Purpose | Example Usage |
-|------|---------|---------------|
-| **Sonnet** | Primary model | Most conversations, code generation |
-| **Opus** | Complex reasoning | Architecture decisions, complex analysis |
-| **Haiku** | Quick tasks | Simple queries, summaries |
+<Note>
+When the Model field is left empty for non-Anthropic providers, Craft Agents defaults to Anthropic model name formatting. This works for providers that support Anthropic model names natively but may not work for all providers.
+</Note>
 
-If you don't specify all models, the configured models will be used for all tiers.
+## Provider Details
 
-## Viewing Current Configuration
+### OpenRouter
 
-To see your current custom endpoint configuration:
+[OpenRouter](https://openrouter.ai) gives you access to hundreds of AI models through a single API key. It handles billing, rate limiting, and fallbacks across providers.
 
-1. Open **Settings**
-2. Under **Billing**, click **View Configuration**
+1. Get your API key at [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Select the **OpenRouter** preset in the Base URL dropdown
+3. Set your model (e.g. `anthropic/claude-sonnet-4`)
 
-This shows:
-- Base URL
-- API key (masked)
-- Configured models
+Browse available models at [openrouter.ai/models](https://openrouter.ai/models).
 
-## Clearing Configuration
+### Ollama (Local Models)
 
-To remove custom endpoint configuration:
+[Ollama](https://ollama.ai) runs open-source models locally on your machine. No API key is required, and data never leaves your computer.
 
-1. Open **Settings**
-2. Under **Billing**, click **View Configuration**
-3. Click **Clear Configuration**
+**Requirements:**
+- Ollama 0.14 or newer (for Anthropic-compatible API format)
+- A model pulled locally
 
-This removes all custom endpoint settings, allowing you to switch to a different authentication method.
+```bash
+# Install and pull a model
+ollama pull llama3.2
+```
+
+To connect:
+1. Select the **Custom** preset in the Base URL dropdown
+2. Enter `http://localhost:11434` as the URL
+3. Leave the API key empty
+4. Set the model name (e.g. `llama3.2`)
+
+<Note>
+Ollama requires version 0.14+ for compatibility with Craft Agents. Earlier versions do not support the Anthropic Messages API format. Update with `ollama update` if needed.
+</Note>
+
+### Vercel AI Gateway
+
+[Vercel AI Gateway](https://vercel.com/docs/ai-gateway) provides a unified endpoint for routing requests to multiple AI providers with built-in observability and caching.
+
+1. Get your API key from your Vercel dashboard
+2. Select the **Vercel AI Gateway** preset
+3. Set your model using `provider/model-name` format
+
+See [supported models](https://vercel.com/docs/ai-gateway) in the Vercel documentation.
+
+### Custom Endpoint
+
+For any API that implements the Anthropic Messages format:
+
+1. Select the **Custom** preset
+2. Enter the full base URL of your endpoint
+3. Enter your API key (if required)
+4. Specify the model name your endpoint expects
+
+This works with self-hosted proxies, enterprise gateways, or any service that implements the `/v1/messages` endpoint.
+
+## How It Works
+
+When you configure a non-default provider, Craft Agents stores:
+- The **API key** in the encrypted credentials file (`~/.craft-agent/credentials.enc`)
+- The **base URL** as `anthropicBaseUrl` in `config.json`
+- The **model override** as `customModel` in `config.json`
+
+At session launch, the base URL is passed via the `ANTHROPIC_BASE_URL` environment variable to the underlying Claude Code SDK.
 
 ## Troubleshooting
 
 <AccordionGroup>
   <Accordion title="Connection test fails">
     Verify:
-    - The `baseUrl` is correct and accessible
+    - The base URL is correct and accessible from your machine
     - Your API key is valid and has sufficient permissions
-    - The endpoint supports the Anthropic API format
+    - The endpoint supports the Anthropic Messages API format (`/v1/messages`)
   </Accordion>
 
   <Accordion title="Model not found errors">
-    Check that the model names in your config match exactly what your provider expects. Model naming varies by provider.
+    Check that the model name matches exactly what your provider expects:
+    - **OpenRouter/Vercel**: Use `provider/model-name` format (e.g. `anthropic/claude-sonnet-4`)
+    - **Ollama**: Use the local model name (e.g. `llama3.2`)
+    - **Custom**: Check your provider's documentation for valid model identifiers
   </Accordion>
 
   <Accordion title="Authentication errors">
-    - Ensure your API key is correct
-    - Check if your key has expired
-    - Verify you have credits/quota available
+    - Ensure your API key is correct and hasn't expired
+    - For Ollama: no API key should be set (leave it empty)
+    - Check if your key has available credits/quota
+  </Accordion>
+
+  <Accordion title="Ollama not connecting">
+    - Verify Ollama is running: `ollama list`
+    - Check you're on version 0.14+: `ollama --version`
+    - Ensure the model is pulled: `ollama pull llama3.2`
+    - Verify the URL is `http://localhost:11434` (note: HTTP, not HTTPS)
   </Accordion>
 
   <Accordion title="Rate limiting">
-    If you hit rate limits, check your provider's usage limits and consider upgrading your plan.
+    If you hit rate limits, check your provider's usage limits and consider upgrading your plan or using a different provider.
   </Accordion>
 </AccordionGroup>
 
@@ -188,4 +161,4 @@ This removes all custom endpoint settings, allowing you to switch to a different
 
 Your API key is stored securely in the encrypted credentials file. See [Credentials](/reference/config/credentials) for details on how credentials are protected.
 
-The configuration file itself (excluding the API key) is stored in your workspace settings.
+The base URL and model name are stored in `config.json` (not encrypted, as they are not sensitive).

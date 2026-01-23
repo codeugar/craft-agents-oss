@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { useTheme } from '@/context/ThemeContext'
 import { routes } from '@/lib/navigate'
-import { Monitor, Sun, Moon } from 'lucide-react'
+import { Monitor, Sun, Moon, X } from 'lucide-react'
 import { Spinner, FullscreenOverlayBase } from '@craft-agent/ui'
 import { useSetAtom } from 'jotai'
 import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
@@ -256,6 +256,19 @@ export default function AppSettingsPage() {
                 onCancelOAuth={apiSetupOnboarding.handleCancelOAuth}
                 className="h-full"
               />
+              {/* Close button — rendered AFTER the wizard so it paints above its titlebar-drag-region */}
+              <div
+                className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
+                style={{ zIndex: 'var(--z-fullscreen, 350)' }}
+              >
+                <button
+                  onClick={closeApiSetup}
+                  className="p-1.5 rounded-[6px] transition-all bg-background shadow-minimal text-muted-foreground/50 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  title="Close (Esc)"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </FullscreenOverlayBase>
 
             {/* About */}

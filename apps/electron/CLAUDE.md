@@ -287,11 +287,10 @@ import {
 ```
 
 **Why styled components?**
-- Base `ContextMenuItem` uses `focus:bg-accent` which looks inconsistent
-- Styled version uses `hover:bg-foreground/[0.03]` matching `StyledDropdownMenuItem`
+- Styled version uses `hover:bg-foreground/[0.03]` for an even subtler hover than the base `focus:bg-foreground/5`
 - Includes proper icon sizing (`[&>svg]:h-3.5 [&>svg]:w-3.5`)
 
-**Key pattern:** Both `StyledDropdownMenu*` and `StyledContextMenu*` use the same subtle hover (`foreground/[0.03]`). Always use these styled variants for consistency.
+**Key pattern:** Both `StyledDropdownMenu*` and `StyledContextMenu*` use the same subtle hover (`foreground/[0.03]`). Use styled variants when you need the subtler hover or custom icon sizing.
 
 ### Toast Notifications
 

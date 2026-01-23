@@ -36,12 +36,36 @@ The main configuration file stores your authentication method, model preferences
 
 ### authType
 
-How you authenticate with Claude AI.
+How you authenticate with the AI provider.
 
 | Value | Description |
 |-------|-------------|
-| `api_key` | Using Anthropic API key directly |
-| `oauth_token` | Using OAuth token (Claude Max subscription or Craft account) |
+| `api_key` | Using an API key (Anthropic, OpenRouter, Vercel AI Gateway, Ollama, or custom endpoint) |
+| `oauth_token` | Using OAuth token (Claude Pro/Max subscription) |
+
+### anthropicBaseUrl
+
+Custom API endpoint URL. Only set when using a non-Anthropic provider. Omitted when using the default Anthropic API.
+
+| Example Values | Provider |
+|-------|-------------|
+| `https://openrouter.ai/api` | OpenRouter |
+| `https://ai-gateway.vercel.sh` | Vercel AI Gateway |
+| `http://localhost:11434` | Ollama (local) |
+
+See [API Providers](/reference/config/custom-endpoint) for setup details.
+
+### customModel
+
+Model name override for non-Anthropic providers. Only set when the provider requires a specific model identifier format.
+
+| Example Values | Provider |
+|-------|-------------|
+| `anthropic/claude-sonnet-4` | OpenRouter / Vercel |
+| `llama3.2` | Ollama |
+| `openai/gpt-4o` | OpenRouter |
+
+When omitted, Craft Agents uses its default model routing (Sonnet, Opus, Haiku).
 
 ### model
 
@@ -110,30 +134,53 @@ Object containing information about an update ready for auto-install on next lau
 }
 ```
 
-## Example Configuration
+## Example Configurations
+
+**Claude Pro/Max (OAuth):**
 
 ```json
 {
   "authType": "oauth_token",
   "model": "claude-sonnet-4-5-20250929",
-  "workspaces": [
-    {
-      "id": "ws-personal",
-      "name": "Personal Notes",
-      "rootPath": "/Users/alex/notes",
-      "createdAt": 1737451800000
-    },
-    {
-      "id": "ws-work",
-      "name": "Work Projects",
-      "rootPath": "/Users/alex/work",
-      "createdAt": 1737365400000
-    }
-  ],
+  "workspaces": [...],
   "activeWorkspaceId": "ws-personal",
-  "activeSessionId": "260121-swift-falcon",
   "notificationsEnabled": true,
   "colorTheme": "default"
+}
+```
+
+**Anthropic API Key (default):**
+
+```json
+{
+  "authType": "api_key",
+  "model": "claude-sonnet-4-5-20250929",
+  "workspaces": [...],
+  "activeWorkspaceId": "ws-personal"
+}
+```
+
+**OpenRouter:**
+
+```json
+{
+  "authType": "api_key",
+  "anthropicBaseUrl": "https://openrouter.ai/api",
+  "customModel": "anthropic/claude-sonnet-4",
+  "workspaces": [...],
+  "activeWorkspaceId": "ws-personal"
+}
+```
+
+**Ollama (local):**
+
+```json
+{
+  "authType": "api_key",
+  "anthropicBaseUrl": "http://localhost:11434",
+  "customModel": "llama3.2",
+  "workspaces": [...],
+  "activeWorkspaceId": "ws-personal"
 }
 ```
 
@@ -143,6 +190,7 @@ Most settings can be changed through the app:
 
 | Setting | How to change |
 |---------|---------------|
+| API Connection | Settings → API Connection |
 | Model | Click the model name in the status bar |
 | Workspace | Use the workspace dropdown in the sidebar |
 

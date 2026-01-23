@@ -174,7 +174,9 @@ export function useOnboarding({
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
     try {
-      if (!data.apiKey.trim()) {
+      // API key is required for hosted providers (Anthropic, OpenRouter, etc.)
+      // but optional for custom endpoints (Ollama, local models)
+      if (!data.apiKey.trim() && !data.baseUrl) {
         setState(s => ({
           ...s,
           credentialStatus: 'error',

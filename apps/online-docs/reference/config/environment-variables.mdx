@@ -18,11 +18,33 @@ craft -p "Check my tasks"
 
 ### CRAFT_CLAUDE_OAUTH_TOKEN
 
-Provide a Claude OAuth token (for Claude Max subscriptions) without storing it locally.
+Provide a Claude OAuth token (for Claude Pro/Max subscriptions) without storing it locally.
 
 ```bash
 export CRAFT_CLAUDE_OAUTH_TOKEN="your-oauth-token"
 ```
+
+### ANTHROPIC_BASE_URL
+
+Override the API endpoint URL. This is set automatically by Craft Agents when you configure a non-Anthropic provider (OpenRouter, Vercel AI Gateway, Ollama, or custom endpoint) via the UI.
+
+```bash
+export ANTHROPIC_BASE_URL="https://openrouter.ai/api"
+```
+
+You can also set this manually to route all API calls through a custom endpoint:
+
+```bash
+# Use OpenRouter
+export ANTHROPIC_BASE_URL="https://openrouter.ai/api"
+
+# Use local Ollama
+export ANTHROPIC_BASE_URL="http://localhost:11434"
+```
+
+<Note>
+This variable is typically managed by Craft Agents based on your [API Provider configuration](/reference/config/custom-endpoint). You only need to set it manually for automation or CI scenarios.
+</Note>
 
 ### CRAFT_CONFIG_DIR
 
@@ -118,15 +140,22 @@ For API credentials, the lookup order is:
 3. Stored credential in `~/.craft-agent/credentials.enc`
 4. Interactive prompt (if running interactively)
 
+For API base URL:
+
+1. `ANTHROPIC_BASE_URL` environment variable
+2. `anthropicBaseUrl` field in `config.json`
+3. Default (`https://api.anthropic.com`)
+
+For model selection:
+
+1. `customModel` field in `config.json` (for non-Anthropic providers)
+2. `model` field in `config.json`
+3. System default (Claude Sonnet)
+
 For configuration directory:
 
 1. `CRAFT_CONFIG_DIR` environment variable
 2. Default `~/.craft-agent/`
-
-For model selection:
-
-1. `model` field in `config.json`
-2. System default (Claude Sonnet)
 
 ## Usage Examples
 
