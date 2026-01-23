@@ -169,6 +169,9 @@ export default function App() {
   // Window's workspace ID - fixed for this window (multi-window architecture)
   const [windowWorkspaceId, setWindowWorkspaceId] = useState<string | null>(null)
   const [currentModel, setCurrentModel] = useState(DEFAULT_MODEL)
+  // Custom model override from API connection settings (OpenRouter, Ollama, etc.)
+  // When set, the Anthropic model selector is hidden and this model is shown instead.
+  const [customModel, setCustomModel] = useState<string | null>(null)
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
@@ -234,6 +237,13 @@ export default function App() {
 
   const DRAFT_SAVE_DEBOUNCE_MS = 500
 
+  // Re-fetch custom model from API setup config (called after API connection changes).
+  // Defined early so it can be passed to useOnboarding's onConfigSaved.
+  const refreshCustomModel = useCallback(async () => {
+    const billing = await window.electronAPI.getApiSetup()
+    setCustomModel(billing.customModel || null)
+  }, [])
+
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
     // Reload workspaces after onboarding
@@ -251,9 +261,11 @@ export default function App() {
     setAppState('ready')
   }, [])
 
-  // Onboarding hook
+  // Onboarding hook — onConfigSaved fires immediately when billing is saved,
+  // ensuring customModel context updates before the wizard closes.
   const onboarding = useOnboarding({
     onComplete: handleOnboardingComplete,
+    onConfigSaved: refreshCustomModel,
     initialSetupNeeds: setupNeeds || undefined,
   })
 
@@ -368,6 +380,10 @@ export default function App() {
       if (storedModel) {
         setCurrentModel(storedModel)
       }
+    })
+    // Load custom model override from API connection settings
+    window.electronAPI.getApiSetup().then((billing) => {
+      setCustomModel(billing.customModel || null)
     })
     // Load persisted input drafts into ref (no re-render needed)
     window.electronAPI.getAllDrafts().then((drafts) => {
@@ -1125,6 +1141,7 @@ export default function App() {
     workspaces,
     activeWorkspaceId: windowWorkspaceId,
     currentModel,
+    customModel,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1147,6 +1164,7 @@ export default function App() {
     onOpenUrl: handleOpenUrl,
     // Model
     onModelChange: handleModelChange,
+    refreshCustomModel,
     // Workspace
     onSelectWorkspace: handleSelectWorkspace,
     onRefreshWorkspaces: handleRefreshWorkspaces,
@@ -1165,6 +1183,7 @@ export default function App() {
     workspaces,
     windowWorkspaceId,
     currentModel,
+    customModel,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1184,6 +1203,7 @@ export default function App() {
     handleOpenFile,
     handleOpenUrl,
     handleModelChange,
+    refreshCustomModel,
     handleSelectWorkspace,
     handleRefreshWorkspaces,
     handleOpenSettings,

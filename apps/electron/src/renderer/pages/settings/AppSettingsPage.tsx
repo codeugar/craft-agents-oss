@@ -34,6 +34,7 @@ import {
 import { useUpdateChecker } from '@/hooks/useUpdateChecker'
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { OnboardingWizard } from '@/components/onboarding'
+import { useAppShellContext } from '@/context/AppShellContext'
 import type { PresetTheme } from '@config/theme'
 
 export const meta: DetailsPageMeta = {
@@ -47,6 +48,7 @@ export const meta: DetailsPageMeta = {
 
 export default function AppSettingsPage() {
   const { mode, setMode, colorTheme, setColorTheme, font, setFont } = useTheme()
+  const { refreshCustomModel } = useAppShellContext()
 
   // Preset themes state
   const [presetThemes, setPresetThemes] = useState<PresetTheme[]>([])
@@ -78,7 +80,7 @@ export default function AppSettingsPage() {
     if (!window.electronAPI) return
     try {
       const [billing, notificationsOn] = await Promise.all([
-        window.electronAPI.getBillingMethod(),
+        window.electronAPI.getApiSetup(),
         window.electronAPI.getNotificationsEnabled(),
       ])
       setAuthType(billing.authType)
@@ -123,9 +125,11 @@ export default function AppSettingsPage() {
     setFullscreenOverlayOpen(false)
   }, [setFullscreenOverlayOpen])
 
-  // OnboardingWizard hook for editing API connection (starts at api-setup step)
+  // OnboardingWizard hook for editing API connection (starts at api-setup step).
+  // onConfigSaved fires immediately when billing is persisted, updating the model UI instantly.
   const apiSetupOnboarding = useOnboarding({
     initialStep: 'api-setup',
+    onConfigSaved: refreshCustomModel,
     onComplete: () => {
       closeApiSetup()
       loadConnectionInfo()

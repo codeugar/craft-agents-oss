@@ -43,7 +43,7 @@ export interface ApiKeyInputProps {
   disabled?: boolean
 }
 
-type PresetKey = 'anthropic' | 'openrouter' | 'vercel' | 'custom'
+type PresetKey = 'anthropic' | 'openrouter' | 'vercel' | 'ollama' | 'custom'
 
 interface Preset {
   key: PresetKey
@@ -55,6 +55,7 @@ const PRESETS: Preset[] = [
   { key: 'anthropic', label: 'Anthropic', url: 'https://api.anthropic.com' },
   { key: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/api' },
   { key: 'vercel', label: 'Vercel AI Gateway', url: 'https://ai-gateway.vercel.sh' },
+  { key: 'ollama', label: 'Ollama', url: 'http://localhost:11434' },
   { key: 'custom', label: 'Custom', url: '' },
 ]
 
@@ -85,8 +86,11 @@ export function ApiKeyInput({
     } else {
       setBaseUrl(preset.url)
     }
-    // Anthropic uses its own model routing (Sonnet/Opus/Haiku), no custom model needed
-    if (preset.key === 'anthropic') {
+    // Pre-fill recommended model for Ollama; clear for all others
+    // (Anthropic hides the field entirely, others default to Claude model IDs when empty)
+    if (preset.key === 'ollama') {
+      setCustomModel('qwen3-coder')
+    } else {
       setCustomModel('')
     }
   }
@@ -211,6 +215,8 @@ export function ApiKeyInput({
           {/* Contextual help links for providers that need model format guidance */}
           {activePreset === 'openrouter' && (
             <p className="text-xs text-foreground/30">
+              Leave empty for Claude models. Only set for non-Claude models.
+              <br />
               Format: <code className="text-foreground/40">provider/model-name</code>.{' '}
               <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-foreground/50 underline hover:text-foreground/70">
                 Browse models
@@ -219,10 +225,17 @@ export function ApiKeyInput({
           )}
           {activePreset === 'vercel' && (
             <p className="text-xs text-foreground/30">
+              Leave empty for Claude models. Only set for non-Claude models.
+              <br />
               Format: <code className="text-foreground/40">provider/model-name</code>.{' '}
               <a href="https://vercel.com/docs/ai-gateway" target="_blank" rel="noopener noreferrer" className="text-foreground/50 underline hover:text-foreground/70">
                 View supported models
               </a>
+            </p>
+          )}
+          {activePreset === 'ollama' && (
+            <p className="text-xs text-foreground/30">
+              Use any model pulled via <code className="text-foreground/40">ollama pull</code>. No API key required.
             </p>
           )}
           {(activePreset === 'custom' || !activePreset) && (

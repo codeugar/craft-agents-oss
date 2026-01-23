@@ -9,9 +9,9 @@ import { SessionManager } from './sessions'
 import { ipcLog, windowLog } from './logger'
 import { WindowManager } from './window-manager'
 import { registerOnboardingHandlers } from './onboarding'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AuthType, type BillingMethodInfo, type SendMessageOptions } from '../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AuthType, type ApiSetupInfo, type SendMessageOptions } from '../shared/types'
 import { readFileAttachment, perf, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
-import { getAuthType, setAuthType, getPreferencesPath, getCustomModel, setCustomModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, getAnthropicBaseUrl, setAnthropicBaseUrl, loadStoredConfig, saveConfig, type Workspace } from '@craft-agent/shared/config'
+import { getAuthType, setAuthType, getPreferencesPath, getCustomModel, setCustomModel, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, getAnthropicBaseUrl, setAnthropicBaseUrl, loadStoredConfig, saveConfig, type Workspace, SUMMARIZATION_MODEL } from '@craft-agent/shared/config'
 import { getSessionAttachmentsPath } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
@@ -844,11 +844,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // ============================================================
-  // Settings - Billing Method
+  // Settings - API Setup
   // ============================================================
 
-  // Get current billing method and credential status
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_BILLING_METHOD, async (): Promise<BillingMethodInfo> => {
+  // Get current API setup and credential status
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_API_SETUP, async (): Promise<ApiSetupInfo> => {
     const authType = getAuthType()
     const manager = getCredentialManager()
 
@@ -861,7 +861,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       apiKey = await manager.getApiKey() ?? undefined
       anthropicBaseUrl = getAnthropicBaseUrl() ?? undefined
       customModel = getCustomModel() ?? undefined
-      hasCredential = !!apiKey
+      // Keyless providers (Ollama) are valid when a custom base URL is configured
+      hasCredential = !!apiKey || !!anthropicBaseUrl
     } else if (authType === 'oauth_token') {
       hasCredential = !!(await manager.getClaudeOAuth())
     }
@@ -875,8 +876,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
-  // Update billing method and credential
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE_BILLING_METHOD, async (_event, authType: AuthType, credential?: string, anthropicBaseUrl?: string | null, customModel?: string | null) => {
+  // Update API setup and credential
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_UPDATE_API_SETUP, async (_event, authType: AuthType, credential?: string, anthropicBaseUrl?: string | null, customModel?: string | null) => {
     const manager = getCredentialManager()
 
     // Clear old credentials when switching auth types
@@ -949,7 +950,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       }
     }
 
-    ipcLog.info(`Billing method updated to: ${authType}`)
+    ipcLog.info(`API setup updated to: ${authType}`)
 
     // Reinitialize SessionManager auth to pick up new credentials
     try {
@@ -990,9 +991,20 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         ),
       })
 
-      // Use provided model or a placeholder — "model not found" errors are a positive
-      // signal that auth and endpoint are working, just the model needs to be configured
-      const testModel = modelName?.trim() || 'test'
+      // Determine test model: user-specified model takes priority, otherwise use
+      // the default Haiku model for known providers (validates full pipeline).
+      // Custom endpoints MUST specify a model — there's no sensible default.
+      const userModel = modelName?.trim()
+      let testModel: string
+      if (userModel) {
+        testModel = userModel
+      } else if (!trimmedUrl || trimmedUrl.includes('openrouter.ai') || trimmedUrl.includes('ai-gateway.vercel.sh')) {
+        // Anthropic, OpenRouter, and Vercel are all Anthropic-compatible — same model IDs
+        testModel = SUMMARIZATION_MODEL
+      } else {
+        // Custom endpoint with no model specified — can't test without knowing the model
+        return { success: false, error: 'Please specify a model for custom endpoints' }
+      }
 
       await client.messages.create({
         model: testModel,
@@ -1044,22 +1056,23 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         lowerMsg.includes('tool use is not supported') ||
         (lowerMsg.includes('tool') && lowerMsg.includes('not') && lowerMsg.includes('support'))
       if (isToolSupportError) {
-        return { success: false, error: `Model "${modelName || 'test'}" does not support tool/function calling. Craft Agent requires a model with tool support (e.g. Claude, GPT-4, Gemini).` }
+        const displayModel = modelName?.trim() || SUMMARIZATION_MODEL
+        return { success: false, error: `Model "${displayModel}" does not support tool/function calling. Craft Agent requires a model with tool support (e.g. Claude, GPT-4, Gemini).` }
       }
 
-      // Model not found — this is actually a POSITIVE signal when no model was specified,
-      // it means auth and endpoint are both working correctly
+      // Model not found — always a failure. Since onboarding is the only place
+      // to configure the model, we must validate it actually exists.
       const isModelNotFound =
         lowerMsg.includes('model not found') ||
         lowerMsg.includes('is not a valid model') ||
         lowerMsg.includes('invalid model') ||
         (lowerMsg.includes('404') && lowerMsg.includes('model'))
       if (isModelNotFound) {
-        if (!modelName?.trim()) {
-          // No model was specified — "model not found" confirms auth + endpoint work
-          return { success: true }
+        if (modelName?.trim()) {
+          return { success: false, error: `Model "${modelName}" not found. Check the model name and try again.` }
         }
-        return { success: false, error: `Model "${modelName}" not found. Check the model name and try again.` }
+        // Default model (Haiku) not found on a known provider — likely a billing/permissions issue
+        return { success: false, error: 'Could not access the default model. Check your API key permissions and billing.' }
       }
 
       // Fallback: return the raw error message

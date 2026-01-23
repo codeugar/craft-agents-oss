@@ -46,7 +46,7 @@ import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPa
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
-import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon } from '@craft-agent/shared/utils'
+import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
 import { DEFAULT_MODEL } from '@craft-agent/shared/config'
@@ -625,32 +625,42 @@ export class SessionManager {
     try {
       const authState = await getAuthState()
       const { billing } = authState
+      const customBaseUrl = getAnthropicBaseUrl()
 
-      sessionLog.info('Reinitializing auth with billing type:', billing.type)
+      sessionLog.info('Reinitializing auth with billing type:', billing.type, customBaseUrl ? `(custom base URL: ${customBaseUrl})` : '')
 
-      if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
-        // Use Claude Max subscription via OAuth token
-        process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
-        delete process.env.ANTHROPIC_API_KEY
-        sessionLog.info('Set Claude Max OAuth Token')
-      } else if (billing.apiKey) {
-        // Use API key (pay-as-you-go)
-        process.env.ANTHROPIC_API_KEY = billing.apiKey
+      // Priority 1: Custom base URL (Ollama, OpenRouter, etc.)
+      // Third-party endpoints require API key auth — OAuth tokens won't work
+      if (customBaseUrl) {
+        process.env.ANTHROPIC_BASE_URL = customBaseUrl
         delete process.env.CLAUDE_CODE_OAUTH_TOKEN
 
-        // Set custom base URL if configured
-        const baseUrl = getAnthropicBaseUrl()
-        if (baseUrl) {
-          process.env.ANTHROPIC_BASE_URL = baseUrl
-          sessionLog.info(`Set Anthropic Base URL: ${baseUrl}`)
+        if (billing.apiKey) {
+          process.env.ANTHROPIC_API_KEY = billing.apiKey
+          sessionLog.info(`Using custom provider at ${customBaseUrl}`)
         } else {
-          delete process.env.ANTHROPIC_BASE_URL
+          // Set a placeholder key for providers like Ollama that don't validate keys
+          process.env.ANTHROPIC_API_KEY = 'not-needed'
+          sessionLog.warn('Custom base URL configured but no API key set. Using placeholder key (works for Ollama, will fail for OpenRouter).')
         }
-
+      } else if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
+        // Priority 2: Claude Max subscription via OAuth token (direct Anthropic only)
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
+        delete process.env.ANTHROPIC_API_KEY
+        delete process.env.ANTHROPIC_BASE_URL
+        sessionLog.info('Set Claude Max OAuth Token')
+      } else if (billing.apiKey) {
+        // Priority 3: API key with default Anthropic endpoint
+        process.env.ANTHROPIC_API_KEY = billing.apiKey
+        delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+        delete process.env.ANTHROPIC_BASE_URL
         sessionLog.info('Set Anthropic API Key')
       } else {
         sessionLog.error('No authentication configured!')
       }
+
+      // Reset cached summarization client so it picks up new credentials/base URL
+      resetSummarizationClient()
     } catch (error) {
       sessionLog.error('Failed to reinitialize auth:', error)
       throw error
@@ -1250,6 +1260,8 @@ export class SessionManager {
     const userDefaultWorkingDir = wsConfig?.defaults?.workingDirectory || undefined
     // Get default thinking level from workspace config, fallback to global defaults
     const defaultThinkingLevel = wsConfig?.defaults?.thinkingLevel ?? globalDefaults.workspaceDefaults.thinkingLevel
+    // Get default model from workspace config (used when no session-specific model is set)
+    const defaultModel = wsConfig?.defaults?.model
 
     // Resolve working directory from options:
     // - 'user_default' or undefined: Use workspace's configured default
@@ -1286,7 +1298,8 @@ export class SessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       sdkCwd: storedSession.sdkCwd,
-      model: storedSession.model,
+      // Session-specific model takes priority, then workspace default
+      model: storedSession.model || defaultModel,
       thinkingLevel: defaultThinkingLevel,
       messageQueue: [],
       backgroundShellCommands: new Map(),
@@ -2136,7 +2149,9 @@ export class SessionManager {
       updateSessionMetadata(managed.workspace.rootPath, sessionId, { model: model ?? undefined })
       // Update agent model if it already exists (takes effect on next query)
       if (managed.agent) {
-        const effectiveModel = model ?? loadStoredConfig()?.model ?? DEFAULT_MODEL
+        // Fallback chain: session model > workspace default > global config > DEFAULT_MODEL
+        const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+        const effectiveModel = model ?? wsConfig?.defaults?.model ?? loadStoredConfig()?.model ?? DEFAULT_MODEL
         const resolvedModel = resolveModelId(effectiveModel)
         managed.agent.setModel(resolvedModel)
       }
