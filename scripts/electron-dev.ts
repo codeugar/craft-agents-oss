@@ -6,10 +6,17 @@
 import { spawn, type Subprocess } from "bun";
 import { existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join } from "path";
+import * as esbuild from "esbuild";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
 const DIST_DIR = join(ELECTRON_DIR, "dist");
+
+// Platform-specific binary paths (bun creates .exe on Windows, no extension on Unix)
+const IS_WINDOWS = process.platform === "win32";
+const BIN_EXT = IS_WINDOWS ? ".exe" : "";
+const VITE_BIN = join(ROOT_DIR, `node_modules/.bin/vite${BIN_EXT}`);
+const ELECTRON_BIN = join(ROOT_DIR, `node_modules/.bin/electron${BIN_EXT}`);
 
 // Load .env file if it exists
 function loadEnvFile(): void {
@@ -114,8 +121,8 @@ function copyResources(): void {
   }
 }
 
-// Get OAuth defines for esbuild
-function getOAuthDefines(): string[] {
+// Get OAuth defines for esbuild API
+function getOAuthDefines(): Record<string, string> {
   const oauthVars = [
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -125,10 +132,12 @@ function getOAuthDefines(): string[] {
     "MICROSOFT_OAUTH_CLIENT_SECRET",
   ];
 
-  return oauthVars.map((varName) => {
+  const defines: Record<string, string> = {};
+  for (const varName of oauthVars) {
     const value = process.env[varName] || "";
-    return `--define:process.env.${varName}="${value}"`;
-  });
+    defines[`process.env.${varName}`] = JSON.stringify(value);
+  }
+  return defines;
 }
 
 // Get environment variables for electron process
@@ -145,41 +154,28 @@ function getElectronEnv(): Record<string, string> {
   };
 }
 
-// Run a one-shot esbuild and wait for completion
+// Run a one-shot esbuild using the JavaScript API
 async function runEsbuild(
   entryPoint: string,
   outfile: string,
-  extraArgs: string[] = []
+  defines: Record<string, string> = {}
 ): Promise<{ success: boolean; error?: string }> {
-  const proc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      entryPoint,
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      `--outfile=${outfile}`,
-      "--external:electron",
-      ...extraArgs,
-    ],
-    cwd: ROOT_DIR,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: process.env as Record<string, string>,
-  });
-
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    return { success: false, error: stderr || stdout || `Exit code ${exitCode}` };
+  try {
+    await esbuild.build({
+      entryPoints: [join(ROOT_DIR, entryPoint)],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      outfile: join(ROOT_DIR, outfile),
+      external: ["electron"],
+      packages: "external", // Mark all node_modules as external
+      define: defines,
+      logLevel: "warning",
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
-
-  return { success: true };
 }
 
 // Verify a JavaScript file is syntactically valid
@@ -333,10 +329,11 @@ async function main(): Promise<void> {
   console.log("📡 Starting dev servers...\n");
 
   const processes: Subprocess[] = [];
+  const esbuildContexts: esbuild.BuildContext[] = [];
 
   // 1. Vite dev server (strictPort ensures we don't silently switch ports)
   const viteProc = spawn({
-    cmd: ["bun", "run", "vite", "dev", "--config", "apps/electron/vite.config.ts", "--port", vitePort, "--strictPort"],
+    cmd: [VITE_BIN, "dev", "--config", "apps/electron/vite.config.ts", "--port", vitePort, "--strictPort"],
     cwd: ROOT_DIR,
     stdin: "ignore",
     stdout: "inherit",
@@ -345,52 +342,42 @@ async function main(): Promise<void> {
   });
   processes.push(viteProc);
 
-  // 2. Main process watcher (esbuild with --watch=forever for incremental rebuilds)
-  const mainProc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      "apps/electron/src/main/index.ts",
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      "--outfile=apps/electron/dist/main.cjs",
-      "--external:electron",
-      ...oauthDefines,
-      "--watch=forever",
-    ],
-    cwd: ROOT_DIR,
-    stdin: "ignore",
-    stdout: "inherit",
-    stderr: "inherit",
-    env: process.env as Record<string, string>,
+  // 2. Main process watcher (using esbuild watch API)
+  const mainContext = await esbuild.context({
+    entryPoints: [join(ROOT_DIR, "apps/electron/src/main/index.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile: join(ROOT_DIR, "apps/electron/dist/main.cjs"),
+    external: ["electron"],
+    packages: "external",
+    define: oauthDefines,
+    logLevel: "info",
   });
-  processes.push(mainProc);
+  await mainContext.watch();
+  esbuildContexts.push(mainContext);
+  console.log("👀 Watching main process...");
 
-  // 3. Preload watcher (esbuild with --watch=forever)
-  const preloadProc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      "apps/electron/src/preload/index.ts",
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      "--outfile=apps/electron/dist/preload.cjs",
-      "--external:electron",
-      "--watch=forever",
-    ],
-    cwd: ROOT_DIR,
-    stdin: "ignore",
-    stdout: "inherit",
-    stderr: "inherit",
-    env: process.env as Record<string, string>,
+  // 3. Preload watcher (using esbuild watch API)
+  const preloadContext = await esbuild.context({
+    entryPoints: [join(ROOT_DIR, "apps/electron/src/preload/index.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile: join(ROOT_DIR, "apps/electron/dist/preload.cjs"),
+    external: ["electron"],
+    packages: "external",
+    logLevel: "info",
   });
-  processes.push(preloadProc);
+  await preloadContext.watch();
+  esbuildContexts.push(preloadContext);
+  console.log("👀 Watching preload...");
 
   // 4. Start Electron (build already verified)
   console.log("🚀 Starting Electron...\n");
 
   const electronProc = spawn({
-    cmd: ["bun", "run", "electron", "apps/electron"],
+    cmd: [ELECTRON_BIN, "apps/electron"],
     cwd: ROOT_DIR,
     stdin: "ignore",
     stdout: "inherit",
@@ -400,8 +387,17 @@ async function main(): Promise<void> {
   processes.push(electronProc);
 
   // Handle cleanup on exit
-  const cleanup = () => {
+  const cleanup = async () => {
     console.log("\n🛑 Shutting down...");
+    // Dispose esbuild contexts
+    for (const ctx of esbuildContexts) {
+      try {
+        await ctx.dispose();
+      } catch {
+        // Context may already be disposed
+      }
+    }
+    // Kill subprocesses
     for (const proc of processes) {
       try {
         proc.kill();
@@ -412,17 +408,17 @@ async function main(): Promise<void> {
     process.exit(0);
   };
 
-  process.on("SIGINT", cleanup);
-  process.on("SIGTERM", cleanup);
+  process.on("SIGINT", () => cleanup());
+  process.on("SIGTERM", () => cleanup());
 
   // Windows doesn't have SIGINT/SIGTERM in the same way
   if (process.platform === "win32") {
-    process.on("SIGHUP", cleanup);
+    process.on("SIGHUP", () => cleanup());
   }
 
   // Wait for electron to exit (main process)
   await electronProc.exited;
-  cleanup();
+  await cleanup();
 }
 
 main().catch((err) => {
