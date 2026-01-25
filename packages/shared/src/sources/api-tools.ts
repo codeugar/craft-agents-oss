@@ -213,12 +213,60 @@ const MIME_TO_EXT: Record<string, string> = {
 };
 
 /**
- * Get file extension from MIME type.
+ * Magic bytes (file signatures) for common binary formats.
+ * Used to detect file type when MIME type is unknown or generic.
+ * Each entry has the byte sequence to match and the resulting extension.
  */
-function getMimeExtension(mimeType: string | null): string {
-  if (!mimeType) return '';
-  const normalized = (mimeType.toLowerCase().split(';')[0] ?? '').trim();
-  return MIME_TO_EXT[normalized] || '';
+const MAGIC_SIGNATURES: Array<{ bytes: number[]; ext: string }> = [
+  { bytes: [0x25, 0x50, 0x44, 0x46], ext: '.pdf' },           // %PDF
+  { bytes: [0x89, 0x50, 0x4E, 0x47], ext: '.png' },           // .PNG
+  { bytes: [0xFF, 0xD8, 0xFF], ext: '.jpg' },                  // JPEG
+  { bytes: [0x47, 0x49, 0x46, 0x38], ext: '.gif' },           // GIF8
+  { bytes: [0x50, 0x4B, 0x03, 0x04], ext: '.zip' },           // PK.. (also docx, xlsx, pptx)
+  { bytes: [0x52, 0x61, 0x72, 0x21], ext: '.rar' },           // Rar!
+  { bytes: [0x1F, 0x8B], ext: '.gz' },                         // gzip
+  { bytes: [0x42, 0x4D], ext: '.bmp' },                        // BM
+  { bytes: [0x49, 0x44, 0x33], ext: '.mp3' },                  // ID3 (MP3 with ID3 tag)
+  { bytes: [0xFF, 0xFB], ext: '.mp3' },                        // MP3 frame sync
+  { bytes: [0x52, 0x49, 0x46, 0x46], ext: '.wav' },           // RIFF (WAV container)
+  { bytes: [0x4F, 0x67, 0x67, 0x53], ext: '.ogg' },           // OggS
+  { bytes: [0x66, 0x4C, 0x61, 0x43], ext: '.flac' },          // fLaC
+];
+
+/**
+ * Detect file extension from magic bytes (file signature).
+ * Inspects first bytes of buffer to identify common file formats.
+ * Returns extension with dot (e.g., '.pdf') or empty string if unknown.
+ */
+function detectExtensionFromMagic(buffer: Buffer): string {
+  if (buffer.length < 8) return '';
+
+  for (const sig of MAGIC_SIGNATURES) {
+    if (sig.bytes.every((byte, i) => buffer[i] === byte)) {
+      return sig.ext;
+    }
+  }
+  return '';
+}
+
+/**
+ * Get file extension from MIME type, with optional magic byte fallback.
+ * First tries MIME type mapping, then falls back to buffer inspection.
+ */
+function getMimeExtension(mimeType: string | null, buffer?: Buffer): string {
+  // First try MIME type mapping (fastest)
+  if (mimeType) {
+    const normalized = (mimeType.toLowerCase().split(';')[0] ?? '').trim();
+    const ext = MIME_TO_EXT[normalized];
+    if (ext && ext !== '.bin') return ext; // Don't use .bin from MIME, let magic detect
+  }
+
+  // Fallback to magic byte detection
+  if (buffer) {
+    return detectExtensionFromMagic(buffer);
+  }
+
+  return '';
 }
 
 /**
@@ -235,12 +283,15 @@ function sanitizeFilename(filename: string): string {
 
 /**
  * Extract filename from response headers or URL path.
- * Priority: Content-Disposition > URL path > generated name
+ * Priority: Content-Disposition > URL path > generated name (with magic byte detection)
+ *
+ * @param buffer - Optional buffer for magic byte detection when mime type is unknown
  */
 function extractFilename(
   response: Response,
   apiPath: string,
-  mimeType: string | null
+  mimeType: string | null,
+  buffer?: Buffer
 ): string {
   // Priority 1: Content-Disposition header
   const disposition = response.headers.get('content-disposition');
@@ -259,8 +310,9 @@ function extractFilename(
     return sanitizeFilename(urlPart);
   }
 
-  // Priority 3: Generate from timestamp + mime extension
-  const ext = getMimeExtension(mimeType) || '.bin';
+  // Priority 3: Generate from timestamp + detected extension
+  // Uses MIME type first, falls back to magic byte detection from buffer
+  const ext = getMimeExtension(mimeType, buffer) || '.bin';
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   return `download_${timestamp}${ext}`;
 }
@@ -583,7 +635,7 @@ export function createApiTool(
         if (contentType && !isTextContentType(contentType) && sessionPath) {
           debug(`[api-tools] ${config.name}: Binary content-type detected: ${contentType}`);
           const buffer = Buffer.from(await response.arrayBuffer());
-          const filename = extractFilename(response, path, contentType);
+          const filename = extractFilename(response, path, contentType, buffer);
           const result = saveBinaryResponse(sessionPath, filename, buffer, contentType);
           if (result.type === 'file_download_error') {
             return {
@@ -608,7 +660,7 @@ export function createApiTool(
         // If Content-Type was missing/text but content looks binary, save as file
         if (sessionPath && looksLikeBinary(buffer)) {
           debug(`[api-tools] ${config.name}: Binary content detected via inspection`);
-          const filename = extractFilename(response, path, contentType);
+          const filename = extractFilename(response, path, contentType, buffer);
           const result = saveBinaryResponse(sessionPath, filename, buffer, contentType);
           if (result.type === 'file_download_error') {
             return {
@@ -650,7 +702,8 @@ export function createApiTool(
               // Verify size roughly matches (allow small variance for padding)
               if (decoded.length > 0 && Math.abs(decoded.length - json.size) < 100) {
                 debug(`[api-tools] ${config.name}: Gmail attachment detected, decoding base64`);
-                const filename = extractFilename(response, path, null);
+                // Pass decoded buffer for magic byte detection since Gmail doesn't provide mime type
+                const filename = extractFilename(response, path, null, decoded);
                 const result = saveBinaryResponse(sessionPath, filename, decoded, null);
                 if (result.type === 'file_download_error') {
                   return {
