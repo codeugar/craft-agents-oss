@@ -67,7 +67,7 @@ jobs:
       - name: Get version from app
         id: get-version
         run: |
-          VERSION=$(grep "APP_VERSION = " packages/shared/src/version/app-version.ts | sed "s/.*= '\([^']*\)'.*/\1/")
+          VERSION=$(jq -r .version packages/shared/package.json)
           echo "Version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -205,10 +205,6 @@ jobs:
       - name: Install dependencies
         if: steps.check-artifact.outputs.skip != 'true'
         run: bun install
-
-      - name: Sync versions
-        if: steps.check-artifact.outputs.skip != 'true'
-        run: bun run scripts/sync-version.ts
 
       # macOS code signing certificate
       - name: Import Code Signing Certificate

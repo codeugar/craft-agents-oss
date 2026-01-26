@@ -47,7 +47,7 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          VERSION=$(grep -oP "APP_VERSION = '\K[^']+" packages/shared/src/version/app-version.ts)
+          VERSION=$(jq -r .version packages/shared/package.json)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 

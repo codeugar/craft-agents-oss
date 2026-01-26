@@ -192,12 +192,11 @@ irm https://agents.craft.do/install-app.ps1 | iex
 
 ### Version Management
 
-**Source of truth:** `packages/shared/src/version/app-version.ts`
+**Source of truth:** `packages/shared/package.json` (all package.json files must have the same version)
 
 ```bash
-bun run release patch         # Bump + sync + commit
-bun run check-version         # Verify all package.json match
-bun run scripts/sync-version.ts  # Manual sync
+bun run release patch         # Bump all package.json files + commit
+bun run check-version         # Verify all package.json versions match
 ```
 
 ## Architecture

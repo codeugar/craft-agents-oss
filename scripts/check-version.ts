@@ -2,8 +2,8 @@
 /**
  * Version Check Script
  *
- * Validates that APP_VERSION in app-version.ts matches all package.json files.
- * Used in CI to catch version mismatches before merge.
+ * Validates that all package.json files in the monorepo have the same version.
+ * The shared package.json (packages/shared/package.json) is the single source of truth.
  *
  * Usage: bun run scripts/check-version.ts
  * Exit code: 0 if all versions match, 1 if there's a mismatch
@@ -15,16 +15,6 @@ import { dirname, join } from 'path';
 const scriptDir = dirname(new URL(import.meta.url).pathname);
 const repoRoot = dirname(scriptDir);
 
-function getAppVersion(): string {
-  const versionFile = join(repoRoot, 'packages/shared/src/version/app-version.ts');
-  const content = readFileSync(versionFile, 'utf-8');
-  const match = content.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
-  if (!match) {
-    throw new Error('Could not find APP_VERSION in app-version.ts');
-  }
-  return match[1];
-}
-
 function getPackageVersion(filePath: string): string {
   const content = readFileSync(filePath, 'utf-8');
   const pkg = JSON.parse(content);
@@ -32,8 +22,10 @@ function getPackageVersion(filePath: string): string {
 }
 
 function main(): void {
-  const appVersion = getAppVersion();
-  console.log(`APP_VERSION: ${appVersion}`);
+  // Read version from shared package.json (single source of truth)
+  const sharedPkgPath = join(repoRoot, 'packages/shared/package.json');
+  const referenceVersion = getPackageVersion(sharedPkgPath);
+  console.log(`Reference version (packages/shared): ${referenceVersion}`);
   console.log('');
 
   // Find all package.json files
@@ -49,8 +41,8 @@ function main(): void {
     const relativePath = file.replace(repoRoot + '/', '');
     const pkgVersion = getPackageVersion(file);
 
-    if (pkgVersion !== appVersion) {
-      console.log(`  ✗ ${relativePath}: ${pkgVersion} (expected ${appVersion})`);
+    if (pkgVersion !== referenceVersion) {
+      console.log(`  ✗ ${relativePath}: ${pkgVersion} (expected ${referenceVersion})`);
       mismatches.push(relativePath);
     } else {
       console.log(`  ✓ ${relativePath}: ${pkgVersion}`);
@@ -62,7 +54,8 @@ function main(): void {
   if (mismatches.length > 0) {
     console.error(`ERROR: ${mismatches.length} package(s) have mismatched versions.`);
     console.error('');
-    console.error('To fix, run: bun run scripts/sync-version.ts');
+    console.error('All package.json files must have the same version.');
+    console.error('Update the mismatched files to match packages/shared/package.json.');
     process.exit(1);
   }
 

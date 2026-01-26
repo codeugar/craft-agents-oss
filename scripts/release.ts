@@ -19,7 +19,6 @@ import { dirname, join } from 'path';
 
 const scriptDir = dirname(new URL(import.meta.url).pathname);
 const repoRoot = dirname(scriptDir);
-const versionFile = join(repoRoot, 'packages/shared/src/version/app-version.ts');
 const releaseNotesDir = join(repoRoot, 'docs/release-notes');
 
 type BumpType = 'patch' | 'minor' | 'major';
@@ -53,13 +52,11 @@ Examples:
 `);
 }
 
+// Read version from the shared package.json (single source of truth)
 function getCurrentVersion(): string {
-  const content = readFileSync(versionFile, 'utf-8');
-  const match = content.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
-  if (!match) {
-    throw new Error('Could not find APP_VERSION in app-version.ts');
-  }
-  return match[1];
+  const pkgPath = join(repoRoot, 'packages/shared/package.json');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  return pkg.version;
 }
 
 function bumpVersion(current: string, type: BumpType): string {
@@ -84,15 +81,6 @@ function isValidVersion(version: string): boolean {
 function getReleaseNotesPath(version: string): string | null {
   const notesPath = join(releaseNotesDir, `${version}.md`);
   return existsSync(notesPath) ? notesPath : null;
-}
-
-function updateVersionFile(version: string): void {
-  const content = readFileSync(versionFile, 'utf-8');
-  const updated = content.replace(
-    /APP_VERSION\s*=\s*['"][^'"]+['"]/,
-    `APP_VERSION = '${version}'`
-  );
-  writeFileSync(versionFile, updated, 'utf-8');
 }
 
 function updatePackageJson(filePath: string, version: string): boolean {
@@ -253,39 +241,33 @@ async function main(): Promise<void> {
 
   if (dryRun) {
     console.log('\n[DRY RUN] Would perform the following actions:');
-    console.log(`  1. Update app-version.ts to ${newVersion}`);
-    console.log(`  2. Sync all package.json files`);
-    console.log(`  3. Create git commit: "chore: release v${newVersion}"`);
-    if (values.tag) console.log(`  4. Create git tag: v${newVersion}`);
-    if (values.push) console.log(`  5. Push to origin`);
-    if (values.oss) console.log(`  6. Sync to OSS repository`);
+    console.log(`  1. Update all package.json files to ${newVersion}`);
+    console.log(`  2. Create git commit: "chore: release v${newVersion}"`);
+    if (values.tag) console.log(`  3. Create git tag: v${newVersion}`);
+    if (values.push) console.log(`  4. Push to origin`);
+    if (values.oss) console.log(`  5. Sync to OSS repository`);
     return;
   }
 
-  // 1. Update version file
-  console.log('\nUpdating app-version.ts...');
-  updateVersionFile(newVersion);
-  console.log(`  ✓ Updated to ${newVersion}`);
-
-  // 2. Sync all package.json files
-  console.log('\nSyncing package.json files...');
+  // 1. Update all package.json files (single source of truth)
+  console.log('\nUpdating package.json files...');
   const updated = syncAllPackageJsons(newVersion);
   console.log(`  Updated ${updated} file(s)`);
 
-  // 3. Create git commit
+  // 2. Create git commit
   console.log('\nCreating git commit...');
   await $`cd ${repoRoot} && git add -A`;
   await $`cd ${repoRoot} && git commit -m ${"chore: release v" + newVersion + "\n\nCo-Authored-By: Craft Agent <agents-noreply@craft.do>"}`;
   console.log(`  ✓ Created commit`);
 
-  // 4. Create tag (optional)
+  // 3. Create tag (optional)
   if (values.tag) {
     console.log('\nCreating git tag...');
     await $`cd ${repoRoot} && git tag v${newVersion}`;
     console.log(`  ✓ Created tag v${newVersion}`);
   }
 
-  // 5. Push (optional)
+  // 4. Push (optional)
   if (values.push) {
     console.log('\nPushing to origin...');
     await $`cd ${repoRoot} && git push`;
@@ -295,7 +277,7 @@ async function main(): Promise<void> {
     console.log(`  ✓ Pushed to origin`);
   }
 
-  // 6. OSS sync (optional)
+  // 5. OSS sync (optional)
   if (values.oss) {
     console.log('\nSyncing to OSS repository...');
     const ossScript = join(repoRoot, 'scripts', 'oss-sync.ts');
