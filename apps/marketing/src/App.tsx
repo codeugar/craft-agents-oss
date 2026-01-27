@@ -139,7 +139,7 @@ const faqItems = [
   },
   {
     question: 'And then, restart the app, right?',
-    answer: 'No. Everything is available instantly. Mention skills or sources with @, even from within the same conversation you created them in.',
+    answer: 'No. Everything is instant. Mention skills or sources with @, even mid-conversation.',
   },
   {
     question: 'So I can just... ask it anything?',
@@ -303,7 +303,7 @@ export default function App() {
         </div>
 
         {/* FAQ section — conversational Q&A list */}
-        <div className="max-w-4xl w-full py-8 mt-16">
+        <div className="max-w-[720px] w-full py-8 mt-16">
           <h2 className="text-2xl font-extrabold leading-tight mb-16 text-center">
             Things that are hard to believe
           </h2>
@@ -333,6 +333,8 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        <hr className="w-[128px] border-foreground/10 mt-[40px]" />
 
         {/* Connect section */}
         <div className="text-left max-w-4xl w-full py-8 mt-16">
