@@ -199,7 +199,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId }: SkillInfoPageP
           {/* Permission Modes */}
           {skill.metadata.alwaysAllow && skill.metadata.alwaysAllow.length > 0 && (
             <Info_Section title="Permission Modes">
-              <div className="space-y-2">
+              <div className="space-y-2 px-4 py-3">
                 <p className="text-xs text-muted-foreground mb-3">
                   How "Always Allowed Tools" interacts with permission modes:
                 </p>
