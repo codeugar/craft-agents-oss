@@ -65,6 +65,7 @@ import {
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { SessionList } from "./SessionList"
 import { MainContentPanel } from "./MainContentPanel"
+import type { ChatDisplayHandle } from "./ChatDisplay"
 import { LeftSidebar } from "./LeftSidebar"
 import { useSession } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
@@ -390,6 +391,24 @@ function AppShellContent({
   // Search state for session list
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
+
+  // Ref for ChatDisplay navigation (exposed via forwardRef)
+  const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
+  // Track match count and index from ChatDisplay (for SessionList navigation UI)
+  const [chatMatchInfo, setChatMatchInfo] = React.useState<{ count: number; index: number }>({ count: 0, index: 0 })
+
+  // Callback for immediate match info updates from ChatDisplay
+  const handleChatMatchInfoChange = React.useCallback((info: { count: number; index: number }) => {
+    console.log('[AppShell] Received match info from ChatDisplay:', info)
+    setChatMatchInfo(info)
+  }, [])
+
+  // Reset match info when search is deactivated
+  React.useEffect(() => {
+    if (!searchActive || !searchQuery) {
+      setChatMatchInfo({ count: 0, index: 0 })
+    }
+  }, [searchActive, searchQuery])
 
   // Reset search only when navigator or filter changes (not when selecting sessions)
   const navFilterKey = React.useMemo(() => {
@@ -998,7 +1017,11 @@ function AppShellContent({
     todoStates: effectiveTodoStates,
     onSessionSourcesChange: handleSessionSourcesChange,
     rightSidebarButton: rightSidebarOpenButton,
-  }), [contextValue, handleDeleteSession, sources, skills, labelConfigs, handleSessionLabelsChange, enabledModes, effectiveTodoStates, handleSessionSourcesChange, rightSidebarOpenButton])
+    // Search state for ChatDisplay highlighting
+    sessionListSearchQuery: searchActive ? searchQuery : undefined,
+    chatDisplayRef,
+    onChatMatchInfoChange: handleChatMatchInfoChange,
+  }), [contextValue, handleDeleteSession, sources, skills, labelConfigs, handleSessionLabelsChange, enabledModes, effectiveTodoStates, handleSessionSourcesChange, rightSidebarOpenButton, searchActive, searchQuery, handleChatMatchInfoChange])
 
   // Persist expanded folders to localStorage
   React.useEffect(() => {
@@ -2139,6 +2162,10 @@ function AppShellContent({
                   evaluateViews={evaluateViews}
                   labels={labelConfigs}
                   onLabelsChange={handleSessionLabelsChange}
+                  workspaceId={activeWorkspaceId ?? undefined}
+                  chatDisplayRef={chatDisplayRef}
+                  chatMatchCount={chatMatchInfo.count}
+                  chatMatchIndex={chatMatchInfo.index}
                 />
               </>
             )}

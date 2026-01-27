@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { formatDistanceToNow, formatDistanceToNowStrict, isToday, isYesterday, format, startOfDay } from "date-fns"
 import type { Locale } from "date-fns"
-import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox } from "lucide-react"
+import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox, ChevronUp, ChevronDown } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -199,6 +199,16 @@ interface SessionItemProps {
   labels: LabelConfig[]
   /** Callback when session labels are toggled */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
+  /** Content match info (from full-text search) - if set, shows snippet below title */
+  contentMatch?: { matchCount: number; snippet: string }
+  /** Number of matches in ChatDisplay (only set when session is selected and loaded) */
+  chatMatchCount?: number
+  /** Current match index in ChatDisplay (0-based) */
+  chatMatchIndex?: number
+  /** Navigate to previous match in ChatDisplay */
+  onNavigatePrev?: () => void
+  /** Navigate to next match in ChatDisplay */
+  onNavigateNext?: () => void
 }
 
 /**
@@ -227,7 +237,24 @@ function SessionItem({
   flatLabels,
   labels,
   onLabelsChange,
+  contentMatch,
+  chatMatchCount,
+  chatMatchIndex,
+  onNavigatePrev,
+  onNavigateNext,
 }: SessionItemProps) {
+  // Debug: log chevron condition values
+  useEffect(() => {
+    if (isSelected) {
+      console.log('[SessionItem Chevron Condition]', item.id, {
+        isSelected,
+        searchQuery: searchQuery || '(empty)',
+        chatMatchCount,
+        showChevrons: !!(isSelected && searchQuery && chatMatchCount != null && chatMatchCount > 0)
+      })
+    }
+  }, [isSelected, searchQuery, chatMatchCount, item.id])
+
   const [menuOpen, setMenuOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [todoMenuOpen, setTodoMenuOpen] = useState(false)
@@ -352,6 +379,15 @@ function SessionItem({
                 {searchQuery ? highlightMatch(getSessionTitle(item), searchQuery) : getSessionTitle(item)}
               </div>
             </div>
+            {/* Content match snippet - shown when found in conversation content */}
+            {contentMatch && contentMatch.snippet && (
+              <div className="flex items-center gap-1.5 text-xs text-foreground/50 w-full pr-6 min-w-0">
+                <Search className="h-3 w-3 shrink-0 text-info/70" />
+                <span className="truncate italic">
+                  {searchQuery ? highlightMatch(contentMatch.snippet, searchQuery) : contentMatch.snippet}
+                </span>
+              </div>
+            )}
             {/* Subtitle row — badges scroll horizontally when they overflow */}
             <div className="flex items-center gap-1.5 text-xs text-foreground/70 w-full -mb-[2px] min-w-0">
               {/* Fixed indicators (Spinner + New) — always visible */}
@@ -512,8 +548,9 @@ function SessionItem({
                 )}
               </div>
               {/* Timestamp — outside stacking container so it never overlaps badges.
-                  shrink-0 keeps it fixed-width; the badges container clips instead. */}
-              {item.lastMessageAt && (
+                  shrink-0 keeps it fixed-width; the badges container clips instead.
+                  Hidden when in search mode with matches for selected session. */}
+              {item.lastMessageAt && !(isSelected && searchQuery && chatMatchCount && chatMatchCount > 0) && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap cursor-default">
@@ -528,10 +565,35 @@ function SessionItem({
             </div>
           </div>
         </button>
-        {/* Action buttons - visible on hover or when menu is open */}
+
+        {/* Match navigation - vertically stacked chevrons on right side when selected with matches */}
+        {isSelected && searchQuery && chatMatchCount != null && chatMatchCount > 0 && (
+          <div className="absolute right-2 top-0 bottom-0 flex flex-col items-center justify-center gap-0.5 py-2 z-10">
+            <button
+              onClick={(e) => { e.stopPropagation(); console.log('[SessionItem] Prev clicked'); onNavigatePrev?.() }}
+              className="p-0.5 hover:bg-foreground/10 rounded transition-colors"
+              title="Previous match"
+            >
+              <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+            <span className="text-[9px] text-muted-foreground tabular-nums text-center leading-tight">
+              {(chatMatchIndex ?? 0) + 1}/{chatMatchCount}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); console.log('[SessionItem] Next clicked'); onNavigateNext?.() }}
+              className="p-0.5 hover:bg-foreground/10 rounded transition-colors"
+              title="Next match"
+            >
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </div>
+        )}
+
+        {/* Action buttons - visible on hover or when menu is open, hidden in search mode with matches */}
+        {!(isSelected && searchQuery && chatMatchCount && chatMatchCount > 0) && (
         <div
           className={cn(
-            "absolute right-2 top-2 transition-opacity z-10",
+            "absolute right-2 top-2 transition-opacity z-10 flex items-center gap-1",
             menuOpen || contextMenuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           )}
         >
@@ -570,6 +632,7 @@ function SessionItem({
             </DropdownMenu>
           </div>
         </div>
+        )}
           </div>
         </ContextMenuTrigger>
         {/* Context menu - same content as dropdown */}
@@ -650,6 +713,14 @@ interface SessionListProps {
   labels?: LabelConfig[]
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
+  /** Workspace ID for content search (optional - if not provided, content search is disabled) */
+  workspaceId?: string
+  /** Ref to ChatDisplay for navigation between matches */
+  chatDisplayRef?: React.RefObject<import('./ChatDisplay').ChatDisplayHandle>
+  /** Match count from ChatDisplay (used for navigation UI) */
+  chatMatchCount?: number
+  /** Current match index from ChatDisplay (0-based) */
+  chatMatchIndex?: number
 }
 
 // Re-export TodoStateId for use by parent components
@@ -686,10 +757,19 @@ export function SessionList({
   evaluateViews,
   labels = [],
   onLabelsChange,
+  workspaceId,
+  chatDisplayRef,
+  chatMatchCount,
+  chatMatchIndex,
 }: SessionListProps) {
   const [session] = useSession()
   const { navigate } = useNavigation()
   const navState = useNavigationState()
+
+  // Debug: Log chatMatchCount when it changes
+  useEffect(() => {
+    console.log('[SessionList] chatMatchCount prop:', chatMatchCount, 'chatMatchIndex:', chatMatchIndex, 'selected:', session.selected)
+  }, [chatMatchCount, chatMatchIndex, session.selected])
 
   // Pre-flatten label tree once for efficient ID lookups in each SessionItem
   const flatLabels = useMemo(() => flattenLabels(labels), [labels])
@@ -703,6 +783,43 @@ export function SessionList({
   const [displayLimit, setDisplayLimit] = useState(INITIAL_DISPLAY_LIMIT)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
+
+  // Content search state (full-text search via ripgrep)
+  const [contentSearchResults, setContentSearchResults] = useState<Map<string, { matchCount: number; snippet: string }>>(new Map())
+  const [isSearchingContent, setIsSearchingContent] = useState(false)
+
+  // Debounced content search - triggers when search query changes and length >= 2
+  useEffect(() => {
+    if (!workspaceId || !searchActive || searchQuery.length < 2) {
+      setContentSearchResults(new Map())
+      return
+    }
+
+    setIsSearchingContent(true)
+    const timer = setTimeout(async () => {
+      try {
+        const results = await window.electronAPI.searchSessionContent(workspaceId, searchQuery)
+        const resultMap = new Map<string, { matchCount: number; snippet: string }>()
+        for (const result of results) {
+          resultMap.set(result.sessionId, {
+            matchCount: result.matchCount,
+            snippet: result.matches[0]?.snippet || '',
+          })
+        }
+        setContentSearchResults(resultMap)
+      } catch (error) {
+        console.error('[SessionList] Content search error:', error)
+        setContentSearchResults(new Map())
+      } finally {
+        setIsSearchingContent(false)
+      }
+    }, 300) // Debounce 300ms
+
+    return () => {
+      clearTimeout(timer)
+      setIsSearchingContent(false)
+    }
+  }, [workspaceId, searchActive, searchQuery])
 
   // Focus search input when search becomes active (with delay to let dropdown close)
   useEffect(() => {
@@ -719,14 +836,17 @@ export function SessionList({
     (b.lastMessageAt || 0) - (a.lastMessageAt || 0)
   )
 
-  // Filter items by search query — matches title, label names, and label values.
+  // Filter items by search query — matches title, label names, label values, and content.
   // '#' characters are stripped when matching labels (so "#bug" finds label "bug").
   // A bare '#' matches all sessions that have any labels.
+  // Content matches (from ripgrep search) are included and shown with snippets.
   const searchFilteredItems = useMemo(() => {
     if (!searchQuery.trim()) return sortedItems
     const query = searchQuery.toLowerCase()
     const labelQuery = query.replace(/#/g, '')
-    return sortedItems.filter(item => {
+
+    // Check if a session matches by title or labels (quick local match)
+    const matchesTitleOrLabels = (item: SessionMeta): boolean => {
       if (getSessionTitle(item).toLowerCase().includes(query)) return true
       // Bare '#' (no text after stripping) matches any session with labels
       if (!labelQuery && item.labels && item.labels.length > 0) return true
@@ -739,8 +859,33 @@ export function SessionList({
         return false
       })) return true
       return false
+    }
+
+    // Split into title/label matches and content-only matches
+    const titleMatches: SessionMeta[] = []
+    const contentOnlyMatches: SessionMeta[] = []
+
+    for (const item of sortedItems) {
+      const hasTitleMatch = matchesTitleOrLabels(item)
+      const hasContentMatch = contentSearchResults.has(item.id)
+
+      if (hasTitleMatch) {
+        titleMatches.push(item)
+      } else if (hasContentMatch) {
+        contentOnlyMatches.push(item)
+      }
+    }
+
+    // Return title matches first, then content-only matches
+    // Content-only matches are sorted by match count (descending)
+    contentOnlyMatches.sort((a, b) => {
+      const countA = contentSearchResults.get(a.id)?.matchCount || 0
+      const countB = contentSearchResults.get(b.id)?.matchCount || 0
+      return countB - countA
     })
-  }, [sortedItems, searchQuery, flatLabels])
+
+    return [...titleMatches, ...contentOnlyMatches]
+  }, [sortedItems, searchQuery, flatLabels, contentSearchResults])
 
   // Reset display limit when search query changes
   useEffect(() => {
@@ -967,14 +1112,19 @@ export function SessionList({
         {searchActive && (
           <div className="sticky top-0 z-sticky px-2 py-2 border-b border-border/50">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              {/* Show spinner while searching content, otherwise show search icon */}
+              {isSearchingContent ? (
+                <Spinner className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-info" />
+              ) : (
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              )}
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery}
                 onChange={(e) => onSearchChange?.(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search conversations..."
+                placeholder="Search titles and content..."
                 className="w-full h-8 pl-8 pr-8 text-sm bg-foreground/5 border-0 rounded-[8px] outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
               />
               <button
@@ -995,12 +1145,15 @@ export function SessionList({
           aria-label="Sessions"
         >
           {/* No results message when searching */}
-          {searchActive && searchQuery && flatItems.length === 0 && (
+          {searchActive && searchQuery && flatItems.length === 0 && !isSearchingContent && (
             <div className="flex flex-col items-center justify-center py-12 px-4">
               <p className="text-sm text-muted-foreground">No conversations found</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">
+                Searched titles and message content
+              </p>
               <button
                 onClick={() => onSearchChange?.('')}
-                className="text-xs text-foreground hover:underline mt-1"
+                className="text-xs text-foreground hover:underline mt-2"
               >
                 Clear search
               </button>
@@ -1050,6 +1203,11 @@ export function SessionList({
                     flatLabels={flatLabels}
                     labels={labels}
                     onLabelsChange={onLabelsChange}
+                    contentMatch={contentSearchResults.get(item.id)}
+                    chatMatchCount={session.selected === item.id ? chatMatchCount : undefined}
+                    chatMatchIndex={session.selected === item.id ? chatMatchIndex : undefined}
+                    onNavigatePrev={session.selected === item.id ? () => chatDisplayRef?.current?.goToPrevMatch() : undefined}
+                    onNavigateNext={session.selected === item.id ? () => chatDisplayRef?.current?.goToNextMatch() : undefined}
                   />
                 )
               })}
