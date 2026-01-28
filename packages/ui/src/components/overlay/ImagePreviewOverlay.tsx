@@ -78,7 +78,7 @@ export function ImagePreviewOverlay({
       error={error ? { label: 'Load Failed', message: error } : undefined}
       headerActions={headerActions}
     >
-      <div className="h-full flex items-center justify-center p-4 overflow-auto">
+      <div className="min-h-full flex items-center justify-center p-4">
         {isLoading && (
           <div className="text-muted-foreground text-sm">Loading image...</div>
         )}

@@ -1,11 +1,12 @@
 /**
  * MultiDiffPreviewOverlay - Overlay for multiple file changes (Edit/Write tools)
  *
- * Layout: All diffs stacked vertically, each with an inline file path badge + change stats.
- * No sidebar — every file section is visible in a single scrollable view.
+ * Layout: Stacked diffs using pierre's native file headers — GitHub PR-like view.
+ * Each diff renders its own file header (filename + addition/deletion counts) via @pierre/diffs.
+ * No card chrome or collapse — all diffs are visible in a single scrollable area.
  *
  * Features:
- * - Vertical stacked layout: [file badge + stats] → [diff] → [diff if multiple] → ...
+ * - Stacked diffs with native pierre file headers (no custom card wrappers)
  * - Consolidated view (group by file) or individual changes
  * - Unified/split diff viewer for each change
  * - Focused change support (scroll to specific change on open)
@@ -14,7 +15,7 @@
 
 import * as React from 'react'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { PencilLine, FilePlus, X, ChevronRight } from 'lucide-react'
+import { PencilLine, FilePlus, X } from 'lucide-react'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { ShikiDiffViewer, getDiffStats } from '../code-viewer/ShikiDiffViewer'
 import { DiffViewerControls } from '../code-viewer/DiffViewerControls'
@@ -111,17 +112,6 @@ function createFileSections(changes: FileChange[], consolidated: boolean): FileS
   }))
 }
 
-/** Truncate file path to parent/filename for display */
-function displayPath(filePath: string): string {
-  const parts = filePath.split('/')
-  const name = parts.pop() || filePath
-  if (parts.length > 0) {
-    const parent = parts.pop()
-    return `${parent}/${name}`
-  }
-  return name
-}
-
 /** Compute diff stats for a single change */
 function computeChangeStats(change: FileChange) {
   const ext = change.filePath.split('.').pop()?.toLowerCase() || ''
@@ -130,88 +120,6 @@ function computeChangeStats(change: FileChange) {
   const newFile: FileContents = { name: change.filePath, contents: change.modified, lang: lang as any }
   const fileDiff = parseDiffFromFile(oldFile, newFile)
   return getDiffStats(fileDiff)
-}
-
-// ============================================
-// DiffCardTitleBar - Collapsible title bar for each diff card
-// ============================================
-
-interface DiffCardTitleBarProps {
-  /** File path to show as a badge in the title bar (omit for plain "Diff" label) */
-  filePath?: string
-  /** Diff stats shown alongside file path badge */
-  additions?: number
-  deletions?: number
-  /** Whether collapse/expand is enabled (disabled for single-item views) */
-  collapsible: boolean
-  /** Whether the card content is collapsed (only title bar visible) */
-  collapsed: boolean
-  /** Toggle collapse state */
-  onToggleCollapse: () => void
-}
-
-/**
- * Collapsible title bar for a diff card. Two modes:
- * - With filePath: collapse chevron | [clickable file badge] [-N +M] (for multi-edit)
- * - Without filePath: collapse chevron | "Diff" label (for single edit, info is in overlay header)
- *
- * The chevron rotates 90deg when expanded (matches codebase convention).
- * File badge matches PreviewHeaderBadge styling (bg-background shadow-minimal).
- * Clicking the badge opens the file in the system default editor via PlatformContext.
- */
-function DiffCardTitleBar({ filePath, additions, deletions, collapsible, collapsed, onToggleCollapse }: DiffCardTitleBarProps) {
-  const { onOpenFileExternal } = usePlatform()
-
-  // Non-collapsible (single item): centered title, no chevron, not clickable
-  if (!collapsible) {
-    return (
-      <div className="flex justify-center items-center px-4 py-3 border-b border-foreground/7 select-none shrink-0">
-        <div className="text-xs font-semibold tracking-wider text-foreground/30">
-          Diff
-        </div>
-      </div>
-    )
-  }
-
-  // Collapsible: chevron + badges, entire bar is clickable
-  return (
-    <div
-      className="flex items-center gap-3 px-4 py-3 border-b border-foreground/7 select-none shrink-0 cursor-pointer"
-      onClick={onToggleCollapse}
-      role="button"
-      aria-label={collapsed ? 'Expand diff' : 'Collapse diff'}
-    >
-      {/* Collapse/expand chevron — rotates 90deg when expanded */}
-      <ChevronRight
-        className={cn(
-          "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 shrink-0",
-          !collapsed && "rotate-90"
-        )}
-      />
-
-      {filePath ? (
-        // Multi-edit mode: clickable file path badge + per-file diff stats
-        <div className="flex items-center gap-2">
-          <button
-            className="flex items-center h-[26px] px-2.5 rounded-[6px] font-sans text-[13px] font-medium bg-background shadow-minimal text-foreground/70 min-w-0 cursor-pointer group"
-            title={filePath}
-            onClick={(e) => { e.stopPropagation(); onOpenFileExternal?.(filePath) }}
-          >
-            <span className="truncate group-hover:underline">{displayPath(filePath)}</span>
-          </button>
-          <div className="flex items-center gap-2 text-[13px] font-medium font-mono shrink-0">
-            <span className="text-destructive">-{deletions ?? 0}</span>
-            <span className="text-success">+{additions ?? 0}</span>
-          </div>
-        </div>
-      ) : (
-        // Plain label (overlay header shows file + stats)
-        <div className="text-xs font-semibold tracking-wider text-foreground/30">
-          Diff
-        </div>
-      )}
-    </div>
-  )
 }
 
 // ============================================
@@ -229,27 +137,10 @@ export function MultiDiffPreviewOverlay({
   diffViewerSettings,
   onDiffViewerSettingsChange,
 }: MultiDiffPreviewOverlayProps) {
+  const { onOpenFileExternal } = usePlatform()
+
   // Ref map for scroll-to-focused-change support
   const changeRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-
-  // Track which cards are collapsed (by change ID). Collapsed cards show only the title bar.
-  // When entering from a specific turn card item (focusedChangeId set), collapse all other
-  // cards so the user immediately sees only the relevant diff expanded.
-  const [collapsedCards, setCollapsedCards] = useState<Set<string>>(() => {
-    if (!focusedChangeId) return new Set()
-    return new Set(changes.filter(c => c.id !== focusedChangeId).map(c => c.id))
-  })
-  const toggleCollapsed = useCallback((changeId: string) => {
-    setCollapsedCards(prev => {
-      const next = new Set(prev)
-      if (next.has(changeId)) {
-        next.delete(changeId)
-      } else {
-        next.add(changeId)
-      }
-      return next
-    })
-  }, [])
 
   // Build file sections (grouped or ungrouped)
   const fileSections = useMemo(() => {
@@ -261,9 +152,8 @@ export function MultiDiffPreviewOverlay({
   // scroll position is achieved. Once all diffs fire onReady AND scroll is
   // done, we reveal with a CSS transition. If everything is ready within
   // the first frame (~50ms), we skip the transition for an instant show.
-  // Only count visible (non-error, non-collapsed) diffs — collapsed cards don't render
-  // ShikiDiffViewer so their onReady never fires; excluding them prevents a stalled reveal.
-  const diffCount = useMemo(() => changes.filter(c => !c.error && !collapsedCards.has(c.id)).length, [changes, collapsedCards])
+  // Only count visible (non-error) diffs for reveal gating
+  const diffCount = useMemo(() => changes.filter(c => !c.error).length, [changes])
   const readyCountRef = useRef(0)
   const scrollDoneRef = useRef(!focusedChangeId) // no scroll needed → already done
   const revealedRef = useRef(false)
@@ -312,32 +202,18 @@ export function MultiDiffPreviewOverlay({
     onDiffViewerSettingsChange?.({ diffStyle, disableBackground: disabled })
   }, [diffStyle, onDiffViewerSettingsChange])
 
-  // Compute per-section stats and total stats
-  const { sectionStats, totalStats } = useMemo(() => {
-    let totalAdd = 0
-    let totalDel = 0
-    const perSection = new Map<string, { additions: number; deletions: number }>()
-
-    for (const section of fileSections) {
-      let secAdd = 0
-      let secDel = 0
-      for (const change of section.changes) {
-        // Skip errored changes — they have no meaningful diff content
-        if (change.error) continue
-        const stats = computeChangeStats(change)
-        secAdd += stats.additions
-        secDel += stats.deletions
-      }
-      perSection.set(section.key, { additions: secAdd, deletions: secDel })
-      totalAdd += secAdd
-      totalDel += secDel
+  // Compute total diff stats for the overlay header
+  const totalStats = useMemo(() => {
+    let additions = 0
+    let deletions = 0
+    for (const change of changes) {
+      if (change.error) continue
+      const stats = computeChangeStats(change)
+      additions += stats.additions
+      deletions += stats.deletions
     }
-
-    return {
-      sectionStats: perSection,
-      totalStats: { additions: totalAdd, deletions: totalDel },
-    }
-  }, [fileSections])
+    return { additions, deletions }
+  }, [changes])
 
   // Scroll to focused change after mount, then signal scroll completion for reveal
   useEffect(() => {
@@ -427,82 +303,63 @@ export function MultiDiffPreviewOverlay({
       embedded={embedded}
       className="bg-foreground-3"
     >
-      {/* Scrollable column of diff cards — hidden until diffs are loaded + scroll position achieved */}
+      {/* Stacked diffs — flow layout inside parent scroll container.
+          Hidden until all diffs are loaded + scroll position achieved (fade-in reveal). */}
       <div
         className={cn(
-          "absolute inset-0 flex pt-6 px-6 overflow-auto",
+          "flex px-6 min-h-full",
           animateReveal && "transition-opacity duration-150"
         )}
-        style={{ opacity: contentVisible ? 1 : 0, scrollPaddingTop: 24 }}
+        style={{ opacity: contentVisible ? 1 : 0 }}
       >
         <div className="m-auto" style={{ width: 'max-content', maxWidth: '100%', minWidth: 'min(850px, 100%)' }}>
-          <div className="flex flex-col gap-8 pb-6">
-            {fileSections.map((section) => {
-              const stats = sectionStats.get(section.key)
-              // Show file badges in card title bar when there are multiple edits;
-              // for a single edit the PreviewOverlay header already shows file + stats
-              const showPerCardBadges = isMultiFile || section.changes.length > 1
-
-              return (
-                <div key={section.key} className="flex flex-col gap-4">
-                  {section.changes.map((change) => {
-                    const isCollapsed = collapsedCards.has(change.id)
-                    // Only apply minHeight to non-error, non-collapsed cards
-                    const cardMinHeight = !change.error && !isCollapsed ? 200 : undefined
-
-                    return (
-                      <div
-                        key={change.id}
-                        ref={(el) => setChangeRef(change.id, el)}
-                        className="flex flex-col rounded-xl overflow-hidden backdrop-blur-sm shadow-middle bg-background"
-                        style={{ minHeight: cardMinHeight, borderRadius: 12 }}
-                      >
-                        <DiffCardTitleBar
-                          filePath={showPerCardBadges ? section.filePath : undefined}
-                          additions={!change.error && showPerCardBadges ? stats?.additions : undefined}
-                          deletions={!change.error && showPerCardBadges ? stats?.deletions : undefined}
-                          collapsible={totalChangeCount > 1}
-                          collapsed={isCollapsed}
-                          onToggleCollapse={() => toggleCollapsed(change.id)}
-                        />
-                        {/* Card content — hidden when collapsed */}
-                        {!isCollapsed && (
-                          change.error ? (
-                            // Errored change — show tinted error banner instead of diff
-                            <div className="px-4 py-4">
-                              <div
-                                className="flex items-start gap-3 px-4 py-3 rounded-[8px] bg-[color-mix(in_oklab,var(--destructive)_5%,var(--background))] shadow-tinted"
-                                style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
-                              >
-                                <X className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-xs font-semibold text-destructive/70 mb-0.5">
-                                    {change.toolType} Failed
-                                  </div>
-                                  <p className="text-sm text-destructive whitespace-pre-wrap break-words">
-                                    {change.error}
-                                  </p>
-                                </div>
-                              </div>
+          {/* Stacked diffs: each ShikiDiffViewer renders with pierre's native file header.
+              No card chrome or collapse — continuous stacked layout like a GitHub PR diff. */}
+          <div className="flex flex-col gap-4">
+            {fileSections.map((section) => (
+              <div key={section.key} className="flex flex-col gap-4">
+                {section.changes.map((change) => (
+                  <div
+                    key={change.id}
+                    ref={(el) => setChangeRef(change.id, el)}
+                    className="rounded-xl overflow-hidden bg-background"
+                    style={{ minHeight: change.error ? undefined : 200, borderRadius: 12 }}
+                  >
+                    {change.error ? (
+                      // Errored change — tinted error banner
+                      <div className="px-4 py-4">
+                        <div
+                          className="flex items-start gap-3 px-4 py-3 rounded-[8px] bg-[color-mix(in_oklab,var(--destructive)_5%,var(--background))] shadow-tinted"
+                          style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
+                        >
+                          <X className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-destructive/70 mb-0.5">
+                              {change.toolType} Failed
                             </div>
-                          ) : (
-                            <ShikiDiffViewer
-                              original={change.original}
-                              modified={change.modified}
-                              filePath={change.filePath}
-                              diffStyle={diffStyle}
-                              disableBackground={disableBackground}
-                              theme={theme}
-                              onReady={handleDiffReady}
-                            />
-                          )
-                        )}
+                            <p className="text-sm text-destructive whitespace-pre-wrap break-words">
+                              {change.error}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                    )
-                  })}
-                </div>
-              )
-            })}
+                    ) : (
+                      <ShikiDiffViewer
+                        original={change.original}
+                        modified={change.modified}
+                        filePath={change.filePath}
+                        diffStyle={diffStyle}
+                        disableBackground={disableBackground}
+                        disableFileHeader={false}
+                        onFileHeaderClick={onOpenFileExternal}
+                        theme={theme}
+                        onReady={handleDiffReady}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       </div>

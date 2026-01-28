@@ -370,7 +370,6 @@ export type SessionEvent =
   | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: import('@craft-agent/core').ToolDisplayMeta; turnId?: string; parentToolUseId?: string }
   | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean }
-  | { type: 'parent_update'; sessionId: string; toolUseId: string; parentToolUseId: string }
   | { type: 'error'; sessionId: string; error: string }
   | { type: 'typed_error'; sessionId: string; error: TypedError }
   | { type: 'complete'; sessionId: string; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean }

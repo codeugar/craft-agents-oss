@@ -1,0 +1,9 @@
+classDiagram
+  Client ..> Server : uses
+---
++--------+    +--------+     
+| Client |uses| Server |     
++--------+    +--------+     
+     :             >         
+     ...............         
+                             

@@ -9,7 +9,8 @@
  * so they hang off the card edges without shifting its center position.
  *
  * The card grows to fit its content — no internal scrolling. When the card is taller
- * than the viewport, the outer container scrolls the entire card ("paper scrolling").
+ * than the viewport, the parent scroll container (provided by FullscreenOverlayBase or
+ * PreviewOverlay's contentArea) scrolls the entire card ("paper scrolling").
  * Uses margin:auto for centering which gracefully handles overflow (unlike items-center
  * which can clip the top of overflowing content).
  *
@@ -20,8 +21,8 @@
  *     100% of the outer container, floored at minWidth. More reliable than JS measurement
  *     because it works with async-rendered content (Shiki syntax highlighting).
  *
- * Layout:
- *   absolute inset-0, flex, pt-6 px-6 (no bottom padding), overflow-auto
+ * Layout (flow-based — lives inside the parent's scroll container):
+ *   flex, px-6, min-h-full
  *     └── relative wrapper (max-w constrained, m-auto centered, grows to content)
  *          ├── leftSidebar?  (absolute, right-full — hangs left of card)
  *          ├── Card (rounded-2xl, bg-background, shadow-strong, grows to content)
@@ -73,9 +74,9 @@ export function ContentFrame({
     : { maxWidth }
 
   return (
-    <div className="absolute inset-0 flex pt-6 px-6 overflow-auto">
+    <div className="flex px-6 min-h-full">
       {/* Relative wrapper — centered via m-auto (safe for overflow, unlike items-center).
-          Card grows to fit content. When taller than viewport, outer container scrolls. */}
+          Card grows to fit content. When taller than viewport, parent scroll container scrolls. */}
       <div
         className={`relative m-auto ${fitContent ? '' : 'w-full'}`}
         style={wrapperStyle}

@@ -131,17 +131,23 @@ export function PreviewOverlay({
     </div>
   )
 
-  // Gradient fade mask — softens the top/bottom edges of the content area,
-  // replacing the old hard header border with a smooth visual transition.
-  // Uses inline styles because the CSS utility classes live in the Electron app, not this shared package.
-  const FADE_MASK = 'linear-gradient(to bottom, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%)'
+  // Gradient fade mask for modal/embedded modes — mirrors FullscreenOverlayBase's
+  // scroll container structure so children (ContentFrame, etc.) work identically
+  // in all modes using flow-based layout inside a scrollable, masked viewport.
+  const FADE_SIZE = 24
+  const FADE_MASK = `linear-gradient(to bottom, transparent 0%, black ${FADE_SIZE}px, black calc(100% - ${FADE_SIZE}px), transparent 100%)`
 
   const contentArea = (
     <div
       className="flex-1 min-h-0 relative"
       style={{ maskImage: FADE_MASK, WebkitMaskImage: FADE_MASK }}
     >
-      {children}
+      <div
+        className="absolute inset-0 overflow-y-auto"
+        style={{ paddingTop: FADE_SIZE, paddingBottom: FADE_SIZE, scrollPaddingTop: FADE_SIZE }}
+      >
+        {children}
+      </div>
     </div>
   )
 
@@ -156,14 +162,13 @@ export function PreviewOverlay({
     )
   }
 
-  // Fullscreen mode — FullscreenOverlayBase renders the header via structured props.
-  // Background is provided by the base (bg-foreground-3 + scenic blur).
+  // Fullscreen mode — FullscreenOverlayBase renders the header via structured props
+  // and owns the masked scroll container. Children are rendered directly inside it.
   if (!isModal) {
     return (
       <FullscreenOverlayBase
         isOpen={isOpen}
         onClose={onClose}
-        className="flex flex-col"
         typeBadge={typeBadge}
         filePath={filePath}
         title={title}
@@ -172,9 +177,7 @@ export function PreviewOverlay({
         headerActions={headerActions}
         error={error}
       >
-        <div className="flex flex-col flex-1 min-h-0">
-          {contentArea}
-        </div>
+        {children}
       </FullscreenOverlayBase>
     )
   }

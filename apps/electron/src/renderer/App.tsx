@@ -1419,7 +1419,6 @@ function FilePreviewRenderer({
           isOpen
           onClose={onClose}
           filePath={state.filePath}
-          loadDataUrl={loadDataUrl}
           theme={theme}
         />
       )

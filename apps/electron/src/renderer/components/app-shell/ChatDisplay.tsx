@@ -69,6 +69,8 @@ interface MarkdownOverlayState {
   type: 'markdown'
   content: string
   title: string
+  /** When true, show raw markdown source in code viewer instead of rendered preview */
+  forceCodeView?: boolean
 }
 
 /** Union of all overlay states, or null for no overlay */
@@ -790,11 +792,12 @@ export function ChatDisplay({
                           }))
                         }}
                         onPopOut={(text) => {
-                          // Open response text in markdown overlay
+                          // Open raw markdown source in code viewer
                           setOverlayState({
                             type: 'markdown',
                             content: text,
                             title: 'Response Preview',
+                            forceCodeView: true,
                           })
                         }}
                         onOpenDetails={() => {
@@ -1082,15 +1085,29 @@ export function ChatDisplay({
         />
       )}
 
-      {/* Markdown preview overlay (pop-out, turn details) - renders markdown properly */}
+      {/* Markdown preview overlay (pop-out, turn details) */}
+      {/* forceCodeView: show raw markdown source in code viewer (used by "View as Markdown" button) */}
+      {/* otherwise: render formatted markdown (used by turn details, etc.) */}
       {overlayState?.type === 'markdown' && (
-        <DocumentFormattedMarkdownOverlay
-          isOpen={true}
-          onClose={handleCloseOverlay}
-          content={overlayState.content}
-          onOpenUrl={onOpenUrl}
-          onOpenFile={onOpenFile}
-        />
+        overlayState.forceCodeView ? (
+          <CodePreviewOverlay
+            isOpen={true}
+            onClose={handleCloseOverlay}
+            content={overlayState.content}
+            filePath="response.md"
+            language="markdown"
+            mode="read"
+            theme={isDark ? 'dark' : 'light'}
+          />
+        ) : (
+          <DocumentFormattedMarkdownOverlay
+            isOpen={true}
+            onClose={handleCloseOverlay}
+            content={overlayState.content}
+            onOpenUrl={onOpenUrl}
+            onOpenFile={onOpenFile}
+          />
+        )
       )}
 
       {/* Generic overlay for unknown tool types - route markdown to fullscreen viewer */}

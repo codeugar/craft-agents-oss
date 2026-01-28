@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { MarkdownJsonBlock } from './MarkdownJsonBlock'
+import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 import { preprocessLinks } from './linkify'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
@@ -167,6 +168,10 @@ function createComponents(
           if (match?.[1] === 'json') {
             return <MarkdownJsonBlock code={code} className="my-1" />
           }
+          // Mermaid code blocks → zinc-styled SVG diagram
+          if (match?.[1] === 'mermaid') {
+            return <MarkdownMermaidBlock code={code} className="my-1" />
+          }
           return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
         }
 
@@ -234,6 +239,10 @@ function createComponents(
         // JSON code blocks → interactive tree viewer
         if (match?.[1] === 'json') {
           return <MarkdownJsonBlock code={code} className="my-1" />
+        }
+        // Mermaid code blocks → zinc-styled SVG diagram
+        if (match?.[1] === 'mermaid') {
+          return <MarkdownMermaidBlock code={code} className="my-1" />
         }
         return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
       }

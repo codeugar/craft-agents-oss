@@ -413,15 +413,17 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
-  // Read a file as a data URL for in-app binary preview (images, PDFs).
-  // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay and PDFPreviewOverlay.
+  // Read a file as a data URL for in-app binary preview (images).
+  // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay.
+  // Note: PDFs use file:// URLs directly (Chromium's PDF viewer doesn't support data: URLs).
   ipcMain.handle(IPC_CHANNELS.READ_FILE_DATA_URL, async (_event, path: string) => {
     try {
       const safePath = await validateFilePath(path)
       const buffer = await readFile(safePath)
       const ext = safePath.split('.').pop()?.toLowerCase() ?? ''
 
-      // Map common extensions to MIME types
+      // Map extensions to MIME types (only formats Chromium can render in-app).
+      // HEIC/HEIF and TIFF are excluded — no Chromium codec, opened externally instead.
       const mimeMap: Record<string, string> = {
         png: 'image/png',
         jpg: 'image/jpeg',
@@ -431,10 +433,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         svg: 'image/svg+xml',
         bmp: 'image/bmp',
         ico: 'image/x-icon',
-        heic: 'image/heic',
-        heif: 'image/heif',
-        tiff: 'image/tiff',
-        tif: 'image/tiff',
         avif: 'image/avif',
         pdf: 'application/pdf',
       }

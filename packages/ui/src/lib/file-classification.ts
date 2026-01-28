@@ -16,10 +16,14 @@ export interface FileClassification {
   canPreview: boolean
 }
 
-/** Image formats — rendered in ImagePreviewOverlay via data URL */
+/**
+ * Image formats — rendered in ImagePreviewOverlay via data URL.
+ * Only includes formats Chromium can natively decode.
+ * HEIC/HEIF and TIFF are excluded — Chromium has no codec for these,
+ * so they fall through to system open (external app).
+ */
 const IMAGE_EXTENSIONS = new Set([
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico',
-  'heic', 'heif', 'tiff', 'tif', 'avif',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif',
 ])
 
 /**
