@@ -128,6 +128,30 @@ export interface McpToolsResult {
 }
 
 /**
+ * Search match result for session content search
+ */
+export interface SessionSearchMatch {
+  /** Session ID */
+  sessionId: string
+  /** Line number in the JSONL file */
+  lineNumber: number
+  /** The matched text snippet with context */
+  snippet: string
+}
+
+/**
+ * Aggregated search results for a session
+ */
+export interface SessionSearchResult {
+  /** Session ID */
+  sessionId: string
+  /** Number of matches found in this session */
+  matchCount: number
+  /** First few matches with context snippets */
+  matches: SessionSearchMatch[]
+}
+
+/**
  * Result of sharing or revoking a session
  */
 export interface ShareResult {
@@ -615,6 +639,9 @@ export const IPC_CHANNELS = {
   // MCP tools listing
   SOURCES_GET_MCP_TOOLS: 'sources:getMcpTools',
 
+  // Session content search (full-text via ripgrep)
+  SEARCH_SESSIONS: 'sessions:searchContent',
+
   // Skills (workspace-scoped)
   SKILLS_GET: 'skills:get',
   SKILLS_GET_FILES: 'skills:getFiles',
@@ -875,6 +902,9 @@ export interface ElectronAPI {
   getWorkspacePermissionsConfig(workspaceId: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
   getDefaultPermissionsConfig(): Promise<{ config: import('@craft-agent/shared/agent').PermissionsConfigFile | null; path: string }>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
+
+  // Session content search (full-text search via ripgrep)
+  searchSessionContent(workspaceId: string, query: string): Promise<SessionSearchResult[]>
 
   // Sources change listener (live updates when sources are added/removed)
   onSourcesChanged(callback: (sources: LoadedSource[]) => void): () => void

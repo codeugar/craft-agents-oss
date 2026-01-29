@@ -1957,6 +1957,34 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   })
 
   // ============================================================
+  // Session Content Search
+  // ============================================================
+
+  // Search session content using ripgrep
+  ipcMain.handle(IPC_CHANNELS.SEARCH_SESSIONS, async (_event, workspaceId: string, query: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      ipcLog.warn('SEARCH_SESSIONS: Workspace not found:', workspaceId)
+      return []
+    }
+
+    const { searchSessions } = await import('./search')
+    const { getWorkspaceSessionsPath } = await import('@craft-agent/shared/workspaces')
+
+    const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)
+    ipcLog.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
+
+    const results = await searchSessions(query, sessionsDir, {
+      timeout: 5000,
+      maxMatchesPerSession: 3,
+      maxSessions: 50,
+    })
+
+    ipcLog.debug(`SEARCH_SESSIONS: Found ${results.length} sessions with matches`)
+    return results
+  })
+
+  // ============================================================
   // Skills (Workspace-scoped)
   // ============================================================
 
