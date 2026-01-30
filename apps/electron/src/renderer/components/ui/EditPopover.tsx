@@ -788,7 +788,7 @@ export function EditPopover({
       if (!rect) return
 
       const MARGIN = 20
-      const MARGIN_TOP = 50 // Match app title bar height (h-[50px])
+      const MARGIN_TOP = 50 // Keep below header (chevrons, menu button)
       const curr = dragOffsetRef.current
       const baseX = rect.left - curr.x
       const baseY = rect.top - curr.y
@@ -946,7 +946,7 @@ export function EditPopover({
               <div
                 onMouseDown={handleDragStart}
                 className={cn(
-                  "absolute top-0 left-1/2 -translate-x-1/2 z-50 px-4 py-2 cursor-grab rounded pointer-events-auto",
+                  "absolute top-0 left-1/2 -translate-x-1/2 z-50 px-4 py-2 cursor-grab rounded pointer-events-auto titlebar-no-drag",
                   isDragging && "cursor-grabbing"
                 )}
               >
