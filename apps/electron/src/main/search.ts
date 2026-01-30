@@ -5,12 +5,15 @@
  * Returns matches with session IDs and context snippets.
  */
 
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { join, dirname, basename } from 'path';
 import { platform, arch } from 'os';
 import { app } from 'electron';
 import { existsSync } from 'fs';
-import { ipcLog } from './logger';
+import { ipcLog, searchLog } from './logger';
+
+// Track current search process to cancel on new search
+let currentSearchProcess: ChildProcess | null = null;
 
 /**
  * Search result for a single match
@@ -49,6 +52,8 @@ export interface SearchOptions {
   maxSessions?: number;
   /** Case insensitive search. Default: true */
   ignoreCase?: boolean;
+  /** Search ID for correlating logs across stages */
+  searchId?: string;
 }
 
 /**
@@ -102,162 +107,77 @@ function escapeRegex(str: string): string {
 }
 
 /**
- * Extract text content from a JSONL line (user, assistant, or system message).
- * Returns the text content that should be searchable, or null if not a searchable message.
- *
- * This matches what ChatDisplay searches, ensuring consistency between
- * session list search results and navigable matches in ChatDisplay.
- *
- * Included:
- * - User messages: text content
- * - Assistant messages: text blocks only (NOT tool_use inputs)
- * - System messages: text content
- *
- * Excluded:
- * - Intermediate messages (isIntermediate: true) - not shown as final response
- * - tool_use, tool_result messages - tool outputs not searchable in ChatDisplay
+ * Extract a snippet from raw JSON line without full parsing.
+ * Uses regex to extract content field and a window around the match.
+ * This avoids expensive JSON.parse() on large message lines.
  */
-function extractSearchableTextContent(rawLine: string): string | null {
+function extractSnippetFast(rawLine: string, matchText: string, maxLength = 150): string {
   try {
-    const parsed = JSON.parse(rawLine);
-    const messageType = parsed.type;
+    // Extract the "content" field value using regex
+    // Handles both string content and the start of array content
+    const contentMatch = rawLine.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)"/);
 
-    // Skip intermediate messages - ChatDisplay only shows final responses
-    if (parsed.isIntermediate) {
-      return null;
+    if (contentMatch) {
+      // Simple string content - unescape and extract window around match
+      const content = contentMatch[1]
+        .replace(/\\n/g, ' ')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+
+      const lowerContent = content.toLowerCase();
+      const lowerMatch = matchText.toLowerCase();
+      const matchPos = lowerContent.indexOf(lowerMatch);
+
+      if (matchPos >= 0) {
+        const halfLength = Math.floor(maxLength / 2);
+        const start = Math.max(0, matchPos - halfLength);
+        const end = Math.min(content.length, start + maxLength);
+
+        let snippet = content.slice(start, end);
+        if (start > 0) snippet = '...' + snippet;
+        if (end < content.length) snippet = snippet + '...';
+        return snippet;
+      }
+
+      // Match not in content field, return start of content
+      if (content.length > maxLength) {
+        return content.slice(0, maxLength) + '...';
+      }
+      return content;
     }
 
-    if (messageType === 'user') {
-      // User messages - extract text content
-      const content = parsed.content;
-      if (typeof content === 'string') {
-        return content;
+    // Content might be an array (Claude format) - extract first text block
+    const textBlockMatch = rawLine.match(/"type"\s*:\s*"text"\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (textBlockMatch) {
+      const text = textBlockMatch[1]
+        .replace(/\\n/g, ' ')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+
+      if (text.length > maxLength) {
+        return text.slice(0, maxLength) + '...';
       }
-      if (Array.isArray(content)) {
-        // Extract only text blocks
-        return content
-          .filter((block: { type?: string }) => block.type === 'text')
-          .map((block: { text?: string }) => block.text || '')
-          .join('\n');
-      }
-      return null;
+      return text;
     }
 
-    if (messageType === 'assistant') {
-      // Assistant messages - extract only text blocks, skip tool_use
-      const content = parsed.content;
-      if (typeof content === 'string') {
-        return content;
-      }
-      if (Array.isArray(content)) {
-        // Extract only text blocks, NOT tool_use
-        return content
-          .filter((block: { type?: string }) => block.type === 'text')
-          .map((block: { text?: string }) => block.text || '')
-          .join('\n');
-      }
-      return null;
-    }
-
-    if (messageType === 'system') {
-      // System messages - extract text content (ChatDisplay searches these too)
-      const content = parsed.content;
-      if (typeof content === 'string') {
-        return content;
-      }
-      return null;
-    }
-
-    // Not a user, assistant, or system message (tool_result, tool_use, etc.)
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check if query appears in the searchable text content of a message.
- * Only matches text in user messages and assistant text blocks (not tool inputs).
- */
-function matchesInTextContent(rawLine: string, query: string, ignoreCase: boolean): boolean {
-  const textContent = extractSearchableTextContent(rawLine);
-  if (!textContent) return false;
-
-  const searchText = ignoreCase ? textContent.toLowerCase() : textContent;
-  const searchQuery = ignoreCase ? query.toLowerCase() : query;
-
-  return searchText.includes(searchQuery);
-}
-
-/**
- * Extract a clean snippet from a JSONL line match.
- * Shows only the line containing the match for cleaner display.
- */
-function extractSnippet(rawLine: string, matchText: string, maxLength = 150): string {
-  try {
-    // Try to parse as JSON and extract meaningful content
-    const parsed = JSON.parse(rawLine);
-
-    // Look for content in common message fields
-    const content =
-      parsed.content ||
-      parsed.text ||
-      parsed.message ||
-      (parsed.data && parsed.data.content) ||
-      rawLine;
-
-    // If content is an array (Claude message format), extract text
-    let textContent: string;
-    if (Array.isArray(content)) {
-      textContent = content
-        .filter((block: { type?: string; text?: string }) => block.type === 'text' && block.text)
-        .map((block: { text: string }) => block.text)
-        .join('\n');
-    } else if (typeof content === 'string') {
-      textContent = content;
-    } else {
-      textContent = JSON.stringify(content);
-    }
-
-    // Split into lines and find the line containing the match
-    const lines = textContent.split('\n');
+    // Fallback: extract a window around the match from raw line
+    const lowerLine = rawLine.toLowerCase();
     const lowerMatch = matchText.toLowerCase();
+    const matchPos = lowerLine.indexOf(lowerMatch);
 
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (!trimmedLine) continue; // Skip empty lines
-
-      if (trimmedLine.toLowerCase().includes(lowerMatch)) {
-        // Found the matching line - truncate if too long
-        if (trimmedLine.length > maxLength) {
-          // Find match position within line and center around it
-          const matchPos = trimmedLine.toLowerCase().indexOf(lowerMatch);
-          const halfLength = Math.floor(maxLength / 2);
-          const start = Math.max(0, matchPos - halfLength);
-          const end = Math.min(trimmedLine.length, start + maxLength);
-
-          let snippet = trimmedLine.slice(start, end);
-          if (start > 0) snippet = '...' + snippet;
-          if (end < trimmedLine.length) snippet = snippet + '...';
-          return snippet;
-        }
-        return trimmedLine;
-      }
+    if (matchPos >= 0) {
+      const halfLength = Math.floor(maxLength / 2);
+      const start = Math.max(0, matchPos - halfLength);
+      const end = Math.min(rawLine.length, start + maxLength);
+      let snippet = rawLine.slice(start, end).replace(/\\n/g, ' ');
+      if (start > 0) snippet = '...' + snippet;
+      if (end < rawLine.length) snippet = snippet + '...';
+      return snippet;
     }
 
-    // Fallback: return first non-empty line truncated
-    const firstLine = lines.find(l => l.trim())?.trim() || textContent.trim();
-    if (firstLine.length > maxLength) {
-      return firstLine.slice(0, maxLength) + '...';
-    }
-    return firstLine;
+    return '';
   } catch {
-    // If JSON parsing fails, just truncate the raw line
-    const cleaned = rawLine.replace(/\n/g, ' ').trim();
-    if (cleaned.length > maxLength) {
-      return cleaned.slice(0, maxLength) + '...';
-    }
-    return cleaned;
+    return '';
   }
 }
 
@@ -279,11 +199,15 @@ export async function searchSessions(
     maxMatchesPerSession = 3,
     maxSessions = 50,
     ignoreCase = true,
+    searchId = Date.now().toString(36),
   } = options;
 
   if (!query.trim()) {
     return [];
   }
+
+  const startTime = Date.now();
+  searchLog.info('ripgrep:start', { searchId, query });
 
   const rgPath = getRipgrepPath();
   ipcLog.debug('[search] Ripgrep path:', rgPath);
@@ -313,15 +237,25 @@ export async function searchSessions(
       args.push('-i');
     }
 
-    // Use literal string matching (escape regex)
-    args.push('-F');
-    args.push(query);
+    // Use regex pattern that:
+    // 1. Only matches user/assistant message lines (skips huge tool_result lines)
+    // 2. Requires the query to appear somewhere in the line
+    // This filters at ripgrep level, avoiding 70x more data being sent to Node.js
+    const escapedQuery = escapeRegex(query);
+    args.push('-e', `^\\{"id":"[^"]*","type":"(user|assistant)".*${escapedQuery}`);
     args.push(sessionsDir);
+
+    // Cancel previous search if still running (user typed new query)
+    if (currentSearchProcess) {
+      currentSearchProcess.kill('SIGTERM');
+      currentSearchProcess = null;
+    }
 
     const rg = spawn(rgPath, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout,
     });
+    currentSearchProcess = rg;
 
     // Set up timeout
     const timeoutHandle = setTimeout(() => {
@@ -364,13 +298,13 @@ export async function searchSessions(
           // Get the raw line content
           const rawLine = data.lines?.text || '';
 
-          // Only match if query appears in actual text content (not tool inputs)
-          if (!matchesInTextContent(rawLine, query, ignoreCase)) continue;
+          // Skip intermediate messages using fast string search (no JSON.parse needed)
+          // This is much faster than parsing the entire message JSON
+          if (rawLine.includes('"isIntermediate":true')) continue;
 
           // Get or create session result
           let sessionResult = results.get(sessionId);
           if (!sessionResult) {
-            if (results.size >= maxSessions) continue; // Hit session limit
             sessionResult = {
               sessionId,
               matchCount: 0,
@@ -379,16 +313,18 @@ export async function searchSessions(
             results.set(sessionId, sessionResult);
           }
 
-          sessionResult.matchCount++;
+          sessionResult.matchCount += data.submatches?.length || 1;
 
-          // Only store limited matches per session
-          if (sessionResult.matches.length < maxMatchesPerSession) {
+          // Only extract snippets for first maxSessions (skip expensive work for the rest)
+          // ripgrep continues to count total sessions for "showing X of Y" display
+          if (results.size <= maxSessions && sessionResult.matches.length < maxMatchesPerSession) {
             const matchText = data.submatches?.[0]?.match?.text || query;
 
+            // Use fast snippet extraction (no JSON.parse)
             sessionResult.matches.push({
               sessionId,
               lineNumber,
-              snippet: extractSnippet(rawLine, matchText),
+              snippet: extractSnippetFast(rawLine, matchText),
               matchText,
             });
           }
@@ -408,6 +344,10 @@ export async function searchSessions(
 
     rg.on('close', (code) => {
       clearTimeout(timeoutHandle);
+      // Clear reference if this is still the current search
+      if (currentSearchProcess === rg) {
+        currentSearchProcess = null;
+      }
 
       if (code !== 0 && code !== 1) {
         // Exit code 1 means no matches found (not an error)
@@ -417,6 +357,13 @@ export async function searchSessions(
       // Convert map to array, sorted by match count (descending)
       const resultArray = Array.from(results.values());
       resultArray.sort((a, b) => b.matchCount - a.matchCount);
+
+      searchLog.info('ripgrep:complete', {
+        searchId,
+        durationMs: Date.now() - startTime,
+        totalSessions: results.size,
+        returnedSessions: Math.min(resultArray.length, maxSessions),
+      });
 
       resolve(resultArray);
     });

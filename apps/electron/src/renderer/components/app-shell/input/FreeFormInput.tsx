@@ -180,6 +180,8 @@ export interface FreeFormInputProps {
     /** Model's context window size in tokens */
     contextWindow?: number
   }
+  /** Enable compact mode - hides attach, sources, working directory for popover embedding */
+  compactMode?: boolean
 }
 
 /**
@@ -229,6 +231,7 @@ export function FreeFormInput({
   disableSend = false,
   isEmptySession = false,
   contextStatus,
+  compactMode = false,
 }: FreeFormInputProps) {
   // Read custom model and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
@@ -254,6 +257,12 @@ export function FreeFormInput({
   // Sync TO parent on blur/submit (debounced persistence)
   const [input, setInput] = React.useState(inputValue ?? '')
   const [attachments, setAttachments] = React.useState<FileAttachment[]>([])
+
+  // Ref to track current attachments for use in event handlers (avoids stale closure issues)
+  const attachmentsRef = React.useRef<FileAttachment[]>([])
+  React.useEffect(() => {
+    attachmentsRef.current = attachments
+  }, [attachments])
 
   // Optimistic state for source selection - updates UI immediately before IPC round-trip completes
   const [optimisticSourceSlugs, setOptimisticSourceSlugs] = React.useState(enabledSourceSlugs)
@@ -540,6 +549,22 @@ export function FreeFormInput({
     return () => window.removeEventListener('craft:focus-input', handleFocusInput)
   }, [richInputRef])
 
+  // Get the next available number for a pasted file prefix (e.g., pasted-image-1, pasted-image-2)
+  const getNextPastedNumber = (
+    prefix: 'image' | 'text' | 'file',
+    existingAttachments: FileAttachment[]
+  ): number => {
+    const pattern = new RegExp(`^pasted-${prefix}-(\\d+)\\.`)
+    let maxNum = 0
+    for (const att of existingAttachments) {
+      const match = att.name.match(pattern)
+      if (match) {
+        maxNum = Math.max(maxNum, parseInt(match[1], 10))
+      }
+    }
+    return maxNum + 1
+  }
+
   // Listen for craft:paste-files events (for global paste when input not focused)
   React.useEffect(() => {
     const handlePasteFiles = async (e: CustomEvent<{ files: File[] }>) => {
@@ -550,16 +575,19 @@ export function FreeFormInput({
 
       setLoadingCount(prev => prev + files.length)
 
-      for (const file of files) {
-        try {
-          // Generate a name for clipboard images
-          let fileName = file.name
-          if (!fileName || fileName === 'image.png' || fileName === 'image.jpg' || fileName === 'blob') {
-            const ext = file.type.split('/')[1] || 'png'
-            fileName = `pasted-image-${Date.now()}.${ext}`
-          }
+      // Pre-assign sequential names using ref to avoid race conditions
+      let nextImageNum = getNextPastedNumber('image', attachmentsRef.current)
+      const fileNames: string[] = files.map(file => {
+        if (!file.name || file.name === 'image.png' || file.name === 'image.jpg' || file.name === 'blob') {
+          const ext = file.type.split('/')[1] || 'png'
+          return `pasted-image-${nextImageNum++}.${ext}`
+        }
+        return file.name
+      })
 
-          const attachment = await readFileAsAttachment(file, fileName)
+      for (let i = 0; i < files.length; i++) {
+        try {
+          const attachment = await readFileAsAttachment(files[i], fileNames[i])
           if (attachment) {
             setAttachments(prev => [...prev, attachment])
           }
@@ -707,6 +735,17 @@ export function FreeFormInput({
     return () => observer.disconnect()
   }, [onHeightChange])
 
+  // In compact mode, immediately report collapsed height when processing state changes
+  // This ensures smooth animation timing when input collapses/expands
+  React.useEffect(() => {
+    if (!onHeightChange || !compactMode) return
+    if (isProcessing) {
+      // Collapsed state - only bottom bar visible (~44px)
+      onHeightChange(44)
+    }
+    // When not processing, ResizeObserver will report the full height
+  }, [compactMode, isProcessing, onHeightChange])
+
   // Check if running in Electron environment (has electronAPI)
   const hasElectronAPI = typeof window !== 'undefined' && !!window.electronAPI
 
@@ -818,16 +857,19 @@ export function FreeFormInput({
     const files = Array.from(clipboardItems)
     setLoadingCount(prev => prev + files.length)
 
-    for (const file of files) {
-      try {
-        // Generate a name for clipboard images (they often have no meaningful name)
-        let fileName = file.name
-        if (!fileName || fileName === 'image.png' || fileName === 'image.jpg' || fileName === 'blob') {
-          const ext = file.type.split('/')[1] || 'png'
-          fileName = `pasted-image-${Date.now()}.${ext}`
-        }
+    // Pre-assign sequential names using ref to avoid race conditions
+    let nextImageNum = getNextPastedNumber('image', attachmentsRef.current)
+    const fileNames: string[] = files.map(file => {
+      if (!file.name || file.name === 'image.png' || file.name === 'image.jpg' || file.name === 'blob') {
+        const ext = file.type.split('/')[1] || 'png'
+        return `pasted-image-${nextImageNum++}.${ext}`
+      }
+      return file.name
+    })
 
-        const attachment = await readFileAsAttachment(file, fileName)
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const attachment = await readFileAsAttachment(files[i], fileNames[i])
         if (attachment) {
           setAttachments(prev => [...prev, attachment])
         }
@@ -840,8 +882,8 @@ export function FreeFormInput({
 
   // Handle long text paste - convert to file attachment
   const handleLongTextPaste = React.useCallback((text: string) => {
-    const timestamp = Date.now()
-    const fileName = `pasted-text-${timestamp}.txt`
+    const nextNum = getNextPastedNumber('text', attachmentsRef.current)
+    const fileName = `pasted-text-${nextNum}.txt`
     const attachment: FileAttachment = {
       type: 'text',
       path: fileName,
@@ -853,7 +895,7 @@ export function FreeFormInput({
     setAttachments(prev => [...prev, attachment])
     // Focus input after adding attachment
     richInputRef.current?.focus()
-  }, [])
+  }, []) // No deps needed - uses ref
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -1230,6 +1272,8 @@ export function FreeFormInput({
         />
 
         {/* Rich Text Input with inline mention badges */}
+        {/* In compact mode, hide input while processing (collapses to just bottom bar) */}
+        {!(compactMode && isProcessing) && (
         <RichTextInput
           ref={richInputRef}
           value={input}
@@ -1250,11 +1294,15 @@ export function FreeFormInput({
           skills={skills}
           sources={sources}
           workspaceId={workspaceId}
-          className="min-h-[88px] pl-5 pr-4 pt-4 pb-3 overflow-y-auto"
+          className={cn(
+            "pl-5 pr-4 pt-4 pb-3 overflow-y-auto",
+            compactMode ? "min-h-[60px]" : "min-h-[88px]"
+          )}
           style={{ maxHeight: inputMaxHeight }}
           data-tutorial="chat-input"
           spellCheck={spellCheck}
         />
+        )}
 
         {/* Bottom Row: Controls - wrapped in relative container for escape overlay */}
         <div className="relative">
@@ -1263,6 +1311,8 @@ export function FreeFormInput({
 
           <div className="flex items-center gap-1 px-2 py-2 border-t border-border/50">
           {/* Left side: Context badges - shrinkable so model + send always stay visible */}
+          {/* Hidden in compact mode (EditPopover embedding) */}
+          {!compactMode && (
           <div className="flex items-center gap-1 min-w-32 shrink overflow-hidden">
           {/* 1. Attach Files Badge */}
           <FreeFormInputContextBadge
@@ -1452,13 +1502,15 @@ export function FreeFormInput({
             />
           )}
           </div>
+          )}
 
           {/* Spacer */}
           <div className="flex-1" />
 
           {/* Right side: Model + Send - never shrink so they're always visible */}
           <div className="flex items-center shrink-0">
-          {/* 5. Model Selector - Radix DropdownMenu for automatic positioning and submenu support */}
+          {/* 5. Model Selector - Hidden in compact mode (EditPopover embedding) */}
+          {!compactMode && (
           <DropdownMenu open={modelDropdownOpen} onOpenChange={setModelDropdownOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1582,6 +1634,7 @@ export function FreeFormInput({
               )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
+          )}
 
           {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
           {(() => {

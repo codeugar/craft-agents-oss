@@ -365,6 +365,8 @@ export interface Session {
     /** Model's context window size in tokens (from SDK modelUsage) */
     contextWindow?: number
   }
+  /** When true, session is hidden from session list (e.g., mini edit sessions) */
+  hidden?: boolean
 }
 
 /**
@@ -385,6 +387,8 @@ export interface CreateSessionOptions {
   model?: string
   /** System prompt preset for the session ('default' | 'mini' or custom string) */
   systemPromptPreset?: 'default' | 'mini' | string
+  /** When true, session won't appear in session list (e.g., mini edit sessions) */
+  hidden?: boolean
 }
 
 // Events sent from main to renderer
@@ -910,7 +914,7 @@ export interface ElectronAPI {
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
 
   // Session content search (full-text search via ripgrep)
-  searchSessionContent(workspaceId: string, query: string): Promise<SessionSearchResult[]>
+  searchSessionContent(workspaceId: string, query: string, searchId?: string): Promise<SessionSearchResult[]>
 
   // Sources change listener (live updates when sources are added/removed)
   onSourcesChanged(callback: (sources: LoadedSource[]) => void): () => void

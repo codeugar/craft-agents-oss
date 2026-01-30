@@ -1624,7 +1624,7 @@ export class CraftAgent {
             this.config.onSdkSessionIdUpdate?.(message.session_id);
           }
 
-          const events = this.convertSDKMessage(
+          const events = await this.convertSDKMessage(
             message,
             toolIndex,
             emittedToolStarts,
@@ -2384,9 +2384,85 @@ Please continue the conversation naturally from where we left off.
   }
 
   /**
-   * Map SDK assistant message error codes to typed error events with user-friendly messages.
+   * Parse actual API error from SDK debug log file.
+   * The SDK logs errors like: [ERROR] Error in non-streaming fallback: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"},"request_id":"req_..."}
+   * These go to ~/.claude/debug/{sessionId}.txt, NOT to stderr.
+   *
+   * Uses async retries with non-blocking delays to handle race condition where
+   * SDK may still be writing to the debug file when the error event is received.
    */
-  private mapSDKErrorToTypedError(errorCode: SDKAssistantMessageError): { type: 'typed_error'; error: AgentError } {
+  private async parseApiErrorFromDebugLog(): Promise<{ errorType: string; message: string; requestId?: string } | null> {
+    if (!this.sessionId) return null;
+
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const debugFilePath = path.join(os.homedir(), '.claude', 'debug', `${this.sessionId}.txt`);
+
+    // Helper for non-blocking delay
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Retry up to 3 times with 50ms delays to handle race condition
+    // where SDK emits error event before finishing debug file write
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (!fs.existsSync(debugFilePath)) {
+          // File doesn't exist yet, wait and retry
+          if (attempt < 2) {
+            await delay(50);
+            continue;
+          }
+          return null;
+        }
+
+        // Read the file and get last 50 lines to find recent errors
+        const content = fs.readFileSync(debugFilePath, 'utf-8');
+        const lines = content.split('\n').slice(-50);
+
+        // Search backwards for the most recent [ERROR] line with JSON
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const line = lines[i];
+          // Match [ERROR] lines containing JSON with error details
+          const errorMatch = line.match(/\[ERROR\].*?(\{.*\})/);
+          if (errorMatch && errorMatch[1]) {
+            try {
+              const parsed = JSON.parse(errorMatch[1]);
+              if (parsed?.error?.message) {
+                return {
+                  errorType: parsed.error.type || 'error',
+                  message: parsed.error.message,
+                  requestId: parsed.request_id,
+                };
+              }
+            } catch {
+              // Not valid JSON, continue searching
+            }
+          }
+        }
+
+        // File exists but no error found yet, wait and retry
+        if (attempt < 2) {
+          await delay(50);
+        }
+      } catch {
+        // File read error, wait and retry
+        if (attempt < 2) {
+          await delay(50);
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Map SDK assistant message error codes to typed error events with user-friendly messages.
+   * Reads from SDK debug log file to extract actual API error details.
+   */
+  private async mapSDKErrorToTypedError(
+    errorCode: SDKAssistantMessageError
+  ): Promise<{ type: 'typed_error'; error: AgentError }> {
+    // Try to extract actual error message from SDK debug log file
+    const actualError = await this.parseApiErrorFromDebugLog();
     const errorMap: Record<SDKAssistantMessageError, AgentError> = {
       'authentication_failed': {
         code: 'invalid_api_key',
@@ -2422,10 +2498,18 @@ Please continue the conversation naturally from where we left off.
         retryDelayMs: 5000,
       },
       'invalid_request': {
-        code: 'unknown_error',
+        code: 'invalid_request',
         title: 'Invalid Request',
-        message: 'The request was invalid.',
-        details: ['Try sending a new message', 'Report this issue if it persists'],
+        message: 'The API rejected this request.',
+        details: [
+          ...(actualError ? [
+            `Error: ${actualError.message}`,
+            `Type: ${actualError.errorType}`,
+            ...(actualError.requestId ? [`Request ID: ${actualError.requestId}`] : []),
+          ] : []),
+          'Try removing any attachments and resending',
+          'Check if images are in a supported format (PNG, JPEG, GIF, WebP)',
+        ],
         actions: [
           { key: 'r', label: 'Retry', action: 'retry' },
         ],
@@ -2450,8 +2534,16 @@ Please continue the conversation naturally from where we left off.
       'unknown': {
         code: 'unknown_error',
         title: 'Unknown Error',
-        message: 'An unexpected error occurred while connecting to Anthropic.',
-        details: ['This may be a temporary issue', 'Check your network connection'],
+        message: 'An unexpected error occurred.',
+        details: [
+          ...(actualError ? [
+            `Error: ${actualError.message}`,
+            `Type: ${actualError.errorType}`,
+            ...(actualError.requestId ? [`Request ID: ${actualError.requestId}`] : []),
+          ] : []),
+          'This may be a temporary issue',
+          'Check your network connection',
+        ],
         actions: [
           { key: 'r', label: 'Retry', action: 'retry' },
         ],
@@ -2467,7 +2559,7 @@ Please continue the conversation naturally from where we left off.
     };
   }
 
-  private convertSDKMessage(
+  private async convertSDKMessage(
     message: SDKMessage,
     toolIndex: ToolIndex,
     emittedToolStarts: Set<string>,
@@ -2476,7 +2568,7 @@ Please continue the conversation naturally from where we left off.
     setPendingText: (text: string | null) => void,
     turnId: string | null,
     setTurnId: (id: string | null) => void
-  ): AgentEvent[] {
+  ): Promise<AgentEvent[]> {
     const events: AgentEvent[] = [];
 
     // Debug: log all SDK message types to understand MCP tool result flow
@@ -2492,7 +2584,9 @@ Please continue the conversation naturally from where we left off.
         // Check for SDK-level errors FIRST (auth, network, rate limits, etc.)
         // These errors are set by the SDK when API calls fail
         if ('error' in message && message.error) {
-          const errorEvent = this.mapSDKErrorToTypedError(message.error);
+          // Extract actual API error from SDK debug log for better error details
+          // Uses async to allow retry with delays for race condition handling
+          const errorEvent = await this.mapSDKErrorToTypedError(message.error);
           events.push(errorEvent);
           // Don't process content blocks when there's an error
           break;

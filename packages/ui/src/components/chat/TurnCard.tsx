@@ -242,6 +242,8 @@ export interface TurnCardProps {
   isLastResponse?: boolean
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
+  /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
+  displayMode?: 'informative' | 'detailed'
 }
 
 // ============================================================================
@@ -664,6 +666,8 @@ interface ActivityRowProps {
   isLastChild?: boolean
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
+  /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
+  displayMode?: 'informative' | 'detailed'
 }
 
 /**
@@ -685,7 +689,7 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
 }
 
 /** Single activity row in expanded view */
-function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }: ActivityRowProps) {
+function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
@@ -771,8 +775,26 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }
   // - Intent: For MCP tools (activity.intent), for Bash (toolInput.description)
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
-  const displayedName = toolDisplay.name
+  const fullDisplayName = toolDisplay.name
     || (activity.type === 'thinking' ? 'Thinking' : 'Processing')
+
+  // Detect MCP/API tools (toolName starts with "mcp__")
+  const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
+
+  // For MCP/API tools, extract source name and tool slug
+  // e.g., "ClickUp: clickup_search" -> sourceName="ClickUp", toolSlug="clickup_search"
+  let sourceName = fullDisplayName
+  let toolSlug: string | undefined = undefined
+  if (isMcpOrApiTool) {
+    const colonIndex = fullDisplayName.indexOf(':')
+    if (colonIndex > 0) {
+      sourceName = fullDisplayName.substring(0, colonIndex).trim()
+      toolSlug = fullDisplayName.substring(colonIndex + 1).trim()
+    }
+  }
+
+  // For non-MCP tools or informative mode, use the appropriate display name
+  const displayedName = isMcpOrApiTool ? sourceName : fullDisplayName
 
   // Intent for MCP tools, description for Bash commands
   const intentOrDescription = activity.intent || (activity.toolInput?.description as string | undefined)
@@ -801,10 +823,40 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }
         onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
       >
         <ActivityStatusIcon status={activity.status} toolName={activity.toolName} customIcon={toolDisplay.icon} />
-        {/* Tool name (always shown, darker) - underlined when clickable */}
-        <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayedName}</span>
-        {/* Diff stats and filename for Edit/Write tools - shown right after tool name */}
-        {!isBackgrounded && diffStats && (
+        {/* MCP/API tools: Source name (shrink-0) then compound label (flex-1) */}
+        {isMcpOrApiTool && !isBackgrounded && (
+          <>
+            <span className="shrink-0">{sourceName}</span>
+            {(intentOrDescription || (displayMode === 'detailed' && (toolSlug || inputSummary))) && (
+              <span className={cn("truncate flex-1 min-w-0", onOpenDetails && isComplete && "group-hover/row:underline")}>
+                {intentOrDescription && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span>{intentOrDescription}</span>
+                  </>
+                )}
+                {displayMode === 'detailed' && toolSlug && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span className="opacity-70">{toolSlug}</span>
+                  </>
+                )}
+                {displayMode === 'detailed' && inputSummary && (
+                  <>
+                    <span className="opacity-60"> · </span>
+                    <span className="opacity-50">{inputSummary}</span>
+                  </>
+                )}
+              </span>
+            )}
+          </>
+        )}
+        {/* Native tools: Tool name (shrink-0) */}
+        {!isMcpOrApiTool && (
+          <span className={cn("shrink-0", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayedName}</span>
+        )}
+        {/* Diff stats and filename badges - after tool name */}
+        {!isMcpOrApiTool && !isBackgrounded && diffStats && (
           <span className="flex items-center gap-1.5 text-[10px] shrink-0">
             {diffStats.deletions > 0 && (
               <span
@@ -826,6 +878,32 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }
             )}
           </span>
         )}
+        {/* Filename badge for Read tool (no diff stats) */}
+        {!isMcpOrApiTool && !isBackgrounded && !diffStats && activity.toolName === 'Read' && activity.toolInput?.file_path && (
+          <span className="flex items-center gap-1.5 text-[10px] shrink-0">
+            <span className="px-1.5 py-0.5 bg-background shadow-minimal rounded-[4px] text-[11px] text-foreground/70">
+              {(activity.toolInput.file_path as string).split('/').pop()}
+            </span>
+          </span>
+        )}
+        {/* Native tools: Compound label with description + params (flex-1) */}
+        {/* In informative mode, hide inputSummary (command details) - only show description */}
+        {!isMcpOrApiTool && !isBackgrounded && (intentOrDescription || (displayMode === 'detailed' && inputSummary)) && (
+          <span className={cn("truncate flex-1 min-w-0", onOpenDetails && isComplete && "group-hover/row:underline")}>
+            {intentOrDescription && (
+              <>
+                <span className="opacity-60"> · </span>
+                <span>{intentOrDescription}</span>
+              </>
+            )}
+            {displayMode === 'detailed' && inputSummary && (
+              <>
+                <span className="opacity-60"> · </span>
+                <span className="opacity-50">{inputSummary}</span>
+              </>
+            )}
+          </span>
+        )}
         {/* Background task info (task/shell ID + elapsed time) */}
         {backgroundInfo && (
           <>
@@ -833,25 +911,14 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath }
             <span className="truncate min-w-0 max-w-[300px] text-accent">{backgroundInfo}</span>
           </>
         )}
-        {/* Intent/description if available (darker, after interpunct) - skip for backgrounded tasks */}
-        {!isBackgrounded && intentOrDescription && (
-          <>
-            <span className="opacity-60 shrink-0">·</span>
-            <span className="truncate min-w-0 max-w-[300px]">{intentOrDescription}</span>
-          </>
-        )}
-        {/* Additional params (lighter) - skip for backgrounded tasks */}
-        {!isBackgrounded && inputSummary && (
-          <span className="opacity-50 truncate min-w-0">{inputSummary}</span>
-        )}
+        {/* Error display */}
         {activity.status === 'error' && activity.error && (
           <>
             <span className="text-destructive/60 shrink-0">·</span>
             <span className="text-destructive truncate min-w-[120px] max-w-[300px]">{activity.error}</span>
           </>
         )}
-        {/* Spacer to push details button to right */}
-        <span className="flex-1" />
+        {/* No spacer needed - both MCP/API and native tools now have flex-1 on their compound spans */}
         {/* Open details button */}
         {onOpenDetails && isComplete && (
           <div
@@ -896,13 +963,15 @@ interface ActivityGroupRowProps {
   animationIndex?: number
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
+  /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
+  displayMode?: 'informative' | 'detailed'
 }
 
 /**
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath }: ActivityGroupRowProps) {
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
   const expandedGroups = externalExpandedGroups ?? localExpandedGroups
@@ -1041,6 +1110,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
                     onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
                     isLastChild={idx === group.children.length - 1}
                     sessionFolderPath={sessionFolderPath}
+                    displayMode={displayMode}
                   />
                 </motion.div>
               ))}
@@ -1469,6 +1539,7 @@ export const TurnCard = React.memo(function TurnCard({
   onAcceptPlanWithCompact,
   isLastResponse,
   sessionFolderPath,
+  displayMode = 'detailed',
 }: TurnCardProps) {
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -1584,9 +1655,9 @@ export const TurnCard = React.memo(function TurnCard({
 
   return (
     <div className="space-y-1">
-      {/* Activity Section */}
+      {/* Activity Section - excluded from search highlighting (matches ripgrep behavior) */}
       {hasActivities && (
-        <div className="group select-none">
+        <div className="group select-none" data-search-exclude="true">
           {/* Collapsed Header / Toggle */}
           <button
             onClick={toggleExpanded}
@@ -1677,6 +1748,7 @@ export const TurnCard = React.memo(function TurnCard({
                           onOpenActivityDetails={onOpenActivityDetails}
                           animationIndex={index}
                           sessionFolderPath={sessionFolderPath}
+                          displayMode={displayMode}
                         />
                       ) : (
                         <motion.div
@@ -1689,6 +1761,7 @@ export const TurnCard = React.memo(function TurnCard({
                             activity={item}
                             onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
                             sessionFolderPath={sessionFolderPath}
+                            displayMode={displayMode}
                           />
                         </motion.div>
                       )
@@ -1708,6 +1781,7 @@ export const TurnCard = React.memo(function TurnCard({
                           onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
                           isLastChild={lastChildSet.has(activity.id)}
                           sessionFolderPath={sessionFolderPath}
+                          displayMode={displayMode}
                         />
                       </motion.div>
                     ))
@@ -1779,6 +1853,12 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if isLastResponse changed (for Accept Plan button visibility)
   if (prev.isLastResponse !== next.isLastResponse) return false
+
+  // Re-render if displayMode changed
+  if (prev.displayMode !== next.displayMode) return false
+
+  // Re-render if activities changed (important for playground/testing scenarios)
+  if (prev.activities !== next.activities) return false
 
   // For complete, non-streaming turns: skip re-render if same turn
   // These are static and safe to cache

@@ -506,7 +506,11 @@ Never try to execute a plan without submitting it first - it will fail, especial
 ## Web Search
 
 You have access to web search for up-to-date information. Use it proactively to get up-to-date information and best practices.
-Your memory might be limited, contain wrong info, or be out-of-date, specifically for fast-changing topics like technology, current events, and recent developments.
+Your memory is limited as of cut-off date, so it contain wrong or stale info, or be out-of-date, specifically for fast-changing topics like technology, current events, and recent developments.
+I.e. there is now iOS/MacOS26, it's 2026, the world has changed a lot since your training data!
+
+## Code Diffs and Visualization
+Craft Agent renders **unified code diffs natively** as beautiful diff views. Use diffs where it makes sense to show changes. Users will love it.
 
 ## Diagrams and Visualization
 
@@ -518,6 +522,7 @@ Craft Agent renders **Mermaid diagrams natively** as beautiful themed SVGs. Use 
 - Before/after changes in refactoring
 
 **Supported types:** Flowcharts (\`graph LR\`), State (\`stateDiagram-v2\`), Sequence (\`sequenceDiagram\`), Class (\`classDiagram\`), ER (\`erDiagram\`)
+Whenever thinking of creating an ASCII visualisation, deeply consider replacing it with a Mermaid diagram instead for much better clarity.
 
 **Quick example:**
 \`\`\`mermaid
@@ -531,9 +536,8 @@ graph LR
 - Full syntax reference: \`${DOC_REFS.mermaid}\`
 
 **Tips:**
-- **PREFER HORIZONTAL (LR/RL)** - Much easier to view and navigate in the UI
-- Use LR for flows, pipelines, state machines, and most diagrams
-- Only use TD/BT for truly hierarchical structures (org charts, trees)
+- **The user sees a 4:3 aspect ratio** - Choose HORIZONTAL (LR/RL) or VERTICAL (TD/BT) for easier viewing and navigation in the UI based on diagram size. I.e. If it's a small diagram, use horizontal (LR/RL). If it's a large diagram with many nodes, use vertical (TD/BT).
+- IMPORTANT! : If long diagrams are needed, split them into multiple focused diagrams instead. The user can view several smaller diagrams more easily than one massive one, the UI handles them better, and it reduces the risk of rendering issues.
 - One concept per diagram - keep them focused
 - Validate complex diagrams with \`mermaid_validate\` first
 

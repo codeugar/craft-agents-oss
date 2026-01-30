@@ -976,6 +976,9 @@ function AppShellContent({
       // History navigation
       { key: '[', cmd: true, action: goBack },
       { key: ']', cmd: true, action: goForward },
+      // Search match navigation (CMD+G next, CMD+SHIFT+G prev)
+      { key: 'g', cmd: true, action: () => chatDisplayRef.current?.goToNextMatch(), when: () => searchActive && (chatMatchInfo.count ?? 0) > 0 },
+      { key: 'g', cmd: true, shift: true, action: () => chatDisplayRef.current?.goToPrevMatch(), when: () => searchActive && (chatMatchInfo.count ?? 0) > 0 },
       // ESC to stop processing - requires double-press within 1 second
       // First press shows warning overlay, second press interrupts
       { key: 'Escape', action: () => {
@@ -2846,9 +2849,6 @@ function AppShellContent({
                   labels={labelConfigs}
                   onLabelsChange={handleSessionLabelsChange}
                   workspaceId={activeWorkspaceId ?? undefined}
-                  chatDisplayRef={chatDisplayRef}
-                  chatMatchCount={chatMatchInfo.count}
-                  chatMatchIndex={chatMatchInfo.index}
                 />
               </>
             )}

@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
-import { ipcLog, windowLog } from './logger'
+import { ipcLog, windowLog, searchLog } from './logger'
 import { WindowManager } from './window-manager'
 import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type AuthType, type ApiSetupInfo, type SendMessageOptions } from '../shared/types'
@@ -1961,7 +1961,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // ============================================================
 
   // Search session content using ripgrep
-  ipcMain.handle(IPC_CHANNELS.SEARCH_SESSIONS, async (_event, workspaceId: string, query: string) => {
+  ipcMain.handle(IPC_CHANNELS.SEARCH_SESSIONS, async (_event, workspaceId: string, query: string, searchId?: string) => {
+    const id = searchId || Date.now().toString(36)
+    searchLog.info('ipc:request', { searchId: id, query })
+
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
       ipcLog.warn('SEARCH_SESSIONS: Workspace not found:', workspaceId)
@@ -1978,10 +1981,18 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       timeout: 5000,
       maxMatchesPerSession: 3,
       maxSessions: 50,
+      searchId: id,
     })
 
-    ipcLog.debug(`SEARCH_SESSIONS: Found ${results.length} sessions with matches`)
-    return results
+    // Filter out hidden sessions (e.g., mini edit sessions)
+    const allSessions = await sessionManager.getSessions()
+    const hiddenSessionIds = new Set(
+      allSessions.filter(s => s.hidden).map(s => s.id)
+    )
+    const filteredResults = results.filter(r => !hiddenSessionIds.has(r.sessionId))
+
+    searchLog.info('ipc:response', { searchId: id, resultCount: filteredResults.length, totalFound: results.length })
+    return filteredResults
   })
 
   // ============================================================

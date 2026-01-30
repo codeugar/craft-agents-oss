@@ -1443,15 +1443,21 @@ function FilePreviewRenderer({
         />
       )
 
-    case 'markdown':
+    case 'markdown': {
+      // Show PLAN header for .md files in plans folder (handles both absolute and relative paths)
+      const isPlanFile =
+        (state.filePath.includes('/plans/') || state.filePath.startsWith('plans/')) &&
+        state.filePath.endsWith('.md')
       return (
         <DocumentFormattedMarkdownOverlay
           isOpen
           onClose={onClose}
           content={state.content ?? ''}
           filePath={state.filePath}
+          variant={isPlanFile ? 'plan' : 'response'}
         />
       )
+    }
 
     case 'json': {
       // JSONPreviewOverlay expects parsed data, not a raw string

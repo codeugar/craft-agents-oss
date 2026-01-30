@@ -248,8 +248,8 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS, workspaceId, sourceSlug),
 
   // Session content search (full-text search via ripgrep)
-  searchSessionContent: (workspaceId: string, query: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SESSIONS, workspaceId, query),
+  searchSessionContent: (workspaceId: string, query: string, searchId?: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SESSIONS, workspaceId, query, searchId),
 
   // Status management
   listStatuses: (workspaceId: string) =>

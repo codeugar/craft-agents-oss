@@ -364,6 +364,8 @@ interface ManagedSession {
   authRetryAttempted?: boolean
   // Flag indicating auth retry is in progress (to prevent complete handler from interfering)
   authRetryInProgress?: boolean
+  // Whether this session is hidden from session list (e.g., mini edit sessions)
+  hidden?: boolean
 }
 
 // Convert runtime Message to StoredMessage for persistence
@@ -891,6 +893,7 @@ export class SessionManager {
             // Shared viewer state - loaded from metadata for persistence across restarts
             sharedUrl: meta.sharedUrl,
             sharedId: meta.sharedId,
+            hidden: meta.hidden,
           }
 
           this.sessions.set(meta.id, managed)
@@ -940,6 +943,7 @@ export class SessionManager {
           contextTokens: 0,
           costUsd: 0,
         },
+        hidden: managed.hidden,
       }
 
       // Queue for async persistence with debouncing
@@ -1261,6 +1265,7 @@ export class SessionManager {
         tokenUsage: m.tokenUsage,
         createdAt: m.createdAt,
         messageCount: m.messageCount,
+        hidden: m.hidden,
       }))
       .sort((a, b) => b.lastMessageAt - a.lastMessageAt)
   }
@@ -1302,6 +1307,7 @@ export class SessionManager {
       sharedId: m.sharedId,
       lastMessageRole: m.lastMessageRole,
       tokenUsage: m.tokenUsage,
+      hidden: m.hidden,
     }
   }
 
@@ -1399,6 +1405,7 @@ export class SessionManager {
     const storedSession = await createStoredSession(workspaceRootPath, {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
+      hidden: options?.hidden,
     })
 
     // Model priority: options.model > storedSession.model > workspace default
@@ -1430,6 +1437,7 @@ export class SessionManager {
       messageQueue: [],
       backgroundShellCommands: new Map(),
       messagesLoaded: true,  // New sessions don't need to load messages from disk
+      hidden: options?.hidden,
     }
 
     this.sessions.set(storedSession.id, managed)
@@ -1448,6 +1456,7 @@ export class SessionManager {
       model: managed.model,
       thinkingLevel: defaultThinkingLevel,
       sessionFolderPath: getSessionStoragePath(workspaceRootPath, storedSession.id),
+      hidden: options?.hidden,
     }
   }
 
@@ -3195,6 +3204,14 @@ To view this task's output:
           // Set toolDisplayMeta if not already set (has base64 icon for viewer)
           if (toolDisplayMeta && !existingStartMsg.toolDisplayMeta) {
             existingStartMsg.toolDisplayMeta = toolDisplayMeta
+          }
+          // Update toolIntent if not already set (second event has intent from complete input)
+          if (event.intent && !existingStartMsg.toolIntent) {
+            existingStartMsg.toolIntent = event.intent
+          }
+          // Update toolDisplayName if not already set
+          if (event.displayName && !existingStartMsg.toolDisplayName) {
+            existingStartMsg.toolDisplayName = event.displayName
           }
         } else {
           // Add tool message immediately (will be updated on tool_result)

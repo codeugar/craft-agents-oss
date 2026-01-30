@@ -81,6 +81,16 @@ type OverlayState =
   | MarkdownOverlayState
   | null
 
+/**
+ * Checks if a file path is in a plans folder and is a markdown file.
+ * Used to conditionally show the PLAN header in DocumentFormattedMarkdownOverlay.
+ */
+function isPlanFilePath(filePath: string | undefined): boolean {
+  if (!filePath) return false
+  return (filePath.includes('/plans/') || filePath.startsWith('plans/')) &&
+         filePath.endsWith('.md')
+}
+
 interface ChatDisplayProps {
   session: Session | null
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
@@ -162,6 +172,11 @@ interface ChatDisplayProps {
   onMatchCountChange?: (count: number) => void
   /** Callback when match info (count and index) changes - for immediate UI updates */
   onMatchInfoChange?: (info: { count: number; index: number }) => void
+  // Compact mode (for EditPopover embedding)
+  /** Enable compact mode - hides non-essential UI elements for popover embedding */
+  compactMode?: boolean
+  /** Custom placeholder for input (used in compact mode for edit context) */
+  placeholder?: string
 }
 
 /**
@@ -399,6 +414,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   isSearchModeActive = false,
   onMatchCountChange,
   onMatchInfoChange,
+  // Compact mode (for EditPopover embedding)
+  compactMode = false,
+  placeholder,
 }, ref) {
   // Input is only disabled when explicitly disabled (e.g., agent needs activation)
   // User can type during streaming - submitting will stop the stream and send
@@ -626,15 +644,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       const tryScroll = () => {
         const matchEl = document.getElementById(matchId) as HTMLElement | null
         if (matchEl) {
-          matchEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-          // Add active styling to current match (prominent yellow with shadow)
+          // Only scroll if match is not comfortably visible on screen (with 128px edge buffer)
+          const rect = matchEl.getBoundingClientRect()
+          const buffer = 128
+          const isVisible = rect.top >= buffer && rect.bottom <= window.innerHeight - buffer
+          if (!isVisible) {
+            matchEl.scrollIntoView({ behavior: 'instant', block: 'center' })
+          }
+          // Add active styling to current match (prominent yellow with shadow and ring)
+          // Using ring instead of border to avoid layout shift
           matchEl.classList.remove('bg-yellow-300/30')
-          matchEl.classList.add('bg-yellow-300', 'shadow-tinted', 'text-black/90')
-          ;(matchEl as HTMLElement).style.setProperty('--shadow-color', '234, 179, 8') // yellow-500 RGB
+          matchEl.classList.add('bg-yellow-300', 'shadow-tinted', 'text-black/90', 'ring-1', 'ring-yellow-500')
+          ;(matchEl as HTMLElement).style.setProperty('--shadow-color', '90, 50, 5') // dark amber for stronger shadow
           // Remove active styling from other matches (revert to passive)
           document.querySelectorAll('mark.search-highlight.bg-yellow-300').forEach(el => {
             if (el.id !== matchId) {
-              el.classList.remove('bg-yellow-300', 'shadow-tinted', 'text-black/90')
+              el.classList.remove('bg-yellow-300', 'shadow-tinted', 'text-black/90', 'ring-1', 'ring-yellow-500')
               el.classList.add('bg-yellow-300/30')
               ;(el as HTMLElement).style.removeProperty('--shadow-color')
             }
@@ -720,6 +745,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               if (!parent) return NodeFilter.FILTER_REJECT
               const tagName = parent.tagName.toLowerCase()
               if (tagName === 'script' || tagName === 'style' || tagName === 'mark') {
+                return NodeFilter.FILTER_REJECT
+              }
+              // Skip nodes within elements marked as search-excluded (e.g., tool activities)
+              // This matches ripgrep behavior which only searches user/assistant text
+              if (parent.closest('[data-search-exclude="true"]')) {
                 return NodeFilter.FILTER_REJECT
               }
               // Only process nodes that contain the search text
@@ -1109,6 +1139,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     })
   }
 
+  // Per-frame scroll compensation during input height animation
+  // Only compensate when user is "stuck to bottom" - otherwise let them control their scroll position
+  const handleAnimatedHeightChange = React.useCallback((delta: number) => {
+    if (!isStickToBottomRef.current) return
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    // Adjust scroll to maintain position relative to content
+    viewport.scrollTop += delta
+  }, [])
+
   // Handle structured input responses (permissions and credentials)
   const handleStructuredResponse = (response: StructuredResponse) => {
     if (response.type === 'permission' && pendingPermission && onRespondToPermission) {
@@ -1443,9 +1483,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           <div className={cn(
             CHAT_LAYOUT.maxWidth,
-            "mx-auto w-full px-4 pb-4 mt-1"
+            "mx-auto w-full px-4 mt-1",
+            compactMode ? "pb-3" : "pb-4"
           )}>
             {/* Active option badges and tasks - positioned above input */}
+            {!compactMode && (
             <ActiveOptionBadges
               ultrathinkEnabled={ultrathinkEnabled}
               onUltrathinkChange={onUltrathinkChange}
@@ -1469,9 +1511,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               currentTodoState={session.todoState || 'todo'}
               onTodoStateChange={onTodoStateChange}
             />
+            )}
             <InputContainer
+              compactMode={compactMode}
+              placeholder={placeholder}
               disabled={isInputDisabled}
               isProcessing={session.isProcessing}
+              onAnimatedHeightChange={handleAnimatedHeightChange}
               onSubmit={handleSubmit}
               onStop={handleStop}
               textareaRef={textareaRef}
@@ -1599,6 +1645,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
           error={overlayData.error}
+          variant={isPlanFilePath(overlayData.filePath) ? 'plan' : 'response'}
         />
       )}
 

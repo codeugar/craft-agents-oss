@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { formatDistanceToNow, formatDistanceToNowStrict, isToday, isYesterday, format, startOfDay } from "date-fns"
 import type { Locale } from "date-fns"
-import { MoreHorizontal, Flag, Search, X, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox, ChevronUp, ChevronDown } from "lucide-react"
+import { MoreHorizontal, Flag, Copy, Link2Off, CloudUpload, Globe, RefreshCw, Inbox } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
+import { searchLog } from "@/lib/logger"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import { flattenLabels, parseLabelEntry, formatLabelEntry, formatDisplayValue } from "@craft-agent/shared/labels"
 import { resolveEntityColor } from "@craft-agent/shared/colors"
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/styled-context-menu"
 import { DropdownMenuProvider, ContextMenuProvider } from "@/components/ui/menu-context"
 import { SessionMenu } from "./SessionMenu"
+import { SessionSearchHeader } from "./SessionSearchHeader"
 import {
   Dialog,
   DialogContent,
@@ -52,6 +54,7 @@ import { getSessionTitle } from "@/utils/session"
 import type { SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from "@craft-agent/shared/agent/modes"
+import { fuzzyScore } from "@craft-agent/shared/search"
 
 // Pagination constants
 const INITIAL_DISPLAY_LIMIT = 20
@@ -157,7 +160,7 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   return (
     <>
       {before}
-      <span className="px-1 py-0.5 bg-yellow-300/30 rounded-[4px]">{match}</span>
+      <span className="bg-yellow-300/30 rounded-[4px]">{match}</span>
       {highlightMatch(after, query)}
     </>
   )
@@ -199,16 +202,8 @@ interface SessionItemProps {
   labels: LabelConfig[]
   /** Callback when session labels are toggled */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
-  /** Content match info (from full-text search) - if set, shows snippet below title */
-  contentMatch?: { matchCount: number; snippet: string }
   /** Number of matches in ChatDisplay (only set when session is selected and loaded) */
   chatMatchCount?: number
-  /** Current match index in ChatDisplay (0-based) */
-  chatMatchIndex?: number
-  /** Navigate to previous match in ChatDisplay */
-  onNavigatePrev?: () => void
-  /** Navigate to next match in ChatDisplay */
-  onNavigateNext?: () => void
 }
 
 /**
@@ -237,11 +232,7 @@ function SessionItem({
   flatLabels,
   labels,
   onLabelsChange,
-  contentMatch,
   chatMatchCount,
-  chatMatchIndex,
-  onNavigatePrev,
-  onNavigateNext,
 }: SessionItemProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -543,54 +534,29 @@ function SessionItem({
                 </Tooltip>
               )}
             </div>
-            {/* Content match snippet - shown when found in conversation content (at bottom) */}
-            {contentMatch && contentMatch.snippet && (
-              <div className="flex items-center gap-1.5 text-xs text-foreground/50 w-full min-w-0 pl-2 pr-1.5 mt-1.5 mb-1 h-8 border border-border rounded-md">
-                  <Search className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} style={{ color: 'color-mix(in oklch, var(--foreground) 60%, transparent)' }} />
-                  <span className="truncate flex-1 min-w-0">
-                    {searchQuery ? highlightMatch(contentMatch.snippet, searchQuery) : contentMatch.snippet}
-                  </span>
-                  {/* Match navigation chevrons - inline on right when selected with matches */}
-                  {isSelected && chatMatchCount != null && chatMatchCount > 0 && (
-                    <div className="flex items-center shrink-0 gap-0.5 ml-1.5">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onNavigatePrev?.() }}
-                        className={cn(
-                          "p-0.5 rounded transition-colors",
-                          (chatMatchIndex ?? 0) <= 0
-                            ? "opacity-30 cursor-default"
-                            : "hover:bg-foreground/5"
-                        )}
-                        disabled={(chatMatchIndex ?? 0) <= 0}
-                        title="Previous match"
-                      >
-                        <ChevronUp className="size-4 text-muted-foreground" strokeWidth={1.5} />
-                      </button>
-                      <span className="text-[9px] text-muted-foreground tabular-nums leading-tight">
-                        {(chatMatchIndex ?? 0) + 1}/{chatMatchCount ?? 0}
-                      </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onNavigateNext?.() }}
-                        className={cn(
-                          "p-0.5 rounded transition-colors",
-                          (chatMatchIndex ?? 0) >= (chatMatchCount ?? 1) - 1
-                            ? "opacity-30 cursor-default"
-                            : "hover:bg-foreground/5"
-                        )}
-                        disabled={(chatMatchIndex ?? 0) >= (chatMatchCount ?? 1) - 1}
-                        title="Next match"
-                      >
-                        <ChevronDown className="size-4 text-muted-foreground" strokeWidth={1.5} />
-                      </button>
-                    </div>
-                  )}
-              </div>
-            )}
           </div>
         </button>
 
-        {/* Action buttons - visible on hover or when menu is open, hidden in search mode with matches */}
-        {!(isSelected && searchQuery && chatMatchCount && chatMatchCount > 0) && (
+        {/* Match count badge - shown on right side for all items with matches */}
+        {chatMatchCount != null && chatMatchCount > 0 && (
+          <div className="absolute right-3 top-2 z-10">
+            <span
+              className={cn(
+                "inline-flex items-center justify-center min-w-[24px] px-1 py-1 rounded-[6px] text-[10px] font-medium tabular-nums leading-tight whitespace-nowrap",
+                isSelected
+                  ? "bg-yellow-300 border border-yellow-500 text-yellow-900"
+                  : "bg-yellow-300/10 border border-yellow-600/20 text-yellow-800"
+              )}
+              style={{ boxShadow: isSelected ? '0 1px 2px 0 rgba(234, 179, 8, 0.3)' : '0 1px 2px 0 rgba(133, 77, 14, 0.15)' }}
+              title="Matches found (⌘G next, ⌘⇧G prev)"
+            >
+              {chatMatchCount}
+            </span>
+          </div>
+        )}
+
+        {/* Action buttons - visible on hover or when menu is open, hidden when match badge is visible */}
+        {!(chatMatchCount != null && chatMatchCount > 0) && (
         <div
           className={cn(
             "absolute right-2 top-2 transition-opacity z-10 flex items-center gap-1",
@@ -715,12 +681,6 @@ interface SessionListProps {
   onLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Workspace ID for content search (optional - if not provided, content search is disabled) */
   workspaceId?: string
-  /** Ref to ChatDisplay for navigation between matches */
-  chatDisplayRef?: React.RefObject<import('./ChatDisplay').ChatDisplayHandle>
-  /** Match count from ChatDisplay (used for navigation UI) */
-  chatMatchCount?: number
-  /** Current match index from ChatDisplay (0-based) */
-  chatMatchIndex?: number
 }
 
 // Re-export TodoStateId for use by parent components
@@ -758,9 +718,6 @@ export function SessionList({
   labels = [],
   onLabelsChange,
   workspaceId,
-  chatDisplayRef,
-  chatMatchCount,
-  chatMatchIndex,
 }: SessionListProps) {
   const [session] = useSession()
   const { navigate } = useNavigation()
@@ -768,6 +725,9 @@ export function SessionList({
 
   // Pre-flatten label tree once for efficient ID lookups in each SessionItem
   const flatLabels = useMemo(() => flattenLabels(labels), [labels])
+
+  // Filter out hidden sessions (e.g., mini edit sessions) before any processing
+  const visibleItems = useMemo(() => items.filter(item => !item.hidden), [items])
 
   // Get current filter from navigation state (for preserving context in tab routes)
   const currentFilter = isChatsNavigation(navState) ? navState.filter : undefined
@@ -785,17 +745,38 @@ export function SessionList({
   // Track if search input has actual DOM focus (for proper keyboard navigation gating)
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false)
 
-  // Debounced content search - triggers when search query changes and length >= 2
+  // Content search - triggers immediately when search query changes (ripgrep cancels previous search)
   useEffect(() => {
     if (!workspaceId || !searchActive || searchQuery.length < 2) {
       setContentSearchResults(new Map())
       return
     }
 
+    const searchId = Date.now().toString(36)
+    searchLog.info('query:change', { searchId, query: searchQuery })
+
+    // Track if this effect was cleaned up (user typed new query)
+    let cancelled = false
+
     setIsSearchingContent(true)
+
+    // 100ms debounce to prevent I/O contention from overlapping ripgrep searches
     const timer = setTimeout(async () => {
       try {
-        const results = await window.electronAPI.searchSessionContent(workspaceId, searchQuery)
+        searchLog.info('ipc:call', { searchId })
+        const ipcStart = performance.now()
+
+        const results = await window.electronAPI.searchSessionContent(workspaceId, searchQuery, searchId)
+
+        // Ignore results if user already typed a new query
+        if (cancelled) return
+
+        searchLog.info('ipc:received', {
+          searchId,
+          durationMs: Math.round(performance.now() - ipcStart),
+          resultCount: results.length,
+        })
+
         const resultMap = new Map<string, { matchCount: number; snippet: string }>()
         for (const result of results) {
           resultMap.set(result.sessionId, {
@@ -804,15 +785,24 @@ export function SessionList({
           })
         }
         setContentSearchResults(resultMap)
+
+        // Log render complete after React commits the state update
+        requestAnimationFrame(() => {
+          searchLog.info('render:complete', { searchId, sessionsDisplayed: resultMap.size })
+        })
       } catch (error) {
+        if (cancelled) return
         console.error('[SessionList] Content search error:', error)
         setContentSearchResults(new Map())
       } finally {
-        setIsSearchingContent(false)
+        if (!cancelled) {
+          setIsSearchingContent(false)
+        }
       }
-    }, 300) // Debounce 300ms
+    }, 100)
 
     return () => {
+      cancelled = true
       clearTimeout(timer)
       setIsSearchingContent(false)
     }
@@ -826,60 +816,34 @@ export function SessionList({
   }, [searchActive])
 
   // Sort by most recent activity first
-  const sortedItems = [...items].sort((a, b) =>
+  const sortedItems = [...visibleItems].sort((a, b) =>
     (b.lastMessageAt || 0) - (a.lastMessageAt || 0)
   )
 
-  // Filter items by search query — matches title, label names, label values, and content.
-  // '#' characters are stripped when matching labels (so "#bug" finds label "bug").
-  // A bare '#' matches all sessions that have any labels.
-  // Content matches (from ripgrep search) are included and shown with snippets.
+  // Filter items by search query — ripgrep content search only for consistent results
+  // Uses fuzzy matching for title sorting (word boundary aware, CJK support)
   const searchFilteredItems = useMemo(() => {
     if (!searchQuery.trim()) return sortedItems
-    const query = searchQuery.toLowerCase()
-    const labelQuery = query.replace(/#/g, '')
 
-    // Check if a session matches by title or labels (quick local match)
-    const matchesTitleOrLabels = (item: SessionMeta): boolean => {
-      if (getSessionTitle(item).toLowerCase().includes(query)) return true
-      // Bare '#' (no text after stripping) matches any session with labels
-      if (!labelQuery && item.labels && item.labels.length > 0) return true
-      // Match against label names and values (with # stripped)
-      if (labelQuery && item.labels?.some(entry => {
-        const parsed = parseLabelEntry(entry)
-        const config = flatLabels.find(l => l.id === parsed.id)
-        if (config?.name.toLowerCase().includes(labelQuery)) return true
-        if (parsed.rawValue?.toLowerCase().includes(labelQuery)) return true
-        return false
-      })) return true
-      return false
-    }
+    // Only show sessions with ripgrep content matches
+    // Sort by: fuzzy title score first, then by match count
+    return sortedItems
+      .filter(item => contentSearchResults.has(item.id))
+      .sort((a, b) => {
+        const aScore = fuzzyScore(getSessionTitle(a), searchQuery)
+        const bScore = fuzzyScore(getSessionTitle(b), searchQuery)
 
-    // Split into title/label matches and content-only matches
-    const titleMatches: SessionMeta[] = []
-    const contentOnlyMatches: SessionMeta[] = []
+        // Title matches come first, sorted by fuzzy score (higher = better)
+        if (aScore > 0 && bScore === 0) return -1
+        if (aScore === 0 && bScore > 0) return 1
+        if (aScore !== bScore) return bScore - aScore
 
-    for (const item of sortedItems) {
-      const hasTitleMatch = matchesTitleOrLabels(item)
-      const hasContentMatch = contentSearchResults.has(item.id)
-
-      if (hasTitleMatch) {
-        titleMatches.push(item)
-      } else if (hasContentMatch) {
-        contentOnlyMatches.push(item)
-      }
-    }
-
-    // Return title matches first, then content-only matches
-    // Content-only matches are sorted by match count (descending)
-    contentOnlyMatches.sort((a, b) => {
-      const countA = contentSearchResults.get(a.id)?.matchCount || 0
-      const countB = contentSearchResults.get(b.id)?.matchCount || 0
-      return countB - countA
-    })
-
-    return [...titleMatches, ...contentOnlyMatches]
-  }, [sortedItems, searchQuery, flatLabels, contentSearchResults])
+        // Then sort by ripgrep match count
+        const countA = contentSearchResults.get(a.id)?.matchCount || 0
+        const countB = contentSearchResults.get(b.id)?.matchCount || 0
+        return countB - countA
+      })
+  }, [sortedItems, searchQuery, contentSearchResults])
 
   // Reset display limit when search query changes
   useEffect(() => {
@@ -1126,37 +1090,19 @@ export function SessionList({
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Search input - OUTSIDE ScrollArea to prevent arrow key capture */}
+      {/* Search header - input + status row (shared with playground) */}
       {searchActive && (
-        <div className="shrink-0 px-2 py-2 border-b border-border/50">
-          {/* Elevated input wrapper with shadow-minimal for consistent styling with filter inputs */}
-          <div className="relative rounded-[8px] shadow-minimal bg-muted/50 has-[:focus-visible]:bg-background">
-            {/* Show spinner while searching content, otherwise show search icon */}
-            {isSearchingContent ? (
-              <Spinner className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground" />
-            ) : (
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange?.(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              onFocus={() => setIsSearchInputFocused(true)}
-              onBlur={() => setIsSearchInputFocused(false)}
-              placeholder="Search titles and content..."
-              className="w-full h-8 pl-8 pr-8 text-sm bg-transparent border-0 rounded-[8px] outline-none focus-visible:ring-0 focus-visible:outline-none placeholder:text-muted-foreground/50"
-            />
-            <button
-              onClick={onSearchClose}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 hover:bg-foreground/10 rounded"
-              title="Close search"
-            >
-              <X className="h-3.5 w-3.5 text-muted-foreground" />
-            </button>
-          </div>
-        </div>
+        <SessionSearchHeader
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          onSearchClose={onSearchClose}
+          onKeyDown={handleSearchKeyDown}
+          onFocus={() => setIsSearchInputFocused(true)}
+          onBlur={() => setIsSearchInputFocused(false)}
+          isSearching={isSearchingContent}
+          resultCount={searchFilteredItems.length}
+          inputRef={searchInputRef}
+        />
       )}
       {/* ScrollArea with mask-fade-top-short - shorter fade to avoid header overlap */}
       <ScrollArea className="flex-1 select-none mask-fade-top-short">
@@ -1226,11 +1172,7 @@ export function SessionList({
                     flatLabels={flatLabels}
                     labels={labels}
                     onLabelsChange={onLabelsChange}
-                    contentMatch={contentSearchResults.get(item.id)}
-                    chatMatchCount={session.selected === item.id ? chatMatchCount : undefined}
-                    chatMatchIndex={session.selected === item.id ? chatMatchIndex : undefined}
-                    onNavigatePrev={session.selected === item.id ? () => chatDisplayRef?.current?.goToPrevMatch() : undefined}
-                    onNavigateNext={session.selected === item.id ? () => chatDisplayRef?.current?.goToNextMatch() : undefined}
+                    chatMatchCount={contentSearchResults.get(item.id)?.matchCount}
                   />
                 )
               })}

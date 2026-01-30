@@ -106,6 +106,8 @@ export interface SessionConfig {
     /** Whether we're still waiting for compaction to complete */
     awaitingCompaction: boolean;
   };
+  /** When true, session is hidden from session list (e.g., mini edit sessions) */
+  hidden?: boolean;
 }
 
 /**
