@@ -585,6 +585,8 @@ export const IPC_CHANNELS = {
   MENU_NEW_WINDOW: 'menu:newWindow',
   MENU_OPEN_SETTINGS: 'menu:openSettings',
   MENU_KEYBOARD_SHORTCUTS: 'menu:keyboardShortcuts',
+  MENU_TOGGLE_FOCUS_MODE: 'menu:toggleFocusMode',
+  MENU_TOGGLE_SIDEBAR: 'menu:toggleSidebar',
   // Deep link navigation (main → renderer, for external craftagents:// URLs)
   DEEP_LINK_NAVIGATE: 'deeplink:navigate',
 

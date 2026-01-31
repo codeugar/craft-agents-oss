@@ -133,6 +133,16 @@ const api: ElectronAPI = {
     ipcRenderer.on(IPC_CHANNELS.MENU_KEYBOARD_SHORTCUTS, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_KEYBOARD_SHORTCUTS, handler)
   },
+  onMenuToggleFocusMode: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.MENU_TOGGLE_FOCUS_MODE, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_TOGGLE_FOCUS_MODE, handler)
+  },
+  onMenuToggleSidebar: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on(IPC_CHANNELS.MENU_TOGGLE_SIDEBAR, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_TOGGLE_SIDEBAR, handler)
+  },
 
   // Deep link navigation listener (for external craftagents:// URLs)
   onDeepLinkNavigate: (callback: (nav: import('../shared/types').DeepLinkNavigation) => void) => {
