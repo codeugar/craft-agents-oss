@@ -92,7 +92,6 @@ export { ADJECTIVES, NOUNS } from './word-lists.ts';
 export {
   validateSessionId,
   sanitizeSessionId,
-  isValidSessionId,
 } from './validation.ts';
 
 
