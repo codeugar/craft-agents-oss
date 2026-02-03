@@ -3,10 +3,9 @@ import { URL } from 'url';
 import { randomBytes, createHash } from 'crypto';
 import { openUrl } from '../utils/open-url.ts';
 import { generateCallbackPage } from './callback-page.ts';
-import { type OAuthSessionContext, buildOAuthDeeplinkUrl } from './types.ts';
 
 export interface OAuthConfig {
-  mcpUrl: string; // Full MCP URL including path (e.g., https://mcp.craft.do/my/mcp)
+  mcpBaseUrl: string; // e.g., http://localhost:3000/v1/links/abc123
 }
 
 export interface OAuthTokens {
@@ -43,23 +42,21 @@ export class CraftOAuth {
   private config: OAuthConfig;
   private server: Server | null = null;
   private callbacks: OAuthCallbacks;
-  private sessionContext?: OAuthSessionContext;
 
-  constructor(config: OAuthConfig, callbacks: OAuthCallbacks, sessionContext?: OAuthSessionContext) {
+  constructor(config: OAuthConfig, callbacks: OAuthCallbacks) {
     this.config = config;
     this.callbacks = callbacks;
-    this.sessionContext = sessionContext;
   }
 
   // Get OAuth server metadata using progressive discovery
   private async getServerMetadata(): Promise<OAuthMetadata> {
     const metadata = await discoverOAuthMetadata(
-      this.config.mcpUrl,
+      this.config.mcpBaseUrl,
       (msg) => this.callbacks.onStatus(msg)
     );
 
     if (!metadata) {
-      throw new Error(`No OAuth metadata found for ${this.config.mcpUrl}`);
+      throw new Error(`No OAuth metadata found for ${this.config.mcpBaseUrl}`);
     }
 
     return metadata;
@@ -183,7 +180,7 @@ export class CraftOAuth {
 
     try {
       const metadata = await discoverOAuthMetadata(
-        this.config.mcpUrl,
+        this.config.mcpBaseUrl,
         (msg) => this.callbacks.onStatus(msg)
       );
 
@@ -209,7 +206,7 @@ export class CraftOAuth {
     let metadata;
     try {
       metadata = await this.getServerMetadata();
-      this.callbacks.onStatus(`Found OAuth endpoints at ${this.config.mcpUrl}`);
+      this.callbacks.onStatus(`Found OAuth endpoints at ${this.config.mcpBaseUrl}`);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
       this.callbacks.onStatus(`Failed to get OAuth metadata: ${msg}`);
@@ -370,12 +367,11 @@ export class CraftOAuth {
             return;
           }
 
-          // Success! Include deeplink to return user to their chat session
+          // Success!
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(generateCallbackPage({
             title: 'Authorization Successful',
             isSuccess: true,
-            deeplinkUrl: buildOAuthDeeplinkUrl(this.sessionContext),
           }));
 
           clearTimeout(timeout);
@@ -491,115 +487,16 @@ interface ProtectedResourceMetadata {
   authorization_servers?: string[];
 }
 
-/** Default timeout for OAuth discovery requests (5 seconds) */
-const DISCOVERY_TIMEOUT_MS = 5000;
-
-/**
- * Check if a URL is safe to fetch (SSRF protection).
- * Rejects private IPs, localhost, and non-HTTPS URLs.
- */
-function isUrlSafeToFetch(urlString: string): { safe: boolean; reason?: string } {
-  let url: URL;
-  try {
-    url = new URL(urlString);
-  } catch {
-    return { safe: false, reason: 'Invalid URL' };
-  }
-
-  // Must be HTTPS (allow HTTP only for localhost in dev)
-  if (url.protocol !== 'https:') {
-    return { safe: false, reason: 'URL must use HTTPS' };
-  }
-
-  // Check hostname for private IP ranges
-  const hostname = url.hostname.toLowerCase();
-
-  // Block localhost variants
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    return { safe: false, reason: 'Localhost not allowed' };
-  }
-
-  // Block private IP ranges (basic check - covers most cases)
-  // This catches: 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 169.254.x.x
-  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (ipMatch) {
-    const a = Number(ipMatch[1]);
-    const b = Number(ipMatch[2]);
-    if (
-      a === 0 ||                             // 0.0.0.0/8
-      a === 10 ||                           // 10.0.0.0/8
-      a === 127 ||                          // 127.0.0.0/8
-      (a === 172 && b >= 16 && b <= 31) ||  // 172.16.0.0/12
-      (a === 192 && b === 168) ||           // 192.168.0.0/16
-      (a === 169 && b === 254)              // 169.254.0.0/16 (link-local/AWS metadata)
-    ) {
-      return { safe: false, reason: 'Private IP range not allowed' };
-    }
-  }
-
-  return { safe: true };
-}
-
-/**
- * Type guard for ProtectedResourceMetadata
- */
-function isProtectedResourceMetadata(data: unknown): data is ProtectedResourceMetadata {
-  if (typeof data !== 'object' || data === null) return false;
-  const obj = data as Record<string, unknown>;
-
-  // resource is required
-  if (typeof obj.resource !== 'string') return false;
-
-  // authorization_servers is optional but must be string array if present
-  if (obj.authorization_servers !== undefined) {
-    if (!Array.isArray(obj.authorization_servers)) return false;
-    if (!obj.authorization_servers.every(s => typeof s === 'string')) return false;
-  }
-
-  return true;
-}
-
-/**
- * Fetch with timeout using AbortController
- */
-async function fetchWithTimeout(
-  url: string,
-  options: RequestInit = {},
-  timeoutMs: number = DISCOVERY_TIMEOUT_MS
-): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    return response;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
- * Normalize URL by removing trailing slash
- */
-function normalizeUrl(url: string): string {
-  return url.endsWith('/') ? url.slice(0, -1) : url;
-}
-
 /**
  * Parse the resource_metadata URL from a WWW-Authenticate header.
  * Example header: Bearer error="invalid_token", resource_metadata="https://example.com/.well-known/oauth-protected-resource/path"
- * Supports both double and single quoted values per RFC 7235.
  */
 function parseResourceMetadataFromHeader(wwwAuthenticate: string | null): string | null {
   if (!wwwAuthenticate) return null;
 
-  // Look for resource_metadata="..." or resource_metadata='...' in the header
-  // Also handles optional spaces around the equals sign
-  const match = wwwAuthenticate.match(/resource_metadata\s*=\s*["']([^"']+)["']/);
-  return match?.[1] ?? null;
+  // Look for resource_metadata="..." in the header
+  const match = wwwAuthenticate.match(/resource_metadata="([^"]+)"/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -610,53 +507,26 @@ async function fetchProtectedResourceMetadata(
   metadataUrl: string,
   onLog?: (message: string) => void
 ): Promise<string | null> {
-  // SSRF protection: validate URL before fetching
-  const urlCheck = isUrlSafeToFetch(metadataUrl);
-  if (!urlCheck.safe) {
-    onLog?.(`  ✗ Unsafe URL rejected: ${urlCheck.reason}`);
-    return null;
-  }
-
   try {
-    onLog?.(`  Fetching protected resource metadata...`);
-    const response = await fetchWithTimeout(metadataUrl);
+    onLog?.(`  Fetching protected resource metadata: ${metadataUrl}`);
+    const response = await fetch(metadataUrl);
     if (!response.ok) {
-      onLog?.(`  ✗ ${response.status} at metadata endpoint`);
+      onLog?.(`  ✗ ${response.status} at ${metadataUrl}`);
       return null;
     }
 
-    const data: unknown = await response.json();
-
-    // Type guard validation
-    if (!isProtectedResourceMetadata(data)) {
-      onLog?.(`  ✗ Invalid protected resource metadata format`);
-      return null;
+    const data = await response.json() as ProtectedResourceMetadata;
+    if (data.authorization_servers && data.authorization_servers.length > 0) {
+      const authServer = data.authorization_servers[0];
+      onLog?.(`  ✓ Found authorization server: ${authServer}`);
+      return authServer;
     }
 
-    // Check for non-empty authorization_servers array
-    if (!data.authorization_servers?.length) {
-      onLog?.(`  ✗ No authorization_servers in protected resource metadata`);
-      return null;
-    }
-
-    const authServer = data.authorization_servers[0]!;
-
-    // Validate the auth server URL too
-    const authServerCheck = isUrlSafeToFetch(authServer);
-    if (!authServerCheck.safe) {
-      onLog?.(`  ✗ Unsafe authorization server URL rejected: ${authServerCheck.reason}`);
-      return null;
-    }
-
-    onLog?.(`  ✓ Found authorization server`);
-    return authServer;
+    onLog?.(`  ✗ No authorization_servers in protected resource metadata`);
+    return null;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      onLog?.(`  ✗ Request timeout fetching protected resource metadata`);
-    } else {
-      const msg = error instanceof Error ? error.message : String(error);
-      onLog?.(`  ✗ Error fetching protected resource metadata: ${msg}`);
-    }
+    const msg = error instanceof Error ? error.message : String(error);
+    onLog?.(`  ✗ Error fetching protected resource metadata: ${msg}`);
     return null;
   }
 }
@@ -676,21 +546,7 @@ async function discoverViaProtectedResource(
     onLog?.(`  Trying RFC 9728 protected resource discovery...`);
 
     // Make a request to the MCP endpoint to trigger 401
-    // Try HEAD first, fall back to GET if HEAD returns 405
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(mcpUrl, { method: 'HEAD' });
-      // Some servers don't support HEAD, fall back to GET
-      if (response.status === 405) {
-        onLog?.(`  HEAD not supported, trying GET...`);
-        response = await fetchWithTimeout(mcpUrl, { method: 'GET' });
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        onLog?.(`  ✗ Request timeout`);
-      }
-      return null;
-    }
+    const response = await fetch(mcpUrl, { method: 'HEAD' });
 
     // We expect a 401 with WWW-Authenticate header
     if (response.status !== 401) {
@@ -706,14 +562,7 @@ async function discoverViaProtectedResource(
       return null;
     }
 
-    // SSRF protection: validate the resource_metadata URL
-    const urlCheck = isUrlSafeToFetch(resourceMetadataUrl);
-    if (!urlCheck.safe) {
-      onLog?.(`  ✗ Unsafe resource_metadata URL rejected: ${urlCheck.reason}`);
-      return null;
-    }
-
-    onLog?.(`  Found resource_metadata hint`);
+    onLog?.(`  Found resource_metadata hint: ${resourceMetadataUrl}`);
 
     // Fetch protected resource metadata to get authorization server
     const authServerUrl = await fetchProtectedResourceMetadata(resourceMetadataUrl, onLog);
@@ -721,9 +570,8 @@ async function discoverViaProtectedResource(
       return null;
     }
 
-    // Fetch authorization server metadata (normalize URL to avoid double slashes)
-    const normalizedAuthServer = normalizeUrl(authServerUrl);
-    const authServerMetadataUrl = `${normalizedAuthServer}/.well-known/oauth-authorization-server`;
+    // Fetch authorization server metadata
+    const authServerMetadataUrl = `${authServerUrl}/.well-known/oauth-authorization-server`;
     return await tryFetchAuthServerMetadata(authServerMetadataUrl, onLog);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
