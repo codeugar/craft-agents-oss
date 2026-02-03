@@ -1,8 +1,8 @@
 import { cn } from "@/lib/utils"
-import { Check, CreditCard, Key } from "lucide-react"
+import { Check, CreditCard, Key, Cpu } from "lucide-react"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
 
-export type ApiSetupMethod = 'api_key' | 'claude_oauth'
+export type ApiSetupMethod = 'api_key' | 'claude_oauth' | 'codex_oauth'
 
 interface ApiSetupOption {
   id: ApiSetupMethod
@@ -10,6 +10,7 @@ interface ApiSetupOption {
   description: string
   icon: React.ReactNode
   recommended?: boolean
+  provider?: 'anthropic' | 'openai'
 }
 
 const API_SETUP_OPTIONS: ApiSetupOption[] = [
@@ -19,12 +20,21 @@ const API_SETUP_OPTIONS: ApiSetupOption[] = [
     description: 'Use your Claude subscription for unlimited access.',
     icon: <CreditCard className="size-4" />,
     recommended: true,
+    provider: 'anthropic',
   },
   {
     id: 'api_key',
-    name: 'API Key',
-    description: 'Anthropic, OpenRouter, Ollama, or compatible APIs.',
+    name: 'Anthropic API Key',
+    description: 'Pay-as-you-go via Anthropic, OpenRouter, or compatible APIs.',
     icon: <Key className="size-4" />,
+    provider: 'anthropic',
+  },
+  {
+    id: 'codex_oauth',
+    name: 'Codex · ChatGPT Plus/Pro',
+    description: 'Use your ChatGPT Plus or Pro subscription with Codex.',
+    icon: <Cpu className="size-4" />,
+    provider: 'openai',
   },
 ]
 

@@ -23,7 +23,9 @@ import type {
   LoadedSource,
   LoadedSkill,
   NewChatActionParams,
+  AuthType,
 } from '../../shared/types'
+import type { AgentCapabilities } from '@craft-agent/shared/agent/backend'
 import type { TodoState as TodoStateConfig } from '@/config/todo-states'
 import type { SessionOptions, SessionOptionUpdates } from '../hooks/useSessionOptions'
 import { defaultSessionOptions } from '../hooks/useSessionOptions'
@@ -39,6 +41,10 @@ export interface AppShellContextType {
   currentModel: string
   /** When set, a custom model overrides the Anthropic model selector (e.g. OpenRouter) */
   customModel: string | null
+  /** Current authentication type (determines which backend is active) */
+  authType: AuthType | null
+  /** Backend capabilities (models, thinking levels) - null until backend ready */
+  capabilities: AgentCapabilities | null
   pendingPermissions: Map<string, PermissionRequest[]>
   pendingCredentials: Map<string, CredentialRequest[]>
   /** Get draft input text for a session - reads from ref without triggering re-renders */

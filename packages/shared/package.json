@@ -48,9 +48,12 @@
     "./version": "./src/version/index.ts",
     "./branding": "./src/branding.ts",
     "./network-interceptor": "./src/network-interceptor.ts",
-    "./search": "./src/search/index.ts"
+    "./search": "./src/search/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./codex": "./src/codex/index.ts"
   },
   "dependencies": {
+    "@craft-agent/codex-types": "workspace:*",
     "@craft-agent/core": "workspace:*",
     "@isaacs/ttlcache": "^2.1.4",
     "@leeoniya/ufuzzy": "^1.0.19",

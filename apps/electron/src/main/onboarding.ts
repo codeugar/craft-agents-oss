@@ -115,6 +115,9 @@ export function registerOnboardingHandlers(sessionManager: SessionManager): void
           mainLog.info('[Onboarding:Main] OAuth token auth type selected')
           mainLog.info('[Onboarding:Main] Credentials should already be saved via native OAuth flow')
         }
+      } else if (config.authType === 'codex_oauth') {
+        // Codex OAuth reads from ~/.codex/auth.json - no credential to save
+        mainLog.info('[Onboarding:Main] Codex OAuth selected - no credential to save (reads from ~/.codex/auth.json)')
       } else {
         mainLog.info('[Onboarding:Main] Skipping credential save', {
           hasCredential: !!config.credential,
@@ -308,5 +311,20 @@ export function registerOnboardingHandlers(sessionManager: SessionManager): void
   ipcMain.handle(IPC_CHANNELS.ONBOARDING_CLEAR_CLAUDE_OAUTH_STATE, async () => {
     clearOAuthState()
     return { success: true }
+  })
+
+  // Check if Codex CLI auth is configured (~/.codex/auth.json)
+  ipcMain.handle(IPC_CHANNELS.ONBOARDING_CHECK_CODEX_AUTH, async () => {
+    try {
+      // Import dynamically to avoid pulling in at startup
+      const { hasCodexOAuth } = await import('@craft-agent/shared/codex')
+      const authenticated = hasCodexOAuth()
+      mainLog.info('[Onboarding] Codex auth check:', authenticated ? 'authenticated' : 'not authenticated')
+      return { authenticated }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      mainLog.error('[Onboarding] Codex auth check error:', message)
+      return { authenticated: false, error: message }
+    }
   })
 }

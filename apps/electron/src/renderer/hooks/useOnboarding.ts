@@ -73,6 +73,7 @@ function apiSetupMethodToAuthType(method: ApiSetupMethod): AuthType {
   switch (method) {
     case 'api_key': return 'api_key'
     case 'claude_oauth': return 'oauth_token'
+    case 'codex_oauth': return 'codex_oauth'
   }
 }
 
@@ -218,6 +219,30 @@ export function useOnboarding({
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
     try {
+      // Handle Codex OAuth (CLI-based) - check if auth file exists
+      if (state.apiSetupMethod === 'codex_oauth') {
+        const result = await window.electronAPI.checkCodexAuth()
+        if (!result.authenticated) {
+          setState(s => ({
+            ...s,
+            credentialStatus: 'error',
+            errorMessage: 'Codex not authenticated. Run `codex` in your terminal to sign in.',
+          }))
+          return
+        }
+
+        // Save config with codex_oauth auth type (no credential needed, reads from file)
+        await handleSaveConfig(undefined)
+
+        setState(s => ({
+          ...s,
+          credentialStatus: 'success',
+          step: 'complete',
+        }))
+        return
+      }
+
+      // Anthropic API key flow
       // API key is required for hosted providers (Anthropic, OpenRouter, etc.)
       // but optional for custom endpoints (Ollama, local models)
       if (!data.apiKey.trim() && !data.baseUrl) {
@@ -260,7 +285,7 @@ export function useOnboarding({
         errorMessage: error instanceof Error ? error.message : 'Validation failed',
       }))
     }
-  }, [handleSaveConfig])
+  }, [handleSaveConfig, state.apiSetupMethod])
 
   // Two-step OAuth flow state
   const [isWaitingForCode, setIsWaitingForCode] = useState(false)

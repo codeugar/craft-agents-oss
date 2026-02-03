@@ -175,6 +175,11 @@ const api: ElectronAPI = {
   exchangeClaudeCode: (code: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_EXCHANGE_CLAUDE_CODE, code),
   hasClaudeOAuthState: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_HAS_CLAUDE_OAUTH_STATE),
   clearClaudeOAuthState: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_CLEAR_CLAUDE_OAUTH_STATE),
+  // Codex OAuth (CLI-based, checks ~/.codex/auth.json)
+  checkCodexAuth: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_CHECK_CODEX_AUTH),
+
+  // Backend capabilities (models, thinking levels)
+  getBackendCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.GET_BACKEND_CAPABILITIES),
 
   // Settings - API Setup
   getApiSetup: () => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_API_SETUP),

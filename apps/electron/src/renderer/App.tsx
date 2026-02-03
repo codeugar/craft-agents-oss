@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge, AuthType, AgentCapabilities } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -183,6 +183,10 @@ export default function App() {
   // Custom model override from API connection settings (OpenRouter, Ollama, etc.)
   // When set, the Anthropic model selector is hidden and this model is shown instead.
   const [customModel, setCustomModel] = useState<string | null>(null)
+  // Current authentication type (determines which backend is active: Anthropic vs OpenAI)
+  const [authType, setAuthType] = useState<AuthType | null>(null)
+  // Backend capabilities (models, thinking levels) - adapts UI based on provider
+  const [capabilities, setCapabilities] = useState<AgentCapabilities | null>(null)
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
@@ -248,11 +252,16 @@ export default function App() {
 
   const DRAFT_SAVE_DEBOUNCE_MS = 500
 
-  // Re-fetch custom model from API setup config (called after API connection changes).
+  // Re-fetch custom model and auth type from API setup config (called after API connection changes).
+  // Also refreshes backend capabilities since they depend on the auth type.
   // Defined early so it can be passed to useOnboarding's onConfigSaved.
   const refreshCustomModel = useCallback(async () => {
     const billing = await window.electronAPI.getApiSetup()
     setCustomModel(billing.customModel || null)
+    setAuthType(billing.authType)
+    // Refresh capabilities in case backend changed
+    const caps = await window.electronAPI.getBackendCapabilities()
+    setCapabilities(caps)
   }, [])
 
   // Handle onboarding completion
@@ -392,9 +401,14 @@ export default function App() {
         setCurrentModel(storedModel)
       }
     })
-    // Load custom model override from API connection settings
+    // Load custom model override and auth type from API connection settings
     window.electronAPI.getApiSetup().then((billing) => {
       setCustomModel(billing.customModel || null)
+      setAuthType(billing.authType)
+    })
+    // Load backend capabilities (for capabilities-driven model/thinking selectors)
+    window.electronAPI.getBackendCapabilities().then((caps) => {
+      setCapabilities(caps)
     })
     // Load persisted input drafts into ref (no re-render needed)
     window.electronAPI.getAllDrafts().then((drafts) => {
@@ -1187,6 +1201,8 @@ export default function App() {
     activeWorkspaceId: windowWorkspaceId,
     currentModel,
     customModel,
+    authType,
+    capabilities,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1229,6 +1245,8 @@ export default function App() {
     windowWorkspaceId,
     currentModel,
     customModel,
+    authType,
+    capabilities,
     pendingPermissions,
     pendingCredentials,
     getDraft,

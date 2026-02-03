@@ -238,10 +238,29 @@ export function FreeFormInput({
   contextStatus,
   compactMode = false,
 }: FreeFormInputProps) {
-  // Read custom model and workspace info from context.
+  // Read custom model, capabilities, and workspace info from context.
   // Uses optional variant so playground (no provider) doesn't crash.
   const appShellCtx = useOptionalAppShellContext()
   const customModel = appShellCtx?.customModel ?? null
+  const capabilities = appShellCtx?.capabilities ?? null
+
+  // Compute available models from capabilities, falling back to hardcoded MODELS
+  // This allows the UI to adapt when switching between Claude and OpenAI backends
+  const availableModels = React.useMemo(() => {
+    if (capabilities?.models && capabilities.models.length > 0) {
+      return capabilities.models
+    }
+    return MODELS
+  }, [capabilities?.models])
+
+  // Compute available thinking levels from capabilities, falling back to hardcoded THINKING_LEVELS
+  const availableThinkingLevels = React.useMemo(() => {
+    if (capabilities?.thinkingLevels && capabilities.thinkingLevels.length > 0) {
+      return capabilities.thinkingLevels
+    }
+    return THINKING_LEVELS
+  }, [capabilities?.thinkingLevels])
+
   // Access todoStates and onTodoStateChange from context for the # menu state picker
   const todoStates = appShellCtx?.todoStates ?? []
   const onTodoStateChange = appShellCtx?.onTodoStateChange
@@ -1546,14 +1565,20 @@ export function FreeFormInput({
                   <Check className="h-4 w-4 text-foreground shrink-0 ml-3" />
                 </StyledDropdownMenuItem>
               ) : (
-                /* Standard Anthropic model options */
-                MODELS.map((model) => {
+                /* Model options from capabilities (adapts to Claude/OpenAI backends) */
+                availableModels.map((model) => {
                   const isSelected = currentModel === model.id
-                  const descriptions: Record<string, string> = {
+                  // Fallback descriptions for common models (when capabilities don't provide descriptions)
+                  const defaultDescriptions: Record<string, string> = {
                     'claude-opus-4-5-20251101': 'Most capable for complex work',
                     'claude-sonnet-4-5-20250929': 'Best for everyday tasks',
                     'claude-haiku-4-5-20251001': 'Fastest for quick answers',
+                    'claude-3-5-haiku-latest': 'Fastest for quick answers',
+                    'codex-1': 'OpenAI Codex model',
+                    'o3': 'OpenAI o3 model',
+                    'o4-mini': 'OpenAI o4-mini model',
                   }
+                  const description = ('description' in model ? model.description : null) || defaultDescriptions[model.id] || ''
                   return (
                     <StyledDropdownMenuItem
                       key={model.id}
@@ -1562,7 +1587,9 @@ export function FreeFormInput({
                     >
                       <div className="text-left">
                         <div className="font-medium text-sm">{model.name}</div>
-                        <div className="text-xs text-muted-foreground">{descriptions[model.id] || model.description}</div>
+                        {description && (
+                          <div className="text-xs text-muted-foreground">{description}</div>
+                        )}
                       </div>
                       {isSelected && (
                         <Check className="h-4 w-4 text-foreground shrink-0 ml-3" />
@@ -1572,8 +1599,9 @@ export function FreeFormInput({
                 })
               )}
 
-              {/* Thinking level selector — only shown for Claude models (extended thinking is Claude-specific) */}
-              {(!customModel || isClaudeModel(customModel)) && (
+              {/* Thinking level selector — only shown when thinking levels are available
+                  (Claude supports extended thinking, OpenAI backends may not) */}
+              {availableThinkingLevels.length > 0 && (!customModel || isClaudeModel(customModel)) && (
                 <>
                   <StyledDropdownMenuSeparator className="my-1" />
 
@@ -1585,7 +1613,7 @@ export function FreeFormInput({
                       </div>
                     </StyledDropdownMenuSubTrigger>
                     <StyledDropdownMenuSubContent className="min-w-[220px]">
-                      {THINKING_LEVELS.map(({ id, name, description }) => {
+                      {availableThinkingLevels.map(({ id, name, description }) => {
                         const isSelected = thinkingLevel === id
                         return (
                           <StyledDropdownMenuItem

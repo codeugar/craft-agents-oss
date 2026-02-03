@@ -105,3 +105,31 @@ export {
 
 // Export LLM tool - secondary Claude calls for subtasks
 export { createLLMTool, type LLMToolOptions } from './llm-tool.ts';
+
+// Export backend abstraction - unified interface for AI providers
+// This module enables switching between Claude (Anthropic) and OpenAI backends
+export {
+  // Factory
+  createBackend,
+  detectProvider,
+  getAvailableProviders,
+  // Backend implementations
+  ClaudeBackend,
+  // Types
+  type AgentBackend,
+  type AgentCapabilities,
+  type AgentProvider,
+  type BackendConfig,
+  type ModelDefinition,
+  type ThinkingLevelDefinition as BackendThinkingLevelDefinition,
+  type PermissionCallback,
+  type PlanCallback,
+  type AuthCallback,
+  type SourceChangeCallback,
+  type SourceActivationCallback,
+  type ChatOptions,
+  type RecoveryMessage,
+  type SdkMcpServerConfig as BackendMcpServerConfig,
+  // Enums
+  AbortReason as BackendAbortReason,
+} from './backend/index.ts';

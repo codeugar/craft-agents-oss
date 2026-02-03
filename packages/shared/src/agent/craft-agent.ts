@@ -3231,4 +3231,82 @@ Please continue the conversation naturally from where we left off.
     // Clear session
     this.sessionId = null;
   }
+
+  // ============================================================
+  // Capabilities (for AgentBackend interface compatibility)
+  // ============================================================
+
+  /**
+   * Get backend capabilities for UI adaptation.
+   * Returns information about available models, thinking levels, and features.
+   *
+   * This method enables UI components to adapt based on backend capabilities
+   * without hardcoding provider-specific logic.
+   */
+  capabilities(): {
+    provider: 'anthropic';
+    models: Array<{
+      id: string;
+      name: string;
+      provider: 'anthropic';
+      contextWindow: number;
+      supportsThinking?: boolean;
+      supportsVision?: boolean;
+      supportsTools?: boolean;
+    }>;
+    thinkingLevels: Array<{
+      id: ThinkingLevel;
+      name: string;
+      description: string;
+      budget?: number;
+    }>;
+    supportsPermissionCallbacks: boolean;
+    supportsSubagentParents: boolean;
+    maxContextTokens: number;
+    supportsMcp: boolean;
+    supportsResume: boolean;
+  } {
+    return {
+      provider: 'anthropic',
+      models: [
+        {
+          id: 'claude-sonnet-4-5-20250929',
+          name: 'Sonnet 4.5',
+          provider: 'anthropic',
+          contextWindow: 200_000,
+          supportsThinking: true,
+          supportsVision: true,
+          supportsTools: true,
+        },
+        {
+          id: 'claude-opus-4-5-20251101',
+          name: 'Opus 4.5',
+          provider: 'anthropic',
+          contextWindow: 200_000,
+          supportsThinking: true,
+          supportsVision: true,
+          supportsTools: true,
+        },
+        {
+          id: 'claude-3-5-haiku-latest',
+          name: 'Haiku 3.5',
+          provider: 'anthropic',
+          contextWindow: 200_000,
+          supportsThinking: false,
+          supportsVision: true,
+          supportsTools: true,
+        },
+      ],
+      thinkingLevels: [
+        { id: 'off', name: 'No Thinking', description: 'Fastest responses, no reasoning', budget: 0 },
+        { id: 'think', name: 'Thinking', description: 'Balanced speed and reasoning', budget: 10_000 },
+        { id: 'max', name: 'Max Thinking', description: 'Deepest reasoning for complex tasks', budget: 32_000 },
+      ],
+      supportsPermissionCallbacks: true,
+      supportsSubagentParents: true,
+      maxContextTokens: 200_000,
+      supportsMcp: true,
+      supportsResume: true,
+    };
+  }
 }

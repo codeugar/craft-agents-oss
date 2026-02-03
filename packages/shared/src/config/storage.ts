@@ -50,6 +50,10 @@ export interface StoredConfig {
   autoCapitalisation?: boolean;  // Auto-capitalize first letter when typing (default: true)
   sendMessageKey?: 'enter' | 'cmd-enter';  // Key to send messages (default: 'enter')
   spellCheck?: boolean;  // Enable spell check in input (default: false)
+  // Experimental: OpenAI backend variant for A/B testing
+  // 'responses' = Custom Responses API implementation (default)
+  // 'codex-sdk' = Forked @openai/codex-sdk with callback support
+  openaiVariant?: 'responses' | 'codex-sdk';
 }
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');

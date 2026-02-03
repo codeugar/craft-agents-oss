@@ -266,6 +266,8 @@ export class CredentialManager {
     }
   }
 
+  // Note: OpenAI API key methods removed - Codex now uses app-server OAuth (~/.codex/auth.json)
+
   /** Check if a credential is expired (with 5-minute buffer) */
   isExpired(credential: StoredCredential): boolean {
     if (!credential.expiresAt) return false;

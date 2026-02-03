@@ -4,6 +4,8 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { rm, readFile } from 'fs/promises'
 import { CraftAgent, type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest } from '@craft-agent/shared/agent'
+import { CodexBackend, detectProvider } from '@craft-agent/shared/agent/backend'
+import { getAuthType } from '@craft-agent/shared/config'
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
@@ -261,10 +263,13 @@ function resolveToolDisplayMeta(
   return undefined
 }
 
+/** Agent type - CraftAgent for Claude, CodexBackend for Codex */
+type AgentInstance = CraftAgent | CodexBackend
+
 interface ManagedSession {
   id: string
   workspace: Workspace
-  agent: CraftAgent | null  // Lazy-loaded - null until first message
+  agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
   lastMessageAt: number
@@ -1468,70 +1473,104 @@ export class SessionManager {
 
   /**
    * Get or create agent for a session (lazy loading)
+   * Creates CraftAgent for Claude or CodexBackend for Codex based on authType.
    */
-  private async getOrCreateAgent(managed: ManagedSession): Promise<CraftAgent> {
+  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
       const config = loadStoredConfig()
-      managed.agent = new CraftAgent({
-        workspace: managed.workspace,
-        // Session model takes priority, fallback to global config, then resolve with customModel override
-        model: resolveModelId(managed.model || config?.model || DEFAULT_MODEL),
-        // Initialize thinking level at construction to avoid race conditions
-        thinkingLevel: managed.thinkingLevel,
-        isHeadless: !AGENT_FLAGS.defaultModesEnabled,
-        // System prompt preset for mini agents (focused prompts for quick edits)
-        systemPromptPreset: managed.systemPromptPreset,
-        // Always pass session object - id is required for plan mode callbacks
-        // sdkSessionId is optional and used for conversation resumption
-        session: {
-          id: managed.id,
-          workspaceRootPath: managed.workspace.rootPath,
-          sdkSessionId: managed.sdkSessionId,
-          createdAt: managed.lastMessageAt,
-          lastUsedAt: managed.lastMessageAt,
-          workingDirectory: managed.workingDirectory,
-          sdkCwd: managed.sdkCwd,
-          model: managed.model,
-        },
-        // Critical: Immediately persist SDK session ID when captured to prevent loss on crash.
-        // Without this, the ID is only saved via debounced persistSession() which may not
-        // complete before app crash/quit, causing session resumption to fail.
-        onSdkSessionIdUpdate: (sdkSessionId: string) => {
-          managed.sdkSessionId = sdkSessionId
-          sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
-          // Persist immediately and flush - critical for resumption reliability
-          this.persistSession(managed)
-          sessionPersistenceQueue.flush(managed.id)
-        },
-        // Called when SDK session ID is cleared after failed resume (empty response recovery)
-        onSdkSessionIdCleared: () => {
-          managed.sdkSessionId = undefined
-          sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
-          // Persist immediately to prevent repeated resume attempts
-          this.persistSession(managed)
-          sessionPersistenceQueue.flush(managed.id)
-        },
-        // Called to get recent messages for recovery context when resume fails.
-        // Returns last 6 messages (3 exchanges) of user/assistant content.
-        getRecoveryMessages: () => {
-          const relevantMessages = managed.messages
-            .filter(m => m.role === 'user' || m.role === 'assistant')
-            .filter(m => !m.isIntermediate)  // Skip intermediate assistant messages
-            .slice(-6);  // Last 6 messages (3 exchanges)
+      const authType = getAuthType()
+      const provider = detectProvider(authType)
 
-          return relevantMessages.map(m => ({
-            type: m.role as 'user' | 'assistant',
-            content: m.content,
-          }));
-        },
-        // Debug mode - enables log file path injection into system prompt
-        debugMode: isDebugMode ? {
-          enabled: true,
-          logFilePath: getLogFilePath(),
-        } : undefined,
-      })
-      sessionLog.info(`Created agent for session ${managed.id}${managed.sdkSessionId ? ' (resuming)' : ''}`)
+      // Create the appropriate backend based on provider
+      if (provider === 'openai') {
+        // Codex backend - uses app-server protocol
+        managed.agent = new CodexBackend({
+          provider: 'openai',
+          authType: 'codex_oauth',
+          workspace: managed.workspace,
+          model: managed.model || 'codex',
+          thinkingLevel: managed.thinkingLevel,
+          session: {
+            id: managed.id,
+            workspaceRootPath: managed.workspace.rootPath,
+            sdkSessionId: managed.sdkSessionId,
+            createdAt: managed.lastMessageAt,
+            lastUsedAt: managed.lastMessageAt,
+            workingDirectory: managed.workingDirectory,
+            sdkCwd: managed.sdkCwd,
+            model: managed.model,
+          },
+          onSdkSessionIdUpdate: (sdkSessionId: string) => {
+            managed.sdkSessionId = sdkSessionId
+            sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
+            this.persistSession(managed)
+            sessionPersistenceQueue.flush(managed.id)
+          },
+        })
+        sessionLog.info(`Created Codex agent for session ${managed.id}${managed.sdkSessionId ? ' (resuming)' : ''}`)
+      } else {
+        // Claude backend - uses Anthropic SDK
+        managed.agent = new CraftAgent({
+          workspace: managed.workspace,
+          // Session model takes priority, fallback to global config, then resolve with customModel override
+          model: resolveModelId(managed.model || config?.model || DEFAULT_MODEL),
+          // Initialize thinking level at construction to avoid race conditions
+          thinkingLevel: managed.thinkingLevel,
+          isHeadless: !AGENT_FLAGS.defaultModesEnabled,
+          // System prompt preset for mini agents (focused prompts for quick edits)
+          systemPromptPreset: managed.systemPromptPreset,
+          // Always pass session object - id is required for plan mode callbacks
+          // sdkSessionId is optional and used for conversation resumption
+          session: {
+            id: managed.id,
+            workspaceRootPath: managed.workspace.rootPath,
+            sdkSessionId: managed.sdkSessionId,
+            createdAt: managed.lastMessageAt,
+            lastUsedAt: managed.lastMessageAt,
+            workingDirectory: managed.workingDirectory,
+            sdkCwd: managed.sdkCwd,
+            model: managed.model,
+          },
+          // Critical: Immediately persist SDK session ID when captured to prevent loss on crash.
+          // Without this, the ID is only saved via debounced persistSession() which may not
+          // complete before app crash/quit, causing session resumption to fail.
+          onSdkSessionIdUpdate: (sdkSessionId: string) => {
+            managed.sdkSessionId = sdkSessionId
+            sessionLog.info(`SDK session ID captured for ${managed.id}: ${sdkSessionId}`)
+            // Persist immediately and flush - critical for resumption reliability
+            this.persistSession(managed)
+            sessionPersistenceQueue.flush(managed.id)
+          },
+          // Called when SDK session ID is cleared after failed resume (empty response recovery)
+          onSdkSessionIdCleared: () => {
+            managed.sdkSessionId = undefined
+            sessionLog.info(`SDK session ID cleared for ${managed.id} (resume recovery)`)
+            // Persist immediately to prevent repeated resume attempts
+            this.persistSession(managed)
+            sessionPersistenceQueue.flush(managed.id)
+          },
+          // Called to get recent messages for recovery context when resume fails.
+          // Returns last 6 messages (3 exchanges) of user/assistant content.
+          getRecoveryMessages: () => {
+            const relevantMessages = managed.messages
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .filter(m => !m.isIntermediate)  // Skip intermediate assistant messages
+              .slice(-6);  // Last 6 messages (3 exchanges)
+
+            return relevantMessages.map(m => ({
+              type: m.role as 'user' | 'assistant',
+              content: m.content,
+            }));
+          },
+          // Debug mode - enables log file path injection into system prompt
+          debugMode: isDebugMode ? {
+            enabled: true,
+            logFilePath: getLogFilePath(),
+          } : undefined,
+        })
+        sessionLog.info(`Created Claude agent for session ${managed.id}${managed.sdkSessionId ? ' (resuming)' : ''}`)
+      }
 
       // Set up permission handler to forward requests to renderer
       managed.agent.onPermissionRequest = (request) => {
@@ -3752,6 +3791,24 @@ To view this task's output:
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)
     }
+  }
+
+  /**
+   * Get backend capabilities for UI adaptation.
+   * Returns capabilities from any active session's agent, or null if no agents exist.
+   *
+   * The capabilities include available models, thinking levels, and feature support.
+   * UI uses this to adapt model/thinking selectors based on the current backend.
+   */
+  getCapabilities(): ReturnType<CraftAgent['capabilities']> | ReturnType<CodexBackend['capabilities']> | null {
+    // Try to get capabilities from any session with an active agent
+    for (const [_, managed] of this.sessions) {
+      if (managed.agent) {
+        return managed.agent.capabilities()
+      }
+    }
+    // No active agents - return null (UI will fall back to hardcoded values)
+    return null
   }
 
   /**

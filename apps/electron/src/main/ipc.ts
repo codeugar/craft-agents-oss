@@ -16,6 +16,7 @@ import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/share
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
+import { hasCodexOAuth } from '@craft-agent/shared/codex/auth'
 import { MarkItDown } from 'markitdown-js'
 
 /**
@@ -1185,6 +1186,9 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       hasCredential = !!apiKey || !!anthropicBaseUrl
     } else if (authType === 'oauth_token') {
       hasCredential = !!(await manager.getClaudeOAuth())
+    } else if (authType === 'codex_oauth') {
+      // Codex uses ~/.codex/auth.json managed by the CLI
+      hasCredential = hasCodexOAuth()
     }
 
     return {
@@ -2321,6 +2325,16 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Register onboarding handlers
   registerOnboardingHandlers(sessionManager)
+
+  // ============================================================
+  // Backend Capabilities (for capabilities-driven UI)
+  // ============================================================
+
+  // Returns capabilities from the current backend (models, thinking levels, etc.)
+  // Returns null if no backend is active yet (UI falls back to hardcoded values)
+  ipcMain.handle(IPC_CHANNELS.GET_BACKEND_CAPABILITIES, async () => {
+    return sessionManager.getCapabilities()
+  })
 
   // ============================================================
   // Theme (app-level only)

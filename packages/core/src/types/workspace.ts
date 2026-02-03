@@ -19,7 +19,13 @@ export interface Workspace {
   mcpAuthType?: McpAuthType;
 }
 
-export type AuthType = 'api_key' | 'oauth_token';
+/**
+ * Authentication type for AI provider
+ * - api_key: Anthropic API key
+ * - oauth_token: Claude Max OAuth (Anthropic)
+ * - codex_oauth: ChatGPT Plus OAuth via Codex app-server (~/.codex/auth.json)
+ */
+export type AuthType = 'api_key' | 'oauth_token' | 'codex_oauth';
 
 /**
  * OAuth credentials from a fresh authentication flow.

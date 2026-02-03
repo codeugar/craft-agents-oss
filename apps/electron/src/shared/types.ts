@@ -50,6 +50,10 @@ export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
 import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/types';
 export type { LoadedSkill, SkillMetadata };
 
+// Import backend capabilities type
+import type { AgentCapabilities } from '@craft-agent/shared/agent/backend';
+export type { AgentCapabilities };
+
 
 /**
  * File/directory entry in a skill folder
@@ -612,6 +616,11 @@ export const IPC_CHANNELS = {
   ONBOARDING_EXCHANGE_CLAUDE_CODE: 'onboarding:exchangeClaudeCode',
   ONBOARDING_HAS_CLAUDE_OAUTH_STATE: 'onboarding:hasClaudeOAuthState',
   ONBOARDING_CLEAR_CLAUDE_OAUTH_STATE: 'onboarding:clearClaudeOAuthState',
+  // Codex OAuth (CLI-based, checks ~/.codex/auth.json)
+  ONBOARDING_CHECK_CODEX_AUTH: 'onboarding:checkCodexAuth',
+
+  // Backend capabilities (for capabilities-driven UI)
+  GET_BACKEND_CAPABILITIES: 'backend:getCapabilities',
 
   // Settings - API Setup
   SETTINGS_GET_API_SETUP: 'settings:getApiSetup',
@@ -884,6 +893,11 @@ export interface ElectronAPI {
   exchangeClaudeCode(code: string): Promise<ClaudeOAuthResult>
   hasClaudeOAuthState(): Promise<boolean>
   clearClaudeOAuthState(): Promise<{ success: boolean }>
+  // Codex OAuth (CLI-based, checks ~/.codex/auth.json)
+  checkCodexAuth(): Promise<{ authenticated: boolean; error?: string }>
+
+  // Backend capabilities (models, thinking levels) - returns null if backend not ready
+  getBackendCapabilities(): Promise<AgentCapabilities | null>
 
   // Settings - API Setup
   getApiSetup(): Promise<ApiSetupInfo>

@@ -157,7 +157,9 @@ export default function AppSettingsPage() {
                       ? 'Claude Pro/Max — using your Claude subscription'
                       : authType === 'api_key' && hasCredential
                         ? 'API Key — Anthropic, OpenRouter, or compatible API'
-                        : 'Not configured'
+                        : authType === 'codex_oauth' && hasCredential
+                          ? 'Codex · ChatGPT Plus/Pro — using your ChatGPT subscription'
+                          : 'Not configured'
                   }
                 >
                   <Button
