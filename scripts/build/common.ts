@@ -169,7 +169,7 @@ export function cleanBuildArtifacts(config: BuildConfig): void {
 
 /**
  * Install dependencies
- * On Windows, reinstalls esbuild with npm to avoid symlink issues
+ * On Windows, reinstalls esbuild in isolation to avoid symlink issues
  */
 export async function installDependencies(config: BuildConfig): Promise<void> {
   const { rootDir, platform } = config;
@@ -178,11 +178,46 @@ export async function installDependencies(config: BuildConfig): Promise<void> {
   await $`cd ${rootDir} && bun install`.quiet();
 
   if (platform === 'win32') {
-    // Reinstall esbuild with npm on Windows - Bun creates symlinks to .bun/
-    // that esbuild can't traverse ("Access is denied" errors)
-    // npm installs esbuild's platform binary without symlinks
+    // Bun creates symlinks to .bun/ that esbuild can't traverse on Windows
+    // ("Access is denied" errors). npm can't run in the main directory because
+    // it chokes on workspace:* dependencies. Solution: install esbuild in an
+    // isolated temp directory with minimal package.json, then copy it back.
     console.log('Reinstalling esbuild for Windows (avoiding symlink issues)...');
-    await $`cd ${rootDir} && npm install esbuild @esbuild/win32-x64 --no-save`.quiet();
+
+    const tempDir = join(rootDir, '.esbuild-temp');
+    mkdirSync(tempDir, { recursive: true });
+
+    // Create minimal package.json for isolated install
+    await Bun.write(
+      join(tempDir, 'package.json'),
+      JSON.stringify({
+        name: 'esbuild-temp',
+        private: true,
+        dependencies: {
+          esbuild: '*',
+          '@esbuild/win32-x64': '*',
+        },
+      })
+    );
+
+    // Install with npm in isolated directory
+    await $`cd ${tempDir} && npm install --no-package-lock`.quiet();
+
+    // Remove bun's symlinked versions
+    const mainEsbuild = join(rootDir, 'node_modules', 'esbuild');
+    const mainEsbuildPlatform = join(rootDir, 'node_modules', '@esbuild');
+
+    if (existsSync(mainEsbuild)) rmSync(mainEsbuild, { recursive: true, force: true });
+    if (existsSync(mainEsbuildPlatform)) rmSync(mainEsbuildPlatform, { recursive: true, force: true });
+
+    // Copy fresh non-symlinked versions
+    cpSync(join(tempDir, 'node_modules', 'esbuild'), mainEsbuild, { recursive: true });
+    cpSync(join(tempDir, 'node_modules', '@esbuild'), mainEsbuildPlatform, { recursive: true });
+
+    // Cleanup temp directory
+    rmSync(tempDir, { recursive: true, force: true });
+
+    console.log('  ✓ esbuild reinstalled without symlinks');
   }
 }
 
