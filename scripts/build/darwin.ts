@@ -31,7 +31,7 @@ export function verifyPackagedSDK(appPath: string): void {
     throw new Error(`CRITICAL: SDK cli.js too small (${stats.size} bytes, expected ~11MB)`);
   }
 
-  console.log(`  SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`  ✓ SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
 }
 
 /**

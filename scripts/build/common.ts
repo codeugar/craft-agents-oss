@@ -3,7 +3,7 @@
  */
 
 import { $ } from 'bun';
-import { existsSync, mkdirSync, rmSync, copyFileSync, cpSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, copyFileSync, cpSync, lstatSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 
@@ -188,6 +188,31 @@ export function copySDK(config: BuildConfig): void {
   }
   // Use dereference to follow symlinks and copy actual files (bun uses symlinked node_modules)
   cpSync(sdkSource, sdkDest, { recursive: true, dereference: true });
+}
+
+/**
+ * Verify SDK was copied correctly (not as symlinks, with expected size)
+ */
+export function verifySDKCopy(config: BuildConfig): void {
+  const { electronDir } = config;
+  const cliPath = join(electronDir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js');
+
+  if (!existsSync(cliPath)) {
+    throw new Error(`SDK verification failed: cli.js not found at ${cliPath}`);
+  }
+
+  const stats = lstatSync(cliPath);
+  if (stats.isSymbolicLink()) {
+    throw new Error('SDK verification failed: cli.js is a symlink (should be real file)');
+  }
+
+  const size = stats.size;
+  if (size < 1_000_000) {
+    // cli.js should be ~11MB
+    throw new Error(`SDK verification failed: cli.js too small (${size} bytes, expected ~11MB)`);
+  }
+
+  console.log(`  ✓ SDK copy verified: cli.js is ${(size / 1024 / 1024).toFixed(1)} MB`);
 }
 
 /**

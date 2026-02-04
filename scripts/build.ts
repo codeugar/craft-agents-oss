@@ -47,6 +47,7 @@ import {
   downloadCodex,
   verifyLocalCodex,
   copySDK,
+  verifySDKCopy,
   copyInterceptor,
   buildMcpServers,
   copyBridgeServer,
@@ -231,6 +232,7 @@ async function main(): Promise<void> {
 
     console.log('\n[6/10] Copying SDK...');
     copySDK(config);
+    verifySDKCopy(config);
 
     console.log('\n[7/10] Copying interceptor...');
     copyInterceptor(config);

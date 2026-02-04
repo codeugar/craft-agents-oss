@@ -33,7 +33,7 @@ export function verifyPackagedSDK(unpackedPath: string): void {
     throw new Error(`CRITICAL: SDK cli.js too small (${stats.size} bytes, expected ~11MB)`);
   }
 
-  console.log(`  SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`  ✓ SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
 }
 
 /**
@@ -257,7 +257,7 @@ export async function packageWindows(config: BuildConfig): Promise<string> {
     console.log('Verifying SDK in packaged app...');
     verifyPackagedSDK(unpackedPath);
   } else {
-    console.warn('  win-unpacked not found, skipping SDK verification');
+    console.warn('  ⚠️ win-unpacked not found, skipping SDK verification');
   }
 
   // Find the built installer
