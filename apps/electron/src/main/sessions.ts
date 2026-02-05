@@ -11,6 +11,7 @@ import {
   resolveSessionConnection,
   providerTypeToAgentProvider,
   connectionAuthTypeToBackendAuthType,
+  type LlmAuthType,
 } from '@craft-agent/shared/agent/backend'
 import {
   generateCodexConfig,
@@ -68,7 +69,7 @@ import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPa
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
-import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon } from '@craft-agent/shared/utils'
+import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon, type TitleGeneratorOptions } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
 import { DEFAULT_MODEL, getToolIconsDir } from '@craft-agent/shared/config'
@@ -226,12 +227,16 @@ async function writeFileSecure(targetPath: string, content: string, mode: number
  * @param sessionPath - Path to the session folder
  * @param sources - Enabled sources for this session
  * @param mcpServerConfigs - Pre-built MCP server configs (from buildServersFromSources)
+ * @param sessionId - Session ID for session-scoped tools
+ * @param workspaceRootPath - Workspace root path for session-scoped tools
  * @returns Path to the CODEX_HOME directory
  */
 async function setupCodexSessionConfig(
   sessionPath: string,
   sources: LoadedSource[],
-  mcpServerConfigs: Record<string, import('@craft-agent/shared/agent/backend').SdkMcpServerConfig>
+  mcpServerConfigs: Record<string, import('@craft-agent/shared/agent/backend').SdkMcpServerConfig>,
+  sessionId?: string,
+  workspaceRootPath?: string
 ): Promise<string> {
   const codexHome = join(sessionPath, '.codex-home')
 
@@ -247,6 +252,13 @@ async function setupCodexSessionConfig(
     : join(process.cwd(), 'packages', 'bridge-mcp-server', 'dist', 'index.js')
   const bridgeConfigPath = join(sessionPath, '.codex-home', 'bridge-config.json')
 
+  // Session MCP server path - provides session-scoped tools (SubmitPlan, config_validate, etc.)
+  // - Packaged: resources/session-mcp-server/index.js (copied during build)
+  // - Dev: packages/session-mcp-server/dist/index.js (built by electron:build:main)
+  const sessionServerPath = app.isPackaged
+    ? join(app.getAppPath(), 'resources', 'session-mcp-server', 'index.js')
+    : join(process.cwd(), 'packages', 'session-mcp-server', 'dist', 'index.js')
+
   // Check if bridge server exists - if not, log warning and skip bridge config
   // This enables graceful degradation when bridge isn't built (e.g., fresh clone)
   const bridgeExists = existsSync(bridgeServerPath)
@@ -254,8 +266,19 @@ async function setupCodexSessionConfig(
     sessionLog.warn(`Bridge MCP server not found at ${bridgeServerPath}. API sources will not be available in Codex sessions. Run 'bun run electron:build' to build it.`)
   }
 
+  // Check if session server exists
+  const sessionServerExists = existsSync(sessionServerPath)
+  if (!sessionServerExists) {
+    sessionLog.warn(`Session MCP server not found at ${sessionServerPath}. Session-scoped tools (SubmitPlan, etc.) will not be available in Codex sessions. Run 'bun run electron:build' to build it.`)
+  }
+
   // Extract workspaceId from first source (all sources in a session share the same workspace)
   const workspaceId = sources[0]?.workspaceId
+
+  // Plans folder path for SubmitPlan tool
+  const plansFolderPath = sessionId && workspaceRootPath
+    ? join(workspaceRootPath, 'sessions', sessionId, 'plans')
+    : undefined
 
   const configResult = generateCodexConfig({
     sources,
@@ -267,6 +290,12 @@ async function setupCodexSessionConfig(
     bridgeConfigPath: bridgeExists ? bridgeConfigPath : undefined,
     // workspaceId is required for the bridge's --workspace flag (credential lookups)
     workspaceId,
+    // Session server provides session-scoped tools (SubmitPlan, config_validate, etc.)
+    // Only include if the session server exists and we have the required session info
+    sessionServerPath: sessionServerExists && sessionId && workspaceRootPath ? sessionServerPath : undefined,
+    sessionId,
+    workspaceRootPath,
+    plansFolderPath,
   })
 
   // Write config.toml
@@ -695,7 +724,7 @@ export class SessionManager {
         for (const [_, managed] of this.sessions) {
           if (managed.workspace.rootPath === workspaceRootPath) {
             if (managed.isProcessing) {
-              sessionLog.info(`Skipping source reload for session ${managed.session.id} (processing)`)
+              sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
               continue
             }
             await this.reloadSessionSources(managed)
@@ -712,7 +741,7 @@ export class SessionManager {
         for (const [_, managed] of this.sessions) {
           if (managed.workspace.rootPath === workspaceRootPath) {
             if (managed.isProcessing) {
-              sessionLog.info(`Skipping source reload for session ${managed.session.id} (processing)`)
+              sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
               continue
             }
             await this.reloadSessionSources(managed)
@@ -896,7 +925,7 @@ export class SessionManager {
 
     // For Codex backend, regenerate config.toml and reconnect
     if (managed.agent instanceof CodexBackend) {
-      await setupCodexSessionConfig(sessionPath, enabledSources, mcpServers)
+      await setupCodexSessionConfig(sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath)
       // Reconnect to pick up the new config
       await managed.agent.reconnect()
       sessionLog.info(`Codex config regenerated and reconnected for session ${managed.id}`)
@@ -931,7 +960,10 @@ export class SessionManager {
 
       // Get the connection to use (explicit parameter or default)
       const slug = connectionSlug || getDefaultLlmConnection()
-      const connection = getLlmConnection(slug)
+      if (!slug) {
+        sessionLog.warn('No LLM connection slug available, using legacy auth')
+      }
+      const connection = slug ? getLlmConnection(slug) : null
 
       // Clear all auth env vars first to ensure clean state
       delete process.env.ANTHROPIC_API_KEY
@@ -968,8 +1000,9 @@ export class SessionManager {
         }
 
         // Set credentials based on connection auth type
+        // Note: slug is guaranteed non-null here since connection was found
         if (connection.authType === 'api_key') {
-          const apiKey = await manager.getLlmApiKey(slug)
+          const apiKey = await manager.getLlmApiKey(slug!)
           if (apiKey) {
             process.env.ANTHROPIC_API_KEY = apiKey
             sessionLog.info(`Set API key for connection: ${slug}`)
@@ -981,7 +1014,7 @@ export class SessionManager {
             sessionLog.error(`No API key found for connection: ${slug}`)
           }
         } else if (connection.authType === 'oauth') {
-          const llmOAuth = await manager.getLlmOAuth(slug)
+          const llmOAuth = await manager.getLlmOAuth(slug!)
           if (llmOAuth?.accessToken) {
             process.env.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken
             sessionLog.info(`Set OAuth token for connection: ${slug}`)
@@ -1915,7 +1948,7 @@ export class SessionManager {
 
       // Determine provider from connection or fall back to legacy authType
       let provider: 'anthropic' | 'openai'
-      let authType: 'api_key' | 'oauth_token' | undefined
+      let authType: LlmAuthType | undefined
 
       if (connection) {
         provider = providerTypeToAgentProvider(connection.providerType || 'anthropic')
@@ -1925,7 +1958,8 @@ export class SessionManager {
         // Fallback to legacy detection
         const legacyAuthType = getAuthType()
         provider = detectProvider(legacyAuthType)
-        authType = legacyAuthType as 'api_key' | 'oauth_token'
+        // Map legacy AuthType to LlmAuthType (oauth_token -> oauth, codex_* handled separately)
+        authType = legacyAuthType === 'oauth_token' ? 'oauth' : legacyAuthType === 'api_key' ? 'api_key' : undefined
         sessionLog.info(`Using legacy auth detection (${legacyAuthType}) for session ${managed.id}`)
       }
 
@@ -1944,11 +1978,11 @@ export class SessionManager {
           enabledSlugs.includes(s.config.slug) && s.config.enabled && s.config.isAuthenticated
         )
         const { mcpServers } = await buildServersFromSources(enabledSources, sessionPath)
-        const codexHome = await setupCodexSessionConfig(sessionPath, enabledSources, mcpServers)
+        const codexHome = await setupCodexSessionConfig(sessionPath, enabledSources, mcpServers, managed.id, managed.workspace.rootPath)
 
         managed.agent = new CodexBackend({
           provider: 'openai',
-          authType: authType || 'oauth_token',
+          authType: authType || 'oauth',
           workspace: managed.workspace,
           model: codexModel,
           thinkingLevel: managed.thinkingLevel,
@@ -2101,7 +2135,7 @@ export class SessionManager {
       }
 
       // Set up permission handler to forward requests to renderer
-      managed.agent.onPermissionRequest = (request) => {
+      managed.agent.onPermissionRequest = (request: { requestId: string; toolName: string; command?: string; description: string; type?: 'bash' | 'file_write' | 'mcp_mutation' | 'api_mutation' }) => {
         sessionLog.info(`Permission request for session ${managed.id}:`, request.command)
         this.sendEvent({
           type: 'permission_request',
@@ -2712,7 +2746,7 @@ export class SessionManager {
       // For Codex backend, regenerate config.toml and reconnect to pick up new sources
       // (Codex reads MCP config from file at startup, unlike Claude which has runtime injection)
       if (managed.agent instanceof CodexBackend) {
-        await setupCodexSessionConfig(sessionPath, sources, mcpServers)
+        await setupCodexSessionConfig(sessionPath, sources, mcpServers, managed.id, workspaceRootPath)
         await managed.agent.reconnect()
         sessionLog.info(`Codex config regenerated and reconnected for session ${managed.id}`)
       }
@@ -2859,6 +2893,7 @@ export class SessionManager {
   /**
    * Regenerate the session title based on recent messages.
    * Uses the last few user messages to capture what the session has evolved into.
+   * Automatically uses the same provider as the session (Claude or OpenAI).
    */
   async refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }> {
     sessionLog.info(`refreshTitle called for session ${sessionId}`)
@@ -2867,6 +2902,9 @@ export class SessionManager {
       sessionLog.warn(`refreshTitle: Session ${sessionId} not found`)
       return { success: false, error: 'Session not found' }
     }
+
+    // Ensure messages are loaded from disk (lazy loading support)
+    await this.ensureMessagesLoaded(managed)
 
     // Get recent user messages (last 3) for context
     const userMessages = managed.messages
@@ -2887,7 +2925,39 @@ export class SessionManager {
       .slice(-1)[0]
 
     const assistantResponse = lastAssistantMsg?.content ?? ''
-    sessionLog.info(`refreshTitle: Calling regenerateSessionTitle...`)
+
+    // Resolve provider and credentials based on session's LLM connection
+    // This ensures title generation uses the same provider as the session
+    let titleOptions: TitleGeneratorOptions | undefined
+    if (managed.llmConnection) {
+      const connection = getLlmConnection(managed.llmConnection)
+      if (connection?.providerType === 'openai') {
+        sessionLog.info(`refreshTitle: Using OpenAI provider for session ${sessionId}`)
+        const credentialManager = getCredentialManager()
+
+        // Get credentials based on connection auth type
+        let apiKey: string | undefined
+        let accessToken: string | undefined
+
+        if (connection.authType === 'api_key') {
+          apiKey = await credentialManager.getLlmApiKey(managed.llmConnection) ?? undefined
+        } else if (connection.authType === 'oauth') {
+          const oauth = await credentialManager.getLlmOAuth(managed.llmConnection)
+          accessToken = oauth?.accessToken
+        }
+
+        if (apiKey || accessToken) {
+          titleOptions = {
+            provider: 'openai',
+            credentials: { apiKey, accessToken },
+          }
+        } else {
+          sessionLog.warn(`refreshTitle: No OpenAI credentials found for connection ${managed.llmConnection}`)
+        }
+      }
+    }
+
+    sessionLog.info(`refreshTitle: Calling regenerateSessionTitle with provider=${titleOptions?.provider ?? 'anthropic'}...`)
 
     // Notify renderer that title regeneration has started (for shimmer effect)
     managed.isAsyncOperationOngoing = true
@@ -2896,7 +2966,7 @@ export class SessionManager {
     this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: true }, managed.workspace.id)
 
     try {
-      const title = await regenerateSessionTitle(userMessages, assistantResponse)
+      const title = await regenerateSessionTitle(userMessages, assistantResponse, titleOptions)
       sessionLog.info(`refreshTitle: regenerateSessionTitle returned: ${title ? `"${title}"` : 'null'}`)
       if (title) {
         managed.name = title
