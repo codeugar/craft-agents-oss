@@ -278,10 +278,14 @@ export class HookSystem implements HooksConfigProvider {
     const emittedEvents: AppEvent[] = [];
     const timestamp = Date.now();
 
+    // Session name for all events
+    const sessionName = next.sessionName;
+
     // Permission mode change
     if (prev.permissionMode !== next.permissionMode) {
       await this.eventBus.emit('PermissionModeChange', {
         sessionId,
+        sessionName,
         workspaceId: this.options.workspaceId,
         timestamp,
         oldMode: prev.permissionMode ?? '',
@@ -298,6 +302,7 @@ export class HookSystem implements HooksConfigProvider {
       if (!prevLabels.has(label)) {
         await this.eventBus.emit('LabelAdd', {
           sessionId,
+          sessionName,
           workspaceId: this.options.workspaceId,
           timestamp,
           label,
@@ -310,6 +315,7 @@ export class HookSystem implements HooksConfigProvider {
       if (!nextLabels.has(label)) {
         await this.eventBus.emit('LabelRemove', {
           sessionId,
+          sessionName,
           workspaceId: this.options.workspaceId,
           timestamp,
           label,
@@ -324,6 +330,7 @@ export class HookSystem implements HooksConfigProvider {
     if (wasFlagged !== isFlagged) {
       await this.eventBus.emit('FlagChange', {
         sessionId,
+        sessionName,
         workspaceId: this.options.workspaceId,
         timestamp,
         isFlagged,
@@ -335,6 +342,7 @@ export class HookSystem implements HooksConfigProvider {
     if (prev.todoState !== next.todoState) {
       await this.eventBus.emit('TodoStateChange', {
         sessionId,
+        sessionName,
         workspaceId: this.options.workspaceId,
         timestamp,
         oldState: prev.todoState ?? '',
@@ -419,7 +427,7 @@ export class HookSystem implements HooksConfigProvider {
       const matchers = this.config.hooks[event];
       if (!matchers?.length) continue;
 
-      sdkHooks[event] = matchers.map(matcher => ({
+      sdkHooks[event] = matchers.filter(m => m.enabled !== false).map(matcher => ({
         matcher: matcher.matcher,
         timeout: 30,
         hooks: [async (input: SdkHookInput, _toolUseId: string, options: { signal?: AbortSignal }) => {

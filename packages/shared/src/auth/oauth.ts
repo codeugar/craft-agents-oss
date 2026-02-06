@@ -3,6 +3,7 @@ import { URL } from 'url';
 import { randomBytes, createHash } from 'crypto';
 import { openUrl } from '../utils/open-url.ts';
 import { generateCallbackPage } from './callback-page.ts';
+import { type OAuthSessionContext, buildOAuthDeeplinkUrl } from './types.ts';
 
 export interface OAuthConfig {
   mcpUrl: string; // Full MCP URL including path (e.g., https://mcp.craft.do/my/mcp)
@@ -42,10 +43,12 @@ export class CraftOAuth {
   private config: OAuthConfig;
   private server: Server | null = null;
   private callbacks: OAuthCallbacks;
+  private sessionContext?: OAuthSessionContext;
 
-  constructor(config: OAuthConfig, callbacks: OAuthCallbacks) {
+  constructor(config: OAuthConfig, callbacks: OAuthCallbacks, sessionContext?: OAuthSessionContext) {
     this.config = config;
     this.callbacks = callbacks;
+    this.sessionContext = sessionContext;
   }
 
   // Get OAuth server metadata using progressive discovery
@@ -372,6 +375,7 @@ export class CraftOAuth {
           res.end(generateCallbackPage({
             title: 'Authorization Successful',
             isSuccess: true,
+            deeplinkUrl: buildOAuthDeeplinkUrl(this.sessionContext),
           }));
 
           clearTimeout(timeout);
@@ -429,6 +433,19 @@ export class CraftOAuth {
   // Cancel the OAuth flow
   cancel(): void {
     this.stopServer();
+  }
+}
+
+/**
+ * Extract the origin (scheme + host + port) from an MCP URL.
+ * This is the base URL for OAuth discovery per RFC 8414.
+ */
+export function getMcpBaseUrl(mcpUrl: string): string {
+  try {
+    return new URL(mcpUrl).origin;
+  } catch {
+    // If URL parsing fails, return as-is and let caller handle it
+    return mcpUrl;
   }
 }
 
@@ -505,10 +522,11 @@ function isUrlSafeToFetch(urlString: string): { safe: boolean; reason?: string }
   // Block private IP ranges (basic check - covers most cases)
   // This catches: 10.x.x.x, 172.16-31.x.x, 192.168.x.x, 169.254.x.x
   const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (ipMatch && ipMatch[1] && ipMatch[2]) {
+  if (ipMatch) {
     const a = Number(ipMatch[1]);
     const b = Number(ipMatch[2]);
     if (
+      a === 0 ||                             // 0.0.0.0/8
       a === 10 ||                           // 10.0.0.0/8
       a === 127 ||                          // 127.0.0.0/8
       (a === 172 && b >= 16 && b <= 31) ||  // 172.16.0.0/12
@@ -621,11 +639,7 @@ async function fetchProtectedResourceMetadata(
       return null;
     }
 
-    const authServer = data.authorization_servers[0];
-    if (!authServer) {
-      onLog?.(`  ✗ Empty authorization server in metadata`);
-      return null;
-    }
+    const authServer = data.authorization_servers[0]!;
 
     // Validate the auth server URL too
     const authServerCheck = isUrlSafeToFetch(authServer);

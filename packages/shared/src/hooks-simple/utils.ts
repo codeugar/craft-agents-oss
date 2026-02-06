@@ -111,6 +111,7 @@ export function getMatchValue(event: HookEvent, data: Record<string, unknown>): 
  * Check if a matcher matches the given event and data.
  */
 export function matcherMatches(matcher: HookMatcher, event: HookEvent, data: Record<string, unknown>): boolean {
+  if (matcher.enabled === false) return false;
   if (event === 'SchedulerTick') {
     // Use cron matching for SchedulerTick
     return !!matcher.cron && matchesCron(matcher.cron, matcher.timezone);
@@ -138,7 +139,16 @@ export function buildEnvFromPayload(event: HookEvent, payload: BaseEventPayload)
   };
 
   if (payload.sessionId) env.CRAFT_SESSION_ID = payload.sessionId;
+  if (payload.sessionName) env.CRAFT_SESSION_NAME = sanitizeForShell(payload.sessionName);
   if (payload.workspaceId) env.CRAFT_WORKSPACE_ID = payload.workspaceId;
+
+  // Add session metadata as JSON (includes sessionId, sessionName if available)
+  const sessionMetadata: Record<string, string> = {};
+  if (payload.sessionId) sessionMetadata.id = payload.sessionId;
+  if (payload.sessionName) sessionMetadata.name = payload.sessionName;
+  if (Object.keys(sessionMetadata).length > 0) {
+    env.CRAFT_SESSION_METADATA = JSON.stringify(sessionMetadata);
+  }
 
   // Add local time for scheduler events
   if (event === 'SchedulerTick') {
@@ -149,7 +159,7 @@ export function buildEnvFromPayload(event: HookEvent, payload: BaseEventPayload)
 
   // Add payload fields as individual env vars
   for (const [key, value] of Object.entries(payload)) {
-    if (key === 'sessionId' || key === 'workspaceId' || key === 'timestamp') continue;
+    if (key === 'sessionId' || key === 'sessionName' || key === 'workspaceId' || key === 'timestamp') continue;
     const envKey = `CRAFT_${toSnakeCase(key).toUpperCase()}`;
     // Sanitize user-controlled values
     const sanitized = typeof value === 'string' ? sanitizeForShell(value) : String(value);

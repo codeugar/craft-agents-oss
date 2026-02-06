@@ -12,7 +12,7 @@ import {
   detectCredentialMode,
   getEffectiveHeaderNames,
   type CredentialInputMode,
-} from '../session-scoped-tools.ts';
+} from '../../../../session-tools-core/src/source-helpers.ts';
 
 describe('detectCredentialMode', () => {
   test('should auto-upgrade to multi-header when source has headerNames', () => {

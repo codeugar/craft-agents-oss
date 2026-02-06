@@ -30,7 +30,7 @@ export function verifyPackagedSDK(unpackedPath: string): void {
     throw new Error(`CRITICAL: SDK cli.js too small (${stats.size} bytes, expected ~11MB)`);
   }
 
-  console.log(`  ✓ SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`  SDK bundled: cli.js is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
 }
 
 /**
@@ -50,7 +50,7 @@ export async function packageLinux(config: BuildConfig): Promise<string> {
     console.log('Verifying SDK in packaged app...');
     verifyPackagedSDK(unpackedPath);
   } else {
-    console.warn('  ⚠️ linux-unpacked not found, skipping SDK verification');
+    console.warn('  linux-unpacked not found, skipping SDK verification');
   }
 
   // electron-builder uses different arch names: x86_64 for x64, aarch64 for arm64

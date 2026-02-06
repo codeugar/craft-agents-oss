@@ -24,13 +24,13 @@ const IGNORED_CONSOLE_PATTERNS = [
 // Combines Electron IPC transport (sentryInit) with React error boundary support (sentryReactInit).
 // DSN and config are inherited from the main process init.
 //
-// captureConsoleIntegration promotes console.warn/error calls into Sentry events,
+// captureConsoleIntegration promotes console.error calls into Sentry events,
 // giving Sentry the same rich context visible in DevTools without needing sourcemaps.
 //
 // NOTE: Source map upload is intentionally disabled — see main/index.ts for details.
 sentryInit(
   {
-    integrations: [captureConsoleIntegration({ levels: ['warn', 'error'] })],
+    integrations: [captureConsoleIntegration({ levels: ['error'] })],
 
     beforeSend(event) {
       // Drop events matching known-harmless console patterns to avoid Sentry quota waste

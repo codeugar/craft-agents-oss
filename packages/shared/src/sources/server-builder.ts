@@ -196,10 +196,7 @@ export class SourceServerBuilder {
       return null;
     }
 
-    debug(`[SourceServerBuilder] Building API server for ${source.config.slug} (auth: ${authType}), credential type=${typeof credential}, isObject=${typeof credential === 'object'}`);
-    if (typeof credential === 'object' && credential !== null) {
-      debug(`[SourceServerBuilder] Credential keys: ${Object.keys(credential).join(', ')}`);
-    }
+    debug(`[SourceServerBuilder] Building API server for ${source.config.slug} (auth: ${authType})`);
     const config = this.buildApiConfig(source);
     return createApiServer(config, credential, sessionPath, summarizationModel);
   }

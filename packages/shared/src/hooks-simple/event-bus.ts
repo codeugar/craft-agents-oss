@@ -24,6 +24,7 @@ const log = createLogger('event-bus');
 /** Base event payload with common fields */
 export interface BaseEventPayload {
   sessionId?: string;
+  sessionName?: string;
   workspaceId: string;
   timestamp: number;
 }

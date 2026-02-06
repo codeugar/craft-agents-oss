@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
-import { useSetAtom, useStore, useAtomValue } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge } from '../shared/types'
+import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge, LlmConnectionWithStatus } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -16,7 +16,6 @@ import { SplashScreen } from '@/components/SplashScreen'
 import { TooltipProvider } from '@craft-agent/ui'
 import { FocusProvider } from '@/context/FocusContext'
 import { ModalProvider } from '@/context/ModalContext'
-import { useGlobalShortcuts } from '@/hooks/keyboard'
 import { useWindowCloseHandler } from '@/hooks/useWindowCloseHandler'
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { useNotifications } from '@/hooks/useNotifications'
@@ -26,7 +25,6 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { stripMarkdown } from './utils/text'
 import { initRendererPerf } from './lib/perf'
-import { DEFAULT_MODEL } from '@config/models'
 import {
   initializeSessionsAtom,
   addSessionAtom,
@@ -37,6 +35,7 @@ import {
   sessionIdsAtom,
   backgroundTasksAtomFamily,
   extractSessionMeta,
+  windowWorkspaceIdAtom,
   type SessionMeta,
 } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
@@ -53,6 +52,7 @@ import {
   JSONPreviewOverlay,
 } from '@craft-agent/ui'
 import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
+import { ActionRegistryProvider } from '@/actions'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'ready'
 
@@ -177,12 +177,30 @@ export default function App() {
   }, [updateSessionDirect])
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  // Window's workspace ID - fixed for this window (multi-window architecture)
-  const [windowWorkspaceId, setWindowWorkspaceId] = useState<string | null>(null)
-  const [currentModel, setCurrentModel] = useState(DEFAULT_MODEL)
-  // Custom model override from API connection settings (OpenRouter, Ollama, etc.)
-  // When set, the Anthropic model selector is hidden and this model is shown instead.
-  const [customModel, setCustomModel] = useState<string | null>(null)
+  // Window's workspace ID — shared atom so Root/ThemeProvider stays in sync on switch
+  const [windowWorkspaceId, setWindowWorkspaceId] = useAtom(windowWorkspaceIdAtom)
+
+  // Derive workspace slug from path for SDK skill qualification
+  const windowWorkspaceSlug = useMemo(() => {
+    if (!windowWorkspaceId) return null
+    const workspace = workspaces.find(w => w.id === windowWorkspaceId)
+    if (!workspace?.rootPath) return windowWorkspaceId // Fallback to ID
+    const pathParts = workspace.rootPath.split('/').filter(Boolean)
+    return pathParts[pathParts.length - 1] || windowWorkspaceId
+  }, [windowWorkspaceId, workspaces])
+
+  // LLM connections with authentication status (for provider selection)
+  const [llmConnections, setLlmConnections] = useState<LlmConnectionWithStatus[]>([])
+  // Workspace default LLM connection (for new sessions)
+  const [workspaceDefaultLlmConnection, setWorkspaceDefaultLlmConnection] = useState<string | undefined>()
+  // Global default LLM connection slug (from app config)
+  const [defaultLlmConnectionSlug, setDefaultLlmConnectionSlug] = useState<string | undefined>()
+
+  // Derive connection default model override from the default LLM connection
+  const defaultConnection = useMemo(() => {
+    return llmConnections.find(c => c.slug === defaultLlmConnectionSlug) ?? null
+  }, [llmConnections, defaultLlmConnectionSlug])
+
   const [menuNewChatTrigger, setMenuNewChatTrigger] = useState(0)
   // Permission requests per session (queue to handle multiple concurrent requests)
   const [pendingPermissions, setPendingPermissions] = useState<Map<string, PermissionRequest[]>>(new Map())
@@ -219,16 +237,6 @@ export default function App() {
   // Compute if app is fully ready (all data loaded)
   const isFullyReady = appState === 'ready' && sessionsLoaded
 
-  // Compute workspace slug from rootPath for SDK skill qualification
-  // SDK expects "workspaceSlug:skillSlug" format, NOT UUID
-  const windowWorkspaceSlug = useMemo(() => {
-    if (!windowWorkspaceId) return null
-    const workspace = workspaces.find(w => w.id === windowWorkspaceId)
-    if (!workspace?.rootPath) return windowWorkspaceId // Fallback to ID
-    const pathParts = workspace.rootPath.split('/').filter(Boolean)
-    return pathParts[pathParts.length - 1] || windowWorkspaceId
-  }, [windowWorkspaceId, workspaces])
-
   // Trigger splash exit animation when fully ready
   useEffect(() => {
     if (isFullyReady && !splashExiting) {
@@ -258,12 +266,21 @@ export default function App() {
 
   const DRAFT_SAVE_DEBOUNCE_MS = 500
 
-  // Re-fetch custom model from API setup config (called after API connection changes).
-  // Defined early so it can be passed to useOnboarding's onConfigSaved.
-  const refreshCustomModel = useCallback(async () => {
-    const billing = await window.electronAPI.getApiSetup()
-    setCustomModel(billing.customModel || null)
+  const resolveDefaultConnectionSlug = useCallback((connections: LlmConnectionWithStatus[]) => {
+    return connections.find(c => c.isDefault)?.slug ?? connections[0]?.slug
   }, [])
+
+  // Refresh LLM connections from config (called on workspace change and after connection updates)
+  const refreshLlmConnections = useCallback(async () => {
+    const connections = await window.electronAPI.listLlmConnectionsWithStatus()
+    setLlmConnections(connections)
+    setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
+    // Also refresh workspace default
+    if (windowWorkspaceId) {
+      const settings = await window.electronAPI.getWorkspaceSettings(windowWorkspaceId)
+      setWorkspaceDefaultLlmConnection(settings?.defaultLlmConnection)
+    }
+  }, [resolveDefaultConnectionSlug, windowWorkspaceId])
 
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(async () => {
@@ -283,10 +300,10 @@ export default function App() {
   }, [])
 
   // Onboarding hook — onConfigSaved fires immediately when billing is saved,
-  // ensuring customModel context updates before the wizard closes.
+  // ensuring connection state updates before the wizard closes.
   const onboarding = useOnboarding({
     onComplete: handleOnboardingComplete,
-    onConfigSaved: refreshCustomModel,
+    onConfigSaved: refreshLlmConnections,
     initialSetupNeeds: setupNeeds || undefined,
   })
 
@@ -344,12 +361,12 @@ export default function App() {
   }, [])
 
   // Session selection state
-  const [, setSession] = useSession()
+  const [sessionSelection, setSession] = useSession()
 
   // Notification system - shows native OS notifications and badge count
   const handleNavigateToSession = useCallback((sessionId: string) => {
-    // Navigate to the session via central routing (uses allChats filter)
-    navigate(routes.view.allChats(sessionId))
+    // Navigate to the session via central routing (uses allSessions filter)
+    navigate(routes.view.allSessions(sessionId))
   }, [])
 
   const { isWindowFocused, showSessionNotification } = useNotifications({
@@ -392,19 +409,14 @@ export default function App() {
       if (initialSessionId && windowWorkspaceId) {
         const session = loadedSessions.find(s => s.id === initialSessionId)
         if (session) {
-          navigate(routes.view.allChats(session.id))
+          navigate(routes.view.allSessions(session.id))
         }
       }
     })
-    // Load stored model preference
-    window.electronAPI.getModel().then((storedModel) => {
-      if (storedModel) {
-        setCurrentModel(storedModel)
-      }
-    })
-    // Load custom model override from API connection settings
-    window.electronAPI.getApiSetup().then((billing) => {
-      setCustomModel(billing.customModel || null)
+    // Load LLM connections with authentication status
+    window.electronAPI.listLlmConnectionsWithStatus().then((connections) => {
+      setLlmConnections(connections)
+      setDefaultLlmConnectionSlug(resolveDefaultConnectionSlug(connections))
     })
     // Load persisted input drafts into ref (no re-render needed)
     window.electronAPI.getAllDrafts().then((drafts) => {
@@ -414,7 +426,7 @@ export default function App() {
     })
     // Load app-level theme
     window.electronAPI.getAppTheme().then(setAppTheme)
-  }, [appState, initialSessionId, windowWorkspaceId, setSession, initializeSessions])
+  }, [appState, initialSessionId, windowWorkspaceId, setSession, initializeSessions, resolveDefaultConnectionSlug])
 
   // Subscribe to theme change events (live updates when theme.json changes)
   useEffect(() => {
@@ -425,6 +437,13 @@ export default function App() {
       cleanupApp()
     }
   }, [])
+
+  // Refresh LLM connections and workspace default when workspace changes
+  useEffect(() => {
+    if (windowWorkspaceId) {
+      refreshLlmConnections()
+    }
+  }, [windowWorkspaceId, refreshLlmConnections])
 
   // Listen for session events - uses centralized event processor for consistent state transitions
   //
@@ -457,7 +476,6 @@ export default function App() {
             break
           }
           case 'permission_mode_changed': {
-            console.log('[App] permission_mode_changed:', effect.sessionId, effect.permissionMode)
             setSessionOptions(prevOpts => {
               const next = new Map(prevOpts)
               const current = next.get(effect.sessionId) ?? defaultSessionOptions
@@ -467,7 +485,6 @@ export default function App() {
             break
           }
           case 'credential_request': {
-            console.log('[App] credential_request:', sessionId, effect.request.mode)
             setPendingCredentials(prevCreds => {
               const next = new Map(prevCreds)
               const existingQueue = next.get(sessionId) || []
@@ -478,7 +495,6 @@ export default function App() {
           }
           case 'auto_retry': {
             // A source was auto-activated, automatically re-send the original message
-            console.log('[App] auto_retry: Source', effect.sourceSlug, 'activated, re-sending message')
             // Add suffix to indicate the source was activated
             const messageWithSuffix = `${effect.originalMessage}\n\n[${effect.sourceSlug} activated]`
             // Use setTimeout to ensure the previous turn has fully completed
@@ -512,6 +528,9 @@ export default function App() {
     }
 
     const cleanup = window.electronAPI.onSessionEvent((event: SessionEvent) => {
+      // Some events don't have sessionId (e.g., sessions_reordered)
+      if (!('sessionId' in event)) return
+
       const sessionId = event.sessionId
       const workspaceId = windowWorkspaceId ?? ''
       const agentEvent = event as unknown as AgentEvent
@@ -564,9 +583,9 @@ export default function App() {
           // Show notification on complete (when window is not focused)
           // Skip hidden sessions (mini-agent sessions) - they shouldn't trigger notifications
           if (event.type === 'complete' && !updatedSession.hidden) {
-            // Get the last assistant message as preview
+            // Get the last assistant/plan message as preview
             const lastMessage = updatedSession.messages.findLast(
-              m => m.role === 'assistant' && !m.isIntermediate
+              m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
             )
             // Strip markdown so OS notifications display clean plain text
             const rawPreview = lastMessage?.content?.substring(0, 200) || undefined
@@ -682,6 +701,16 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'unflag' })
   }, [updateSessionById])
 
+  const handleArchiveSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isArchived: true, archivedAt: Date.now() })
+    window.electronAPI.sessionCommand(sessionId, { type: 'archive' })
+  }, [updateSessionById])
+
+  const handleUnarchiveSession = useCallback((sessionId: string) => {
+    updateSessionById(sessionId, { isArchived: false, archivedAt: undefined })
+    window.electronAPI.sessionCommand(sessionId, { type: 'unarchive' })
+  }, [updateSessionById])
+
   /**
    * Set which session user is actively viewing (for unread state machine).
    * Called when user navigates to a session. Main process uses this to determine
@@ -699,7 +728,7 @@ export default function App() {
     // Also update lastReadMessageId for backwards compatibility
     updateSessionById(sessionId, (s) => {
       const lastFinalId = s.messages.findLast(
-        m => m.role === 'assistant' && !m.isIntermediate
+        m => (m.role === 'assistant' || m.role === 'plan') && !m.isIntermediate
       )?.id
       return {
         hasUnread: false,
@@ -865,6 +894,7 @@ export default function App() {
         ultrathinkEnabled: isUltrathink,
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
+        optimisticMessageId: userMessage.id,
       })
 
       // Auto-disable ultrathink after sending (single-shot activation)
@@ -887,12 +917,6 @@ export default function App() {
       }))
     }
   }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
-
-  const handleModelChange = useCallback((model: string) => {
-    setCurrentModel(model)
-    // Persist to config so it's remembered across launches
-    window.electronAPI.setModel(model)
-  }, [])
 
   /**
    * Unified handler for all session option changes.
@@ -970,7 +994,7 @@ export default function App() {
     }
 
     // Navigate to the chat view - this sets both selectedSession and activeView
-    navigate(routes.view.allChats(session.id))
+    navigate(routes.view.allSessions(session.id))
 
     // Pre-fill input if provided (after a small delay to ensure component is mounted)
     if (params.input) {
@@ -979,10 +1003,7 @@ export default function App() {
   }, [windowWorkspaceId, handleCreateSession, handleInputChange])
 
   const handleRespondToPermission = useCallback(async (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
-    console.log('[App] handleRespondToPermission called:', { sessionId, requestId, allowed, alwaysAllow })
-
     const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
-    console.log('[App] handleRespondToPermission IPC result:', { success })
 
     if (success) {
       // Remove only the first permission from the queue (the one we just responded to)
@@ -990,7 +1011,6 @@ export default function App() {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
         const remainingQueue = queue.slice(1) // Remove first item
-        console.log('[App] handleRespondToPermission: clearing permission from queue, remaining:', remainingQueue.length)
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
@@ -1017,10 +1037,7 @@ export default function App() {
   }, [])
 
   const handleRespondToCredential = useCallback(async (sessionId: string, requestId: string, response: CredentialResponse) => {
-    console.log('[App] handleRespondToCredential called:', { sessionId, requestId, cancelled: response.cancelled })
-
     const success = await window.electronAPI.respondToCredential(sessionId, requestId, response)
-    console.log('[App] handleRespondToCredential IPC result:', { success })
 
     if (success) {
       // Remove only the first credential from the queue (the one we just responded to)
@@ -1028,7 +1045,6 @@ export default function App() {
         const next = new Map(prev)
         const queue = next.get(sessionId) || []
         const remainingQueue = queue.slice(1) // Remove first item
-        console.log('[App] handleRespondToCredential: clearing credential from queue, remaining:', remainingQueue.length)
         if (remainingQueue.length === 0) {
           next.delete(sessionId)
         } else {
@@ -1143,9 +1159,9 @@ export default function App() {
       // This prevents showing stale session data from the wrong workspace.
       setSession({ selected: null })
 
-      // 4. Navigate to allChats view without a specific session selected
+      // 4. Navigate to allSessions view without a specific session selected
       // This ensures the UI is in a clean state for the new workspace
-      navigate(routes.view.allChats())
+      navigate(routes.view.allSessions())
 
       // 5. Clear pending permissions/credentials (not relevant to new workspace)
       setPendingPermissions(new Map())
@@ -1197,8 +1213,9 @@ export default function App() {
     workspaces,
     activeWorkspaceId: windowWorkspaceId,
     activeWorkspaceSlug: windowWorkspaceSlug,
-    currentModel,
-    customModel,
+    llmConnections,
+    workspaceDefaultLlmConnection,
+    refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1209,6 +1226,8 @@ export default function App() {
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
     onUnflagSession: handleUnflagSession,
+    onArchiveSession: handleArchiveSession,
+    onUnarchiveSession: handleUnarchiveSession,
     onMarkSessionRead: handleMarkSessionRead,
     onMarkSessionUnread: handleMarkSessionUnread,
     onSetActiveViewingSession: handleSetActiveViewingSession,
@@ -1219,9 +1238,6 @@ export default function App() {
     // File/URL handlers
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
-    // Model
-    onModelChange: handleModelChange,
-    refreshCustomModel,
     // Workspace
     onSelectWorkspace: handleSelectWorkspace,
     onRefreshWorkspaces: handleRefreshWorkspaces,
@@ -1240,8 +1256,9 @@ export default function App() {
     workspaces,
     windowWorkspaceId,
     windowWorkspaceSlug,
-    currentModel,
-    customModel,
+    llmConnections,
+    workspaceDefaultLlmConnection,
+    refreshLlmConnections,
     pendingPermissions,
     pendingCredentials,
     getDraft,
@@ -1251,6 +1268,8 @@ export default function App() {
     handleRenameSession,
     handleFlagSession,
     handleUnflagSession,
+    handleArchiveSession,
+    handleUnarchiveSession,
     handleMarkSessionRead,
     handleMarkSessionUnread,
     handleSetActiveViewingSession,
@@ -1260,8 +1279,6 @@ export default function App() {
     handleRespondToCredential,
     handleOpenFile,
     handleOpenUrl,
-    handleModelChange,
-    refreshCustomModel,
     handleSelectWorkspace,
     handleRefreshWorkspaces,
     handleOpenSettings,
@@ -1350,9 +1367,10 @@ export default function App() {
   return (
     <PlatformProvider actions={platformActions}>
     <ShikiThemeProvider shikiTheme={shikiTheme}>
+      <ActionRegistryProvider>
       <FocusProvider>
         <ModalProvider>
-        <TooltipProvider>
+        <TooltipProvider delayDuration={0}>
         <NavigationProvider
           workspaceId={windowWorkspaceId}
           onCreateSession={handleCreateSession}
@@ -1401,6 +1419,7 @@ export default function App() {
         </TooltipProvider>
         </ModalProvider>
       </FocusProvider>
+      </ActionRegistryProvider>
     </ShikiThemeProvider>
     </PlatformProvider>
   )

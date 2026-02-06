@@ -77,6 +77,8 @@ export interface HookMatcher {
   permissionMode?: 'safe' | 'ask' | 'allow-all';
   /** Labels to apply to sessions created by prompt hooks */
   labels?: string[];
+  /** Whether this hook matcher is enabled. Defaults to true. Set to false to disable without removing. */
+  enabled?: boolean;
   hooks: HookDefinition[];
 }
 
@@ -213,4 +215,6 @@ export interface SessionMetadataSnapshot {
   labels?: string[];
   isFlagged?: boolean;
   todoState?: string;
+  /** Session name (user-defined or auto-generated) */
+  sessionName?: string;
 }

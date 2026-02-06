@@ -236,6 +236,7 @@ export async function emitHook(
 
   if (event === 'SchedulerTick') {
     for (const m of matchers) {
+      if (m.enabled === false) continue;
       const cronMatches = m.cron && matchesCron(m.cron, m.timezone);
       if (m.cron && cronMatches) {
         for (const hook of m.hooks) {
@@ -246,6 +247,7 @@ export async function emitHook(
   } else {
     const matchValue = getMatchValue(event, data);
     for (const m of matchers) {
+      if (m.enabled === false) continue;
       if (!m.matcher || new RegExp(m.matcher).test(matchValue)) {
         for (const hook of m.hooks) {
           matchingHooks.push({ hook, permissionMode: m.permissionMode, labels: m.labels });

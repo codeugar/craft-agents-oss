@@ -20,11 +20,6 @@ const DOCS_DIR = join(CONFIG_DIR, 'docs');
 // Track if docs have been initialized this session (prevents re-init on hot reload)
 let docsInitialized = false;
 
-// Lazily loaded bundled docs (populated on first initializeDocs call)
-// Must be lazy because getBundledAssetsDir() depends on setBundledAssetsRoot()
-// being called first, which happens in app.whenReady() — after module imports.
-let _bundledDocs: Record<string, string> | null = null;
-
 // Resolve the bundled docs assets directory using the shared asset resolver.
 // Handles all environments: dev (resources/docs), bundled (dist/resources/docs),
 // and packaged Electron (setBundledAssetsRoot sets the base path at startup).

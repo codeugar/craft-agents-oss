@@ -306,7 +306,6 @@ export async function startGoogleOAuth(
     // Start callback server with deeplink for returning to chat session
     const appType = options.appType || 'electron';
     const deeplinkUrl = buildOAuthDeeplinkUrl(options.sessionContext);
-    console.log('[Google OAuth] sessionContext:', options.sessionContext, '→ deeplinkUrl:', deeplinkUrl);
     const callbackServer = await createCallbackServer({ appType, deeplinkUrl });
     const redirectUri = `${callbackServer.url}/callback`;
 

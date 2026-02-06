@@ -34,6 +34,7 @@ export const HookMatcherSchema = z.object({
   timezone: z.string().optional(),
   permissionMode: z.enum(['safe', 'ask', 'allow-all']).optional(),
   labels: z.array(z.string()).optional(),
+  enabled: z.boolean().optional(),
   hooks: z.array(HookDefinitionSchema).min(1, 'At least one hook required'),
 });
 
