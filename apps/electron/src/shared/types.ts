@@ -296,6 +296,14 @@ export type TodoState = string
 // Helper type for TypeScript consumers
 export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' | 'cancelled'
 
+/** Metadata for sessions created by hooks (automation) */
+export interface HookTriggerMetadata {
+  type: 'hook'
+  event: string        // e.g., 'SchedulerTick'
+  cron?: string        // The cron expression that matched
+  timezone?: string    // Timezone used for matching
+}
+
 export interface Session {
   id: string
   workspaceId: string
@@ -370,12 +378,7 @@ export interface Session {
   /** When true, session is hidden from session list (e.g., mini edit sessions) */
   hidden?: boolean
   /** Metadata for sessions created by hooks (automation) */
-  triggeredBy?: {
-    type: 'hook'
-    event: string        // e.g., 'SchedulerTick'
-    cron?: string        // The cron expression that matched
-    timezone?: string    // Timezone used for matching
-  }
+  triggeredBy?: HookTriggerMetadata
 }
 
 /**
@@ -405,12 +408,7 @@ export interface CreateSessionOptions {
   /** Whether the session should be flagged */
   isFlagged?: boolean
   /** Metadata for sessions created by hooks (automation) */
-  triggeredBy?: {
-    type: 'hook'
-    event: string        // e.g., 'SchedulerTick'
-    cron?: string        // The cron expression that matched
-    timezone?: string    // Timezone used for matching
-  }
+  triggeredBy?: HookTriggerMetadata
 }
 
 // Events sent from main to renderer

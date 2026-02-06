@@ -347,10 +347,10 @@ export class ConfigWatcher {
    * Watch workspace directory recursively
    */
   private watchWorkspaceDir(): void {
-    console.log('[ConfigWatcher] Setting up workspace watcher for:', this.workspaceDir);
+    debug('[ConfigWatcher] Setting up workspace watcher for:', this.workspaceDir);
     try {
       const watcher = watch(this.workspaceDir, { recursive: true }, (eventType, filename) => {
-        console.log('[ConfigWatcher] RAW FILE EVENT:', eventType, filename);
+        debug('[ConfigWatcher] RAW FILE EVENT:', eventType, filename);
         if (!filename) return;
 
         // Normalize path separators
@@ -359,10 +359,8 @@ export class ConfigWatcher {
       });
 
       this.watchers.push(watcher);
-      console.log('[ConfigWatcher] Watcher created successfully');
       debug('[ConfigWatcher] Watching workspace recursively:', this.workspaceDir);
     } catch (error) {
-      console.error('[ConfigWatcher] Error watching workspace directory:', error);
       debug('[ConfigWatcher] Error watching workspace directory:', error);
     }
   }
@@ -381,7 +379,7 @@ export class ConfigWatcher {
 
     // Workspace-level hooks.json
     if (relativePath === 'hooks.json') {
-      console.log('[ConfigWatcher] hooks.json change detected');
+      debug('[ConfigWatcher] hooks.json change detected');
       this.debounce('hooks-config', () => this.handleHooksConfigChange());
       return;
     }
@@ -899,7 +897,6 @@ export class ConfigWatcher {
    */
   private handleHooksConfigChange(): void {
     debug('[ConfigWatcher] hooks.json changed:', this.workspaceId);
-    console.log('[ConfigWatcher] Calling onHooksConfigChange callback');
     this.callbacks.onHooksConfigChange?.(this.workspaceId);
   }
 

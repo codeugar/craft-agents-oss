@@ -43,7 +43,7 @@ import { getAuthState } from '@craft-agent/shared/auth'
 import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath, setExecutable } from '@craft-agent/shared/agent'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
-import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, IPC_CHANNELS, generateMessageId } from '../shared/types'
+import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, type HookTriggerMetadata, IPC_CHANNELS, generateMessageId } from '../shared/types'
 import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
@@ -428,12 +428,7 @@ interface ManagedSession {
   // Token refresh manager for this session (handles OAuth token refresh with rate limiting)
   tokenRefreshManager?: TokenRefreshManager
   // Metadata for sessions created by hooks (automation)
-  triggeredBy?: {
-    type: 'hook'
-    event: string
-    cron?: string
-    timezone?: string
-  }
+  triggeredBy?: HookTriggerMetadata
 }
 
 // Convert runtime Message to StoredMessage for persistence
@@ -1668,6 +1663,8 @@ export class SessionManager {
       const config = loadStoredConfig()
       managed.agent = new CraftAgent({
         workspace: managed.workspace,
+        // Pass the workspace-level HookSystem so agents reuse the shared instance
+        hookSystem: this.hookSystems.get(managed.workspace.rootPath),
         // Session model takes priority, fallback to global config, then resolve with customModel override
         model: resolveModelId(managed.model || config?.model || DEFAULT_MODEL),
         // Initialize thinking level at construction to avoid race conditions

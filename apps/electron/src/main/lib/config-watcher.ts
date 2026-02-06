@@ -320,10 +320,10 @@ export class ConfigWatcher {
    * Watch workspace directory recursively
    */
   private watchWorkspaceDir(): void {
-    console.log('[ConfigWatcher] Setting up workspace watcher for:', this.workspaceDir);
+    debug('[ConfigWatcher] Setting up workspace watcher for:', this.workspaceDir);
     try {
       const watcher = watch(this.workspaceDir, { recursive: true }, (eventType, filename) => {
-        console.log('[ConfigWatcher] RAW FILE EVENT:', eventType, filename);
+        debug('[ConfigWatcher] RAW FILE EVENT:', eventType, filename);
         if (!filename) return;
 
         // Normalize path separators
@@ -332,9 +332,9 @@ export class ConfigWatcher {
       });
 
       this.watchers.push(watcher);
-      console.log('[ConfigWatcher] Watcher created successfully for:', this.workspaceDir);
+      debug('[ConfigWatcher] Watcher created successfully for:', this.workspaceDir);
     } catch (error) {
-      console.error('[ConfigWatcher] Error watching workspace directory:', error);
+      debug('[ConfigWatcher] Error watching workspace directory:', error);
     }
   }
 
@@ -342,7 +342,7 @@ export class ConfigWatcher {
    * Handle a file change within the workspace directory
    */
   private handleWorkspaceFileChange(relativePath: string, eventType: string): void {
-    console.log('[ConfigWatcher] File change detected:', relativePath, eventType);
+    debug('[ConfigWatcher] File change detected:', relativePath, eventType);
     const parts = relativePath.split('/');
 
     // Workspace-level permissions.json
@@ -353,7 +353,7 @@ export class ConfigWatcher {
 
     // Workspace-level hooks.json
     if (relativePath === 'hooks.json') {
-      console.log('[ConfigWatcher] hooks.json change detected - triggering reload');
+      debug('[ConfigWatcher] hooks.json change detected - triggering reload');
       this.debounce('hooks-config', () => this.handleHooksConfigChange());
       return;
     }
