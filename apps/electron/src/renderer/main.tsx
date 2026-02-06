@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { init as sentryInit } from '@sentry/electron/renderer'
 import * as Sentry from '@sentry/react'
 import { captureConsoleIntegration } from '@sentry/react'
-import { Provider as JotaiProvider } from 'jotai'
+import { Provider as JotaiProvider, useAtomValue } from 'jotai'
 import App from './App'
 import { ThemeProvider } from './context/ThemeContext'
+import { windowWorkspaceIdAtom } from './atoms/sessions'
 import { Toaster } from '@/components/ui/sonner'
 import './index.css'
 
@@ -89,14 +90,8 @@ function CrashFallback() {
  * App.tsx handles window mode detection internally (main vs tab-content)
  */
 function Root() {
-  // Load workspace ID for theme context (workspace-specific theme overrides)
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
-
-  useEffect(() => {
-    window.electronAPI?.getWindowWorkspace?.().then((id) => {
-      setWorkspaceId(id)
-    })
-  }, [])
+  // Shared atom — written by App on init & workspace switch, read here for ThemeProvider
+  const workspaceId = useAtomValue(windowWorkspaceIdAtom)
 
   return (
     <ThemeProvider activeWorkspaceId={workspaceId}>

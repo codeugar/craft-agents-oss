@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
-import { useSetAtom, useStore, useAtomValue } from 'jotai'
+import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, TodoState, NewChatActionParams, ContentBadge, LlmConnectionWithStatus } from '../shared/types'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -35,6 +35,7 @@ import {
   sessionIdsAtom,
   backgroundTasksAtomFamily,
   extractSessionMeta,
+  windowWorkspaceIdAtom,
   type SessionMeta,
 } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
@@ -176,8 +177,8 @@ export default function App() {
   }, [updateSessionDirect])
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  // Window's workspace ID - fixed for this window (multi-window architecture)
-  const [windowWorkspaceId, setWindowWorkspaceId] = useState<string | null>(null)
+  // Window's workspace ID — shared atom so Root/ThemeProvider stays in sync on switch
+  const [windowWorkspaceId, setWindowWorkspaceId] = useAtom(windowWorkspaceIdAtom)
 
   // Derive workspace slug from path for SDK skill qualification
   const windowWorkspaceSlug = useMemo(() => {
