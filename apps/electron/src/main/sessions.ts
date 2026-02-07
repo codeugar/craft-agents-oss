@@ -65,7 +65,7 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, SERVER_BUILD_ERRORS } from '@craft-agent/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
-import { getAuthState } from '@craft-agent/shared/auth'
+import { getAuthState, getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
 import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath, setExecutable } from '@craft-agent/shared/agent'
 import { toolMetadataStore } from '@craft-agent/shared/network-interceptor'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
@@ -1033,12 +1033,24 @@ export class SessionManager {
             sessionLog.error(`No API key found for connection: ${slug}`)
           }
         } else if (connection.authType === 'oauth') {
-          const llmOAuth = await manager.getLlmOAuth(slug!)
-          if (llmOAuth?.accessToken) {
-            process.env.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken
-            sessionLog.info(`Set OAuth token for connection: ${slug}`)
+          // For Anthropic OAuth, use getValidClaudeOAuthToken which handles refresh
+          if (connection.providerType === 'anthropic' || slug === 'claude-max') {
+            const tokenResult = await getValidClaudeOAuthToken()
+            if (tokenResult.accessToken) {
+              process.env.CLAUDE_CODE_OAUTH_TOKEN = tokenResult.accessToken
+              sessionLog.info(`Set refreshed OAuth token for connection: ${slug}`)
+            } else {
+              sessionLog.error(`Failed to get valid OAuth token for connection: ${slug}`)
+            }
           } else {
-            sessionLog.error(`No OAuth token found for connection: ${slug}`)
+            // Other OAuth providers (fallback to direct read)
+            const llmOAuth = await manager.getLlmOAuth(slug!)
+            if (llmOAuth?.accessToken) {
+              process.env.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken
+              sessionLog.info(`Set OAuth token for connection: ${slug}`)
+            } else {
+              sessionLog.error(`No OAuth token found for connection: ${slug}`)
+            }
           }
         }
         // OpenAI OAuth doesn't use env vars - handled by CodexAgent via tryInjectStoredChatGptTokens

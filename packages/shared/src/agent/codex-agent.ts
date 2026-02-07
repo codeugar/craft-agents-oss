@@ -101,6 +101,27 @@ import type {
 // Models and DEFAULT_CODEX_MODEL imported from centralized registry (config/models.ts)
 
 /**
+ * Resolve abstract Codex model IDs to actual versioned model slugs.
+ *
+ * The model registry uses abstract IDs (e.g. 'codex', 'codex-mini') so the UI
+ * doesn't expose version numbers. This function maps them to the real model
+ * slugs that the Codex app-server expects, based on the connection's auth type.
+ *
+ * - OAuth (ChatGPT Plus/Pro) users get the latest models (gpt-5.3-codex)
+ * - API key users get the models available on the platform API (gpt-5.2-codex)
+ */
+function resolveCodexModelId(abstractId: string, authType?: string): string {
+  const isApiKey = authType === 'api_key' || authType === 'api_key_with_endpoint';
+  const modelMap: Record<string, { api: string; sub: string }> = {
+    'codex':      { api: 'gpt-5.2-codex',     sub: 'gpt-5.3-codex' },
+    'codex-mini': { api: 'gpt-5.1-codex-mini', sub: 'gpt-5.1-codex-mini' },
+  };
+  const entry = modelMap[abstractId];
+  if (!entry) return abstractId; // passthrough versioned or unknown IDs
+  return isApiKey ? entry.api : entry.sub;
+}
+
+/**
  * Map thinking levels to Codex reasoning effort.
  */
 const THINKING_TO_EFFORT: Record<ThinkingLevel, ReasoningEffort> = {
@@ -1478,8 +1499,12 @@ export class CodexAgent extends BaseAgent {
       // Start or resume thread
       const permissionMode = this.permissionManager.getPermissionMode();
 
-      // Mini agent model selection: use gpt-5.1-codex-mini for faster, cheaper responses
-      const model = miniConfig.enabled ? 'gpt-5.1-codex-mini' : this._model;
+      // Mini agent model selection: use codex-mini for faster, cheaper responses
+      // resolveCodexModelId maps abstract IDs to actual versioned slugs based on auth type
+      const model = resolveCodexModelId(
+        miniConfig.enabled ? 'codex-mini' : this._model,
+        this.config.authType,
+      );
       if (this.codexThreadId) {
         // Resume existing thread from disk
         try {
@@ -1487,8 +1512,8 @@ export class CodexAgent extends BaseAgent {
             threadId: this.codexThreadId,
             history: null,
             path: null,
-            // Mini agent: use gpt-5.1-codex-mini model for resumed threads too
-            model: miniConfig.enabled ? 'gpt-5.1-codex-mini' : null,
+            // Mini agent: use codex-mini model for resumed threads too
+            model: miniConfig.enabled ? resolveCodexModelId('codex-mini', this.config.authType) : null,
             modelProvider: null,
             cwd: null,
             approvalPolicy: null,

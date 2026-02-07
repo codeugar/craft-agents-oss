@@ -111,7 +111,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
   // Model IDs must match actual Codex CLI model identifiers
   // ----------------------------------------
   {
-    id: 'gpt-5.3-codex',
+    id: 'codex',
     name: 'Codex',
     shortName: 'Codex',
     description: 'OpenAI reasoning model',
@@ -124,7 +124,7 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     outputCostPerM: 8.0,
   },
   {
-    id: 'gpt-5.1-codex-mini',
+    id: 'codex-mini',
     name: 'Codex Mini',
     shortName: 'Codex Mini',
     description: 'Fast OpenAI model',
