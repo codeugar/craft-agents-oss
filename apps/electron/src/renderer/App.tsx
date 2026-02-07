@@ -1468,7 +1468,7 @@ export default function App() {
       <ActionRegistryProvider>
       <FocusProvider>
         <ModalProvider>
-        <TooltipProvider>
+        <TooltipProvider delayDuration={0}>
         <NavigationProvider
           workspaceId={windowWorkspaceId}
           onCreateSession={handleCreateSession}

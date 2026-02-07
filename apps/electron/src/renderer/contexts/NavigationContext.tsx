@@ -480,8 +480,6 @@ export function NavigationProvider({
         return
       }
 
-      console.log('[Navigation] Navigating:', parsed)
-
       // Handle actions (side effects)
       if (parsed.type === 'action') {
         await handleActionNavigation(parsed)
@@ -517,7 +515,6 @@ export function NavigationProvider({
       // Update our custom history stack (unless we're navigating via back/forward)
       if (isNavigatingHistoryRef.current) {
         isNavigatingHistoryRef.current = false
-        console.log('[Navigation] Skipping history push (navigating via back/forward)')
       } else {
         // Only push if route is different from current route (avoid duplicates)
         const currentRoute = historyStackRef.current[historyIndexRef.current]
@@ -527,16 +524,12 @@ export function NavigationProvider({
           historyStackRef.current = historyStackRef.current.slice(0, newIndex)
           historyStackRef.current.push(finalRoute)
           historyIndexRef.current = newIndex
-          console.log('[Navigation] Pushed to history:', finalRoute, 'index:', newIndex, 'stack length:', historyStackRef.current.length)
-        } else {
-          console.log('[Navigation] Skipping duplicate route:', finalRoute)
         }
       }
 
       // Update back/forward availability
       const newCanGoBack = historyIndexRef.current > 0
       const newCanGoForward = historyIndexRef.current < historyStackRef.current.length - 1
-      console.log('[Navigation] Updating canGoBack:', newCanGoBack, 'canGoForward:', newCanGoForward)
       setCanGoBack(newCanGoBack)
       setCanGoForward(newCanGoForward)
     },
@@ -579,10 +572,8 @@ export function NavigationProvider({
   // When encountering invalid entries (deleted sessions/sources), remove them from the stack
   const goBack = useCallback(() => {
     const currentIndex = historyIndexRef.current
-    console.log('[Navigation] goBack called, current index:', currentIndex, 'stack length:', historyStackRef.current.length)
 
     if (currentIndex <= 0) {
-      console.log('[Navigation] Already at beginning of history')
       return
     }
 
@@ -597,7 +588,6 @@ export function NavigationProvider({
         break
       }
       invalidIndices.push(i)
-      console.log('[Navigation] Marking invalid history entry for removal:', route)
     }
 
     // Remove invalid entries from stack (in reverse order to preserve indices)
@@ -605,7 +595,6 @@ export function NavigationProvider({
       for (const idx of invalidIndices.sort((a, b) => b - a)) {
         historyStackRef.current.splice(idx, 1)
       }
-      console.log('[Navigation] Removed', invalidIndices.length, 'invalid entries from history')
     }
 
     // Recalculate target index after removal
@@ -623,10 +612,8 @@ export function NavigationProvider({
       historyIndexRef.current = targetIndex
       isNavigatingHistoryRef.current = true
       const route = historyStackRef.current[targetIndex]
-      console.log('[Navigation] Going back to:', route, 'new index:', targetIndex)
       navigateRef.current?.(route)
     } else {
-      console.log('[Navigation] No valid history entry to go back to')
       // Update canGoBack/canGoForward since we may have removed entries
       setCanGoBack(historyIndexRef.current > 0)
       setCanGoForward(historyIndexRef.current < historyStackRef.current.length - 1)
@@ -638,10 +625,8 @@ export function NavigationProvider({
   const goForward = useCallback(() => {
     const currentIndex = historyIndexRef.current
     const stackLength = historyStackRef.current.length
-    console.log('[Navigation] goForward called, current index:', currentIndex, 'stack length:', stackLength)
 
     if (currentIndex >= stackLength - 1) {
-      console.log('[Navigation] Already at end of history')
       return
     }
 
@@ -656,7 +641,6 @@ export function NavigationProvider({
         break
       }
       invalidIndices.push(i)
-      console.log('[Navigation] Marking invalid history entry for removal:', route)
     }
 
     // Remove invalid entries from stack (in reverse order to preserve indices)
@@ -664,7 +648,6 @@ export function NavigationProvider({
       for (const idx of invalidIndices.sort((a, b) => b - a)) {
         historyStackRef.current.splice(idx, 1)
       }
-      console.log('[Navigation] Removed', invalidIndices.length, 'invalid entries from history')
     }
 
     // Recalculate target index after removal (invalid entries were between current and target)
@@ -676,10 +659,8 @@ export function NavigationProvider({
       historyIndexRef.current = targetIndex
       isNavigatingHistoryRef.current = true
       const route = historyStackRef.current[targetIndex]
-      console.log('[Navigation] Going forward to:', route, 'new index:', targetIndex)
       navigateRef.current?.(route)
     } else {
-      console.log('[Navigation] No valid history entry to go forward to')
       // Update canGoBack/canGoForward since we may have removed entries
       setCanGoBack(historyIndexRef.current > 0)
       setCanGoForward(historyIndexRef.current < historyStackRef.current.length - 1)
@@ -700,8 +681,6 @@ export function NavigationProvider({
 
     // Skip on initial mount (no previous workspace)
     if (previousWorkspaceIdRef.current !== null && previousWorkspaceIdRef.current !== workspaceId) {
-      console.log('[Navigation] Workspace changed, resetting navigation state')
-
       // Clear history stack - old routes belong to previous workspace
       historyStackRef.current = []
       historyIndexRef.current = -1
@@ -731,7 +710,6 @@ export function NavigationProvider({
       const initialRoute = (params.get('route') || 'allSessions') as Route
       historyStackRef.current = [initialRoute]
       historyIndexRef.current = 0
-      console.log('[Navigation] Initialized history stack with:', initialRoute)
     }
   }, [isReady, workspaceId])
 
@@ -765,8 +743,6 @@ export function NavigationProvider({
     const sidebarParam = params.get('sidebar') || undefined
 
     if (initialRoute) {
-      console.log('[Navigation] Restoring route from URL:', initialRoute, 'sidebar:', sidebarParam)
-
       // Parse with sidebar param
       const navState = parseRouteToNavigationState(initialRoute, sidebarParam)
       if (navState) {
