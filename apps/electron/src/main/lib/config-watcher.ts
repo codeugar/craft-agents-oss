@@ -362,6 +362,9 @@ export class ConfigWatcher {
         this.debounce(`source-guide:${slug}`, () => this.handleSourceGuideChange(slug));
       } else if (file === 'permissions.json') {
         this.debounce(`source-permissions:${slug}`, () => this.handleSourcePermissionsChange(slug));
+      } else if (file && /^icon\.(svg|png|jpg|jpeg)$/i.test(file)) {
+        // Icon file changes trigger a source change (to update icon)
+        this.debounce(`source-icon:${slug}`, () => this.handleSourceConfigChange(slug));
       }
       return;
     }
