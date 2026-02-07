@@ -149,3 +149,6 @@ export {
 
 // Export core utilities for shared agent logic
 export * from './core/index.ts';
+
+// Export PowerShell validator root setter (for Electron startup on Windows)
+export { setPowerShellValidatorRoot } from './powershell-validator.ts';

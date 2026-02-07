@@ -15,10 +15,30 @@
  */
 
 import { spawnSync } from 'child_process';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { debug } from '../utils/debug.ts';
 import type { CompiledBashPattern } from './mode-types.ts';
+
+// ============================================================
+// Module Root (set at Electron startup)
+// ============================================================
+
+/**
+ * Module-level root directory for the PowerShell parser script.
+ * Set once at Electron startup via setPowerShellValidatorRoot(__dirname).
+ */
+let _validatorRoot: string | undefined;
+
+/**
+ * Register the directory containing the PowerShell parser script.
+ * Call this once at app startup: setPowerShellValidatorRoot(join(__dirname, 'resources'))
+ *
+ * After this, the validator will look for powershell-parser.ps1 in this directory.
+ */
+export function setPowerShellValidatorRoot(dir: string): void {
+  _validatorRoot = dir;
+  debug('[PowerShellValidator] Root set to:', dir);
+}
 
 // ============================================================
 // Types
@@ -270,10 +290,15 @@ export function isPowerShellAvailable(): boolean {
 
 /**
  * Get the path to the PowerShell parser script.
+ * Requires setPowerShellValidatorRoot() to have been called at startup.
  */
 function getParserScriptPath(): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  return join(currentDir, 'powershell-parser.ps1');
+  if (!_validatorRoot) {
+    throw new Error(
+      'PowerShell validator root not set. Call setPowerShellValidatorRoot() at startup.'
+    );
+  }
+  return join(_validatorRoot, 'powershell-parser.ps1');
 }
 
 /**

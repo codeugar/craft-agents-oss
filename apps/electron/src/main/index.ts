@@ -77,6 +77,7 @@ import { ensureDefaultPermissions } from '@craft-agent/shared/agent/permissions-
 import { ensureToolIcons, ensurePresetThemes } from '@craft-agent/shared/config'
 import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
 import { setVendorRoot } from '@craft-agent/shared/codex'
+import { setPowerShellValidatorRoot } from '@craft-agent/shared/agent'
 import { handleDeepLink } from './deep-link'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
@@ -226,6 +227,10 @@ app.whenReady().then(async () => {
   // Register vendor root so the Codex binary resolver can find bundled binaries
   // (Codex binary resolves via resolveCodexBinary() which checks vendor/codex/)
   setVendorRoot(__dirname)
+
+  // Register PowerShell validator root so it can find the bundled parser script
+  // (Windows only: validates PowerShell commands in Explore mode using AST analysis)
+  setPowerShellValidatorRoot(join(__dirname, 'resources'))
 
   // Initialize bundled docs
   initializeDocs()
