@@ -1158,12 +1158,25 @@ export class CodexAgent extends BaseAgent {
   }
 
   /**
+   * Built-in MCP servers that are always available (not user sources).
+   * Must match the set in claude-agent.ts to keep behavior consistent.
+   */
+  private static readonly BUILT_IN_MCP_SERVERS = new Set([
+    'preferences',
+    'session',
+    'craft-agents-docs',
+  ]);
+
+  /**
    * Extract source slug from MCP server name.
-   * MCP servers in Craft Agent follow the pattern: source slug directly.
+   * Returns null for built-in MCP servers (session, preferences, etc.)
+   * so that PreToolUse doesn't try to activate them as user sources.
    */
   private extractSourceSlugFromMcpServer(mcpServer: string): string | null {
-    // In Craft Agent, the MCP server name IS the source slug
-    return mcpServer || null;
+    if (!mcpServer || CodexAgent.BUILT_IN_MCP_SERVERS.has(mcpServer)) {
+      return null;
+    }
+    return mcpServer;
   }
 
   /**
