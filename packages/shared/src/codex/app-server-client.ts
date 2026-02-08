@@ -790,8 +790,38 @@ export class AppServerClient extends EventEmitter {
     requestId: RequestId,
     decision: ToolCallPreExecuteDecision
   ): Promise<void> {
-    const response: ToolCallPreExecuteResponse = { decision };
+    // Transform TS discriminated union to serde externally-tagged format.
+    // Rust's serde default enum representation uses external tags:
+    //   Unit variant  → "allow"
+    //   Struct variant → { "block": { "reason": "..." } }
+    // TS uses { type: "block", reason: "..." } which doesn't match.
+    const serdeDecision = this.toSerdeExternallyTagged(decision);
+    const response = { decision: serdeDecision };
     await this.respond(requestId, response);
+  }
+
+  /**
+   * Convert a TS discriminated union (internally tagged with `type`) to
+   * serde's default externally-tagged JSON representation.
+   */
+  private toSerdeExternallyTagged(decision: ToolCallPreExecuteDecision): unknown {
+    switch (decision.type) {
+      case 'allow':
+        return 'allow';
+      case 'block':
+        return { block: { reason: decision.reason } };
+      case 'modify':
+        return { modify: { input: decision.input } };
+      case 'askUser':
+        return { askUser: { prompt: decision.prompt } };
+      case 'userResponse':
+        return {
+          userResponse: {
+            decision: decision.decision,
+            accept_for_session: decision.acceptForSession ?? false,
+          },
+        };
+    }
   }
 
   // ============================================================
