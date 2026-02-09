@@ -1785,6 +1785,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       workingDirectory: config?.defaults?.workingDirectory,
       localMcpEnabled: config?.localMcpServers?.enabled ?? true,
       defaultLlmConnection: config?.defaults?.defaultLlmConnection,
+      enabledSourceSlugs: config?.defaults?.enabledSourceSlugs ?? [],
     }
   })
 
@@ -2725,6 +2726,14 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { deleteSource } = await import('@craft-agent/shared/sources')
     deleteSource(workspace.rootPath, sourceSlug)
+
+    // Clean up stale slug from workspace default sources
+    const { loadWorkspaceConfig, saveWorkspaceConfig } = await import('@craft-agent/shared/workspaces')
+    const config = loadWorkspaceConfig(workspace.rootPath)
+    if (config?.defaults?.enabledSourceSlugs?.includes(sourceSlug)) {
+      config.defaults.enabledSourceSlugs = config.defaults.enabledSourceSlugs.filter(s => s !== sourceSlug)
+      saveWorkspaceConfig(workspace.rootPath, config)
+    }
   })
 
   // Start OAuth flow for a source

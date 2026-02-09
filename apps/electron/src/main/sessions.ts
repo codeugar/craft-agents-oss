@@ -1862,6 +1862,8 @@ export class SessionManager {
     const defaultThinkingLevel = wsConfig?.defaults?.thinkingLevel ?? globalDefaults.workspaceDefaults.thinkingLevel
     // Get default model from workspace config (used when no session-specific model is set)
     const defaultModel = wsConfig?.defaults?.model
+    // Get default enabled sources from workspace config
+    const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
 
     // Resolve working directory from options:
     // - 'user_default' or undefined: Use workspace's configured default
@@ -1936,6 +1938,7 @@ export class SessionManager {
       systemPromptPreset: options?.systemPromptPreset,
       messageQueue: [],
       backgroundShellCommands: new Map(),
+      enabledSourceSlugs: defaultEnabledSourceSlugs,
       messagesLoaded: true,  // New sessions don't need to load messages from disk
       hidden: options?.hidden,
       // Initialize TokenRefreshManager for this session (handles OAuth token refresh with rate limiting)
@@ -1958,6 +1961,7 @@ export class SessionManager {
       todoState: options?.todoState,
       labels: options?.labels,
       workingDirectory: resolvedWorkingDir,
+      enabledSourceSlugs: defaultEnabledSourceSlugs,
       model: managed.model,
       thinkingLevel: defaultThinkingLevel,
       sessionFolderPath: getSessionStoragePath(workspaceRootPath, storedSession.id),
