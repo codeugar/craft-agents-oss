@@ -71,9 +71,6 @@ interface UseOnboardingReturn {
 
   // Reset
   reset: () => void
-
-  // Edit mode - start wizard at credentials step for editing an API key connection
-  startEditMode: (method: ApiSetupMethod) => void
 }
 
 // Map ApiSetupMethod to LlmConnectionSetup for the new unified connection system
@@ -574,21 +571,6 @@ export function useOnboarding({
     })
   }, [initialStep, initialApiSetupMethod])
 
-  // Start edit mode - jump directly to credentials step with pre-selected method
-  // Used when editing an existing API key connection (skips provider selection)
-  const startEditMode = useCallback((method: ApiSetupMethod) => {
-    setState({
-      step: 'credentials',
-      loginStatus: 'idle',
-      credentialStatus: 'idle',
-      completionStatus: 'saving',
-      apiSetupMethod: method,
-      isExistingUser: true,
-      errorMessage: undefined,
-    })
-    setIsWaitingForCode(false)
-  }, [])
-
   return {
     state,
     handleContinue,
@@ -610,6 +592,5 @@ export function useOnboarding({
     handleFinish,
     handleCancel,
     reset,
-    startEditMode,
   }
 }

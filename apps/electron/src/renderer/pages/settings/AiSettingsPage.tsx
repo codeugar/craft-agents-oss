@@ -44,6 +44,7 @@ import {
 import { useOnboarding } from '@/hooks/useOnboarding'
 import { useWorkspaceIcon } from '@/hooks/useWorkspaceIcon'
 import { OnboardingWizard } from '@/components/onboarding'
+import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
 import { getModelsForProviderType } from '@config/llm-connections'
@@ -143,18 +144,16 @@ type ValidationState = 'idle' | 'validating' | 'success' | 'error'
 interface ConnectionRowProps {
   connection: LlmConnectionWithStatus
   isLastConnection: boolean
-  onEdit: () => void
+  onRenameClick: () => void
   onDelete: () => void
   onSetDefault: () => void
   onValidate: () => void
   onReauthenticate: () => void
   validationState: ValidationState
   validationError?: string
-  /** Hide edit option for OAuth connections (they can only re-authenticate) */
-  showEdit: boolean
 }
 
-function ConnectionRow({ connection, isLastConnection, onEdit, onDelete, onSetDefault, onValidate, onReauthenticate, validationState, validationError, showEdit }: ConnectionRowProps) {
+function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, validationState, validationError }: ConnectionRowProps) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   // Build description with provider, default indicator, auth status, and validation state
@@ -167,16 +166,37 @@ function ConnectionRow({ connection, isLastConnection, onEdit, onDelete, onSetDe
     const parts: string[] = []
 
     // Provider type (fall back to legacy 'type' field if providerType missing)
+    // OAuth = subscription (Pro/Plus/Max), API key = API
     const provider = connection.providerType || connection.type
+    const isSubscription = connection.authType === 'oauth'
     switch (provider) {
-      case 'anthropic': parts.push('Anthropic API'); break
+      case 'anthropic': parts.push(isSubscription ? 'Anthropic Subscription' : 'Anthropic API'); break
       case 'anthropic_compat': parts.push('Anthropic Compatible'); break
-      case 'openai': parts.push('OpenAI API'); break
+      case 'openai': parts.push(isSubscription ? 'OpenAI Subscription' : 'OpenAI API'); break
       case 'copilot': parts.push('GitHub Copilot'); break
       case 'openai_compat': parts.push('OpenAI Compatible'); break
       case 'bedrock': parts.push('AWS Bedrock'); break
       case 'vertex': parts.push('Google Vertex'); break
       default: parts.push(provider || 'Unknown')
+    }
+
+    // Base URL for API key connections (show custom endpoint or default for provider)
+    if (connection.authType !== 'oauth') {
+      let endpoint = connection.baseUrl
+      // Use default endpoints for standard providers if no custom baseUrl
+      if (!endpoint) {
+        if (provider === 'anthropic') endpoint = 'https://api.anthropic.com'
+        else if (provider === 'openai') endpoint = 'https://api.openai.com'
+      }
+      if (endpoint) {
+        // Extract hostname from URL for cleaner display
+        try {
+          const url = new URL(endpoint)
+          parts.push(url.host)
+        } catch {
+          parts.push(endpoint)
+        }
+      }
     }
 
     // Auth status
@@ -209,12 +229,10 @@ function ConnectionRow({ connection, isLastConnection, onEdit, onDelete, onSetDe
           </button>
         </DropdownMenuTrigger>
         <StyledDropdownMenuContent align="end">
-          {showEdit && (
-            <StyledDropdownMenuItem onClick={onEdit}>
-              <Pencil className="h-3.5 w-3.5" />
-              <span>Edit</span>
-            </StyledDropdownMenuItem>
-          )}
+          <StyledDropdownMenuItem onClick={onRenameClick}>
+            <Pencil className="h-3.5 w-3.5" />
+            <span>Rename</span>
+          </StyledDropdownMenuItem>
           {!connection.isDefault && (
             <StyledDropdownMenuItem onClick={onSetDefault}>
               <Star className="h-3.5 w-3.5" />
@@ -469,6 +487,11 @@ export default function AiSettingsPage() {
   // Credential health state (for startup warning banner)
   const [credentialHealthIssues, setCredentialHealthIssues] = useState<CredentialHealthIssue[]>([])
 
+  // Rename dialog state
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false)
+  const [renamingConnection, setRenamingConnection] = useState<{ slug: string; name: string } | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
   // Load workspaces, default settings, and credential health
   useEffect(() => {
     const load = async () => {
@@ -543,15 +566,40 @@ export default function AiSettingsPage() {
   }, [llmConnections, openApiSetup])
 
   // Connection action handlers
-  const handleEditConnection = useCallback((connection: LlmConnectionWithStatus) => {
-    // Determine the API setup method based on provider type
-    // Note: This should only be called for non-OAuth connections (API key)
-    const method = connection.providerType === 'openai' ? 'openai_api_key'
-                 : 'anthropic_api_key' // Default to Anthropic for other types
+  const handleRenameClick = useCallback((connection: LlmConnectionWithStatus) => {
+    setRenamingConnection({ slug: connection.slug, name: connection.name })
+    setRenameValue(connection.name)
+    // Defer dialog open to next frame to let dropdown fully unmount first
+    requestAnimationFrame(() => {
+      setRenameDialogOpen(true)
+    })
+  }, [])
 
-    openApiSetup(connection.slug)
-    apiSetupOnboarding.startEditMode(method)
-  }, [openApiSetup, apiSetupOnboarding])
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renamingConnection || !window.electronAPI) return
+    const trimmedName = renameValue.trim()
+    if (!trimmedName || trimmedName === renamingConnection.name) {
+      setRenameDialogOpen(false)
+      return
+    }
+    try {
+      // Get the full connection, update name, and save
+      const connection = await window.electronAPI.getLlmConnection(renamingConnection.slug)
+      if (connection) {
+        const result = await window.electronAPI.saveLlmConnection({ ...connection, name: trimmedName })
+        if (result.success) {
+          refreshLlmConnections?.()
+        } else {
+          console.error('Failed to rename connection:', result.error)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to rename connection:', error)
+    }
+    setRenameDialogOpen(false)
+    setRenamingConnection(null)
+    setRenameValue('')
+  }, [renamingConnection, renameValue, refreshLlmConnections])
 
   const handleReauthenticateConnection = useCallback((connection: LlmConnectionWithStatus) => {
     openApiSetup(connection.slug)
@@ -749,14 +797,13 @@ export default function AiSettingsPage() {
                         key={conn.slug}
                         connection={conn}
                         isLastConnection={false}
-                        onEdit={() => handleEditConnection(conn)}
+                        onRenameClick={() => handleRenameClick(conn)}
                         onDelete={() => handleDeleteConnection(conn.slug)}
                         onSetDefault={() => handleSetDefaultConnection(conn.slug)}
                         onValidate={() => handleValidateConnection(conn.slug)}
                         onReauthenticate={() => handleReauthenticateConnection(conn)}
                         validationState={validationStates[conn.slug]?.state || 'idle'}
                         validationError={validationStates[conn.slug]?.error}
-                        showEdit={conn.authType !== 'oauth'}
                       />
                     ))
                   )}
@@ -804,6 +851,17 @@ export default function AiSettingsPage() {
                   </button>
                 </div>
               </FullscreenOverlayBase>
+
+              {/* Rename Connection Dialog */}
+              <RenameDialog
+                open={renameDialogOpen}
+                onOpenChange={setRenameDialogOpen}
+                title="Rename Connection"
+                value={renameValue}
+                onValueChange={setRenameValue}
+                onSubmit={handleRenameSubmit}
+                placeholder="Enter connection name..."
+              />
             </div>
           </div>
         </ScrollArea>

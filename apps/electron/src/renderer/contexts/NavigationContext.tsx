@@ -60,6 +60,7 @@ import {
   isSkillsNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
+import { isValidSettingsSubpage, type SettingsSubpage } from '../../shared/settings-registry'
 import { sessionMetaMapAtom, updateSessionMetaAtom, type SessionMeta } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
@@ -524,8 +525,23 @@ export function NavigationProvider({
       // Parse route to unified NavigationState (with sidebar param from current URL)
       const urlParams = new URLSearchParams(window.location.search)
       const sidebarParam = urlParams.get('sidebar') || undefined
-      const newNavState = parseRouteToNavigationState(route, sidebarParam)
+      let newNavState = parseRouteToNavigationState(route, sidebarParam)
       let finalRoute = route
+
+      // Settings subpage persistence: restore/save last viewed subpage
+      if (newNavState && isSettingsNavigation(newNavState)) {
+        const isBareSettingsRoute = route === 'settings'
+        if (isBareSettingsRoute) {
+          // Restore last subpage from localStorage
+          const savedSubpage = storage.get<string>(storage.KEYS.lastSettingsSubpage, 'app')
+          if (isValidSettingsSubpage(savedSubpage) && savedSubpage !== 'app') {
+            newNavState = { ...newNavState, subpage: savedSubpage as SettingsSubpage }
+          }
+        } else {
+          // Save the current subpage for future restoration
+          storage.set(storage.KEYS.lastSettingsSubpage, newNavState.subpage)
+        }
+      }
 
       if (newNavState) {
         // Apply navigation state (may auto-select first item)

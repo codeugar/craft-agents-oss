@@ -47,6 +47,9 @@ export const KEYS = {
 
   // Last selected session (workspace-scoped via suffix)
   lastSelectedSessionId: 'last-selected-session-id',
+
+  // Settings navigation
+  lastSettingsSubpage: 'last-settings-subpage',
 } as const
 
 export type StorageKey = typeof KEYS[keyof typeof KEYS]
