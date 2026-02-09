@@ -73,6 +73,7 @@ import { loadWorkspaceSkills } from '../skills/storage.ts';
 
 // Path utilities for cross-platform normalization
 import { join, resolve } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 
 // System prompt for Craft Agent context
 import { getSystemPrompt } from '../prompts/system.ts';
@@ -1807,7 +1808,8 @@ export class CodexAgent extends BaseAgent {
       const input = this.buildUserInput(message, attachments);
 
       // Start turn
-      this.debug(`Starting turn with input: ${message.slice(0, 100)}...`);
+      const inputSummary = input.map(i => i.type === 'skill' ? `skill:${(i as any).name}` : i.type === 'text' ? `text(${(i as any).text?.length ?? 0} chars)` : i.type).join(', ');
+      this.debug(`Starting turn with ${input.length} input items: [${inputSummary}]`);
       await client.turnStart({
         threadId: this.codexThreadId!,
         input,
@@ -2016,20 +2018,36 @@ export class CodexAgent extends BaseAgent {
     const workspaceRoot = this.config.workspace.rootPath ?? this.workingDirectory;
     const skills = loadWorkspaceSkills(workspaceRoot);
     const skillSlugs = skills.map(s => s.slug);
+    this.debug(`[buildUserInput] Available skills: ${skillSlugs.join(', ')}`);
     const parsed = parseMentions(message, skillSlugs, []);
+    this.debug(`[buildUserInput] Parsed skills from message: ${JSON.stringify(parsed.skills)}, raw message: ${message.slice(0, 200)}`);
 
-    // Add matched skills as skill UserInput items.
-    // Codex loads the SKILL.md from the given path and injects its instructions.
+    // Read matched SKILL.md files and inject their content directly into the
+    // user message. The Codex app-server only discovers skills from its own
+    // standard paths ({CODEX_HOME}/skills/, .agents/skills/), so we read and
+    // inject workspace skill content ourselves to guarantee the model sees it.
+    const skillContents: string[] = [];
     for (const slug of parsed.skills) {
       const skill = skills.find(s => s.slug === slug);
       if (skill) {
-        input.push({ type: 'skill' as const, name: skill.slug, path: join(skill.path, 'SKILL.md') });
+        const skillPath = join(skill.path, 'SKILL.md');
+        if (existsSync(skillPath)) {
+          const content = readFileSync(skillPath, 'utf-8');
+          this.debug(`[buildUserInput] Loaded skill ${skill.slug} (${content.length} chars) from ${skillPath}`);
+          skillContents.push(`<skill name="${skill.slug}">\n${content}\n</skill>`);
+        } else {
+          this.debug(`[buildUserInput] SKILL.md not found: ${skillPath}`);
+        }
       }
     }
 
-    // Strip all [bracket] mentions from the message text.
-    // Codex doesn't understand [skill:...], [source:...] etc. annotations.
-    const cleanMessage = stripAllMentions(message);
+    // Strip all bracket mentions from the message text.
+    const cleanMessage = stripAllMentions(message).trim();
+    // If the user sent only skill mentions with no other text, add a directive.
+    const effectiveMessage = (!cleanMessage && skillContents.length > 0)
+      ? 'Follow the skill instructions above.'
+      : cleanMessage;
+    this.debug(`[buildUserInput] Clean message: "${effectiveMessage.slice(0, 200)}", skills injected: ${skillContents.length}`);
 
     // ============================================================
     // CONTEXT INJECTION (matching ClaudeAgent)
@@ -2079,11 +2097,12 @@ export class CodexAgent extends BaseAgent {
     // COMBINE INTO MESSAGE
     // ============================================================
 
-    // Combine: context + attachments + user message (with mentions stripped)
+    // Combine: skill instructions + context + attachments + user message
     const allParts = [
+      ...skillContents,
       ...contextParts,
       ...attachmentParts,
-      cleanMessage,
+      effectiveMessage,
     ].filter(Boolean);
 
     const fullMessage = allParts.join('\n\n');

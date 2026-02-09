@@ -21,7 +21,11 @@ type HeadersInitType = Headers | Record<string, string> | string[][];
 
 // Feature flags
 const TOOL_METADATA_FOR_ALL_TOOLS = false; // When false, only add metadata to MCP tools
-const INTERCEPTOR_LOGGING_ENABLED = false; // When false, disable all debug logging
+
+// Enable interceptor logging in dev mode (not packaged), disable in production.
+// Detection: packaged apps run from inside an app.asar archive.
+const IS_PACKAGED = process.argv.some(arg => arg.includes('app.asar'));
+const INTERCEPTOR_LOGGING_ENABLED = !IS_PACKAGED;
 
 const DEBUG = INTERCEPTOR_LOGGING_ENABLED &&
   (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1');

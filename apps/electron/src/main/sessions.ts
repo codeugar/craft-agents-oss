@@ -2183,6 +2183,7 @@ export class SessionManager {
         // CRITICAL: Inject stored credentials into Codex app-server
         // Without this, the app-server spawns but has no authentication, causing silent failures
         const codexAgent = managed.agent as CodexAgent
+        codexAgent.onDebug = (msg: string) => sessionLog.info(msg)
         const codexAuthType = connection?.authType || authType
 
         // Determine auth method based on connection authType
