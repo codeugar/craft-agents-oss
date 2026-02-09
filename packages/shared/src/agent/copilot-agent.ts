@@ -652,7 +652,7 @@ export class CopilotAgent extends BaseAgent {
     // Copilot uses `mcp__server__tool` format for MCP tool names
     if (toolName.startsWith('mcp__')) {
       const parts = toolName.split('__');
-      const sourceSlug = parts[1];
+      const sourceSlug = this.extractSourceSlugFromMcpTool(parts[1], parts[2]);
       if (sourceSlug && !this.sourceManager.isSourceActive(sourceSlug)) {
         this.debug(`PreToolUse: MCP tool from inactive source "${sourceSlug}", attempting activation...`);
 
@@ -900,6 +900,31 @@ export class CopilotAgent extends BaseAgent {
       }
     }
 
+    // Add bridge MCP server for API sources (REST API → MCP bridge)
+    // The bridge server exposes API sources as api_{slug} tools via stdio MCP.
+    // Bridge config JSON and credential caches are written by the main process
+    // (setupCopilotBridgeConfig in sessions.ts) before session creation.
+    if (Object.keys(this.sourceApiServers).length > 0 && this.config.bridgeServerPath && this.config.copilotConfigDir) {
+      const nodePath = this.config.nodePath || 'bun';
+      const bridgeConfigPath = join(this.config.copilotConfigDir, 'bridge-config.json');
+      const workspaceId = this.config.workspace.id;
+      const sessionId = this.config.session?.id;
+      const sessionPath = sessionId
+        ? join(this.config.workspace.rootPath, 'sessions', sessionId)
+        : undefined;
+
+      const bridgeArgs = [this.config.bridgeServerPath, '--config', bridgeConfigPath];
+      if (sessionPath) bridgeArgs.push('--session', sessionPath);
+      if (workspaceId) bridgeArgs.push('--workspace', workspaceId);
+
+      config['api-bridge'] = {
+        type: 'local',
+        command: nodePath,
+        args: bridgeArgs,
+        tools: ['*'],
+      };
+    }
+
     return config;
   }
 
@@ -1064,6 +1089,40 @@ export class CopilotAgent extends BaseAgent {
     if (wd.startsWith('~/')) return join(homedir(), wd.slice(2));
     if (wd === '~') return homedir();
     return wd;
+  }
+
+  /**
+   * Built-in MCP servers that are always available (not user sources).
+   * Must match the set in codex-agent.ts to keep behavior consistent.
+   */
+  private static readonly BUILT_IN_MCP_SERVERS = new Set([
+    'preferences',
+    'session',
+    'craft-agents-docs',
+    'api-bridge',
+  ]);
+
+  /**
+   * Extract source slug from MCP tool name parts.
+   * Returns null for built-in MCP servers (session, preferences, etc.)
+   * so that PreToolUse doesn't try to activate them as user sources.
+   *
+   * Special case: api-bridge is a built-in server that proxies API sources.
+   * The real source slug is embedded in the tool name (e.g., "api_gmail" → "gmail").
+   */
+  private extractSourceSlugFromMcpTool(mcpServer?: string, mcpTool?: string): string | null {
+    if (!mcpServer) return null;
+    // api-bridge proxies API sources — resolve the real source slug from the tool name
+    if (mcpServer === 'api-bridge') {
+      if (mcpTool?.startsWith('api_')) {
+        return mcpTool.slice(4);
+      }
+      return null;
+    }
+    if (CopilotAgent.BUILT_IN_MCP_SERVERS.has(mcpServer)) {
+      return null;
+    }
+    return mcpServer;
   }
 
   /**

@@ -406,6 +406,57 @@ async function setupCodexSessionConfig(
 }
 
 /**
+ * Write bridge-config.json and credential cache files for Copilot API sources.
+ * Mirrors the bridge setup in setupCodexSessionConfig() but without TOML generation —
+ * Copilot passes MCP config directly at session creation via buildMcpConfig().
+ *
+ * Called before setSourceServers() so the bridge MCP server subprocess can read them
+ * when the session is created on the next chat() call.
+ */
+async function setupCopilotBridgeConfig(
+  copilotConfigDir: string,
+  sources: LoadedSource[],
+): Promise<void> {
+  const apiSources = sources.filter(s => s.config.type === 'api' && s.config.enabled)
+  if (apiSources.length === 0) return
+
+  // Ensure config directory exists
+  await mkdir(copilotConfigDir, { recursive: true })
+
+  // Generate bridge config JSON (same format as Codex)
+  const bridgeConfig = generateBridgeConfig(sources)
+  await writeFile(join(copilotConfigDir, 'bridge-config.json'), bridgeConfig, 'utf-8')
+
+  // Write credential cache files for the bridge server to read
+  const credManager = getSourceCredentialManager()
+  for (const source of apiSources) {
+    const cred = await credManager.load(source)
+    if (cred?.value) {
+      const cachePath = getCredentialCachePath(source.workspaceRootPath, source.config.slug)
+      const cacheEntry: CredentialCacheEntry = {
+        value: cred.value,
+        expiresAt: cred.expiresAt,
+      }
+      await mkdir(join(source.workspaceRootPath, 'sources', source.config.slug), { recursive: true })
+      await writeFileSecure(cachePath, JSON.stringify(cacheEntry), 0o600)
+    }
+  }
+
+  sessionLog.info(`Copilot bridge config written: ${apiSources.length} API sources`)
+}
+
+/**
+ * Resolve the path to the bridge MCP server executable.
+ * Same binary is shared between Codex and Copilot backends.
+ */
+function resolveBridgeServerPath(): { path: string; exists: boolean } {
+  const bridgeServerPath = app.isPackaged
+    ? join(app.getAppPath(), 'resources', 'bridge-mcp-server', 'index.js')
+    : join(process.cwd(), 'packages', 'bridge-mcp-server', 'dist', 'index.js')
+  return { path: bridgeServerPath, exists: existsSync(bridgeServerPath) }
+}
+
+/**
  * Resolve tool display metadata for a tool call.
  * Returns metadata with base64-encoded icon for viewer compatibility.
  *
@@ -1019,6 +1070,12 @@ export class SessionManager {
       // Reconnect to pick up the new config
       await managed.agent.reconnect()
       sessionLog.info(`Codex config regenerated and reconnected for session ${managed.id}`)
+    }
+
+    // For Copilot backend, write bridge config for API sources
+    if (managed.agent instanceof CopilotAgent) {
+      const copilotConfigDir = join(sessionPath, '.copilot-config')
+      await setupCopilotBridgeConfig(copilotConfigDir, enabledSources)
     }
 
     managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
@@ -2249,6 +2306,12 @@ export class SessionManager {
         const copilotConfigDir = join(sessionPath, '.copilot-config')
         await mkdir(copilotConfigDir, { recursive: true })
 
+        // Bridge MCP server path for API sources (same binary as Codex)
+        const bridgeServer = resolveBridgeServerPath()
+        if (!bridgeServer.exists) {
+          sessionLog.warn(`Bridge MCP server not found at ${bridgeServer.path}. API sources will not be available in Copilot sessions.`)
+        }
+
         managed.agent = new CopilotAgent({
           provider: 'copilot',
           authType: authType || 'oauth',
@@ -2260,6 +2323,7 @@ export class SessionManager {
           copilotCliPath: this.copilotCliPath,
           copilotConfigDir,
           sessionServerPath: copilotSessionServerExists ? copilotSessionServerPath : undefined,
+          bridgeServerPath: bridgeServer.exists ? bridgeServer.path : undefined,
           nodePath: getBundledBunPath() ?? 'bun',
           session: {
             id: managed.id,
@@ -2306,8 +2370,10 @@ export class SessionManager {
           sessionLog.warn(`No GitHub token available for Copilot session ${managed.id} - user may need to authenticate`)
         }
 
-        // Set source servers
-        if (Object.keys(mcpServers).length > 0) {
+        // Set source servers (includes both MCP and API sources)
+        if (Object.keys(mcpServers).length > 0 || Object.keys(apiServers).length > 0) {
+          // Write bridge config for API sources before setting servers
+          await setupCopilotBridgeConfig(copilotConfigDir, enabledSources)
           copilotAgent.setSourceServers(mcpServers, apiServers, enabledSlugs)
         }
       } else {
@@ -2606,6 +2672,12 @@ export class SessionManager {
           )
           await managed.agent.reconnect()
           sessionLog.info(`Codex config regenerated and reconnected for source enable in session ${managed.id}`)
+        }
+
+        // For Copilot backend, write bridge config for API sources
+        if (managed.agent instanceof CopilotAgent) {
+          const copilotConfigDir = join(sessionPath, '.copilot-config')
+          await setupCopilotBridgeConfig(copilotConfigDir, allEnabledSources)
         }
 
         managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs)
@@ -3017,6 +3089,13 @@ export class SessionManager {
 
       // Set active source servers (tools are only available from these)
       const intendedSlugs = sources.filter(isSourceUsable).map(s => s.config.slug)
+
+      // For Copilot backend, write bridge config for API sources before setting servers
+      if (managed.agent instanceof CopilotAgent) {
+        const copilotConfigDir = join(sessionPath, '.copilot-config')
+        await setupCopilotBridgeConfig(copilotConfigDir, sources.filter(isSourceUsable))
+      }
+
       managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
 
       // For Codex backend, regenerate config.toml and reconnect to pick up new sources
@@ -3590,6 +3669,13 @@ export class SessionManager {
       if (mcpCount > 0 || apiCount > 0 || managed.enabledSourceSlugs.length > 0) {
         // Pass intended slugs so agent shows sources as active even if build failed
         const intendedSlugs = sources.filter(isSourceUsable).map(s => s.config.slug)
+
+        // For Copilot backend, write bridge config for API sources before setting servers
+        if (agent instanceof CopilotAgent) {
+          const copilotConfigDir = join(sessionPath, '.copilot-config')
+          await setupCopilotBridgeConfig(copilotConfigDir, sources.filter(isSourceUsable))
+        }
+
         agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
         sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
       }

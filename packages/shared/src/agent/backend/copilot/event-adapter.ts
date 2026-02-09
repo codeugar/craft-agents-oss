@@ -227,6 +227,13 @@ export class CopilotEventAdapter {
           for (const req of event.data.toolRequests) {
             // Only emit if we haven't seen this tool call yet via tool.execution_start
             if (!this.toolNames.has(req.toolCallId)) {
+              // Skip early emission for MCP tools (not in COPILOT_TOOL_NAME_MAP).
+              // toolRequests lack mcpServerName/mcpToolName metadata, so MCP tool names
+              // resolve incorrectly (e.g. "api-bridge-api_gmail" instead of "mcp__api-bridge__api_gmail").
+              // Let tool.execution_start handle them with proper MCP metadata.
+              if (!COPILOT_TOOL_NAME_MAP[req.name]) {
+                continue;
+              }
               const toolName = this.resolveToolName({ toolName: req.name });
               this.toolNames.set(req.toolCallId, toolName);
               const args = this.normalizeToolArgs(

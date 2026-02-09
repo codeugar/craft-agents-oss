@@ -374,6 +374,13 @@ export interface BackendConfig {
    */
   nodePath?: string;
 
+  /**
+   * Path to bridge-mcp-server executable (stdio MCP server for API sources).
+   * Bridges REST API sources to the agent via MCP protocol.
+   * Used by Codex (via config.toml) and Copilot (via mcpServers runtime config).
+   */
+  bridgeServerPath?: string;
+
   /** Callback when SDK session ID is captured/updated */
   onSdkSessionIdUpdate?: (sdkSessionId: string) => void;
 
