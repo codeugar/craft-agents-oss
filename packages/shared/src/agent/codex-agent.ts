@@ -171,6 +171,10 @@ export class CodexAgent extends BaseAgent {
   private client: AppServerClient | null = null;
   private clientConnecting: Promise<void> | null = null;
 
+  // Deferred ChatGPT tokens — cached by tryInjectStoredChatGptTokens(),
+  // injected after ensureClient() connects (avoids 30s timeout during agent creation)
+  private _pendingChatGptTokens: { idToken: string; accessToken: string } | null = null;
+
   // State
   private _isProcessing: boolean = false;
   private abortReason?: AbortReason;
@@ -344,28 +348,44 @@ export class CodexAgent extends BaseAgent {
 
     this.debug('App-server client connected');
 
-    // Inject auth tokens for the new client to avoid 401 errors after interrupts
-    // This mirrors the token injection in reconnect() but is needed whenever
-    // a fresh client is created (e.g., after forceAbort with UserStop)
-    const normalizedAuthType =
-      this.config.authType ??
-      (this.config.legacyAuthType === 'api_key'
-        ? 'api_key'
-        : this.config.legacyAuthType === 'oauth_token'
-          ? 'oauth'
-          : undefined);
-
-    if (normalizedAuthType === 'oauth') {
-      this.debug('Injecting stored ChatGPT tokens for new client...');
-      const injected = await this.tryInjectStoredChatGptTokens();
-      if (!injected) {
-        this.debug('No stored ChatGPT tokens available - auth may be required');
-        // Don't throw here - let the chat() method handle auth requirements
-        // via the onChatGptAuthRequired callback when the server responds with 401
+    // Inject auth tokens for the new client to avoid 401 errors after interrupts.
+    // This is needed whenever a fresh client is created (e.g., after forceAbort with UserStop).
+    //
+    // First, check for deferred tokens cached by tryInjectStoredChatGptTokens() during
+    // agent creation — this avoids the 30s timeout that would occur if we called
+    // tryInjectStoredChatGptTokens() before the client existed.
+    if (this._pendingChatGptTokens) {
+      this.debug('Injecting deferred ChatGPT tokens...');
+      try {
+        await this.client.accountLoginWithChatGptTokens(this._pendingChatGptTokens);
+        this.debug('Deferred ChatGPT tokens injected successfully');
+      } catch (err) {
+        this.debug(`Failed to inject deferred ChatGPT tokens: ${err}`);
       }
-    } else if (normalizedAuthType === 'api_key' || normalizedAuthType === 'api_key_with_endpoint') {
-      this.debug('Injecting stored API key for new client...');
-      await this.tryInjectStoredApiKey();
+      this._pendingChatGptTokens = null;
+    } else {
+      // No deferred tokens — fall back to loading from credential store
+      // (handles reconnect after forceAbort, etc.)
+      const normalizedAuthType =
+        this.config.authType ??
+        (this.config.legacyAuthType === 'api_key'
+          ? 'api_key'
+          : this.config.legacyAuthType === 'oauth_token'
+            ? 'oauth'
+            : undefined);
+
+      if (normalizedAuthType === 'oauth') {
+        this.debug('Injecting stored ChatGPT tokens for new client...');
+        const injected = await this.tryInjectStoredChatGptTokens();
+        if (!injected) {
+          this.debug('No stored ChatGPT tokens available - auth may be required');
+          // Don't throw here - let the chat() method handle auth requirements
+          // via the onChatGptAuthRequired callback when the server responds with 401
+        }
+      } else if (normalizedAuthType === 'api_key' || normalizedAuthType === 'api_key_with_endpoint') {
+        this.debug('Injecting stored API key for new client...');
+        await this.tryInjectStoredApiKey();
+      }
     }
 
     return this.client;
@@ -1401,8 +1421,30 @@ export class CodexAgent extends BaseAgent {
           this.debug('Stored tokens expired, attempting refresh...');
           const newTokens = await refreshChatGptTokens(storedCreds.refreshToken);
 
-          // Store and inject new tokens
-          await this.injectChatGptTokens(newTokens);
+          // Store refreshed tokens in credential manager
+          const credMgr = getCredentialManager();
+          await credMgr.setLlmOAuth(this.credentialSlug, {
+            accessToken: newTokens.accessToken,
+            idToken: newTokens.idToken,
+            refreshToken: newTokens.refreshToken,
+            expiresAt: newTokens.expiresAt,
+          });
+
+          // If client is already connected (reconnect scenario), inject directly.
+          // Otherwise cache for deferred injection during ensureClient().
+          if (this.client?.isConnected()) {
+            await this.client.accountLoginWithChatGptTokens({
+              idToken: newTokens.idToken,
+              accessToken: newTokens.accessToken,
+            });
+            this.debug('Refreshed ChatGPT tokens injected directly');
+          } else {
+            this._pendingChatGptTokens = {
+              idToken: newTokens.idToken,
+              accessToken: newTokens.accessToken,
+            };
+            this.debug('Refreshed ChatGPT tokens cached for deferred injection');
+          }
           return true;
         }
         this.debug('Stored tokens expired and no refresh token available');
@@ -1415,14 +1457,22 @@ export class CodexAgent extends BaseAgent {
         return false;
       }
 
-      // Inject stored tokens using correct fields
-      const client = await this.ensureClient();
-      await client.accountLoginWithChatGptTokens({
-        idToken: storedCreds.idToken,
-        accessToken: storedCreds.accessToken,
-      });
-
-      this.debug('Stored ChatGPT tokens injected successfully');
+      // If client is already connected (reconnect scenario), inject directly.
+      // Otherwise cache for deferred injection during ensureClient() — avoids
+      // spawning the app-server process here which can hang for 30s on timeout.
+      if (this.client?.isConnected()) {
+        await this.client.accountLoginWithChatGptTokens({
+          idToken: storedCreds.idToken,
+          accessToken: storedCreds.accessToken,
+        });
+        this.debug('Stored ChatGPT tokens injected directly');
+      } else {
+        this._pendingChatGptTokens = {
+          idToken: storedCreds.idToken,
+          accessToken: storedCreds.accessToken,
+        };
+        this.debug('ChatGPT tokens cached for deferred injection');
+      }
       return true;
     } catch (error) {
       this.debug(`Failed to inject stored ChatGPT tokens: ${error}`);
@@ -1520,6 +1570,103 @@ export class CodexAgent extends BaseAgent {
     return new Promise((resolve) => {
       this.eventResolvers.push(resolve);
     });
+  }
+
+  // ============================================================
+  // Title Generation (via app-server)
+  // ============================================================
+
+  /**
+   * Generate a title by routing through the Codex app-server.
+   * Uses the cheapest model (Codex Mini) with an ephemeral thread.
+   * Falls back to null on failure — caller should fall back to Claude.
+   */
+  async generateTitle(prompt: string): Promise<string | null> {
+    const client = await this.ensureClient();
+
+    // Use the cheapest model (Codex Mini) — title is just a 5-word summary
+    const miniModelId = getModelIdByShortName('Codex Mini');
+    const model = resolveCodexModelId(miniModelId, this.config.authType);
+
+    this.debug(`[generateTitle] Starting ephemeral thread with model=${model}`);
+
+    // Start an ephemeral thread (not persisted, no tools)
+    const response = await client.threadStart({
+      model,
+      ephemeral: true,
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access',
+      baseInstructions: 'Reply with ONLY the requested text. No explanation.',
+    });
+    const threadId = response.thread.id;
+
+    this.debug(`[generateTitle] Thread started: ${threadId}`);
+
+    // Send the title prompt
+    await client.turnStart({
+      threadId,
+      input: [{ type: 'text', text: prompt, text_elements: [] }],
+      cwd: null,
+      approvalPolicy: null,
+      sandboxPolicy: null,
+      model: null,
+      effort: null,
+      summary: null,
+      personality: null,
+      outputSchema: null,
+      collaborationMode: null,
+    });
+
+    // Collect text from agentMessage/delta events until turn completes.
+    // Filter by threadId to avoid interference with the main chat thread.
+    let title = '';
+    const result = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(title); // resolve with whatever we have
+      }, 15000);
+
+      const onDelta = (ev: { threadId: string; delta: string }) => {
+        if (ev.threadId === threadId) {
+          title += ev.delta;
+        }
+      };
+      const onTurnComplete = (ev: { threadId: string }) => {
+        if (ev.threadId === threadId) {
+          clearTimeout(timeout);
+          cleanup();
+          resolve(title);
+        }
+      };
+      const onCodexError = (ev: { threadId: string; error: { message?: string } }) => {
+        if (ev.threadId === threadId) {
+          clearTimeout(timeout);
+          cleanup();
+          reject(new Error(ev.error?.message ?? 'Codex title generation failed'));
+        }
+      };
+      const onProcessError = (err: Error) => {
+        clearTimeout(timeout);
+        cleanup();
+        reject(err);
+      };
+
+      const cleanup = () => {
+        client.off('item/agentMessage/delta', onDelta);
+        client.off('turn/completed', onTurnComplete);
+        client.off('codex/error', onCodexError);
+        client.off('error', onProcessError);
+      };
+
+      client.on('item/agentMessage/delta', onDelta);
+      client.on('turn/completed', onTurnComplete);
+      client.on('codex/error', onCodexError);
+      client.on('error', onProcessError);
+    });
+
+    const trimmed = result.trim();
+    this.debug(`[generateTitle] Result: "${trimmed}"`);
+    return (trimmed.length > 0 && trimmed.length < 100) ? trimmed : null;
   }
 
   // ============================================================
@@ -1782,6 +1929,20 @@ export class CodexAgent extends BaseAgent {
       };
     }
 
+    // App-server initialization timeout (process started but didn't respond)
+    if (errorMessage.includes('request timeout') && errorMessage.includes('initialize')) {
+      return {
+        code: 'network_error',
+        title: 'Codex Failed to Start',
+        message: 'The Codex app-server started but did not respond. This may be caused by an expired OpenAI quota or network issue. Check your OpenAI billing at platform.openai.com.',
+        actions: [
+          { key: 'r', label: 'Retry', action: 'retry' },
+        ],
+        canRetry: true,
+        originalError: error.message,
+      };
+    }
+
     // App-server connection errors
     if (
       errorMessage.includes('failed to connect') ||
@@ -1792,6 +1953,20 @@ export class CodexAgent extends BaseAgent {
         code: 'network_error',
         title: 'Codex Not Found',
         message: 'Could not start the Codex app-server. Make sure Codex is installed and accessible in your PATH.',
+        actions: [
+          { key: 'r', label: 'Retry', action: 'retry' },
+        ],
+        canRetry: true,
+        originalError: error.message,
+      };
+    }
+
+    // OpenAI quota exhaustion (insufficient_quota / exceeded quota)
+    if (errorMessage.includes('quota') || errorMessage.includes('insufficient_quota')) {
+      return {
+        code: 'rate_limited',
+        title: 'OpenAI Quota Exceeded',
+        message: 'Your OpenAI API quota has been exceeded. Check your plan and billing at platform.openai.com.',
         actions: [
           { key: 'r', label: 'Retry', action: 'retry' },
         ],

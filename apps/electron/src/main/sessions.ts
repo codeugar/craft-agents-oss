@@ -75,7 +75,7 @@ import { type Session, type Message, type SessionEvent, type FileAttachment, typ
 import { generateSessionTitle, regenerateSessionTitle, formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon, type TitleGeneratorOptions } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
-import { getToolIconsDir, isCodexModel, getMiniModel, getSummarizationModel } from '@craft-agent/shared/config'
+import { getToolIconsDir, isCodexModel, getMiniModel, getSummarizationModel, DEFAULT_MODEL, DEFAULT_CODEX_MODEL } from '@craft-agent/shared/config'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
 import { listLabels } from '@craft-agent/shared/labels/storage'
@@ -1253,6 +1253,16 @@ export class SessionManager {
             }),
           }
 
+          // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
+          if (managed.llmConnection) {
+            const conn = resolveSessionConnection(managed.llmConnection, null)
+            if (!conn) {
+              sessionLog.warn(`Session ${meta.id} has orphaned llmConnection "${managed.llmConnection}", clearing`)
+              managed.llmConnection = undefined
+              managed.connectionLocked = false
+            }
+          }
+
           this.sessions.set(meta.id, managed)
           totalSessions++
         }
@@ -1278,7 +1288,7 @@ export class SessionManager {
         id: managed.id,
         workspaceRootPath,
         name: managed.name,
-        createdAt: managed.lastMessageAt,  // Approximate, will be overwritten if already exists
+        createdAt: managed.createdAt,
         lastUsedAt: Date.now(),
         lastMessageAt: managed.lastMessageAt,  // Preserve actual message time (not persist time)
         sdkSessionId: managed.sdkSessionId,
@@ -2107,8 +2117,8 @@ export class SessionManager {
         // Codex backend - uses app-server protocol
         // Model from session > connection default (connection always has defaultModel via backfill)
         // Safety: ensure the resolved model is actually a Codex model (not a Claude model from stale session data)
-        const rawCodexModel = managed.model || connection?.defaultModel!
-        const codexModel = isCodexModel(rawCodexModel) ? rawCodexModel : connection?.defaultModel!
+        const rawCodexModel = managed.model || connection?.defaultModel
+        const codexModel = (rawCodexModel && isCodexModel(rawCodexModel)) ? rawCodexModel : (connection?.defaultModel || DEFAULT_CODEX_MODEL)
 
         // Set up per-session Codex configuration (MCP servers, etc.)
         // This creates .codex-home/config.toml in the session folder
@@ -2187,6 +2197,13 @@ export class SessionManager {
             sessionLog.info(`OpenAI API key injected for Codex session ${managed.id}`)
           } else {
             sessionLog.warn(`No OpenAI API key available for Codex session ${managed.id} - user may need to configure API key`)
+            // Surface immediately so user doesn't wait 30s for a timeout
+            this.sendEvent({
+              type: 'info',
+              sessionId: managed.id,
+              message: 'No OpenAI API key available. Please configure your API key in Settings → AI.',
+              level: 'error',
+            }, managed.workspace.id)
           }
         } else {
           // Wire up auth callback to notify UI when re-authentication is needed (OAuth only)
@@ -2207,6 +2224,13 @@ export class SessionManager {
             sessionLog.info(`ChatGPT tokens injected for Codex session ${managed.id}`)
           } else {
             sessionLog.warn(`No ChatGPT tokens available for Codex session ${managed.id} - user may need to authenticate`)
+            // Surface immediately so user doesn't wait 30s for a timeout
+            this.sendEvent({
+              type: 'info',
+              sessionId: managed.id,
+              message: 'No ChatGPT tokens available. Please check your Codex login in Settings → AI.',
+              level: 'error',
+            }, managed.workspace.id)
           }
         }
       } else {
@@ -2220,7 +2244,7 @@ export class SessionManager {
         }
 
         // Model resolution: session > connection default (connection always has defaultModel via backfill)
-        const resolvedModel = managed.model || connection?.defaultModel!
+        const resolvedModel = managed.model || connection?.defaultModel || DEFAULT_MODEL
         managed.agent = new CraftAgent({
           workspace: managed.workspace,
           model: resolvedModel,
@@ -3101,12 +3125,6 @@ export class SessionManager {
 
     const assistantResponse = lastAssistantMsg?.content ?? ''
 
-    // Resolve provider and credentials based on session's LLM connection
-    // This ensures title generation uses the same provider as the session
-    const titleOptions = await this.buildTitleOptions(managed.llmConnection)
-
-    sessionLog.info(`refreshTitle: Calling regenerateSessionTitle with provider=${titleOptions?.provider ?? 'anthropic'}...`)
-
     // Notify renderer that title regeneration has started (for shimmer effect)
     managed.isAsyncOperationOngoing = true
     this.sendEvent({ type: 'async_operation', sessionId, isOngoing: true }, managed.workspace.id)
@@ -3114,6 +3132,57 @@ export class SessionManager {
     this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: true }, managed.workspace.id)
 
     try {
+      // For Codex sessions with a locked connection, route through the app-server
+      // (ChatGPT OAuth tokens can't be used for direct OpenAI API calls)
+      if (managed.agent instanceof CodexBackend && managed.connectionLocked) {
+        sessionLog.info(`refreshTitle: Using Codex app-server for session ${sessionId}`)
+        const titlePrompt = [
+          'Based on these recent messages, what is the current focus of this conversation?',
+          'Reply with ONLY a short task description (2-5 words).',
+          'Start with a verb. Use plain text only - no markdown.',
+          'Examples: "Fix authentication bug", "Add dark mode", "Refactor API layer", "Explain codebase structure"',
+          '',
+          'Recent user messages:',
+          ...userMessages.map((msg) => msg.slice(0, 300)),
+          '',
+          'Latest assistant response:',
+          assistantResponse.slice(0, 500),
+          '',
+          'Current focus:',
+        ].join('\n')
+
+        try {
+          const title = await managed.agent.generateTitle(titlePrompt)
+          if (title) {
+            managed.name = title
+            this.persistSession(managed)
+            this.sendEvent({ type: 'title_generated', sessionId, title }, managed.workspace.id)
+            sessionLog.info(`Refreshed title via Codex for session ${sessionId}: "${title}"`)
+            return { success: true, title }
+          }
+          sessionLog.warn(`Codex title regeneration returned null for session ${sessionId}, falling back to Claude`)
+        } catch (codexErr) {
+          sessionLog.warn(`Codex title regeneration failed for session ${sessionId}, falling back to Claude:`, codexErr)
+        }
+
+        // Fall back to Claude (no options = default Anthropic path)
+        const title = await regenerateSessionTitle(userMessages, assistantResponse)
+        sessionLog.info(`refreshTitle: Claude fallback returned: ${title ? `"${title}"` : 'null'}`)
+        if (title) {
+          managed.name = title
+          this.persistSession(managed)
+          this.sendEvent({ type: 'title_generated', sessionId, title }, managed.workspace.id)
+          sessionLog.info(`Refreshed title via Claude fallback for session ${sessionId}: "${title}"`)
+          return { success: true, title }
+        }
+        this.sendEvent({ type: 'title_regenerating', sessionId, isRegenerating: false }, managed.workspace.id)
+        return { success: false, error: 'Failed to generate title (both Codex and Claude)' }
+      }
+
+      // Non-Codex sessions (or API key Codex): use existing direct API path
+      const titleOptions = await this.buildTitleOptions(managed.llmConnection)
+      sessionLog.info(`refreshTitle: Calling regenerateSessionTitle with provider=${titleOptions?.provider ?? 'anthropic'}...`)
+
       const title = await regenerateSessionTitle(userMessages, assistantResponse, titleOptions)
       sessionLog.info(`refreshTitle: regenerateSessionTitle returned: ${title ? `"${title}"` : 'null'}`)
       if (title) {
@@ -4138,6 +4207,68 @@ To view this task's output:
     const resolvedConnection = connectionOverride ?? managed.llmConnection
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}, connection=${resolvedConnection ?? '(none)'}`)
     try {
+      // For Codex OAuth sessions, ChatGPT tokens can't be used for direct OpenAI API calls.
+      // Check connection config to detect this (agent may not exist yet on first message).
+      const connection = resolvedConnection ? getLlmConnection(resolvedConnection) : null
+      const isCodexOAuth = connection &&
+        (connection.providerType === 'openai' || connection.providerType === 'openai_compat') &&
+        connection.authType === 'oauth'
+
+      if (isCodexOAuth) {
+        // Wait for the agent to be created (fires concurrently, usually within ~50ms)
+        if (!(managed.agent instanceof CodexBackend)) {
+          sessionLog.info(`[generateTitle] Codex OAuth session — waiting for agent to be ready for session ${managed.id}`)
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 200))
+            if (managed.agent instanceof CodexBackend) break
+          }
+        }
+
+        if (managed.agent instanceof CodexBackend) {
+          sessionLog.info(`[generateTitle] Using Codex app-server for session ${managed.id}`)
+          const titlePrompt = [
+            'What is the user trying to do? Reply with ONLY a short task description (2-5 words).',
+            'Start with a verb. Use plain text only - no markdown.',
+            'Examples: "Fix authentication bug", "Add dark mode", "Refactor API layer", "Explain codebase structure"',
+            '',
+            'User: ' + userMessage.slice(0, 500),
+            '',
+            'Task:',
+          ].join('\n')
+
+          try {
+            const title = await managed.agent.generateTitle(titlePrompt)
+            if (title) {
+              managed.name = title
+              this.persistSession(managed)
+              await this.flushSession(managed.id)
+              this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
+              sessionLog.info(`Generated title via Codex for session ${managed.id}: "${title}"`)
+              return
+            }
+            sessionLog.warn(`Codex title generation returned null for session ${managed.id}, falling back to Claude`)
+          } catch (codexErr) {
+            sessionLog.warn(`Codex title generation failed for session ${managed.id}, falling back to Claude:`, codexErr)
+          }
+        } else {
+          sessionLog.warn(`[generateTitle] Codex agent not ready after 6s for session ${managed.id} — falling back to Claude`)
+        }
+
+        // Fall back to Claude (no options = default Anthropic path)
+        const title = await generateSessionTitle(userMessage)
+        if (title) {
+          managed.name = title
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
+          sessionLog.info(`Generated title via Claude fallback for session ${managed.id}: "${title}"`)
+        } else {
+          sessionLog.warn(`Title generation returned null (Claude fallback) for session ${managed.id}`)
+        }
+        return
+      }
+
+      // Non-Codex sessions (or API key Codex): use existing direct API path
       const titleOptions = await this.buildTitleOptions(resolvedConnection)
       sessionLog.info(`[generateTitle] Options: provider=${titleOptions?.provider ?? '(none)'}, model=${titleOptions?.summarizationModel ?? '(default)'}, baseUrl=${titleOptions?.baseUrl ?? '(default)'}`)
 
@@ -4157,6 +4288,21 @@ To view this task's output:
       }
     } catch (error) {
       sessionLog.error(`Failed to generate title for session ${managed.id}:`, error)
+
+      // Surface quota/auth errors to the user — these indicate the main chat call will also fail
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('401') || errorMsg.includes('insufficient')) {
+        this.sendEvent({
+          type: 'typed_error',
+          sessionId: managed.id,
+          error: {
+            code: 'api_error',
+            title: 'API Error',
+            message: `OpenAI API error: ${errorMsg.slice(0, 200)}`,
+            canRetry: true,
+          }
+        }, managed.workspace.id)
+      }
     }
   }
 
