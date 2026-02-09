@@ -178,6 +178,31 @@ export function isApiOAuthProvider(provider: string | undefined): provider is Ap
 }
 
 /**
+ * Check if a source uses OAuth authentication (for proactive token refresh).
+ *
+ * Returns true for:
+ * - MCP sources with authType: 'oauth'
+ * - API sources with OAuth providers (google, slack, microsoft)
+ *
+ * Only returns true if the source is authenticated (has tokens to refresh).
+ */
+export function isOAuthSource(source: LoadedSource): boolean {
+  if (!source.config.isAuthenticated) return false;
+
+  // MCP OAuth sources
+  if (source.config.type === 'mcp') {
+    return source.config.mcp?.authType === 'oauth';
+  }
+
+  // API OAuth sources (Google, Slack, Microsoft)
+  if (source.config.type === 'api') {
+    return isApiOAuthProvider(source.config.provider);
+  }
+
+  return false;
+}
+
+/**
  * MCP transport type for sources
  * - 'http': HTTP-based MCP server (URL endpoint)
  * - 'sse': Server-Sent Events MCP server (URL endpoint)

@@ -196,9 +196,9 @@ async function buildServersFromSources(
 }
 
 /**
- * Result of MCP OAuth token refresh operation.
+ * Result of OAuth token refresh operation.
  */
-interface McpTokenRefreshResult {
+interface OAuthTokenRefreshResult {
   /** Whether any tokens were refreshed (configs were updated) */
   tokensRefreshed: boolean
   /** Sources that failed to refresh (for warning display) */
@@ -206,24 +206,28 @@ interface McpTokenRefreshResult {
 }
 
 /**
- * Refresh expired MCP OAuth tokens and rebuild server configs.
+ * Refresh expired OAuth tokens and rebuild server configs.
  * Uses TokenRefreshManager for unified refresh logic (DRY/SOLID principles).
  *
- * This implements "lazy refresh at query time" - tokens are refreshed before
+ * This implements "proactive refresh at query time" - tokens are refreshed before
  * each agent.chat() call, then server configs are rebuilt with fresh headers.
+ *
+ * Handles both:
+ * - MCP OAuth sources (e.g., Linear, Notion)
+ * - API OAuth sources (Google, Slack, Microsoft)
  *
  * @param agent - The agent to update server configs on
  * @param sources - All loaded sources for the session
  * @param sessionPath - Path to session folder for API response storage
  * @param tokenRefreshManager - TokenRefreshManager instance for this session
  */
-async function refreshMcpOAuthTokensIfNeeded(
-  agent: CraftAgent,
+async function refreshOAuthTokensIfNeeded(
+  agent: AgentInstance,
   sources: LoadedSource[],
   sessionPath: string,
   tokenRefreshManager: TokenRefreshManager
-): Promise<McpTokenRefreshResult> {
-  sessionLog.debug('[OAuth] Checking if any MCP OAuth tokens need refresh')
+): Promise<OAuthTokenRefreshResult> {
+  sessionLog.debug('[OAuth] Checking if any OAuth tokens need refresh')
 
   // Use TokenRefreshManager to find sources needing refresh (handles rate limiting)
   const needRefresh = await tokenRefreshManager.getSourcesNeedingRefresh(sources)
@@ -3700,6 +3704,24 @@ export class SessionManager {
         sessionLog.info(`Applied ${mcpCount} MCP + ${apiCount} API sources to session ${sessionId} (${allSources.length} total)`)
       }
       sendSpan.mark('servers.applied')
+
+      // Proactive OAuth token refresh before chat starts.
+      // This ensures tokens are fresh BEFORE the first API call, avoiding mid-call auth failures.
+      // Handles both MCP OAuth (Linear, Notion) and API OAuth (Gmail, Slack, Microsoft).
+      if (managed.tokenRefreshManager) {
+        const refreshResult = await refreshOAuthTokensIfNeeded(
+          agent,
+          sources,
+          sessionPath,
+          managed.tokenRefreshManager
+        )
+        if (refreshResult.failedSources.length > 0) {
+          sessionLog.warn('[OAuth] Some sources failed token refresh:', refreshResult.failedSources.map(f => f.slug))
+        }
+        if (refreshResult.tokensRefreshed) {
+          sendSpan.mark('oauth.refreshed')
+        }
+      }
     }
 
     try {
