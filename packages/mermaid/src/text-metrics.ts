@@ -232,7 +232,8 @@ export function measureMultilineText(
   // Width = max of all line widths
   let maxWidth = 0
   for (const line of lines) {
-    const w = measureTextWidth(line, fontSize, fontWeight)
+    const plain = line.replace(/<\/?(?:b|strong|i|em|u|s|del)\s*>/gi, '')
+    const w = measureTextWidth(plain, fontSize, fontWeight)
     if (w > maxWidth) maxWidth = w
   }
 

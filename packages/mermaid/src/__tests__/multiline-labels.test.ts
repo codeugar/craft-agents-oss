@@ -16,6 +16,7 @@ import { parseClassDiagram } from '../class/parser.ts'
 import { parseErDiagram } from '../er/parser.ts'
 import { measureMultilineText, LINE_HEIGHT_RATIO, measureTextWidth } from '../text-metrics.ts'
 import { renderMermaid } from '../index.ts'
+import { normalizeBrTags, stripFormattingTags } from '../multiline-utils.ts'
 
 // ============================================================================
 // Parser: <br> tag normalization
@@ -530,6 +531,160 @@ describe('renderMermaid – all flowchart shapes with multi-line', () => {
       expect(svg).toContain('>Line1</tspan>')
       expect(svg).toContain('>Line2</tspan>')
     })
+  })
+})
+
+// ============================================================================
+// Inline formatting: <b>, <i>, <u>, <s> → SVG tspan attributes
+// ============================================================================
+
+describe('renderMermaid – inline formatting', () => {
+  it('renders <b> as font-weight="bold"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <b>bold</b> text]')
+    expect(svg).toContain('font-weight="bold"')
+    expect(svg).toContain('>bold</tspan>')
+  })
+
+  it('renders <strong> as font-weight="bold"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <strong>bold</strong>]')
+    expect(svg).toContain('font-weight="bold"')
+  })
+
+  it('renders <i> as font-style="italic"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <i>italic</i> text]')
+    expect(svg).toContain('font-style="italic"')
+    expect(svg).toContain('>italic</tspan>')
+  })
+
+  it('renders <em> as font-style="italic"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <em>italic</em>]')
+    expect(svg).toContain('font-style="italic"')
+  })
+
+  it('renders <u> as text-decoration="underline"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <u>underline</u> text]')
+    expect(svg).toContain('text-decoration="underline"')
+    expect(svg).toContain('>underline</tspan>')
+  })
+
+  it('renders <s> as text-decoration="line-through"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <s>strike</s> text]')
+    expect(svg).toContain('text-decoration="line-through"')
+    expect(svg).toContain('>strike</tspan>')
+  })
+
+  it('renders <del> as text-decoration="line-through"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello <del>deleted</del>]')
+    expect(svg).toContain('text-decoration="line-through"')
+  })
+
+  it('renders nested <b><i> with both attributes', async () => {
+    const svg = await renderMermaid('graph TD\n  A[<b><i>bold italic</i></b>]')
+    expect(svg).toContain('font-weight="bold"')
+    expect(svg).toContain('font-style="italic"')
+    expect(svg).toContain('>bold italic</tspan>')
+  })
+
+  it('renders formatting combined with <br> multiline', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Line1<br><b>Bold Line2</b>]')
+    expect(svg).toContain('font-weight="bold"')
+    expect(svg).toContain('>Bold Line2</tspan>')
+  })
+
+  it('does not include raw tag text in rendered text', async () => {
+    const svg = await renderMermaid('graph TD\n  A[<b>bold</b>]')
+    // Tags should not appear as escaped text content inside <text> elements
+    expect(svg).toMatch(/<tspan font-weight="bold">bold<\/tspan>/)
+    expect(svg).not.toMatch(/<text[^>]*>&lt;b&gt;/)
+  })
+
+  it('renders plain text without formatting tspan wrappers', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Plain text]')
+    // Should not have bold/italic formatting tspans (font-weight="500" on the text element is fine)
+    expect(svg).not.toContain('font-weight="bold"')
+    expect(svg).not.toContain('font-style="italic"')
+    expect(svg).not.toContain('text-decoration=')
+  })
+})
+
+// ============================================================================
+// Tag stripping: unsupported tags removed, formatting tags preserved
+// ============================================================================
+
+describe('normalizeBrTags – tag handling', () => {
+  it('strips <sub> tags', () => {
+    expect(normalizeBrTags('H<sub>2</sub>O')).toBe('H2O')
+  })
+
+  it('strips <sup> tags', () => {
+    expect(normalizeBrTags('x<sup>2</sup>')).toBe('x2')
+  })
+
+  it('strips <small> tags', () => {
+    expect(normalizeBrTags('big <small>small</small>')).toBe('big small')
+  })
+
+  it('strips <mark> tags', () => {
+    expect(normalizeBrTags('some <mark>highlighted</mark> text')).toBe('some highlighted text')
+  })
+
+  it('preserves <b> tags for rendering', () => {
+    expect(normalizeBrTags('Hello <b>bold</b>')).toContain('<b>')
+  })
+
+  it('preserves <i> tags for rendering', () => {
+    expect(normalizeBrTags('Hello <i>italic</i>')).toContain('<i>')
+  })
+
+  it('preserves <u> tags for rendering', () => {
+    expect(normalizeBrTags('Hello <u>under</u>')).toContain('<u>')
+  })
+
+  it('preserves <s> tags for rendering', () => {
+    expect(normalizeBrTags('Hello <s>strike</s>')).toContain('<s>')
+  })
+})
+
+describe('stripFormattingTags', () => {
+  it('strips all formatting tags', () => {
+    expect(stripFormattingTags('<b>bold</b> and <i>italic</i>')).toBe('bold and italic')
+  })
+
+  it('strips <strong> and <em>', () => {
+    expect(stripFormattingTags('<strong>bold</strong> <em>italic</em>')).toBe('bold italic')
+  })
+
+  it('strips <u>, <s>, <del>', () => {
+    expect(stripFormattingTags('<u>under</u> <s>strike</s> <del>del</del>')).toBe('under strike del')
+  })
+
+  it('handles nested tags', () => {
+    expect(stripFormattingTags('<b><i>nested</i></b>')).toBe('nested')
+  })
+
+  it('returns plain text unchanged', () => {
+    expect(stripFormattingTags('no tags here')).toBe('no tags here')
+  })
+})
+
+// ============================================================================
+// Text metrics: formatting tags excluded from width
+// ============================================================================
+
+describe('measureMultilineText – formatting tag exclusion', () => {
+  const fontSize = 13
+  const fontWeight = 500
+
+  it('measures width of plain text, not tag text', () => {
+    const withTags = measureMultilineText('<b>bold</b>', fontSize, fontWeight)
+    const plain = measureMultilineText('bold', fontSize, fontWeight)
+    expect(withTags.width).toBe(plain.width)
+  })
+
+  it('excludes nested tags from width', () => {
+    const withTags = measureMultilineText('<b><i>text</i></b>', fontSize, fontWeight)
+    const plain = measureMultilineText('text', fontSize, fontWeight)
+    expect(withTags.width).toBe(plain.width)
   })
 })
 
