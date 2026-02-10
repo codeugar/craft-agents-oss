@@ -109,6 +109,8 @@ export const DOC_REFS = {
   toolIcons: `${APP_ROOT}/docs/tool-icons.md`,
   mermaid: `${APP_ROOT}/docs/mermaid.md`,
   dataTables: `${APP_ROOT}/docs/data-tables.md`,
+  htmlPreview: `${APP_ROOT}/docs/html-preview.md`,
+  pdfPreview: `${APP_ROOT}/docs/pdf-preview.md`,
   docsDir: `${APP_ROOT}/docs/`,
 } as const;
 

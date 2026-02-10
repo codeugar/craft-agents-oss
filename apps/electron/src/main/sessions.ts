@@ -761,6 +761,11 @@ function messageToStored(msg: Message): StoredMessage {
     toolDisplayName: msg.toolDisplayName,
     toolDisplayMeta: msg.toolDisplayMeta,  // Includes base64 icon for viewer
     parentToolUseId: msg.parentToolUseId,
+    // Background task fields
+    taskId: msg.taskId,
+    shellId: msg.shellId,
+    elapsedSeconds: msg.elapsedSeconds,
+    isBackground: msg.isBackground,
     isError: msg.isError,
     attachments: msg.attachments,
     badges: msg.badges,  // Content badges for inline display (sources, skills, context)
@@ -775,6 +780,8 @@ function messageToStored(msg: Message): StoredMessage {
     errorCanRetry: msg.errorCanRetry,
     // Ultrathink
     ultrathink: msg.ultrathink,
+    // Plan fields
+    planPath: msg.planPath,
     // Auth request fields
     authRequestId: msg.authRequestId,
     authRequestType: msg.authRequestType,
@@ -783,10 +790,12 @@ function messageToStored(msg: Message): StoredMessage {
     authStatus: msg.authStatus,
     authCredentialMode: msg.authCredentialMode,
     authHeaderName: msg.authHeaderName,
+    authHeaderNames: msg.authHeaderNames,
     authLabels: msg.authLabels,
     authDescription: msg.authDescription,
     authHint: msg.authHint,
     authSourceUrl: msg.authSourceUrl,
+    authPasswordRequired: msg.authPasswordRequired,
     authError: msg.authError,
     authEmail: msg.authEmail,
     authWorkspace: msg.authWorkspace,
@@ -813,6 +822,11 @@ function storedToMessage(stored: StoredMessage): Message {
     toolDisplayName: stored.toolDisplayName,
     toolDisplayMeta: stored.toolDisplayMeta,  // Includes base64 icon for viewer
     parentToolUseId: stored.parentToolUseId,
+    // Background task fields
+    taskId: stored.taskId,
+    shellId: stored.shellId,
+    elapsedSeconds: stored.elapsedSeconds,
+    isBackground: stored.isBackground,
     isError: stored.isError,
     attachments: stored.attachments,
     badges: stored.badges,  // Content badges for inline display (sources, skills, context)
@@ -827,6 +841,8 @@ function storedToMessage(stored: StoredMessage): Message {
     errorCanRetry: stored.errorCanRetry,
     // Ultrathink
     ultrathink: stored.ultrathink,
+    // Plan fields
+    planPath: stored.planPath,
     // Auth request fields
     authRequestId: stored.authRequestId,
     authRequestType: stored.authRequestType,
@@ -835,10 +851,12 @@ function storedToMessage(stored: StoredMessage): Message {
     authStatus: stored.authStatus,
     authCredentialMode: stored.authCredentialMode,
     authHeaderName: stored.authHeaderName,
+    authHeaderNames: stored.authHeaderNames,
     authLabels: stored.authLabels,
     authDescription: stored.authDescription,
     authHint: stored.authHint,
     authSourceUrl: stored.authSourceUrl,
+    authPasswordRequired: stored.authPasswordRequired,
     authError: stored.authError,
     authEmail: stored.authEmail,
     authWorkspace: stored.authWorkspace,
@@ -4516,11 +4534,6 @@ To view this task's output:
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
-        // SDK's parent_tool_use_id identifies the subagent context for this text
-        // (undefined = main agent / top-level, Task ID = inside subagent)
-        // Only intermediate text (text before a tool_use) gets a parent assignment
-        const textParentToolUseId = event.isIntermediate ? event.parentToolUseId : undefined
-
         const assistantMessage: Message = {
           id: generateMessageId(),
           role: 'assistant',
@@ -4528,7 +4541,7 @@ To view this task's output:
           timestamp: this.monotonic(),
           isIntermediate: event.isIntermediate,
           turnId: event.turnId,
-          parentToolUseId: textParentToolUseId,
+          parentToolUseId: event.parentToolUseId,
         }
         managed.messages.push(assistantMessage)
         managed.streamingText = ''
@@ -4539,7 +4552,7 @@ To view this task's output:
           managed.lastFinalMessageId = assistantMessage.id
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: textParentToolUseId }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -4697,6 +4710,8 @@ To view this task's output:
         // (e.g., safety net auto-completed with empty result, then real result arrived later)
         const resultChanged = wasAlreadyComplete && formattedResult && existingToolMsg?.toolResult !== formattedResult
         if (!wasAlreadyComplete || resultChanged) {
+          // Use existing tool message timestamp, or fallback message timestamp for ordering
+          const toolResultTimestamp = existingToolMsg?.timestamp ?? (managed.messages.find(m => m.toolUseId === event.toolUseId)?.timestamp)
           this.sendEvent({
             type: 'tool_result',
             sessionId,
@@ -4706,6 +4721,7 @@ To view this task's output:
             turnId: event.turnId,
             parentToolUseId,
             isError: event.isError,
+            timestamp: toolResultTimestamp,
           }, workspaceId)
         }
 
@@ -4751,6 +4767,7 @@ To view this task's output:
 
       case 'info': {
         const isCompactionComplete = event.message.startsWith('Compacted')
+        const infoTimestamp = this.monotonic()
 
         // Persist compaction messages so they survive reload
         // Other info messages are transient (just sent to renderer)
@@ -4759,7 +4776,7 @@ To view this task's output:
             id: generateMessageId(),
             role: 'info',
             content: event.message,
-            timestamp: this.monotonic(),
+            timestamp: infoTimestamp,
             statusType: 'compaction_complete',
           }
           managed.messages.push(compactionMessage)
@@ -4789,7 +4806,8 @@ To view this task's output:
           type: 'info',
           sessionId,
           message: event.message,
-          statusType: isCompactionComplete ? 'compaction_complete' : undefined
+          statusType: isCompactionComplete ? 'compaction_complete' : undefined,
+          timestamp: infoTimestamp,
         }, workspaceId)
         break
       }
@@ -4808,7 +4826,7 @@ To view this task's output:
           timestamp: this.monotonic()
         }
         managed.messages.push(errorMessage)
-        this.sendEvent({ type: 'error', sessionId, error: event.message }, workspaceId)
+        this.sendEvent({ type: 'error', sessionId, error: event.message, timestamp: errorMessage.timestamp }, workspaceId)
         break
 
       case 'typed_error':
@@ -4943,7 +4961,8 @@ To view this task's output:
             canRetry: event.error.canRetry,
             details: event.error.details,
             originalError: event.error.originalError,
-          }
+          },
+          timestamp: typedErrorMessage.timestamp,
         }, workspaceId)
         break
 
@@ -4977,17 +4996,6 @@ To view this task's output:
           sessionId,
           sourceSlug: event.sourceSlug,
           originalMessage: event.originalMessage,
-        }, workspaceId)
-        break
-
-      case 'todos_updated':
-        // Codex turn plan updates - forward to renderer for TurnCard display
-        this.sendEvent({
-          type: 'todos_updated',
-          sessionId,
-          todos: event.todos,
-          turnId: event.turnId,
-          explanation: event.explanation ?? null,
         }, workspaceId)
         break
 

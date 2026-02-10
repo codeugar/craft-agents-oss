@@ -9,8 +9,7 @@
 
 import type { AgentEvent, TypedError } from '@craft-agent/core/types';
 import type { SessionEvent } from '@github/copilot-sdk';
-import { parseReadCommand, type ReadCommandInfo } from '../codex/read-patterns.ts';
-import { createLogger } from '../../../utils/debug.ts';
+import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { COPILOT_TOOL_NAME_MAP } from '../../copilot-agent.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 
@@ -35,24 +34,9 @@ import { toolMetadataStore } from '../../../interceptor-common.ts';
  * - tool.execution_complete → tool_result
  * - tool.execution_progress → status
  */
-export class CopilotEventAdapter {
-  private log = createLogger('copilot-event');
-  private turnIndex: number = 0;
-
+export class CopilotEventAdapter extends BaseEventAdapter {
   // Track tool names from execution_start for proper tool_result correlation
   private toolNames: Map<string, string> = new Map();
-
-  // Track command output for tool results (accumulated from partial results)
-  private commandOutput: Map<string, string> = new Map();
-
-  // Track commands detected as file reads (for Read tool display)
-  private readCommands: Map<string, ReadCommandInfo> = new Map();
-
-  // Track block reasons for declined tool calls (set by PreToolUse hook)
-  private blockReasons: Map<string, string> = new Map();
-
-  // Current turn ID for event correlation
-  private currentTurnId: string | null = null;
 
   // Track whether streaming deltas have been received for the current message
   private hasStreamedDeltas: boolean = false;
@@ -67,29 +51,47 @@ export class CopilotEventAdapter {
   // Deduplication: track last emitted intermediate text to skip identical re-emissions
   private lastIntermediateText: string | null = null;
 
-  /**
-   * Store the block reason for a tool call that will be declined.
-   * Called from copilot-agent when PreToolUse hook blocks a tool.
-   */
-  setBlockReason(toolCallId: string, reason: string): void {
-    this.log.warn('Tool call block reason recorded', { toolCallId, reason });
-    this.blockReasons.set(toolCallId, reason);
+  // ── Sub-turnId isolation ──────────────────────────────────────────
+  // The renderer matches text_delta → text_complete by turnId, and uses
+  // findAssistantMessage(turnId) to locate a message to update. Copilot
+  // reasoning, intent, and message events all share the same SDK turnId
+  // within a turn. Without sub-turnIds the renderer overwrites the
+  // reasoning message with the final response (findAssistantMessage
+  // returns the FIRST match), placing the final text at the wrong array
+  // position and causing ordering bugs / final message not displaying.
+  //
+  // Fix: each text block (reasoning block, message block, intent block)
+  // gets its own sub-turnId via `nextSubTurnId()`. The renderer always
+  // creates a new message per block. Turn grouping is unaffected because
+  // turn-utils.ts explicitly ignores turnId for grouping (line 363).
+  private subTurnCounter: number = 0;
+  private reasoningSubTurnId: string | null = null;
+  private messageSubTurnId: string | null = null;
+
+  constructor() {
+    super('copilot-event');
   }
 
   /**
-   * Start a new turn - resets indexing and streaming state.
+   * Generate a unique sub-turnId for a text block within the current turn.
+   * Each call increments the counter, guaranteeing no two blocks share a turnId.
+   *
+   * @param prefix - block type identifier: 'r' (reasoning), 'm' (message), 'i' (intent)
    */
-  startTurn(): void {
-    this.turnIndex++;
+  private nextSubTurnId(prefix: string): string {
+    const base = this.currentTurnId || 'unknown';
+    return `${base}__${prefix}${this.subTurnCounter++}`;
+  }
+
+  protected onTurnStart(): void {
     this.toolNames.clear();
-    this.commandOutput.clear();
-    this.readCommands.clear();
-    this.blockReasons.clear();
-    this.currentTurnId = null;
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
     this.inReasoning = false;
     this.lastIntermediateText = null;
+    this.subTurnCounter = 0;
+    this.reasoningSubTurnId = null;
+    this.messageSubTurnId = null;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -196,16 +198,24 @@ export class CopilotEventAdapter {
         this.hasEmittedFinalText = false;
         this.inReasoning = false;
         this.lastIntermediateText = null;
+        this.subTurnCounter = 0;
+        this.reasoningSubTurnId = null;
+        this.messageSubTurnId = null;
         break;
 
       case 'assistant.message_delta':
         if (event.data.deltaContent) {
           this.hasStreamedDeltas = true;
           this.inReasoning = false; // Exited reasoning block
+          // Allocate sub-turnId on first delta of this message block.
+          // Keeps message streaming separate from any preceding reasoning block.
+          if (!this.messageSubTurnId) {
+            this.messageSubTurnId = this.nextSubTurnId('m');
+          }
           yield {
             type: 'text_delta',
             text: event.data.deltaContent,
-            turnId: this.currentTurnId || undefined,
+            turnId: this.messageSubTurnId,
             parentToolUseId: event.data.parentToolCallId || undefined,
           };
         }
@@ -232,11 +242,17 @@ export class CopilotEventAdapter {
             this.lastIntermediateText = null; // Final response clears the slate
           }
 
+          // Use sub-turnId from message_delta if we streamed, otherwise allocate fresh.
+          // This ensures the renderer finds the streaming message from deltas (if any)
+          // and never collides with a preceding reasoning or intermediate message.
+          const mTurnId = this.messageSubTurnId || this.nextSubTurnId('m');
+          this.messageSubTurnId = null; // Reset for next message block
+
           yield {
             type: 'text_complete',
             text: event.data.content,
             isIntermediate,
-            turnId: this.currentTurnId || undefined,
+            turnId: mTurnId,
             parentToolUseId: event.data.parentToolCallId || undefined,
           };
           this.hasStreamedDeltas = false;
@@ -254,13 +270,17 @@ export class CopilotEventAdapter {
       case 'assistant.reasoning_delta':
         if (event.data.deltaContent) {
           this.inReasoning = true;
+          // Allocate sub-turnId on first delta of this reasoning block.
+          // All deltas within the same block share this ID so the renderer
+          // accumulates them into one streaming message. The subsequent
+          // assistant.reasoning complete event uses the same ID to finalize it.
+          if (!this.reasoningSubTurnId) {
+            this.reasoningSubTurnId = this.nextSubTurnId('r');
+          }
           yield {
             type: 'text_delta',
             text: event.data.deltaContent,
-            turnId: this.currentTurnId || undefined,
-            // Note: isIntermediate is set on text_complete (assistant.reasoning),
-            // deltas are always partial. The inReasoning flag distinguishes these from
-            // regular message deltas for consumers that need the distinction.
+            turnId: this.reasoningSubTurnId,
           };
         }
         break;
@@ -269,23 +289,32 @@ export class CopilotEventAdapter {
         this.inReasoning = false; // Reasoning block complete
         if (event.data.content && event.data.content !== this.lastIntermediateText) {
           this.lastIntermediateText = event.data.content;
+          // Use the sub-turnId from deltas so the renderer finds the streaming
+          // message created by reasoning_delta. If no deltas preceded (SDK sent
+          // complete-only), allocate a fresh sub-turnId to avoid collisions.
+          const rTurnId = this.reasoningSubTurnId || this.nextSubTurnId('r');
+          this.reasoningSubTurnId = null; // Reset for next reasoning block
           yield {
             type: 'text_complete',
             text: event.data.content,
             isIntermediate: true,
-            turnId: this.currentTurnId || undefined,
+            turnId: rTurnId,
           };
+        } else {
+          this.reasoningSubTurnId = null; // Reset even when deduped
         }
         break;
 
       case 'assistant.intent':
+        // Intent is a one-shot complete event (no preceding deltas), so always
+        // allocate a fresh sub-turnId to avoid colliding with reasoning/message.
         if (event.data.intent && event.data.intent !== this.lastIntermediateText) {
           this.lastIntermediateText = event.data.intent;
           yield {
             type: 'text_complete',
             text: event.data.intent,
             isIntermediate: true,
-            turnId: this.currentTurnId || undefined,
+            turnId: this.nextSubTurnId('i'),
           };
         }
         break;
@@ -330,43 +359,30 @@ export class CopilotEventAdapter {
 
         // Classify bash commands that are actually file reads
         if (toolName === 'Bash' && typeof args.command === 'string') {
-          const readInfo = parseReadCommand(args.command);
+          const readInfo = this.classifyReadCommand(toolCallId, args.command);
           if (readInfo) {
-            this.readCommands.set(toolCallId, readInfo);
             if (!alreadyEmitted) {
-              yield {
-                type: 'tool_start',
-                toolName: 'Read',
-                toolUseId: toolCallId,
-                input: {
-                  file_path: readInfo.filePath,
-                  offset: readInfo.startLine,
-                  limit: readInfo.endLine
-                    ? readInfo.endLine - (readInfo.startLine || 1) + 1
-                    : undefined,
-                  _command: readInfo.originalCommand,
-                },
+              yield this.createReadToolStart(
+                toolCallId,
+                readInfo,
                 intent,
-                displayName: 'Read File',
-                turnId: this.currentTurnId || undefined,
+                'Read File',
                 parentToolUseId,
-              };
+              );
             }
             break;
           }
         }
 
         if (!alreadyEmitted) {
-          yield {
-            type: 'tool_start',
+          yield this.createToolStart(
+            toolCallId,
             toolName,
-            toolUseId: toolCallId,
-            input: args,
+            args,
             intent,
             displayName,
-            turnId: this.currentTurnId || undefined,
             parentToolUseId,
-          };
+          );
         }
         break;
       }
@@ -381,15 +397,10 @@ export class CopilotEventAdapter {
 
         // Block reasons are keyed by mapped tool name (e.g. "Bash") because
         // the PreToolUse hook doesn't have access to the tool call ID
-        const blockReason = this.blockReasons.get(toolCallId) || this.blockReasons.get(resolvedToolName);
-        if (blockReason) {
-          this.blockReasons.delete(toolCallId);
-          this.blockReasons.delete(resolvedToolName);
-        }
+        const blockReason = this.consumeBlockReason(toolCallId, resolvedToolName);
 
         // Use accumulated output from partial results if available
-        const accumulatedOutput = this.commandOutput.get(toolCallId);
-        this.commandOutput.delete(toolCallId);
+        const accumulatedOutput = this.consumeOutput(toolCallId);
 
         const isError = !event.data.success;
         let result: string;
@@ -408,34 +419,19 @@ export class CopilotEventAdapter {
         }
 
         // After tool completion, the assistant may generate new text in response
-        // to tool results. Reset the guard so the next assistant.message emits text_complete.
+        // to tool results. Reset guards so the next text block gets a fresh sub-turnId
+        // and the hasEmittedFinalText gate re-opens.
         this.hasEmittedFinalText = false;
+        this.messageSubTurnId = null;
 
         // Check if this was classified as a file read
-        const readInfo = this.readCommands.get(toolCallId);
+        const readInfo = this.consumeReadCommand(toolCallId);
         if (readInfo) {
-          this.readCommands.delete(toolCallId);
-          yield {
-            type: 'tool_result',
-            toolUseId: toolCallId,
-            toolName: 'Read',
-            result,
-            isError,
-            turnId: this.currentTurnId || undefined,
-            parentToolUseId,
-          };
+          yield this.createToolResult(toolCallId, 'Read', result, isError, parentToolUseId);
           break;
         }
 
-        yield {
-          type: 'tool_result',
-          toolUseId: toolCallId,
-          toolName: resolvedToolName,
-          result,
-          isError,
-          turnId: this.currentTurnId || undefined,
-          parentToolUseId,
-        };
+        yield this.createToolResult(toolCallId, resolvedToolName, result, isError, parentToolUseId);
         break;
       }
 
@@ -444,10 +440,7 @@ export class CopilotEventAdapter {
         break;
 
       case 'tool.execution_partial_result': {
-        const id = event.data.toolCallId;
-        const content = event.data.partialOutput || '';
-        const existing = this.commandOutput.get(id) || '';
-        this.commandOutput.set(id, existing + content);
+        this.accumulateOutput(event.data.toolCallId, event.data.partialOutput || '');
         break;
       }
 
@@ -486,25 +479,21 @@ export class CopilotEventAdapter {
         break;
 
       case 'subagent.completed':
-        yield {
-          type: 'tool_result',
-          toolUseId: event.data.toolCallId,
-          toolName: `SubAgent:${event.data.agentName}`,
-          result: 'Sub-agent task completed',
-          isError: false,
-          turnId: this.currentTurnId || undefined,
-        };
+        yield this.createToolResult(
+          event.data.toolCallId,
+          `SubAgent:${event.data.agentName}`,
+          'Sub-agent task completed',
+          false,
+        );
         break;
 
       case 'subagent.failed':
-        yield {
-          type: 'tool_result',
-          toolUseId: event.data.toolCallId,
-          toolName: `SubAgent:${event.data.agentName}`,
-          result: event.data.error,
-          isError: true,
-          turnId: this.currentTurnId || undefined,
-        };
+        yield this.createToolResult(
+          event.data.toolCallId,
+          `SubAgent:${event.data.agentName}`,
+          event.data.error,
+          true,
+        );
         break;
 
       case 'subagent.selected':
@@ -522,7 +511,7 @@ export class CopilotEventAdapter {
 
       default:
         // TODO: If Copilot SDK emits plan events (e.g., 'plan.updated'),
-        // map them to todos_updated events with status normalization
+        // map them to synthetic TodoWrite tool events (tool_start + tool_result)
         this.log.warn(`Unknown Copilot event type: ${(event as { type: string }).type}`);
         break;
     }

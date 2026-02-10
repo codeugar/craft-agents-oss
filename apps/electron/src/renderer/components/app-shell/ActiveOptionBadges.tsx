@@ -130,8 +130,8 @@ export function ActiveOptionBadges({
   const resolvedState = todoStates.length > 0 ? getState(effectiveStateId, todoStates) : undefined
   const hasState = !!resolvedState
 
-  // Show the stacking container when there are labels or a state badge
-  const hasStackContent = hasLabels || hasState
+  // Show the stacking container when there are labels (state badge is now rendered standalone on the left)
+  const hasStackContent = hasLabels
 
   // Dynamic stacking with equal visible strips: ResizeObserver computes per-badge
   // margins directly on children. Wider badges get more negative margins so each
@@ -141,7 +141,7 @@ export function ActiveOptionBadges({
   const stackRef = useDynamicStack({ gap: 8, minVisible: 20, reservedStart: 24 })
 
   // Only render if badges or tasks are active
-  if (!ultrathinkEnabled && !permissionMode && tasks.length === 0 && !hasStackContent) {
+  if (!ultrathinkEnabled && !permissionMode && tasks.length === 0 && !hasState && !hasStackContent) {
     return null
   }
 
@@ -155,6 +155,17 @@ export function ActiveOptionBadges({
             ultrathinkEnabled={ultrathinkEnabled}
             onPermissionModeChange={onPermissionModeChange}
             onUltrathinkChange={onUltrathinkChange}
+          />
+        </div>
+      )}
+
+      {/* State Badge — standalone on the left, after Mode */}
+      {hasState && resolvedState && (
+        <div className="shrink-0">
+          <StateBadge
+            state={resolvedState}
+            todoStates={todoStates}
+            onTodoStateChange={onTodoStateChange}
           />
         </div>
       )}
@@ -174,7 +185,7 @@ export function ActiveOptionBadges({
         </button>
       )}
 
-      {/* Stacking container for state badge + label badges.
+      {/* Stacking container for label badges (right-aligned).
        * useDynamicStack sets per-child marginLeft directly via ResizeObserver.
        * overflow: clip prevents scroll container while py/-my gives shadow room. */}
       {hasStackContent && (
@@ -192,14 +203,6 @@ export function ActiveOptionBadges({
             className="flex items-center min-w-0 justify-end py-1 -my-1 pr-2 -mr-2"
             style={{ overflow: 'clip' }}
           >
-            {/* State badge — first child in the stack (leftmost in the right-aligned row) */}
-            {hasState && resolvedState && (
-              <StateBadge
-                state={resolvedState}
-                todoStates={todoStates}
-                onTodoStateChange={onTodoStateChange}
-              />
-            )}
             {/* Label badges */}
             {resolvedLabels.map(({ config, rawValue, index }) => (
               <LabelBadge
@@ -373,12 +376,10 @@ function StateBadge({
           type="button"
           className={cn(
             "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
-            "outline-none select-none transition-colors",
-            // Same color-mix tinting as label badges for visual consistency
+            "outline-none select-none transition-colors shadow-minimal",
             "bg-[color-mix(in_srgb,var(--background)_97%,var(--badge-color))]",
             "hover:bg-[color-mix(in_srgb,var(--background)_92%,var(--badge-color))]",
             "text-[color-mix(in_srgb,var(--foreground)_80%,var(--badge-color))]",
-            "relative",
           )}
           style={{ '--badge-color': badgeColor } as React.CSSProperties}
         >
@@ -390,7 +391,7 @@ function StateBadge({
             {state.icon}
           </span>
           <span className="whitespace-nowrap">{state.label}</span>
-          <ChevronDown className="h-3 w-3 opacity-40 shrink-0" />
+          <ChevronDown className="h-3.5 w-3.5 opacity-40" />
         </button>
       </PopoverTrigger>
       <PopoverContent

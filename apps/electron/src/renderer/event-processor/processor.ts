@@ -46,7 +46,6 @@ import {
   handleAuthRequest,
   handleAuthCompleted,
   handleUsageUpdate,
-  handleTodosUpdated,
 } from './handlers/session'
 
 /**
@@ -200,11 +199,6 @@ export function processEvent(
 
     case 'usage_update':
       return handleUsageUpdate(state, event)
-
-    case 'todos_updated':
-      // Codex's turn/plan/updated notification - synthesize a TodoWrite tool message
-      // This allows reusing existing turn-utils extraction logic for TurnCard todos
-      return handleTodosUpdated(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

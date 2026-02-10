@@ -488,18 +488,6 @@ export type SessionEvent =
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   // Real-time usage update during processing (for context display)
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
-  // Codex turn plan updates (native task list)
-  | {
-      type: 'todos_updated'
-      sessionId: string
-      todos: Array<{
-        content: string
-        status: 'pending' | 'in_progress' | 'completed'
-        activeForm?: string
-      }>
-      turnId?: string
-      explanation?: string | null
-    }
 
 // Options for sendMessage
 export interface SendMessageOptions {

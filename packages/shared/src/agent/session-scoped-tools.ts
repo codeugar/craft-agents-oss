@@ -343,19 +343,20 @@ Opens a browser window for the user to sign in with their Microsoft account.
 
 **IMPORTANT:** After calling this tool, execution will be paused while OAuth completes.`,
 
-  transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks.
+  transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks, or extract HTML content for html-preview blocks.
 
-Use this tool when you need to transform large datasets (20+ rows) into structured JSON for display. Instead of outputting all rows inline, write a transform script that reads the input file and produces a JSON output file, then reference it via \`"src"\` in your datatable/spreadsheet block.
+Use this tool when you need to transform large datasets (20+ rows) into structured JSON for display, or extract/decode HTML content for rendering. Write a transform script that reads the input file and produces an output file, then reference it via \`"src"\` in your datatable/spreadsheet/html-preview/pdf-preview block.
 
 **Workflow:**
-1. Call \`transform_data\` with a script that reads input files and writes JSON output
-2. Output a datatable/spreadsheet block with \`"src": "data/output.json"\` referencing the output file
+1. Call \`transform_data\` with a script that reads input files and writes output
+2. Output a datatable/spreadsheet block with \`"src": "data/output.json"\`, an html-preview block with \`"src": "data/output.html"\`, or a pdf-preview block with \`"src": "data/output.pdf"\`
 
 **Script conventions:**
 - Input file paths are passed as command-line arguments (last arg = output file path)
 - Python: \`sys.argv[1:-1]\` = input files, \`sys.argv[-1]\` = output path
 - Node/Bun: \`process.argv.slice(2, -1)\` = input files, \`process.argv.at(-1)\` = output path
-- Output must be valid JSON: \`{"title": "...", "columns": [...], "rows": [...]}\`
+- For datatable/spreadsheet: output must be valid JSON: \`{"title": "...", "columns": [...], "rows": [...]}\`
+- For html-preview: output is an HTML file (any valid HTML)
 
 **Security:** Runs in an isolated subprocess with no access to API keys or credentials. 30-second timeout.`,
 
@@ -499,10 +500,10 @@ async function handleTransformData(
       };
     }
 
-    // Return the absolute path for use in the datatable/spreadsheet "src" field
+    // Return the absolute path for use in the datatable/spreadsheet/html-preview "src" field
     // The UI's file reader requires absolute paths for security validation
     const lines = [`Output written to: ${resolvedOutput}`];
-    lines.push(`\nUse this absolute path as the "src" value in your datatable or spreadsheet block.`);
+    lines.push(`\nUse this absolute path as the "src" value in your datatable, spreadsheet, html-preview, or pdf-preview block.`);
     if (result.stdout.trim()) {
       lines.push(`\nStdout:\n${result.stdout.slice(0, 500)}`);
     }

@@ -38,7 +38,6 @@ import type {
   AuthRequestEvent,
   AuthCompletedEvent,
   UsageUpdateEvent,
-  TodosUpdatedEvent,
 } from '../types'
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
@@ -109,7 +108,7 @@ export function handleError(
     id: generateMessageId(),
     role: 'error',
     content: event.error,
-    timestamp: Date.now(),
+    timestamp: event.timestamp ?? Date.now(),
   }
 
   return {
@@ -148,7 +147,7 @@ export function handleTypedError(
     content: event.error.title
       ? `${event.error.title}: ${event.error.message}`
       : event.error.message,
-    timestamp: Date.now(),
+    timestamp: event.timestamp ?? Date.now(),
     errorCode: event.error.code,
     errorTitle: event.error.title,
     errorDetails: event.error.details,
@@ -184,7 +183,7 @@ export function handleStatus(
     id: generateMessageId(),
     role: 'status',
     content: event.message,
-    timestamp: Date.now(),
+    timestamp: event.timestamp ?? Date.now(),
     statusType: event.statusType,
   }
 
@@ -240,7 +239,7 @@ export function handleInfo(
     id: generateMessageId(),
     role: 'info',
     content: event.message,
-    timestamp: Date.now(),
+    timestamp: event.timestamp ?? Date.now(),
     infoLevel: event.level,
   }
 
@@ -849,41 +848,3 @@ export function handleUsageUpdate(
   }
 }
 
-/**
- * Handle todos_updated - Codex's turn/plan/updated notification
- *
- * Synthesizes a TodoWrite tool message so the existing turn-utils extraction
- * logic picks up the todos and displays them in TurnCard.
- */
-export function handleTodosUpdated(
-  state: SessionState,
-  event: TodosUpdatedEvent
-): ProcessResult {
-  const { session, streaming } = state
-
-  // Generate a unique tool use ID for this synthetic TodoWrite message
-  const toolUseId = `codex-plan-${event.turnId || Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-
-  // Create a synthetic TodoWrite tool message
-  // This is picked up by extractTodosFromActivities() in turn-utils.ts
-  const syntheticTodoMessage: Message = {
-    id: generateMessageId(),
-    role: 'tool',
-    content: event.explanation || 'Plan updated',
-    timestamp: Date.now(),
-    toolUseId,
-    toolName: 'TodoWrite',
-    toolInput: { todos: event.todos },
-    toolResult: 'Plan updated',
-    toolStatus: 'completed',
-    turnId: event.turnId,
-  }
-
-  return {
-    state: {
-      session: appendMessage(session, syntheticTodoMessage),
-      streaming,
-    },
-    effects: [],
-  }
-}

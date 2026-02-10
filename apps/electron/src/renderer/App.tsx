@@ -1301,6 +1301,8 @@ export default function App() {
     onOpenFileExternal: linkInterceptor.openFileExternal,
     // Read file contents as UTF-8 string (used by datatable/spreadsheet src field)
     onReadFile: (path: string) => window.electronAPI.readFile(path),
+    // Read file as binary Uint8Array (used by PDF preview blocks)
+    onReadFileBinary: (path: string) => window.electronAPI.readFileBinary(path),
     // Reveal a file in the system file manager (Finder on macOS, Explorer on Windows)
     onRevealInFinder: (path: string) => {
       window.electronAPI.showInFolder(path).catch(() => {})
