@@ -8,11 +8,13 @@
 import { LINE_HEIGHT_RATIO } from './text-metrics.ts'
 
 /**
- * Normalize <br>, <br/>, <br /> tags to newline characters.
- * Case-insensitive to match Mermaid standard behavior.
+ * Normalize label text: strip surrounding quotes, convert <br> tags and
+ * literal \n sequences to newline characters.
  */
 export function normalizeBrTags(label: string): string {
-  return label.replace(/<br\s*\/?>/gi, '\n')
+  // Strip surrounding double quotes (Mermaid uses them for special chars in labels)
+  const unquoted = label.startsWith('"') && label.endsWith('"') ? label.slice(1, -1) : label
+  return unquoted.replace(/<br\s*\/?>/gi, '\n').replace(/\\n/g, '\n')
 }
 
 /**

@@ -1615,11 +1615,13 @@ export function shouldAllowToolInMode(
           if (pathHint) {
             lines.push(``, pathHint);
           }
+          const plansHint = options?.plansFolderPath ? `For plans, write to: ${options.plansFolderPath}` : null;
+          const dataHint = options?.dataFolderPath ? `For data output, write to: ${options.dataFolderPath}` : null;
           lines.push(
             ``,
-            `To proceed:`,
-            `• Use the exact plansFolderPath or dataFolderPath from <session_state>`,
-            `• Or switch to Ask mode (${config.shortcutHint}) to enable writes with approval`
+            `Allowed paths in Explore mode:`,
+            ...[plansHint, dataHint].filter(Boolean).map(p => `• ${p}`),
+            `• Or ask the user to switch to Ask or Auto mode (${config.shortcutHint}) to enable writes anywhere`
           );
           return {
             allowed: false,
@@ -1630,7 +1632,7 @@ export function shouldAllowToolInMode(
         if (looksLikePotentialWrite(command)) {
           debug(`[Mode] Bash command looks like a write but path extraction failed`);
           const plansExample = options?.plansFolderPath
-            ? `  Plans: printf '...' > "${options.plansFolderPath}/plan.md"\n` : '';
+            ? `  Plans: printf '...' > "${options.plansFolderPath}/plan_<descriptive-name>.md"\n` : '';
           const dataExample = options?.dataFolderPath
             ? `  Data:  printf '...' > "${options.dataFolderPath}/output.json"\n` : '';
           return {
@@ -1638,7 +1640,7 @@ export function shouldAllowToolInMode(
             reason: `Bash command appears to write files but the target path couldn't be detected.\n\n` +
                     `If writing to an allowed folder, use one of these patterns:\n` +
                     plansExample + dataExample + `\n` +
-                    `Or switch to Ask or Execute mode (${config.shortcutHint}).`,
+                    `Or ask the user to switch to Ask or Auto mode (${config.shortcutHint}).`,
           };
         }
       }
@@ -1712,11 +1714,13 @@ export function shouldAllowToolInMode(
         if (pathHint) {
           lines.push(``, pathHint);
         }
+        const plansHint = options?.plansFolderPath ? `For plans, write to: ${options.plansFolderPath}` : null;
+        const dataHint = options?.dataFolderPath ? `For data output, write to: ${options.dataFolderPath}` : null;
         lines.push(
           ``,
-          `To proceed:`,
-          `• Use the exact plansFolderPath or dataFolderPath from <session_state>`,
-          `• Or switch to Ask mode (${config.shortcutHint}) to enable writes with approval`
+          `Allowed paths in Explore mode:`,
+          ...[plansHint, dataHint].filter(Boolean).map(p => `• ${p}`),
+          `• Or ask the user to switch to Ask or Auto mode (${config.shortcutHint}) to enable writes anywhere`
         );
         return {
           allowed: false,
