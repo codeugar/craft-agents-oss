@@ -978,17 +978,17 @@ export class SessionManager {
         workspaceRootPath,
         workspaceId,
         enableScheduler: true,
-        onPromptHookResults: async (event, results) => {
+        onPromptsReady: async (prompts) => {
           // Execute prompt hooks by creating new sessions
           const settled = await Promise.allSettled(
-            results.map((result) =>
+            prompts.map((pending) =>
               this.executePromptHook(
                 workspaceId,
                 workspaceRootPath,
-                result.prompt,
-                result.labels,
-                result.permissionMode,
-                result.mentions,
+                pending.prompt,
+                pending.labels,
+                pending.permissionMode,
+                pending.mentions,
               )
             )
           )
@@ -5066,14 +5066,14 @@ To view this task's output:
     mentions?: string[],
   ): Promise<{ sessionId: string }> {
     // Resolve @mentions to source/skill slugs
-    const resolvedMentions = mentions ? this.resolveHookMentions(workspaceRootPath, mentions) : undefined
+    const resolved = mentions ? this.resolveHookMentions(workspaceRootPath, mentions) : undefined
 
     // Create a new session for this hook
     const session = await this.createSession(workspaceId, {
       name: `Hook: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`,
       labels,
       permissionMode: permissionMode || 'safe',
-      mentions: resolvedMentions,
+      enabledSourceSlugs: resolved?.sourceSlugs,
     })
 
     // Send the prompt
@@ -5083,27 +5083,25 @@ To view this task's output:
   }
 
   /**
-   * Resolve @mentions in hook prompts to valid source slugs
+   * Resolve @mentions in hook prompts to source and skill slugs
    */
-  private resolveHookMentions(workspaceRootPath: string, mentions: string[]): string[] | undefined {
+  private resolveHookMentions(workspaceRootPath: string, mentions: string[]): { sourceSlugs: string[]; skillSlugs: string[] } | undefined {
     const sources = loadWorkspaceSources(workspaceRootPath)
     const skills = loadWorkspaceSkills(workspaceRootPath)
-    const validSlugs: string[] = []
+    const sourceSlugs: string[] = []
+    const skillSlugs: string[] = []
 
     for (const mention of mentions) {
-      // Check if it's a valid source slug
       if (sources.some(s => s.config.slug === mention)) {
-        validSlugs.push(mention)
-      }
-      // Check if it's a valid skill slug
-      else if (skills.some(s => s.slug === mention)) {
-        validSlugs.push(mention)
+        sourceSlugs.push(mention)
+      } else if (skills.some(s => s.slug === mention)) {
+        skillSlugs.push(mention)
       } else {
         sessionLog.warn(`[Hooks] Unknown mention: @${mention}`)
       }
     }
 
-    return validSlugs.length > 0 ? validSlugs : undefined
+    return (sourceSlugs.length > 0 || skillSlugs.length > 0) ? { sourceSlugs, skillSlugs } : undefined
   }
 
   /**

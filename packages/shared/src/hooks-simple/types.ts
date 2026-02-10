@@ -135,6 +135,8 @@ export interface PendingPrompt {
   mentions: string[];
   /** Labels to apply to the created session */
   labels?: string[];
+  /** Permission mode for the created session (from matcher config) */
+  permissionMode?: 'safe' | 'ask' | 'allow-all';
 }
 
 export interface HookResult {

@@ -58,14 +58,14 @@ export class PromptHandler implements HookHandler {
     if (matchers.length === 0) return;
 
     // Find matching prompt hooks
-    const promptHooks: Array<{ prompt: PromptHookDefinition; labels?: string[] }> = [];
+    const promptHooks: Array<{ prompt: PromptHookDefinition; labels?: string[]; permissionMode?: 'safe' | 'ask' | 'allow-all' }> = [];
 
     for (const matcher of matchers) {
       if (!matcherMatches(matcher, event, payload as unknown as Record<string, unknown>)) continue;
 
       for (const hook of matcher.hooks) {
         if (hook.type === 'prompt') {
-          promptHooks.push({ prompt: hook, labels: matcher.labels });
+          promptHooks.push({ prompt: hook, labels: matcher.labels, permissionMode: matcher.permissionMode });
         }
       }
     }
@@ -80,7 +80,7 @@ export class PromptHandler implements HookHandler {
     // Process prompts
     const pendingPrompts: PendingPrompt[] = [];
 
-    for (const { prompt, labels } of promptHooks) {
+    for (const { prompt, labels, permissionMode } of promptHooks) {
       // Expand environment variables in the prompt
       const expandedPrompt = expandEnvVars(prompt.prompt, env);
 
@@ -95,6 +95,7 @@ export class PromptHandler implements HookHandler {
         prompt: expandedPrompt,
         mentions: references.mentions,
         labels: expandedLabels,
+        permissionMode,
       });
     }
 
