@@ -178,6 +178,8 @@ export class CodexAgent extends BaseAgent {
   // State
   private _isProcessing: boolean = false;
   private _pendingReconnect: boolean = false;
+  private _reconnectPromise: Promise<void> | null = null;
+  private _resolveReconnectPromise: (() => void) | null = null;
   private abortReason?: AbortReason;
   private codexThreadId: string | null = null; // For session resume
   private currentTurnId: string | null = null;
@@ -1650,6 +1652,15 @@ export class CodexAgent extends BaseAgent {
     attachments?: FileAttachment[],
     _options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
+    // Wait for any in-flight reconnect to complete before starting the new turn.
+    // This prevents the race where auth completes mid-turn, queueReconnect defers,
+    // and the next turn starts before the reconnect finishes.
+    if (this._reconnectPromise) {
+      this.debug('Waiting for pending reconnect before starting turn...');
+      await this._reconnectPromise;
+      this.debug('Pending reconnect resolved, proceeding with turn');
+    }
+
     this._isProcessing = true;
     this.abortReason = undefined;
     this.turnComplete = false;
@@ -1853,6 +1864,11 @@ export class CodexAgent extends BaseAgent {
           this.debug('Deferred reconnect completed');
         } catch (err) {
           this.debug(`Deferred reconnect failed: ${err}`);
+        } finally {
+          // Resolve the promise so waiters (next chat() turn) can proceed
+          this._resolveReconnectPromise?.();
+          this._reconnectPromise = null;
+          this._resolveReconnectPromise = null;
         }
       }
     }
@@ -2298,6 +2314,11 @@ export class CodexAgent extends BaseAgent {
     if (this._isProcessing) {
       this.debug('Reconnect queued (will execute after turn completes)');
       this._pendingReconnect = true;
+      // Create a promise that resolves when the deferred reconnect completes,
+      // so callers (and the next chat() turn) can wait for it.
+      this._reconnectPromise = new Promise(resolve => {
+        this._resolveReconnectPromise = resolve;
+      });
       return;
     }
     await this.reconnect();
