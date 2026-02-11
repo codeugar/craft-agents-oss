@@ -177,6 +177,7 @@ export class CodexAgent extends BaseAgent {
 
   // State
   private _isProcessing: boolean = false;
+  private _pendingReconnect: boolean = false;
   private abortReason?: AbortReason;
   private codexThreadId: string | null = null; // For session resume
   private currentTurnId: string | null = null;
@@ -1842,6 +1843,18 @@ export class CodexAgent extends BaseAgent {
       yield { type: 'complete' };
     } finally {
       this._isProcessing = false;
+
+      // Execute deferred reconnect if one was queued during this turn
+      if (this._pendingReconnect) {
+        this._pendingReconnect = false;
+        this.debug('Executing deferred reconnect...');
+        try {
+          await this.reconnect();
+          this.debug('Deferred reconnect completed');
+        } catch (err) {
+          this.debug(`Deferred reconnect failed: ${err}`);
+        }
+      }
     }
   }
 
@@ -2275,6 +2288,19 @@ export class CodexAgent extends BaseAgent {
         this.config.onSdkSessionIdCleared?.();
       }
     }
+  }
+
+  /**
+   * Queue a reconnect. If not processing, reconnects immediately.
+   * If processing, defers until the current turn completes.
+   */
+  async queueReconnect(): Promise<void> {
+    if (this._isProcessing) {
+      this.debug('Reconnect queued (will execute after turn completes)');
+      this._pendingReconnect = true;
+      return;
+    }
+    await this.reconnect();
   }
 
   // ============================================================

@@ -535,6 +535,18 @@ Windows (PowerShell) - use single quotes to avoid escaping issues:
 @('# Plan Title', '', '## Goal', 'Description', '', '## Steps', '1. Step one') | Out-File -FilePath '$PLANS_PATH\\my-plan.md' -Encoding utf8
 \`\`\`
 ` : ''}
+${backendName === 'Codex' ? `
+## MCP Tool Naming
+
+MCP tools from connected sources follow the naming pattern \`mcp__{slug}__{tool}\`:
+
+- **\`slug\`** is the source's **slug** from the \`<sources>\` block above (e.g., \`linear\`, \`github\`)
+- Do **NOT** use source IDs, provider names, or config.json \`id\` fields
+- Example: Linear source (slug: \`linear\`) → \`mcp__linear__list_issues\`, \`mcp__linear__create_issue\`
+- The \`session\` MCP server provides workspace tools: \`mcp__session__SubmitPlan\`, \`mcp__session__source_test\`, etc.
+
+To discover available tools from a connected source, simply call a tool — the server will list its capabilities. Do NOT use \`list_mcp_resources\` for tool discovery (resources and tools are different MCP concepts).
+` : ''}
 **Full reference on what commands are enablled:** \`${DOC_REFS.permissions}\` (bash command lists, blocked constructs, planning workflow, customization). Read if unsure, or user has questions about permissions.
 
 ## Web Search

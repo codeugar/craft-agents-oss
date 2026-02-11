@@ -1193,8 +1193,8 @@ export class SessionManager {
     // For Codex backend, regenerate config.toml and reconnect
     if (managed.agent instanceof CodexBackend) {
       await setupCodexSessionConfig(sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath)
-      // Reconnect to pick up the new config
-      await managed.agent.reconnect()
+      // Reconnect to pick up the new config (queued if mid-turn)
+      await managed.agent.queueReconnect()
       sessionLog.info(`Codex config regenerated and reconnected for session ${managed.id}`)
     }
 
@@ -1733,8 +1733,41 @@ export class SessionManager {
     managed.pendingAuthRequestId = undefined
     managed.pendingAuthRequest = undefined
 
-    // Persist session with updated auth message
+    // Auto-enable the source in the session after successful auth
+    if (result.success && result.sourceSlug) {
+      const slugSet = new Set(managed.enabledSourceSlugs || [])
+      if (!slugSet.has(result.sourceSlug)) {
+        slugSet.add(result.sourceSlug)
+        managed.enabledSourceSlugs = Array.from(slugSet)
+        sessionLog.info(`Auto-enabled source ${result.sourceSlug} in session ${sessionId} after auth`)
+      }
+    }
+
+    // Persist session with updated auth message and enabled sources
     this.persistSession(managed)
+
+    // For Codex backend: regenerate config.toml with new credentials and reconnect
+    if (result.success && result.sourceSlug && managed.agent instanceof CodexBackend) {
+      try {
+        const workspaceRootPath = managed.workspace.rootPath
+        const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
+        const enabledSlugs = managed.enabledSourceSlugs || []
+        const allSources = loadAllSources(workspaceRootPath)
+        const enabledSources = allSources.filter(s =>
+          enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
+        )
+        const { mcpServers } = await buildServersFromSources(
+          enabledSources, sessionPath, managed.tokenRefreshManager
+        )
+        await setupCodexSessionConfig(
+          sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath
+        )
+        await managed.agent.queueReconnect()
+        sessionLog.info(`Codex config regenerated after source auth for session ${managed.id}`)
+      } catch (err) {
+        sessionLog.error(`Failed to regenerate Codex config after auth: ${err}`)
+      }
+    }
 
     // Send the result as a new message to resume conversation
     // Use empty arrays for attachments since this is a system-generated message
@@ -2895,7 +2928,7 @@ export class SessionManager {
             managed.id,
             workspaceRootPath
           )
-          await managed.agent.reconnect()
+          await managed.agent.queueReconnect()
           sessionLog.info(`Codex config regenerated and reconnected for source enable in session ${managed.id}`)
         }
 
@@ -3327,7 +3360,7 @@ export class SessionManager {
       // (Codex reads MCP config from file at startup, unlike Claude which has runtime injection)
       if (managed.agent instanceof CodexBackend) {
         await setupCodexSessionConfig(sessionPath, sources, mcpServers, managed.id, workspaceRootPath)
-        await managed.agent.reconnect()
+        await managed.agent.queueReconnect()
         sessionLog.info(`Codex config regenerated and reconnected for session ${managed.id}`)
       }
 
