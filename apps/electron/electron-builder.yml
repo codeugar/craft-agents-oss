@@ -125,13 +125,14 @@ win:
     - "!**/vendor/codex/linux-*/**"
     - "!**/vendor/copilot/darwin-*/**"
     - "!**/vendor/copilot/linux-*/**"
-    # WORKAROUND: Exclude bun and codex from regular files on Windows.
+    # WORKAROUND: Exclude bun, codex, and copilot from regular files on Windows.
     # electron-builder's npm node module collector causes EBUSY errors when copying
     # .exe files because it scans/locks files while simultaneously trying to copy them.
     # Moving them to extraResources avoids this by copying before the collector runs.
     # See: https://github.com/electron-userland/electron-builder/issues/8250
     - "!vendor/bun/**/*"
     - "!vendor/codex/**/*"
+    - "!vendor/copilot/**/*"
   # Copy executables as extraResources to avoid EBUSY file locking (see comment above)
   extraResources:
     - from: node_modules/@anthropic-ai/claude-agent-sdk
@@ -146,6 +147,8 @@ win:
       to: vendor/bun/bun.exe
     - from: vendor/codex/win32-x64
       to: app/vendor/codex/win32-x64
+    - from: vendor/copilot/win32-x64
+      to: app/vendor/copilot/win32-x64
 
 nsis:
   oneClick: true
