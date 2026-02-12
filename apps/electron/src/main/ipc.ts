@@ -178,12 +178,24 @@ async function fetchAndStoreCopilotModels(slug: string, accessToken: string): Pr
     }
   }
 
+  const COPILOT_TIMEOUT_MS = 30_000
+
   let models: Array<{ id: string; name: string; supportedReasoningEfforts?: string[] }>
   try {
     debugLog('Starting Copilot client...')
-    await client.start()
+    await Promise.race([
+      client.start(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(
+        'Copilot client failed to start within 30 seconds. Check your network connection and GitHub Copilot subscription.',
+      )), COPILOT_TIMEOUT_MS)),
+    ])
     debugLog('Copilot client started, fetching models...')
-    models = await client.listModels()
+    models = await Promise.race([
+      client.listModels(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
+        'Copilot model listing timed out after 30 seconds. Your GitHub token may be invalid or your Copilot plan may not support this feature.',
+      )), COPILOT_TIMEOUT_MS)),
+    ])
     debugLog(`listModels returned ${models?.length ?? 0} models: ${models?.map(m => m.id).join(', ')}`)
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
