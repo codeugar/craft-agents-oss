@@ -438,6 +438,14 @@ export default function App() {
     }
   }, [])
 
+  // Subscribe to LLM connections change events (live updates when models are fetched)
+  useEffect(() => {
+    const cleanup = window.electronAPI.onLlmConnectionsChanged(() => {
+      refreshLlmConnections()
+    })
+    return () => { cleanup() }
+  }, [refreshLlmConnections])
+
   // Refresh LLM connections and workspace default when workspace changes
   useEffect(() => {
     if (windowWorkspaceId) {

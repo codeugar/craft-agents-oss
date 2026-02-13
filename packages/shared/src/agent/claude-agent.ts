@@ -11,7 +11,7 @@ import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { isLocalMcpEnabled } from '../workspaces/storage.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
-import { DEFAULT_MODEL, isClaudeModel, getDefaultSummarizationModel } from '../config/models.ts';
+import { DEFAULT_MODEL, isClaudeModel } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { updatePreferences, loadPreferences, formatPreferencesForPrompt, type UserPreferences } from '../config/preferences.ts';
 import type { FileAttachment } from '../utils/files.ts';
@@ -127,6 +127,14 @@ export interface ClaudeAgentConfig {
   systemPromptPreset?: 'default' | 'mini' | string;
   /** Workspace-level HookSystem instance (shared across all agents in the workspace) */
   hookSystem?: HookSystem;
+  /**
+   * Per-session environment variable overrides for the SDK subprocess.
+   * Used to pass connection-specific config like ANTHROPIC_BASE_URL that
+   * must not be clobbered by concurrent sessions.
+   */
+  envOverrides?: Record<string, string>;
+  /** Mini/utility model for summarization, title generation, and mini completions. */
+  miniModel?: string;
 }
 
 // Permission request tracking
@@ -415,6 +423,8 @@ export class ClaudeAgent extends BaseAgent {
       onSdkSessionIdUpdate: config.onSdkSessionIdUpdate,
       onSdkSessionIdCleared: config.onSdkSessionIdCleared,
       getRecoveryMessages: config.getRecoveryMessages,
+      envOverrides: config.envOverrides,
+      miniModel: config.miniModel,
     };
 
     // Call BaseAgent constructor - initializes model, thinkingLevel, permissionManager, sourceManager, etc.
@@ -691,7 +701,7 @@ export class ClaudeAgent extends BaseAgent {
       }
 
       const options: Options = {
-        ...getDefaultOptions(),
+        ...getDefaultOptions(this.config.envOverrides),
         model,
         // Capture stderr from SDK subprocess for error diagnostics
         // This helps identify why sessions fail with "process exited with code 1"
@@ -2386,10 +2396,13 @@ export class ClaudeAgent extends BaseAgent {
    */
   async runMiniCompletion(prompt: string): Promise<string | null> {
     try {
-      const model = this.config.miniModel ?? getDefaultSummarizationModel();
+      if (!this.config.miniModel) {
+        throw new Error('ClaudeAgent.runMiniCompletion: config.miniModel is required');
+      }
+      const model = this.config.miniModel;
 
       const options = {
-        ...getDefaultOptions(),
+        ...getDefaultOptions(this.config.envOverrides),
         model,
         maxTurns: 1,
         systemPrompt: 'Reply with ONLY the requested text. No explanation.', // Minimal - no Claude Code preset
@@ -2409,6 +2422,7 @@ export class ClaudeAgent extends BaseAgent {
       return result.trim() || null;
     } catch (error) {
       this.debug(`[runMiniCompletion] Failed: ${error}`);
+      debug(`[ClaudeAgent.runMiniCompletion] Failed: ${error}`);
       return null;
     }
   }

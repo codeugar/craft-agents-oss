@@ -69,7 +69,7 @@ import {
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
-import { setAnthropicOptionsEnv, setPathToClaudeCodeExecutable, setInterceptorPath, setExecutable } from '@craft-agent/shared/agent'
+import { setPathToClaudeCodeExecutable, setInterceptorPath, setExecutable } from '@craft-agent/shared/agent'
 import { toolMetadataStore } from '@craft-agent/shared/network-interceptor'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
@@ -77,7 +77,7 @@ import { type Session, type Message, type SessionEvent, type FileAttachment, typ
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon } from '@craft-agent/shared/utils'
 import { loadWorkspaceSkills, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
-import { getToolIconsDir, isCodexModel, getMiniModel, DEFAULT_MODEL, DEFAULT_CODEX_MODEL } from '@craft-agent/shared/config'
+import { getToolIconsDir, isCodexModel, getMiniModel, isAnthropicProvider, DEFAULT_MODEL, DEFAULT_CODEX_MODEL } from '@craft-agent/shared/config'
 import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
@@ -610,14 +610,18 @@ function resolveToolDisplayMeta(
   // Parses the command string to detect known tools (git, npm, docker, etc.)
   // and resolves their brand icon from ~/.craft-agent/tool-icons/
   if (toolName === 'Bash' && toolInput?.command) {
-    const toolIconsDir = getToolIconsDir()
-    const match = resolveToolIcon(String(toolInput.command), toolIconsDir)
-    if (match) {
-      return {
-        displayName: match.displayName,
-        iconDataUrl: match.iconDataUrl,
-        category: 'native' as const,
+    try {
+      const toolIconsDir = getToolIconsDir()
+      const match = resolveToolIcon(String(toolInput.command), toolIconsDir)
+      if (match) {
+        return {
+          displayName: match.displayName,
+          iconDataUrl: match.iconDataUrl,
+          category: 'native' as const,
+        }
       }
+    } catch {
+      // Icon resolution is best-effort — never crash the session for it
     }
   }
 
@@ -780,6 +784,9 @@ interface ManagedSession {
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
+  // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
+  // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
+  envOverrides?: Record<string, string>
 }
 
 // Convert runtime Message to StoredMessage for persistence
@@ -1039,6 +1046,10 @@ export class SessionManager {
           }
         }
       },
+      onLlmConnectionsChange: () => {
+        sessionLog.info(`LLM connections changed in ${workspaceId}`)
+        this.broadcastLlmConnectionsChanged()
+      },
       onAppThemeChange: (theme) => {
         sessionLog.info(`App theme changed`)
         this.broadcastAppThemeChanged(theme)
@@ -1199,6 +1210,15 @@ export class SessionManager {
     if (!this.windowManager) return
     sessionLog.info(`Broadcasting app theme changed`)
     this.windowManager.broadcastToAll(IPC_CHANNELS.THEME_APP_CHANGED, theme)
+  }
+
+  /**
+   * Broadcast LLM connections changed event to all windows
+   */
+  private broadcastLlmConnectionsChanged(): void {
+    if (!this.windowManager) return
+    sessionLog.info('Broadcasting LLM connections changed')
+    this.windowManager.broadcastToAll(IPC_CHANNELS.LLM_CONNECTIONS_CHANGED)
   }
 
   /**
@@ -2478,7 +2498,7 @@ export class SessionManager {
           authType: authType || 'oauth',
           workspace: managed.workspace,
           model: codexModel,
-          miniModel: connection ? getMiniModel(connection) : undefined,
+          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
           thinkingLevel: managed.thinkingLevel,
           codexHome, // Per-session config directory
           session: {
@@ -2616,7 +2636,7 @@ export class SessionManager {
           authType: authType || 'oauth',
           workspace: managed.workspace,
           model: copilotModel,
-          miniModel: connection ? getMiniModel(connection) : undefined,
+          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
           thinkingLevel: managed.thinkingLevel,
           connectionSlug: connection?.slug,
           copilotCliPath: this.copilotCliPath,
@@ -2688,24 +2708,37 @@ export class SessionManager {
         }
       } else {
         // Claude backend - uses Anthropic SDK
-        // CRITICAL: Set env vars for this session's connection BEFORE creating the agent.
-        // The SDK subprocess inherits env vars at spawn time, so we must ensure
-        // ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_BASE_URL
-        // are set for the correct connection, not whatever was last initialized.
+        // Set auth credentials for this session's connection BEFORE creating the agent.
+        // reinitializeAuth() sets ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN on process.env.
+        // Note: ANTHROPIC_BASE_URL is handled separately via envOverrides (below) to avoid
+        // race conditions when concurrent sessions clobber process.env.
         if (connection) {
           await this.reinitializeAuth(connection.slug)
         }
+
+        // Build per-session env overrides from the connection config.
+        // These are passed explicitly to getDefaultOptions() and spread AFTER process.env,
+        // so they survive even if another session's reinitializeAuth() clobbers process.env.
+        const envOverrides: Record<string, string> = {}
+        if (connection?.baseUrl) {
+          envOverrides.ANTHROPIC_BASE_URL = connection.baseUrl
+        }
+        managed.envOverrides = envOverrides
 
         // Model resolution: session > connection default (connection always has defaultModel via backfill)
         const resolvedModel = managed.model || connection?.defaultModel || DEFAULT_MODEL
         managed.agent = new CraftAgent({
           workspace: managed.workspace,
           model: resolvedModel,
+          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
           // Initialize thinking level at construction to avoid race conditions
           thinkingLevel: managed.thinkingLevel,
           isHeadless: !AGENT_FLAGS.defaultModesEnabled,
           // Pass the workspace-level HookSystem so agents reuse the shared instance
           hookSystem: this.hookSystems.get(managed.workspace.rootPath),
+          // Per-session env overrides (e.g., ANTHROPIC_BASE_URL for custom endpoints)
+          // Prevents race conditions when concurrent sessions mutate process.env
+          envOverrides,
           // System prompt preset for mini agents (focused prompts for quick edits)
           systemPromptPreset: managed.systemPromptPreset,
           // Always pass session object - id is required for plan mode callbacks
@@ -3599,9 +3632,21 @@ export class SessionManager {
     if (!agent && managed.llmConnection) {
       try {
         const connection = getLlmConnection(managed.llmConnection)
+        const resolvedMiniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
+
+        // Ensure auth credentials are available for Claude connections
+        if (connection && isAnthropicProvider(connection.providerType)) {
+          await this.reinitializeAuth(connection.slug)
+        }
+        const envOverrides: Record<string, string> = {}
+        if (connection?.baseUrl) {
+          envOverrides.ANTHROPIC_BASE_URL = connection.baseUrl
+        }
+
         agent = createBackendFromConnection(managed.llmConnection, {
           workspace: managed.workspace,
-          miniModel: connection ? getMiniModel(connection) : undefined,
+          miniModel: resolvedMiniModel,
+          envOverrides,
           session: {
             id: `title-${managed.id}`,
             workspaceRootPath: managed.workspace.rootPath,
@@ -4630,9 +4675,20 @@ To view this task's output:
     if (!agent && managed.llmConnection) {
       try {
         const connection = getLlmConnection(managed.llmConnection)
+
+        // Ensure auth credentials are available for Claude connections
+        if (connection && isAnthropicProvider(connection.providerType)) {
+          await this.reinitializeAuth(connection.slug)
+        }
+        const envOverrides: Record<string, string> = {}
+        if (connection?.baseUrl) {
+          envOverrides.ANTHROPIC_BASE_URL = connection.baseUrl
+        }
+
         agent = createBackendFromConnection(managed.llmConnection, {
           workspace: managed.workspace,
-          miniModel: connection ? getMiniModel(connection) : undefined,
+          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
+          envOverrides,
           session: {
             id: `title-${managed.id}`,
             workspaceRootPath: managed.workspace.rootPath,

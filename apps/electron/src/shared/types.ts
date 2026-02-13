@@ -688,6 +688,8 @@ export const IPC_CHANNELS = {
   LLM_CONNECTION_TEST: 'LLM_Connection:test',
   LLM_CONNECTION_SET_DEFAULT: 'LLM_Connection:setDefault',
   LLM_CONNECTION_SET_WORKSPACE_DEFAULT: 'LLM_Connection:setWorkspaceDefault',
+  LLM_CONNECTION_REFRESH_MODELS: 'LLM_Connection:refreshModels',
+  LLM_CONNECTIONS_CHANGED: 'LLM_Connection:changed',  // Broadcast event
 
   // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
   CHATGPT_START_OAUTH: 'chatgpt:startOAuth',
@@ -1074,6 +1076,9 @@ export interface ElectronAPI {
   deleteLabel(workspaceId: string, labelId: string): Promise<{ stripped: number }>
   // Labels change listener (live updates when labels config changes)
   onLabelsChanged(callback: (workspaceId: string) => void): () => void
+
+  // LLM connections change listener (live updates when models are fetched or connections are modified)
+  onLlmConnectionsChanged(callback: () => void): () => void
 
   // Views (workspace-scoped, stored in views.json)
   listViews(workspaceId: string): Promise<import('@craft-agent/shared/views').ViewConfig[]>

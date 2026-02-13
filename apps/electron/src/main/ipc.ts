@@ -17,6 +17,8 @@ import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/share
 import { loadWorkspaceSources, getSourcesBySlugs, type LoadedSource } from '@craft-agent/shared/sources'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
+import { AppServerClient, getCodexPath } from '@craft-agent/shared/codex'
+import type { ModelDefinition } from '@craft-agent/shared/config'
 import { MarkItDown } from 'markitdown-js'
 
 /**
@@ -95,7 +97,9 @@ const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
  * (custom connections are created through the settings UI).
  */
 function createBuiltInConnection(slug: string, baseUrl?: string | null): LlmConnection {
-  const template = BUILT_IN_CONNECTION_TEMPLATES[slug]
+  // Try exact match first, then strip numeric suffix for derived slugs (e.g. 'anthropic-api-2' → 'anthropic-api')
+  const baseSlug = slug.replace(/-\d+$/, '')
+  const template = BUILT_IN_CONNECTION_TEMPLATES[slug] ?? BUILT_IN_CONNECTION_TEMPLATES[baseSlug]
   if (!template) {
     throw new Error(`Unknown built-in connection slug: ${slug}. Custom connections should be created through settings.`)
   }
@@ -107,9 +111,15 @@ function createBuiltInConnection(slug: string, baseUrl?: string | null): LlmConn
   const authType = typeof template.authType === 'function'
     ? template.authType(hasCustomEndpoint)
     : template.authType
-  const name = typeof template.name === 'function'
+  let name = typeof template.name === 'function'
     ? template.name(hasCustomEndpoint)
     : template.name
+
+  // Append suffix number to name for derived connections (e.g. 'anthropic-api-2' → 'Anthropic (API Key) 2')
+  const suffixMatch = slug.match(/-(\d+)$/)
+  if (suffixMatch && !BUILT_IN_CONNECTION_TEMPLATES[slug]) {
+    name = `${name} ${suffixMatch[1]}`
+  }
 
   return {
     slug,
@@ -241,6 +251,141 @@ async function fetchAndStoreCopilotModels(slug: string, accessToken: string): Pr
   })
 
   ipcLog.info(`Fetched ${modelDefs.length} Copilot models: ${modelDefs.map(m => m.id).join(', ')}`)
+}
+
+/**
+ * Fetch available models from the Codex app-server and update the connection.
+ * Spins up a temporary AppServerClient, authenticates, calls model/list, then disconnects.
+ * On failure, keeps existing models as fallback (unlike Copilot which has no fallback).
+ */
+async function fetchAndStoreCodexModels(slug: string): Promise<void> {
+  const connection = getLlmConnection(slug)
+  if (!connection) throw new Error(`Connection not found: ${slug}`)
+
+  const codexPath = await getCodexPath()
+  const client = new AppServerClient({
+    codexPath,
+    workDir: homedir(),
+  })
+
+  const CODEX_MODEL_TIMEOUT_MS = 15_000
+
+  try {
+    await Promise.race([
+      client.connect(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
+        'Codex app-server failed to start within 15 seconds.',
+      )), CODEX_MODEL_TIMEOUT_MS)),
+    ])
+
+    // Authenticate based on connection auth type
+    const manager = getCredentialManager()
+    if (connection.authType === 'oauth') {
+      const oauth = await manager.getLlmOAuth(slug)
+      if (oauth?.idToken && oauth?.accessToken) {
+        await client.accountLoginWithChatGptTokens({
+          idToken: oauth.idToken,
+          accessToken: oauth.accessToken,
+        })
+      }
+    } else if (connection.authType === 'api_key') {
+      const apiKey = await manager.getLlmApiKey(slug)
+      if (apiKey) {
+        await client.accountLoginWithApiKey(apiKey)
+      }
+    }
+
+    // Fetch models with timeout
+    const models = await Promise.race([
+      client.modelList(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
+        'Codex model listing timed out after 15 seconds.',
+      )), CODEX_MODEL_TIMEOUT_MS)),
+    ])
+
+    if (!models || models.length === 0) {
+      ipcLog.warn(`No models returned from Codex model/list for connection: ${slug}`)
+      return // Keep existing hardcoded models as fallback
+    }
+
+    // Map to ModelDefinition format
+    const modelDefs: ModelDefinition[] = models.map(m => ({
+      id: m.model, // actual model slug (e.g., 'gpt-5.3-codex-spark')
+      name: m.displayName,
+      shortName: m.displayName.replace(/^GPT-[\d.]+ /, ''), // Strip "GPT-X.Y " prefix
+      description: m.description,
+      provider: 'openai' as const,
+      contextWindow: 128_000, // default; model/list doesn't expose context window
+      supportsThinking: m.supportedReasoningEfforts.length > 0,
+    }))
+
+    // Update connection with fetched models
+    const currentDefault = connection.defaultModel
+    const stillValid = currentDefault && modelDefs.some(m => m.id === currentDefault)
+    // Use the original models array for isDefault (ModelDefinition doesn't have this field)
+    const serverDefault = models.find(m => m.isDefault)
+    const defaultModel = stillValid
+      ? currentDefault
+      : (serverDefault?.model ?? modelDefs[0]?.id)
+
+    updateLlmConnection(slug, {
+      models: modelDefs,
+      ...(defaultModel && !stillValid ? { defaultModel } : {}),
+    })
+
+    ipcLog.info(`Fetched ${modelDefs.length} Codex models for ${slug}: ${modelDefs.map(m => m.id).join(', ')}`)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    ipcLog.warn(`Codex model fetch failed for ${slug}: ${msg}`)
+    // Don't throw — keep existing models as fallback
+  } finally {
+    try { await client.disconnect() } catch { /* ignore cleanup errors */ }
+  }
+}
+
+// ============================================================
+// Periodic Model Refresh
+// ============================================================
+
+const CODEX_MODEL_REFRESH_INTERVAL = 30 * 60 * 1000 // 30 minutes
+let codexModelRefreshTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Start periodic model refresh for all OpenAI/Codex connections.
+ * Call after app is ready and IPC handlers are registered.
+ */
+export function startCodexModelRefresh(): void {
+  if (codexModelRefreshTimer) return
+
+  codexModelRefreshTimer = setInterval(async () => {
+    const connections = getLlmConnections().filter(c => c.providerType === 'openai')
+    for (const conn of connections) {
+      try {
+        await fetchAndStoreCodexModels(conn.slug)
+      } catch (err) {
+        ipcLog.warn(`Periodic Codex model refresh failed for ${conn.slug}: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+  }, CODEX_MODEL_REFRESH_INTERVAL)
+
+  // Also run an initial fetch on startup (non-blocking)
+  const connections = getLlmConnections().filter(c => c.providerType === 'openai')
+  for (const conn of connections) {
+    fetchAndStoreCodexModels(conn.slug).catch(err => {
+      ipcLog.warn(`Initial Codex model fetch failed for ${conn.slug}: ${err instanceof Error ? err.message : err}`)
+    })
+  }
+}
+
+/**
+ * Stop periodic model refresh.
+ * Call on app quit to clean up.
+ */
+export function stopCodexModelRefresh(): void {
+  if (codexModelRefreshTimer) {
+    clearInterval(codexModelRefreshTimer)
+    codexModelRefreshTimer = null
+  }
 }
 
 /**
@@ -1521,6 +1666,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         }
       }
 
+      // For OpenAI/Codex connections, fetch available models from the app-server
+      if (isOpenAIProvider(pendingConnection.providerType)) {
+        await fetchAndStoreCodexModels(setup.slug)
+      }
+
       // Reinitialize auth with the newly-created connection's slug
       // (not the default, which may be a different connection)
       const authSlug = getDefaultLlmConnection() || setup.slug
@@ -2037,6 +2187,11 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
             idToken: refreshed.idToken,
           })
 
+          // Fetch available models from Codex app-server (non-blocking — keeps hardcoded fallback on failure)
+          fetchAndStoreCodexModels(slug).catch(err => {
+            ipcLog.warn(`Codex model fetch failed during OAuth validation: ${err instanceof Error ? err.message : err}`)
+          })
+
           ipcLog.info(`LLM connection validated (ChatGPT OAuth refreshed): ${slug}`)
           touchLlmConnection(slug)
           return { success: true }
@@ -2084,6 +2239,13 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
               const msg = parseError instanceof Error ? parseError.message : String(parseError)
               return { success: false, error: `Failed to parse model list: ${msg.slice(0, 200)}` }
             }
+          }
+
+          // Fetch available models from Codex app-server (non-blocking — keeps hardcoded fallback on failure)
+          if (connection.providerType === 'openai') {
+            fetchAndStoreCodexModels(slug).catch(err => {
+              ipcLog.warn(`Codex model fetch failed during API key validation: ${err instanceof Error ? err.message : err}`)
+            })
           }
 
           ipcLog.info(`LLM connection validated: ${slug}`)
@@ -2371,6 +2533,36 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     } catch (error) {
       ipcLog.error('Failed to set workspace default LLM connection:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
+  // Refresh available models for a connection (dynamic model discovery)
+  ipcMain.handle(IPC_CHANNELS.LLM_CONNECTION_REFRESH_MODELS, async (_event, slug: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const connection = getLlmConnection(slug)
+      if (!connection) {
+        return { success: false, error: 'Connection not found' }
+      }
+
+      if (isOpenAIProvider(connection.providerType)) {
+        await fetchAndStoreCodexModels(slug)
+      } else if (isCopilotProvider(connection.providerType)) {
+        const manager = getCredentialManager()
+        const oauth = await manager.getLlmOAuth(slug)
+        if (oauth?.accessToken) {
+          await fetchAndStoreCopilotModels(slug, oauth.accessToken)
+        } else {
+          return { success: false, error: 'Not authenticated' }
+        }
+      } else {
+        return { success: false, error: 'Model refresh not supported for this provider' }
+      }
+
+      return { success: true }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error'
+      ipcLog.error(`Failed to refresh models for ${slug}: ${msg}`)
+      return { success: false, error: msg }
     }
   })
 

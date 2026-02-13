@@ -31,7 +31,7 @@ import { AbortReason } from './backend/types.ts';
 import type { Workspace } from '../config/storage.ts';
 
 // Import models from centralized registry
-import { DEFAULT_CODEX_MODEL, getModelById, getModelIdByShortName, isCodexModel } from '../config/models.ts';
+import { DEFAULT_CODEX_MODEL, getModelById, getModelIdByShortName } from '../config/models.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
@@ -108,32 +108,26 @@ import type {
 // Models and DEFAULT_CODEX_MODEL imported from centralized registry (config/models.ts)
 
 /**
- * Resolve Codex model IDs to the correct versioned slug for the auth type.
+ * Resolve Codex model IDs to the correct versioned slug.
  *
- * The registry uses real OpenAI model slugs (gpt-5.3-codex, gpt-5.1-codex-mini).
- * This function handles:
- * - API key downgrade: gpt-5.3-codex → gpt-5.2-codex (5.3 is ChatGPT-sub-only)
+ * With dynamic model discovery (model/list), the app-server returns only models
+ * appropriate for the current auth type. Manual API-key downgrades are no longer needed.
+ *
+ * This function still handles:
  * - Backward compat: old abstract IDs (codex, codex-mini) from existing sessions
  */
-function resolveCodexModelId(modelId: string, authType?: string): string {
-  const isApiKey = authType === 'api_key' || authType === 'api_key_with_endpoint';
-
+function resolveCodexModelId(modelId: string, _authType?: string): string {
   // Registry-based model IDs (derived, not hardcoded)
   const codexModelId = getModelIdByShortName('Codex');
   const codexMiniModelId = getModelIdByShortName('Codex Mini');
 
   // Backward compat: map old abstract IDs to real registry slugs
-  const legacyMap: Record<string, { api: string; sub: string }> = {
-    'codex':      { api: 'gpt-5.2-codex', sub: codexModelId },  // API-only: 5.2 (not in registry)
-    'codex-mini': { api: codexMiniModelId, sub: codexMiniModelId },
+  const legacyMap: Record<string, string> = {
+    'codex': codexModelId,
+    'codex-mini': codexMiniModelId,
   };
   const legacy = legacyMap[modelId];
-  if (legacy) return isApiKey ? legacy.api : legacy.sub;
-
-  // API key users: downgrade subscription-only model to API-available version
-  if (isApiKey && modelId === codexModelId) {
-    return 'gpt-5.2-codex';  // 5.3 requires ChatGPT subscription, 5.2 available via API
-  }
+  if (legacy) return legacy;
 
   return modelId;
 }
@@ -1518,9 +1512,10 @@ export class CodexAgent extends BaseAgent {
   async generateTitle(prompt: string): Promise<string | null> {
     const client = await this.ensureClient();
 
-    // Use the cheapest model (Codex Mini) — title is just a 5-word summary
-    const miniModelId = getModelIdByShortName('Codex Mini');
-    const model = resolveCodexModelId(miniModelId, this.config.authType);
+    if (!this.config.miniModel) {
+      throw new Error('CodexAgent.generateTitle: config.miniModel is required');
+    }
+    const model = resolveCodexModelId(this.config.miniModel, this.config.authType);
 
     this.debug(`[generateTitle] Starting ephemeral thread with model=${model}`);
 
@@ -2454,11 +2449,10 @@ export class CodexAgent extends BaseAgent {
       const client = await this.ensureClient();
       debug(`[CodexAgent.runMiniCompletion] Client connected`);
 
-      // Use a smaller model for quick completions
-      let model = this.config.miniModel ?? 'gpt-5-mini';
-      if (isCodexModel(model)) {
-        model = 'gpt-5-mini';
+      if (!this.config.miniModel) {
+        throw new Error('CodexAgent.runMiniCompletion: config.miniModel is required');
       }
+      const model = this.config.miniModel;
       debug(`[CodexAgent.runMiniCompletion] Using model: ${model}`);
 
       // Start an ephemeral thread with no system prompt
