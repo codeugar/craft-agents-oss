@@ -19,6 +19,7 @@
  * - source_microsoft_oauth_trigger: Start Microsoft OAuth authentication
  * - source_credential_prompt: Prompt user for API credentials
  * - transform_data: Transform data files via script for datatable/spreadsheet blocks
+ * - render_template: Render a source's HTML template with data
  */
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
@@ -31,6 +32,13 @@ import { basename, join, normalize, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+
+// Feature flags
+import { FEATURE_FLAGS } from '../feature-flags.ts';
+
+// Template rendering
+import { loadTemplate, validateTemplateData } from '../templates/loader.ts';
+import { renderMustache } from '../templates/mustache.ts';
 
 // Import handlers from session-tools-core
 import {
@@ -238,6 +246,12 @@ const credentialPromptSchema = {
   passwordRequired: z.boolean().optional().describe('For basic auth: whether password is required'),
 };
 
+const renderTemplateSchema = {
+  source: z.string().describe('Source slug (e.g., "linear", "gmail")'),
+  template: z.string().describe('Template ID (e.g., "issue-detail", "issue-list")'),
+  data: z.record(z.string(), z.unknown()).describe('JSON data to render into the template'),
+};
+
 const transformDataSchema = {
   language: z.enum(['python3', 'node', 'bun']).describe('Script runtime to use'),
   script: z.string().describe('Transform script source code. Receives input file paths as command-line args (sys.argv[1:] or process.argv.slice(2)), last arg is the output file path.'),
@@ -342,6 +356,19 @@ Opens a browser window for the user to sign in with their Microsoft account.
 **Supported services:** Outlook, Calendar, OneDrive, Teams, SharePoint
 
 **IMPORTANT:** After calling this tool, execution will be paused while OAuth completes.`,
+
+  render_template: `Render a source's HTML template with data.
+
+Use this when a source provides HTML templates for rich rendering of its data (e.g., issue detail views, email threads, ticket summaries).
+
+**Workflow:**
+1. Fetch data from the source (via MCP tools or API calls)
+2. Call \`render_template\` with the source slug, template ID, and data
+3. Output an \`html-preview\` block with the returned file path as \`"src"\`
+
+**Available templates** are documented in each source's \`guide.md\` under the "Templates" section.
+
+Templates use Mustache syntax — the tool handles rendering and writes the output HTML to the session data folder.`,
 
   transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks, or extract HTML content for html-preview blocks.
 
@@ -539,6 +566,85 @@ async function handleTransformData(
 }
 
 // ============================================================
+// render_template Handler
+// ============================================================
+
+async function handleRenderTemplate(
+  sessionId: string,
+  workspaceRootPath: string,
+  args: {
+    source: string;
+    template: string;
+    data: Record<string, unknown>;
+  }
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  const sourcePath = join(workspaceRootPath, 'sources', args.source);
+
+  // Validate source exists
+  if (!existsSync(sourcePath)) {
+    return {
+      content: [{ type: 'text', text: `Error: Source "${args.source}" not found at ${sourcePath}` }],
+      isError: true,
+    };
+  }
+
+  // Load template
+  const template = loadTemplate(sourcePath, args.template);
+  if (!template) {
+    return {
+      content: [{ type: 'text', text: `Error: Template "${args.template}" not found for source "${args.source}".\n\nExpected file: ${join(sourcePath, 'templates', `${args.template}.html`)}` }],
+      isError: true,
+    };
+  }
+
+  // Soft validation
+  const warnings = validateTemplateData(template.meta, args.data);
+
+  // Render template
+  let rendered: string;
+  try {
+    rendered = renderMustache(template.content, args.data);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return {
+      content: [{ type: 'text', text: `Error rendering template "${args.template}": ${msg}` }],
+      isError: true,
+    };
+  }
+
+  // Write output to session data folder
+  const dataDir = getSessionDataPath(workspaceRootPath, sessionId);
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true });
+  }
+
+  const outputFileName = `${args.source}-${args.template}-${Date.now()}.html`;
+  const outputPath = join(dataDir, outputFileName);
+  writeFileSync(outputPath, rendered, 'utf-8');
+
+  // Build response
+  const lines: string[] = [];
+  lines.push(`Rendered template: ${template.meta.name || args.template}`);
+  lines.push(`Output: ${outputPath}`);
+  lines.push('');
+  lines.push(`Use this absolute path as the "src" value in your html-preview block.`);
+
+  if (warnings.length > 0) {
+    lines.push('');
+    lines.push('⚠ Warnings:');
+    for (const w of warnings) {
+      lines.push(`  - ${w.message}`);
+    }
+    lines.push('The template was rendered but may have blank sections. Consider re-rendering with the missing fields.');
+  }
+
+  debug('session-scoped-tools', `render_template succeeded: ${outputPath} (${warnings.length} warnings)`);
+  return {
+    content: [{ type: 'text', text: lines.join('\n') }],
+  };
+}
+
+// ============================================================
 // Main Factory Function
 // ============================================================
 
@@ -648,6 +754,13 @@ export function getSessionScopedTools(
     tool('transform_data', TOOL_DESCRIPTIONS.transform_data, transformDataSchema, async (args) => {
       return handleTransformData(sessionId, workspaceRootPath, args);
     }),
+
+    // render_template (feature-flagged)
+    ...(FEATURE_FLAGS.sourceTemplates ? [
+      tool('render_template', TOOL_DESCRIPTIONS.render_template, renderTemplateSchema, async (args) => {
+        return handleRenderTemplate(sessionId, workspaceRootPath, args);
+      }),
+    ] : []),
 
   ];
 

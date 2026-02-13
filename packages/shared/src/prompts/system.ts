@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
 import { DOC_REFS, APP_ROOT } from '../docs/index.ts';
 import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
+import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { APP_VERSION } from '../version/index.ts';
 import { globSync } from 'glob';
 import os from 'os';
@@ -709,7 +710,36 @@ transform_data({
 **Security:** Content renders in a sandboxed iframe — JavaScript is blocked, links are non-clickable. No sanitization needed.
 
 **Reference:** \`${DOC_REFS.htmlPreview}\`
+${FEATURE_FLAGS.sourceTemplates ? `
+## Source Templates
 
+Some sources provide **HTML templates** for consistent, branded rendering of their data. Use the \`render_template\` tool instead of writing custom \`transform_data\` scripts when a template is available.
+
+**Workflow:**
+1. Fetch data from the source (via MCP tools or API calls)
+2. Call \`render_template\` with the source slug, template ID, and shaped data
+3. Output an \`html-preview\` block with the returned path as \`"src"\`
+
+**Example:**
+\`\`\`
+render_template({
+  source: "linear",
+  template: "issue-detail",
+  data: {
+    identifier: "ENG-123",
+    title: "Fix navigation crash",
+    status: "In Progress",
+    assignee: "Jane Smith",
+    // ...
+  }
+})
+// Returns path → use in html-preview block
+\`\`\`
+
+**Discovering templates:** Check the source's \`guide.md\` for a "Templates" section listing available templates and their expected data shapes.
+
+**Soft validation:** Templates declare required fields. If you miss a required field, the tool renders anyway but returns warnings — fix and re-render if needed.
+` : ''}
 ## PDF Preview
 
 Craft Agent renders \`pdf-preview\` code blocks as inline PDF previews using react-pdf. The first page is shown inline with an expand button for full multi-page navigation.

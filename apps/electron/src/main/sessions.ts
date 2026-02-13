@@ -491,6 +491,8 @@ function resolveToolDisplayMeta(
           'source_slack_oauth_trigger': 'Slack Auth',
           'source_microsoft_oauth_trigger': 'Microsoft Auth',
           'source_credential_prompt': 'Enter Credentials',
+          'transform_data': 'Transform Data',
+          'render_template': 'Render Template',
         },
         'preferences': {
           'update_user_preferences': 'Update Preferences',

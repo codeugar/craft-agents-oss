@@ -15,6 +15,7 @@
 import { homedir } from 'os';
 import { debug } from '../utils/debug.ts';
 import { resolve } from 'path';
+import { FEATURE_FLAGS } from '../feature-flags.ts';
 import type { PermissionsContext, MergedPermissionsConfig } from './permissions-config.ts';
 import {
   validateBashCommand,
@@ -1741,6 +1742,7 @@ export function shouldAllowToolInMode(
         'mcp__session__mermaid_validate',
         'mcp__session__source_test',
         'mcp__session__transform_data',
+        ...(FEATURE_FLAGS.sourceTemplates ? ['mcp__session__render_template'] : []),
       ];
       if (readOnlySessionTools.includes(toolName)) {
         return { allowed: true };
