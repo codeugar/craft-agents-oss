@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/styled-context-menu"
 import { DropdownMenuProvider, ContextMenuProvider } from "@/components/ui/menu-context"
 import { SessionMenu } from "./SessionMenu"
+import { BatchSessionMenu } from "./BatchSessionMenu"
 import { SessionSearchHeader } from "./SessionSearchHeader"
 import { ConnectionIcon } from "@/components/icons/ConnectionIcon"
 import { useOptionalAppShellContext } from "@/context/AppShellContext"
@@ -413,6 +414,16 @@ function SessionItem({
   const handleClick = (e: React.MouseEvent) => {
     // Always activate session-list zone for keyboard navigation (arrow keys, Cmd+A, etc.)
     onFocusZone?.()
+
+    // Right-click: preserve multi-select, let context menu handle it
+    if (e.button === 2) {
+      if (isMultiSelectActive && !isInMultiSelect && onToggleSelect) {
+        // Right-clicking an unselected item during multi-select: add it to selection
+        onToggleSelect()
+      }
+      // Don't change selection — context menu will show batch or single actions
+      return
+    }
 
     // Handle multi-select modifier keys
     const isMetaKey = e.metaKey || e.ctrlKey // Cmd on Mac, Ctrl on Windows
@@ -799,32 +810,36 @@ function SessionItem({
         )}
           </div>
         </ContextMenuTrigger>
-        {/* Context menu - same content as dropdown */}
+        {/* Context menu - batch actions when multi-selecting, single-session menu otherwise */}
         <StyledContextMenuContent>
           <ContextMenuProvider>
-            <SessionMenu
-              sessionId={item.id}
-              sessionName={getSessionTitle(item)}
-              isFlagged={item.isFlagged ?? false}
-              isArchived={item.isArchived ?? false}
-              sharedUrl={item.sharedUrl}
-              hasMessages={hasMessages(item)}
-              hasUnreadMessages={hasUnreadMessages(item)}
-              currentTodoState={currentTodoState}
-              todoStates={todoStates}
-              sessionLabels={item.labels ?? []}
-              labels={labels}
-              onLabelsChange={onLabelsChange ? (newLabels) => onLabelsChange(item.id, newLabels) : undefined}
-              onRename={() => onRenameClick(item.id, getSessionTitle(item))}
-              onFlag={() => onFlag?.(item.id)}
-              onUnflag={() => onUnflag?.(item.id)}
-              onArchive={() => onArchive?.(item.id)}
-              onUnarchive={() => onUnarchive?.(item.id)}
-              onMarkUnread={() => onMarkUnread(item.id)}
-              onTodoStateChange={(state) => onTodoStateChange(item.id, state)}
-              onOpenInNewWindow={onOpenInNewWindow}
-              onDelete={() => onDelete(item.id)}
-            />
+            {isMultiSelectActive && isInMultiSelect ? (
+              <BatchSessionMenu />
+            ) : (
+              <SessionMenu
+                sessionId={item.id}
+                sessionName={getSessionTitle(item)}
+                isFlagged={item.isFlagged ?? false}
+                isArchived={item.isArchived ?? false}
+                sharedUrl={item.sharedUrl}
+                hasMessages={hasMessages(item)}
+                hasUnreadMessages={hasUnreadMessages(item)}
+                currentTodoState={currentTodoState}
+                todoStates={todoStates}
+                sessionLabels={item.labels ?? []}
+                labels={labels}
+                onLabelsChange={onLabelsChange ? (newLabels) => onLabelsChange(item.id, newLabels) : undefined}
+                onRename={() => onRenameClick(item.id, getSessionTitle(item))}
+                onFlag={() => onFlag?.(item.id)}
+                onUnflag={() => onUnflag?.(item.id)}
+                onArchive={() => onArchive?.(item.id)}
+                onUnarchive={() => onUnarchive?.(item.id)}
+                onMarkUnread={() => onMarkUnread(item.id)}
+                onTodoStateChange={(state) => onTodoStateChange(item.id, state)}
+                onOpenInNewWindow={onOpenInNewWindow}
+                onDelete={() => onDelete(item.id)}
+              />
+            )}
           </ContextMenuProvider>
         </StyledContextMenuContent>
       </ContextMenu>

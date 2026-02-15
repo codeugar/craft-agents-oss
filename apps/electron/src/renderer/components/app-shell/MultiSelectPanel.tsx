@@ -67,7 +67,7 @@ export function MultiSelectPanel({
           <span className="text-2xl font-semibold text-accent">{count}</span>
         </div>
         <h2 className="text-lg font-medium text-foreground">
-          {count} {count === 1 ? 'Chat' : 'Chats'} selected
+          {count} {count === 1 ? 'Session' : 'Sessions'} selected
         </h2>
         <div className="text-sm text-foreground/50 flex flex-col items-center gap-1">
           <span>
