@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../../lib/utils'
+import { FILE_EXTENSIONS_PATTERN } from '../../lib/file-classification'
 import { CodeBlock, InlineCode } from './CodeBlock'
 import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { MarkdownJsonBlock } from './MarkdownJsonBlock'
@@ -73,7 +74,8 @@ interface CollapsibleContext {
 }
 
 // File path detection regex - matches paths starting with /, ~/, or ./
-const FILE_PATH_REGEX = /^(?:\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma)$/i
+// Extensions derived from file-classification.ts to stay in sync with preview support
+const FILE_PATH_REGEX = new RegExp(`^(?:/|~/|./)[\\w\\-./@]+\\.(?:${FILE_EXTENSIONS_PATTERN})$`, 'i')
 
 /**
  * Create custom components based on render mode.
