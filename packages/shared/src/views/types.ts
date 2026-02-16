@@ -62,7 +62,7 @@ export interface ViewEvaluationContext {
   /** Preview text (first 150 chars of first user message) */
   preview: string;
   /** Status ID (e.g. 'todo', 'in-progress', 'done') */
-  todoState: string;
+  sessionStatus: string;
   /** Permission mode ('safe', 'ask', 'allow-all') */
   permissionMode: string;
   /** Model override string */

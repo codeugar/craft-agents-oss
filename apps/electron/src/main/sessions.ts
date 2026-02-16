@@ -23,6 +23,7 @@ import {
 } from '@craft-agent/shared/codex'
 import { getLlmConnection, getDefaultLlmConnection } from '@craft-agent/shared/config'
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
+import { InitGate } from './init-gate'
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk'
 import type { WindowManager } from './window-manager'
 import {
@@ -63,7 +64,7 @@ import {
   type StoredSession,
   type StoredMessage,
   type SessionMetadata,
-  type TodoState,
+  type SessionStatus,
   pickSessionFields,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
@@ -698,9 +699,9 @@ interface ManagedSession {
     /** Model's context window size in tokens (from SDK modelUsage) */
     contextWindow?: number
   }
-  // Todo state (user-controlled) - determines open vs closed
+  // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
-  todoState?: string
+  sessionStatus?: string
   // Read/unread tracking - ID of last message user has read
   lastReadMessageId?: string
   /**
@@ -944,23 +945,15 @@ export class SessionManager {
   copilotCliPath: string | undefined
   /** Resolved path to Copilot network interceptor (for tool metadata capture) */
   copilotInterceptorPath: string | undefined
-  /** Promise that resolves once initialize() completes (sessions loaded from disk).
-   *  IPC handlers await this to avoid returning empty results during startup. */
-  private initPromise: Promise<void>
-  private resolveInit!: () => void
+  /** Coordinates startup initialization waiters from IPC handlers. */
+  private initGate = new InitGate()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
-
-  constructor() {
-    this.initPromise = new Promise<void>(resolve => {
-      this.resolveInit = resolve
-    })
-  }
 
   /** Wait until initialize() has completed (sessions loaded from disk).
    *  Resolves immediately if already initialized. */
   waitForInit(): Promise<void> {
-    return this.initPromise
+    return this.initGate.wait()
   }
 
   setWindowManager(wm: WindowManager): void {
@@ -1087,7 +1080,7 @@ export class SessionManager {
       },
 
       // Session metadata changes (external edits to session.jsonl headers).
-      // Detects label/flag/name/todoState changes made by other instances or scripts.
+      // Detects label/flag/name/sessionStatus changes made by other instances or scripts.
       // Compares with in-memory state and only emits events for actual differences.
       onSessionMetadataChange: (sessionId, header) => {
         const managed = this.sessions.get(sessionId)
@@ -1117,10 +1110,10 @@ export class SessionManager {
           changed = true
         }
 
-        // Todo state
-        if (managed.todoState !== header.todoState) {
-          managed.todoState = header.todoState
-          this.sendEvent({ type: 'todo_state_changed', sessionId, todoState: header.todoState ?? '' }, managed.workspace.id)
+        // Session status
+        if (managed.sessionStatus !== header.sessionStatus) {
+          managed.sessionStatus = header.sessionStatus
+          this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus: header.sessionStatus ?? '' }, managed.workspace.id)
           changed = true
         }
 
@@ -1142,7 +1135,7 @@ export class SessionManager {
             permissionMode: header.permissionMode,
             labels: header.labels,
             isFlagged: header.isFlagged,
-            todoState: header.todoState,
+            sessionStatus: header.sessionStatus,
             sessionName: header.name,
           }).catch((error) => {
             sessionLog.error(`[Hooks] Failed to update session metadata:`, error)
@@ -1392,113 +1385,118 @@ export class SessionManager {
   }
 
   async initialize(): Promise<void> {
-    // Set path to Claude Code executable (cli.js from SDK)
-    // In packaged app: use app.getAppPath() (points to app folder, ASAR is disabled)
-    // In development: use process.cwd()
-    const basePath = app.isPackaged ? app.getAppPath() : process.cwd()
+    try {
+      // Set path to Claude Code executable (cli.js from SDK)
+      // In packaged app: use app.getAppPath() (points to app folder, ASAR is disabled)
+      // In development: use process.cwd()
+      const basePath = app.isPackaged ? app.getAppPath() : process.cwd()
 
-    // In monorepos, dependencies may be hoisted to the root node_modules
-    // Try local first, then check monorepo root (two levels up from apps/electron)
-    const sdkRelativePath = join('node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js')
-    let cliPath = join(basePath, sdkRelativePath)
-    if (!existsSync(cliPath) && !app.isPackaged) {
-      // Try monorepo root (../../node_modules from apps/electron)
-      const monorepoRoot = join(basePath, '..', '..')
-      cliPath = join(monorepoRoot, sdkRelativePath)
-    }
-    if (!existsSync(cliPath)) {
-      const error = `Claude Code SDK not found at ${cliPath}. The app package may be corrupted.`
-      sessionLog.error(error)
-      throw new Error(error)
-    }
-    sessionLog.info('Setting pathToClaudeCodeExecutable:', cliPath)
-    setPathToClaudeCodeExecutable(cliPath)
-
-    // Resolve path to @github/copilot CLI (for CopilotAgent)
-    // import.meta.resolve() breaks in esbuild bundles, so we resolve the path explicitly.
-    // Packaged: vendor/copilot/{platform}-{arch}/ (copied by build script, verified in CI).
-    // Dev: native binary from node_modules/@github/copilot-{platform}-{arch}/.
-    const platform = process.platform === 'win32' ? 'win32' : process.platform === 'linux' ? 'linux' : 'darwin'
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
-    const binaryName = platform === 'win32' ? 'copilot.exe' : 'copilot'
-
-    const copilotPath = app.isPackaged
-      ? join(basePath, 'vendor', 'copilot', `${platform}-${arch}`, binaryName)
-      : join(basePath, 'node_modules', '@github', `copilot-${platform}-${arch}`, binaryName)
-
-    if (existsSync(copilotPath)) {
-      this.copilotCliPath = copilotPath
-      sessionLog.info('Resolved Copilot CLI path:', copilotPath)
-    } else {
-      sessionLog.warn('Copilot CLI not found at', copilotPath, '— Copilot sessions will try SDK default resolution')
-    }
-
-    // Set path to fetch interceptor for SDK subprocess
-    // This interceptor captures API errors and adds metadata to MCP tool schemas
-    // In monorepos, packages may be at the root level, not inside apps/electron
-    const interceptorRelativePath = join('packages', 'shared', 'src', 'network-interceptor.ts')
-    let interceptorPath = join(basePath, interceptorRelativePath)
-    if (!existsSync(interceptorPath) && !app.isPackaged) {
-      // Try monorepo root (../../packages from apps/electron)
-      const monorepoRoot = join(basePath, '..', '..')
-      interceptorPath = join(monorepoRoot, interceptorRelativePath)
-    }
-    if (!existsSync(interceptorPath)) {
-      const error = `Network interceptor not found at ${interceptorPath}. The app package may be corrupted.`
-      sessionLog.error(error)
-      throw new Error(error)
-    }
-    // Set interceptor path (used for --preload flag with bun)
-    sessionLog.info('Setting interceptorPath:', interceptorPath)
-    setInterceptorPath(interceptorPath)
-
-    // Resolve Copilot network interceptor (loaded via NODE_OPTIONS="--require ..." into Copilot CLI subprocess)
-    // Must be bundled CJS since it runs under Electron's Node.js, not Bun
-    // Built by `bun run build:copilot-interceptor` → apps/electron/dist/copilot-interceptor.cjs
-    // In dev: basePath is monorepo root, so add apps/electron/ prefix
-    // In packaged: basePath is the app dir, dist/ is directly inside
-    let copilotInterceptorPath = join(basePath, 'dist', 'copilot-interceptor.cjs')
-    if (!existsSync(copilotInterceptorPath) && !app.isPackaged) {
-      copilotInterceptorPath = join(basePath, 'apps', 'electron', 'dist', 'copilot-interceptor.cjs')
-    }
-    if (existsSync(copilotInterceptorPath)) {
-      this.copilotInterceptorPath = copilotInterceptorPath
-      sessionLog.info('Resolved Copilot interceptor path:', copilotInterceptorPath)
-    } else {
-      sessionLog.warn('Copilot network interceptor not found — run `bun run build:copilot-interceptor` in apps/electron/')
-    }
-
-    // In packaged app: use bundled Bun binary
-    // In development: use system 'bun' command (no need to set executable)
-    const bundledBunPath = getBundledBunPath()
-    if (app.isPackaged) {
-      if (!bundledBunPath) {
-        const error = 'Bundled Bun runtime not found. The app package may be corrupted.'
+      // In monorepos, dependencies may be hoisted to the root node_modules
+      // Try local first, then check monorepo root (two levels up from apps/electron)
+      const sdkRelativePath = join('node_modules', '@anthropic-ai', 'claude-agent-sdk', 'cli.js')
+      let cliPath = join(basePath, sdkRelativePath)
+      if (!existsSync(cliPath) && !app.isPackaged) {
+        // Try monorepo root (../../node_modules from apps/electron)
+        const monorepoRoot = join(basePath, '..', '..')
+        cliPath = join(monorepoRoot, sdkRelativePath)
+      }
+      if (!existsSync(cliPath)) {
+        const error = `Claude Code SDK not found at ${cliPath}. The app package may be corrupted.`
         sessionLog.error(error)
         throw new Error(error)
       }
-      sessionLog.info('Setting executable:', bundledBunPath)
-      setExecutable(bundledBunPath)
+      sessionLog.info('Setting pathToClaudeCodeExecutable:', cliPath)
+      setPathToClaudeCodeExecutable(cliPath)
+
+      // Resolve path to @github/copilot CLI (for CopilotAgent)
+      // import.meta.resolve() breaks in esbuild bundles, so we resolve the path explicitly.
+      // Packaged: vendor/copilot/{platform}-{arch}/ (copied by build script, verified in CI).
+      // Dev: native binary from node_modules/@github/copilot-{platform}-{arch}/.
+      const platform = process.platform === 'win32' ? 'win32' : process.platform === 'linux' ? 'linux' : 'darwin'
+      const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+      const binaryName = platform === 'win32' ? 'copilot.exe' : 'copilot'
+
+      const copilotPath = app.isPackaged
+        ? join(basePath, 'vendor', 'copilot', `${platform}-${arch}`, binaryName)
+        : join(basePath, 'node_modules', '@github', `copilot-${platform}-${arch}`, binaryName)
+
+      if (existsSync(copilotPath)) {
+        this.copilotCliPath = copilotPath
+        sessionLog.info('Resolved Copilot CLI path:', copilotPath)
+      } else {
+        sessionLog.warn('Copilot CLI not found at', copilotPath, '— Copilot sessions will try SDK default resolution')
+      }
+
+      // Set path to fetch interceptor for SDK subprocess
+      // This interceptor captures API errors and adds metadata to MCP tool schemas
+      // In monorepos, packages may be at the root level, not inside apps/electron
+      const interceptorRelativePath = join('packages', 'shared', 'src', 'network-interceptor.ts')
+      let interceptorPath = join(basePath, interceptorRelativePath)
+      if (!existsSync(interceptorPath) && !app.isPackaged) {
+        // Try monorepo root (../../packages from apps/electron)
+        const monorepoRoot = join(basePath, '..', '..')
+        interceptorPath = join(monorepoRoot, interceptorRelativePath)
+      }
+      if (!existsSync(interceptorPath)) {
+        const error = `Network interceptor not found at ${interceptorPath}. The app package may be corrupted.`
+        sessionLog.error(error)
+        throw new Error(error)
+      }
+      // Set interceptor path (used for --preload flag with bun)
+      sessionLog.info('Setting interceptorPath:', interceptorPath)
+      setInterceptorPath(interceptorPath)
+
+      // Resolve Copilot network interceptor (loaded via NODE_OPTIONS="--require ..." into Copilot CLI subprocess)
+      // Must be bundled CJS since it runs under Electron's Node.js, not Bun
+      // Built by `bun run build:copilot-interceptor` → apps/electron/dist/copilot-interceptor.cjs
+      // In dev: basePath is monorepo root, so add apps/electron/ prefix
+      // In packaged: basePath is the app dir, dist/ is directly inside
+      let copilotInterceptorPath = join(basePath, 'dist', 'copilot-interceptor.cjs')
+      if (!existsSync(copilotInterceptorPath) && !app.isPackaged) {
+        copilotInterceptorPath = join(basePath, 'apps', 'electron', 'dist', 'copilot-interceptor.cjs')
+      }
+      if (existsSync(copilotInterceptorPath)) {
+        this.copilotInterceptorPath = copilotInterceptorPath
+        sessionLog.info('Resolved Copilot interceptor path:', copilotInterceptorPath)
+      } else {
+        sessionLog.warn('Copilot network interceptor not found — run `bun run build:copilot-interceptor` in apps/electron/')
+      }
+
+      // In packaged app: use bundled Bun binary
+      // In development: use system 'bun' command (no need to set executable)
+      const bundledBunPath = getBundledBunPath()
+      if (app.isPackaged) {
+        if (!bundledBunPath) {
+          const error = 'Bundled Bun runtime not found. The app package may be corrupted.'
+          sessionLog.error(error)
+          throw new Error(error)
+        }
+        sessionLog.info('Setting executable:', bundledBunPath)
+        setExecutable(bundledBunPath)
+      }
+
+      // Backfill missing `models` arrays on existing LLM connections
+      migrateLegacyLlmConnectionsConfig()
+
+      // Fix defaultLlmConnection if it points to a non-existent connection
+      migrateOrphanedDefaultConnections()
+
+      // Migrate legacy credentials to LLM connection format (one-time migration)
+      // This ensures credentials saved before LLM connections are available via the new system
+      await migrateLegacyCredentials()
+
+      // Set up authentication environment variables (critical for SDK to work)
+      await this.reinitializeAuth()
+
+      // Load existing sessions from disk
+      this.loadSessionsFromDisk()
+
+      // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
+      this.initGate.markReady()
+    } catch (error) {
+      this.initGate.markFailed(error)
+      throw error
     }
-
-    // Backfill missing `models` arrays on existing LLM connections
-    migrateLegacyLlmConnectionsConfig()
-
-    // Fix defaultLlmConnection if it points to a non-existent connection
-    migrateOrphanedDefaultConnections()
-
-    // Migrate legacy credentials to LLM connection format (one-time migration)
-    // This ensures credentials saved before LLM connections are available via the new system
-    await migrateLegacyCredentials()
-
-    // Set up authentication environment variables (critical for SDK to work)
-    await this.reinitializeAuth()
-
-    // Load existing sessions from disk
-    this.loadSessionsFromDisk()
-
-    // Signal that initialization is complete — IPC handlers waiting on initPromise will proceed
-    this.resolveInit()
   }
 
   // Load all existing sessions from disk into memory (metadata only - messages are lazy-loaded)
@@ -1538,7 +1536,7 @@ export class SessionManager {
             permissionMode: meta.permissionMode,
             sdkSessionId: meta.sdkSessionId,
             tokenUsage: meta.tokenUsage,  // From JSONL header (updated on save)
-            todoState: meta.todoState,
+            sessionStatus: meta.sessionStatus,
             lastReadMessageId: meta.lastReadMessageId,  // Pre-computed for unread detection
             lastFinalMessageId: meta.lastFinalMessageId,  // Pre-computed for unread detection
             hasUnread: meta.hasUnread,  // Explicit unread flag for NEW badge state machine
@@ -1583,7 +1581,7 @@ export class SessionManager {
               permissionMode: meta.permissionMode,
               labels: meta.labels,
               isFlagged: meta.isFlagged,
-              todoState: meta.todoState,
+              sessionStatus: meta.sessionStatus,
               sessionName: managed.name,
             })
           }
@@ -1620,7 +1618,7 @@ export class SessionManager {
         isArchived: managed.isArchived,
         archivedAt: managed.archivedAt,
         permissionMode: managed.permissionMode,
-        todoState: managed.todoState,
+        sessionStatus: managed.sessionStatus,
         lastReadMessageId: managed.lastReadMessageId,  // For unread detection
         hasUnread: managed.hasUnread,  // Explicit unread flag for NEW badge state machine
         enabledSourceSlugs: managed.enabledSourceSlugs,
@@ -2157,7 +2155,7 @@ export class SessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
     })
@@ -2197,7 +2195,7 @@ export class SessionManager {
       streamingText: '',
       processingGeneration: 0,
       isFlagged: options?.isFlagged ?? false,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
@@ -2230,7 +2228,7 @@ export class SessionManager {
         permissionMode: storedSession.permissionMode,
         labels: storedSession.labels,
         isFlagged: storedSession.isFlagged,
-        todoState: storedSession.todoState,
+        sessionStatus: storedSession.sessionStatus,
         sessionName: managed.name,
       })
     }
@@ -2244,7 +2242,7 @@ export class SessionManager {
       isProcessing: false,
       isFlagged: options?.isFlagged ?? false,
       permissionMode: defaultPermissionMode,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       workingDirectory: resolvedWorkingDir,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
@@ -2274,7 +2272,7 @@ export class SessionManager {
       permissionMode: options?.permissionMode,
       enabledSourceSlugs: options?.enabledSourceSlugs,
       model: options?.model,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
     })
 
@@ -2296,7 +2294,7 @@ export class SessionManager {
       streamingText: '',
       processingGeneration: 0,
       isFlagged: options?.isFlagged ?? false,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       permissionMode: defaultPermissionMode,
       workingDirectory: storedSession.workingDirectory,
@@ -2331,7 +2329,7 @@ export class SessionManager {
       isProcessing: false,
       isFlagged: options?.isFlagged ?? false,
       permissionMode: defaultPermissionMode,
-      todoState: options?.todoState,
+      sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       workingDirectory: storedSession.workingDirectory,
       model: managed.model,
@@ -3124,15 +3122,15 @@ export class SessionManager {
     }
   }
 
-  async setTodoState(sessionId: string, todoState: TodoState): Promise<void> {
+  async setSessionStatus(sessionId: string, sessionStatus: SessionStatus): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      managed.todoState = todoState
+      managed.sessionStatus = sessionStatus
       // Persist in-memory state directly to avoid race with pending queue writes
       this.persistSession(managed)
       await this.flushSession(managed.id)
       // Notify all windows for this workspace
-      this.sendEvent({ type: 'todo_state_changed', sessionId, todoState }, managed.workspace.id)
+      this.sendEvent({ type: 'session_status_changed', sessionId, sessionStatus }, managed.workspace.id)
     }
   }
 
@@ -4077,12 +4075,16 @@ export class SessionManager {
         if (requiredSources.size > 0) {
           const currentSlugs = new Set(managed.enabledSourceSlugs || [])
           const toEnable: string[] = []
+          const candidateSlugs = Array.from(requiredSources)
+          const usableSources = new Set(
+            getSourcesBySlugs(workspaceRoot, candidateSlugs)
+              .filter(isSourceUsable)
+              .map(source => source.config.slug)
+          )
 
-          for (const srcSlug of requiredSources) {
+          for (const srcSlug of candidateSlugs) {
             if (currentSlugs.has(srcSlug)) continue
-            // Only pre-enable sources that exist and are usable (authenticated)
-            const sources = getSourcesBySlugs(workspaceRoot, [srcSlug])
-            if (sources.length > 0 && isSourceUsable(sources[0])) {
+            if (usableSources.has(srcSlug)) {
               toEnable.push(srcSlug)
             }
           }
@@ -4428,9 +4430,9 @@ export class SessionManager {
     // 3. Auto-complete mini agent sessions to avoid session list clutter
     //    Mini agents are spawned from EditPopovers for quick config edits
     //    and should automatically move to 'done' when finished
-    if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.todoState !== 'done') {
+    if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
       sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
-      await this.setTodoState(sessionId, 'done')
+      await this.setSessionStatus(sessionId, 'done')
     }
 
     // 4. Check queue and process or complete
@@ -5477,7 +5479,9 @@ To view this task's output:
     })
 
     // Send the prompt
-    await this.sendMessage(session.id, prompt)
+    await this.sendMessage(session.id, prompt, undefined, undefined, {
+      skillSlugs: resolved?.skillSlugs,
+    })
 
     return { sessionId: session.id }
   }

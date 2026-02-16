@@ -364,6 +364,17 @@ export function setGitBashPath(path: string): void {
   saveConfig(config);
 }
 
+/**
+ * Clear persisted Git Bash path (Windows only).
+ * Used when the stored path is stale or invalid.
+ */
+export function clearGitBashPath(): void {
+  const config = loadStoredConfig();
+  if (!config || !config.gitBashPath) return;
+  delete config.gitBashPath;
+  saveConfig(config);
+}
+
 // Note: getDefaultWorkingDirectory/setDefaultWorkingDirectory removed
 // Working directory is now stored per-workspace in workspace config.json (defaults.workingDirectory)
 // Note: getDefaultPermissionMode/getEnabledPermissionModes removed

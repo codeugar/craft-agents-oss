@@ -85,6 +85,7 @@ import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
 import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { initNotificationService, clearBadgeCount, initBadgeIcon, initInstanceBadge } from './notifications'
 import { checkForUpdatesOnLaunch, setWindowManager as setAutoUpdateWindowManager, isUpdating } from './auto-update'
+import { validateGitBashPath } from './git-bash'
 
 // Initialize electron-log for renderer process support
 log.initialize()
@@ -297,10 +298,17 @@ app.whenReady().then(async () => {
 
     // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)
     if (process.platform === 'win32') {
-      const { getGitBashPath } = await import('@craft-agent/shared/config')
+      const { getGitBashPath, clearGitBashPath } = await import('@craft-agent/shared/config')
       const gitBashPath = getGitBashPath()
       if (gitBashPath) {
-        process.env.CLAUDE_CODE_GIT_BASH_PATH = gitBashPath
+        const validation = await validateGitBashPath(gitBashPath)
+        if (validation.valid) {
+          process.env.CLAUDE_CODE_GIT_BASH_PATH = validation.path
+        } else {
+          clearGitBashPath()
+          delete process.env.CLAUDE_CODE_GIT_BASH_PATH
+          mainLog.warn(`Cleared invalid persisted Git Bash path: ${gitBashPath}`)
+        }
       }
     }
 
