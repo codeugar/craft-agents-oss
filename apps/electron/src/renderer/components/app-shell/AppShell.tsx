@@ -2027,7 +2027,7 @@ function AppShellContent({
             animate={{ opacity: effectiveFocusMode ? 0 : 1 }}
             transition={springTransition}
             className={cn(
-              "fixed top-0 h-[50px] z-overlay flex items-center titlebar-no-drag pr-2",
+              "fixed top-0 h-[50px] z-overlay flex items-center pointer-events-none pr-2",
               effectiveFocusMode && "pointer-events-none"
             )}
             style={{ left: menuLeftOffset, width: sidebarWidth - menuLeftOffset }}
@@ -2399,7 +2399,7 @@ function AppShellContent({
           >
             <div
               style={{ width: sessionListWidth }}
-              className="h-full flex flex-col min-w-0 titlebar-no-drag relative z-panel"
+              className="h-full flex flex-col min-w-0 relative z-panel"
             >
             <PanelHeader
               title={isSidebarVisible ? listTitle : undefined}
