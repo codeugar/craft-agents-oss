@@ -20,6 +20,9 @@ CODE_OF_CONDUCT.md
 CONTRIBUTING.md
 SECURITY.md
 
+# GitHub Issue Templates
+.github/ISSUE_TEMPLATE/**/*
+
 # =============================================================================
 # APPS - ELECTRON (Desktop GUI)
 # =============================================================================
