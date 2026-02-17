@@ -6,6 +6,7 @@ import { DOC_REFS, APP_ROOT } from '../docs/index.ts';
 import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { APP_VERSION } from '../version/index.ts';
+import { readPluginName } from '../utils/workspace.ts';
 import { globSync } from 'glob';
 import os from 'os';
 
@@ -412,9 +413,11 @@ function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
-  // Extract workspaceId from path (last component of the path)
-  // Path format: ~/.craft-agent/workspaces/{workspaceId}
-  const workspaceId = basename(workspacePath) || '{workspaceId}';
+  // Read the SDK plugin name from .claude-plugin/plugin.json — this is what the SDK
+  // uses to resolve skills. Falls back to basename for backwards compatibility.
+  const workspaceId = (workspaceRootPath && readPluginName(workspaceRootPath))
+    || basename(workspacePath)
+    || '{workspaceId}';
 
   // Environment marker for SDK JSONL detection
   const environmentMarker = getCraftAgentEnvironmentMarker();
