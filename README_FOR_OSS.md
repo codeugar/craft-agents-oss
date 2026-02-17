@@ -106,6 +106,16 @@ bun run electron:start
 4. **Connect sources** (optional): Add MCP servers, REST APIs, or local filesystems
 5. **Start chatting**: Create sessions and interact with Claude
 
+## Tasks Migration Troubleshooting (hooks.json → tasks.json)
+
+`tasks.json` is the canonical automation config. `hooks.json` is deprecated and only used as a migration fallback.
+
+If your tasks appear missing and **both** files exist in the same workspace root:
+
+1. Remove the empty/invalid `tasks.json`
+2. Restart the app
+3. The app will re-migrate from `hooks.json` into a fresh `tasks.json`
+
 ## Desktop App Features
 
 ### Session Management

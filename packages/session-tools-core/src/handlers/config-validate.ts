@@ -153,11 +153,18 @@ export async function handleConfigValidate(
     }
 
     case 'hooks': {
+      const tasksPath = join(ctx.workspacePath, 'tasks.json');
       const hooksPath = join(ctx.workspacePath, 'hooks.json');
-      if (!ctx.fs.exists(hooksPath)) {
-        return successResponse('✓ No hooks.json (no hooks configured)');
+      if (ctx.fs.exists(tasksPath)) {
+        const result = validateJsonFileHasFields(tasksPath, []);
+        return successResponse(formatValidationResult(result));
       }
-      const result = validateJsonFileHasFields(hooksPath, ['matchers']);
+
+      if (!ctx.fs.exists(hooksPath)) {
+        return successResponse('✓ No tasks.json or hooks.json (no tasks configured)');
+      }
+
+      const result = validateJsonFileHasFields(hooksPath, []);
       return successResponse(formatValidationResult(result));
     }
 

@@ -16,15 +16,23 @@ import { hooksAtom } from '@/atoms/hooks'
 import { parseHooksConfig, type HookListItem, type TestResult, type ExecutionEntry } from '@/components/hooks/types'
 
 async function loadHooksFromDisk(rootPath: string): Promise<HookListItem[]> {
-  // Try tasks.json first (v2), fall back to hooks.json (v1)
-  let content: string
+  // tasks.json is canonical. Legacy fallback is used only when hooks.json exists.
+  const tasksPath = `${rootPath}/tasks.json`
+  const hooksPath = `${rootPath}/hooks.json`
+
+  // 1) Try canonical tasks.json
   try {
-    content = await window.electronAPI.readFile(`${rootPath}/tasks.json`)
+    const tasksContent = await window.electronAPI.readFile(tasksPath)
+    return parseHooksConfig(JSON.parse(tasksContent))
   } catch {
-    content = await window.electronAPI.readFile(`${rootPath}/hooks.json`)
+    // Continue to legacy fallback below
   }
-  const parsed = JSON.parse(content)
-  return parseHooksConfig(parsed)
+
+  // 2) Legacy fallback: only if hooks.json exists/readable.
+  // This is a migration safety net, not a first-class config path.
+  const legacyContent = await window.electronAPI.readFile(hooksPath)
+  console.warn('[tasks] Falling back to deprecated hooks.json in renderer. Please migrate to tasks.json.')
+  return parseHooksConfig(JSON.parse(legacyContent))
 }
 
 export interface UseHooksResult {
