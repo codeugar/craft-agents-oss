@@ -3,14 +3,17 @@ import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import TurndownService from 'turndown';
 import { parse as parseHtml } from 'node-html-parser';
 import { join } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { randomUUID } from 'node:crypto';
 
 const schema = Type.Object({
   url: Type.String({ description: 'URL to fetch' }),
   prompt: Type.Optional(
     Type.String({
       description:
-        'What to extract from the page (optional — returns full content if omitted)',
+        'Context hint included in the output prefix (e.g. "find the pricing table"). The full page content is always returned — use this to annotate what you were looking for.',
     }),
   ),
 });
@@ -20,17 +23,8 @@ const turndown = new TurndownService({
   codeBlockStyle: 'fenced',
 });
 
-// Remove noise elements
-turndown.remove([
-  'script',
-  'style',
-  'nav',
-  'footer',
-  'header',
-  'aside',
-  'noscript',
-  'iframe',
-]);
+const NOISE_ELEMENTS = ['script', 'style', 'nav', 'footer', 'header', 'aside', 'noscript', 'iframe', 'svg'];
+turndown.remove(NOISE_ELEMENTS);
 
 const MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024; // 50MB
 const MAX_TEXT_LENGTH = 50_000;
@@ -44,11 +38,125 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/svg+xml': '.svg',
 };
 
+// ============================================================
+// SSRF protection
+// ============================================================
+
+const PRIVATE_IP_PATTERNS = [
+  /^127\./,                                   // IPv4 loopback
+  /^10\./,                                    // Class A private
+  /^172\.(1[6-9]|2\d|3[01])\./,              // Class B private
+  /^192\.168\./,                              // Class C private
+  /^169\.254\./,                              // link-local
+  /^0\./,                                     // "this" network
+  /^100\.(6[4-9]|[7-9]\d|1[0-2]\d)\./,       // Carrier-grade NAT (100.64.0.0/10)
+  /^::1$/,                                    // IPv6 loopback
+  /^fe80:/i,                                  // IPv6 link-local
+  /^f[cd]/i,                                  // IPv6 unique local (fc00::/7)
+];
+
+function isPrivateIp(ip: string): boolean {
+  return PRIVATE_IP_PATTERNS.some(r => r.test(ip));
+}
+
+/**
+ * Validate URL before fetching — blocks non-HTTP schemes and private/reserved IPs.
+ * Note: there is an inherent TOCTOU gap between this DNS check and the subsequent fetch().
+ * This is defense-in-depth, not a complete SSRF mitigation.
+ */
+async function validateUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Blocked: unsupported protocol "${parsed.protocol}"`);
+  }
+
+  const hostname = parsed.hostname;
+
+  // Hostname is already an IP literal
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw new Error('Blocked: private/reserved IP address');
+    }
+    return;
+  }
+
+  // Resolve hostname and check the resulting IP
+  const { address } = await lookup(hostname);
+  if (isPrivateIp(address)) {
+    throw new Error('Blocked: hostname resolves to private/reserved IP');
+  }
+}
+
+// ============================================================
+// Streaming size-limited reader
+// ============================================================
+
+/**
+ * Read the full response body while enforcing a byte-size limit.
+ * Unlike checking Content-Length (which can be absent or lie),
+ * this actually caps how many bytes we buffer.
+ */
+async function readResponseBytes(response: Response, maxSize: number): Promise<Buffer> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    // Fallback for runtimes without streaming body
+    const ab = await response.arrayBuffer();
+    if (ab.byteLength > maxSize) {
+      throw new Error(`Response exceeded ${Math.round(maxSize / 1024 / 1024)}MB limit`);
+    }
+    return Buffer.from(ab);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalSize = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalSize += value.byteLength;
+      if (totalSize > maxSize) {
+        throw new Error(`Response exceeded ${Math.round(maxSize / 1024 / 1024)}MB limit`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const combined = new Uint8Array(totalSize);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return Buffer.from(combined.buffer, combined.byteOffset, combined.byteLength);
+}
+
+/**
+ * Read the full response body as text while enforcing a byte-size limit.
+ */
+async function readResponseText(response: Response, maxSize: number): Promise<string> {
+  const buffer = await readResponseBytes(response, maxSize);
+  return buffer.toString('utf-8');
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
 function result(text: string, isError = false): AgentToolResult<typeof schema> {
   return {
     content: [{ type: 'text', text }],
     details: isError ? { isError: true } : {},
   };
+}
+
+function truncate(text: string, maxLen: number = MAX_TEXT_LENGTH): string {
+  return text.length > maxLen
+    ? text.slice(0, maxLen) + '\n\n[Content truncated]'
+    : text;
 }
 
 // ============================================================
@@ -58,6 +166,8 @@ function result(text: string, isError = false): AgentToolResult<typeof schema> {
 function ensurePdfjsPolyfills(): void {
   // pdfjs-dist uses browser-only APIs at module scope (e.g. `const SCALE_MATRIX = new DOMMatrix()`).
   // Provide minimal stubs so it can load in Node.js — only text extraction is used, not rendering.
+  // WARNING: These are non-functional stubs. If pdfjs-dist starts using matrix math for text
+  // positioning, text extraction output may degrade silently. Pin pdfjs-dist version carefully.
   if (typeof globalThis.DOMMatrix === 'undefined') {
     (globalThis as any).DOMMatrix = class DOMMatrix {
       a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
@@ -110,37 +220,42 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   return pages.join('\n\n');
 }
 
-function handlePdf(
+async function handlePdf(
   buffer: Buffer,
   url: string,
-  saveBinary: (buffer: Buffer, url: string, ext: string) => string,
+  saveBinary: (buffer: Buffer, url: string, ext: string) => Promise<string>,
 ): Promise<AgentToolResult<typeof schema>> {
-  const savedPath = saveBinary(buffer, url, '.pdf');
+  let savedPath: string;
+  try {
+    savedPath = await saveBinary(buffer, url, '.pdf');
+  } catch {
+    savedPath = '(failed to save)';
+  }
 
-  return extractPdfText(buffer).then((text) => {
+  try {
+    const text = await extractPdfText(buffer);
     if (!text.trim()) {
       return result(
         `PDF from ${url} (saved to ${savedPath})\n\nNo extractable text (likely scanned/image-based).`,
       );
     }
-
-    const truncated =
-      text.length > MAX_TEXT_LENGTH
-        ? text.slice(0, MAX_TEXT_LENGTH) + '\n\n[Content truncated]'
-        : text;
-
-    return result(`PDF content from ${url} (saved to ${savedPath}):\n\n${truncated}`);
-  });
+    return result(`PDF content from ${url} (saved to ${savedPath}):\n\n${truncate(text)}`);
+  } catch (err) {
+    return result(
+      `PDF from ${url} (saved to ${savedPath})\n\nFailed to extract text: ${err instanceof Error ? err.message : String(err)}`,
+      true,
+    );
+  }
 }
 
-function handleImage(
+async function handleImage(
   buffer: Buffer,
   url: string,
   contentType: string,
-  saveBinary: (buffer: Buffer, url: string, ext: string) => string,
-): AgentToolResult<typeof schema> {
+  saveBinary: (buffer: Buffer, url: string, ext: string) => Promise<string>,
+): Promise<AgentToolResult<typeof schema>> {
   const ext = MIME_TO_EXT[contentType] || '.bin';
-  const savedPath = saveBinary(buffer, url, ext);
+  const savedPath = await saveBinary(buffer, url, ext);
   const sizeKb = Math.round(buffer.length / 1024);
 
   return result(
@@ -155,8 +270,11 @@ function handleHtml(
   prompt: string | undefined,
 ): AgentToolResult<typeof schema> {
   const root = parseHtml(html);
+  // Strip noise elements from the DOM before selecting mainContent.
+  // This prevents e.g. a <nav class="content"> from being picked as main content.
+  // turndown.remove() provides a second pass during markdown conversion as a safety net.
   root
-    .querySelectorAll('script, style, nav, footer, noscript, iframe, svg')
+    .querySelectorAll(NOISE_ELEMENTS.join(', '))
     .forEach((el) => el.remove());
 
   const mainContent =
@@ -166,16 +284,11 @@ function handleHtml(
 
   const markdown = turndown.turndown(mainContent.innerHTML);
 
-  const truncated =
-    markdown.length > MAX_TEXT_LENGTH
-      ? markdown.slice(0, MAX_TEXT_LENGTH) + '\n\n[Content truncated]'
-      : markdown;
-
   const prefix = prompt
     ? `Content from ${url} (asked: "${prompt}"):\n\n`
     : `Content from ${url}:\n\n`;
 
-  return result(prefix + truncated);
+  return result(prefix + truncate(markdown));
 }
 
 function handleJson(
@@ -188,24 +301,14 @@ function handleJson(
   } catch {
     formatted = raw;
   }
-  const truncated =
-    formatted.length > MAX_TEXT_LENGTH
-      ? formatted.slice(0, MAX_TEXT_LENGTH) + '\n\n[Truncated]'
-      : formatted;
-
-  return result(`JSON from ${url}:\n\n${truncated}`);
+  return result(`JSON from ${url}:\n\n${truncate(formatted)}`);
 }
 
 function handleText(
   raw: string,
   url: string,
 ): AgentToolResult<typeof schema> {
-  const truncated =
-    raw.length > MAX_TEXT_LENGTH
-      ? raw.slice(0, MAX_TEXT_LENGTH) + '\n\n[Content truncated]'
-      : raw;
-
-  return result(`Content from ${url}:\n\n${truncated}`);
+  return result(`Content from ${url}:\n\n${truncate(raw)}`);
 }
 
 // ============================================================
@@ -215,17 +318,18 @@ function handleText(
 export function createWebFetchTool(
   getSessionPath: () => string | null,
 ): AgentTool<typeof schema> {
-  function saveBinary(buffer: Buffer, url: string, ext: string): string {
+  async function saveBinary(buffer: Buffer, url: string, ext: string): Promise<string> {
     const sessionPath = getSessionPath();
-    if (!sessionPath) return '(no session path — file not saved)';
+    if (!sessionPath) throw new Error('No active session — cannot save file to disk');
     const dir = join(sessionPath, 'long_responses');
-    mkdirSync(dir, { recursive: true });
-    const urlName = new URL(url).pathname.split('/').pop() || '';
+    await mkdir(dir, { recursive: true });
+    let urlName = '';
+    try { urlName = new URL(url).pathname.split('/').pop() || ''; } catch { /* malformed URL */ }
     const safe =
       urlName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40) || 'download';
-    const file = `${Date.now()}_web_fetch_${safe}${ext}`;
+    const file = `${randomUUID()}_${safe}${ext}`;
     const abs = join(dir, file);
-    writeFileSync(abs, buffer);
+    await writeFile(abs, buffer);
     return abs;
   }
 
@@ -238,14 +342,33 @@ export function createWebFetchTool(
     async execute(toolCallId, params) {
       const { url, prompt } = params;
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; CraftAgent/1.0)',
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        signal: AbortSignal.timeout(30_000),
-      });
+      // SSRF protection: block non-HTTP schemes and private/reserved IPs
+      try {
+        await validateUrl(url);
+      } catch (err) {
+        return result(
+          `Refused to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; CraftAgent/1.0)',
+            Accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (err) {
+        return result(
+          `Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
+      }
 
       if (!response.ok) {
         return result(
@@ -254,53 +377,40 @@ export function createWebFetchTool(
         );
       }
 
-      // Size guard
-      const contentLength = parseInt(
-        response.headers.get('content-length') || '0',
-        10,
-      );
-      if (contentLength > MAX_DOWNLOAD_SIZE) {
-        return result(
-          `File too large (${Math.round(contentLength / 1024 / 1024)}MB). Max: 50MB.`,
-          true,
-        );
-      }
+      // Use the final URL after redirects for all output messages
+      const finalUrl = response.url || url;
 
       const contentType = (response.headers.get('content-type') || '')
         .toLowerCase()
         .split(';')[0]
         .trim();
 
-      // PDF — extract text with pdfjs-dist
+      // Binary content types — stream with size limit
       if (contentType === 'application/pdf') {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        return handlePdf(buffer, url, saveBinary);
+        const buffer = await readResponseBytes(response, MAX_DOWNLOAD_SIZE);
+        return handlePdf(buffer, finalUrl, saveBinary);
       }
 
-      // Image — save to disk, return metadata
       if (contentType.startsWith('image/')) {
-        const buffer = Buffer.from(await response.arrayBuffer());
-        return handleImage(buffer, url, contentType, saveBinary);
+        const buffer = await readResponseBytes(response, MAX_DOWNLOAD_SIZE);
+        return handleImage(buffer, finalUrl, contentType, saveBinary);
       }
 
-      // From here, read as text
-      const text = await response.text();
+      // Text content types — stream with size limit then decode
+      const text = await readResponseText(response, MAX_DOWNLOAD_SIZE);
 
-      // HTML — parse and convert to markdown
       if (contentType.includes('html')) {
-        return handleHtml(text, url, prompt);
+        return handleHtml(text, finalUrl, prompt);
       }
 
-      // JSON — pretty-print
       if (
         contentType === 'application/json' ||
         contentType.endsWith('+json')
       ) {
-        return handleJson(text, url);
+        return handleJson(text, finalUrl);
       }
 
-      // Everything else — plain text
-      return handleText(text, url);
+      return handleText(text, finalUrl);
     },
   };
 }
