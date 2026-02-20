@@ -87,7 +87,7 @@ export const CallLlmSchema = z.object({
       startLine: z.number().optional().describe('First line (1-indexed)'),
       endLine: z.number().optional().describe('Last line (1-indexed)'),
     }),
-  ])).optional().describe('File paths to attach (max 20). Use {path, startLine, endLine} for large files.'),
+  ])).optional().describe('File paths on disk to attach (max 20). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.'),
   model: z.string().optional().describe('Model ID or short name. Defaults to a fast model.'),
   systemPrompt: z.string().optional().describe('Optional system prompt'),
   maxTokens: z.number().optional().describe('Max output tokens (1-64000). Defaults to 4096'),
@@ -214,7 +214,8 @@ The user will see a secure input UI with appropriate fields based on the auth mo
 - Parallel processing: call multiple times in one message - all run simultaneously
 - Context isolation: process content without polluting main context
 
-Pass file paths via 'attachments' - the tool loads content automatically.
+Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
+Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
 For large files (>2000 lines), use {path, startLine, endLine} to select a portion.`,
 } as const;
 

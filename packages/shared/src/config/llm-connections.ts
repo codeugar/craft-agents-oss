@@ -12,6 +12,7 @@ import {
   ANTHROPIC_MODELS,
   OPENAI_MODELS,
   PI_MODELS,
+  getPiModelsForAuthProvider,
 } from './models';
 
 // ============================================================
@@ -373,9 +374,10 @@ export function isPiProvider(providerType: LlmProviderType): boolean {
  * For *_compat providers, returns empty array - those should use connection.models instead.
  *
  * @param providerType - Provider type
+ * @param piAuthProvider - Optional Pi auth provider for filtering Pi models
  * @returns Model list from registry, or empty array for compat providers
  */
-export function getModelsForProviderType(providerType: LlmProviderType): ModelDefinition[] {
+export function getModelsForProviderType(providerType: LlmProviderType, piAuthProvider?: string): ModelDefinition[] {
   // Compat providers require explicit model lists from the connection
   if (isCompatProvider(providerType)) {
     return [];
@@ -390,9 +392,9 @@ export function getModelsForProviderType(providerType: LlmProviderType): ModelDe
     return []; // Copilot models are dynamic — fetched via listModels(), no hardcoded fallbacks
   }
 
-  // Pi: registry models as fallback; pi_compat already handled by isCompatProvider above
+  // Pi: filter by auth provider if known; pi_compat already handled by isCompatProvider above
   if (providerType === 'pi') {
-    return PI_MODELS;
+    return piAuthProvider ? getPiModelsForAuthProvider(piAuthProvider) : PI_MODELS;
   }
 
   // Anthropic, Bedrock, Vertex all use Claude models
@@ -407,16 +409,17 @@ export function getModelsForProviderType(providerType: LlmProviderType): ModelDe
  * Use this whenever you need to populate or backfill a connection's models.
  *
  * @param providerType - Provider type from the connection
+ * @param piAuthProvider - Optional Pi auth provider for filtering Pi models
  * @returns Default model list (ModelDefinition[] for standard, string[] for compat)
  */
-export function getDefaultModelsForConnection(providerType: LlmProviderType): Array<ModelDefinition | string> {
+export function getDefaultModelsForConnection(providerType: LlmProviderType, piAuthProvider?: string): Array<ModelDefinition | string> {
   if (providerType === 'openai_compat') return [
     'openai/gpt-5.2-codex',
     'openai/gpt-5.1-codex-mini',
   ];
   if (providerType === 'openai') return OPENAI_MODELS;
   if (providerType === 'copilot') return []; // Dynamic — fetched via listModels()
-  if (providerType === 'pi') return PI_MODELS;
+  if (providerType === 'pi') return piAuthProvider ? getPiModelsForAuthProvider(piAuthProvider) : PI_MODELS;
   if (providerType === 'pi_compat') return [];  // Dynamic — user specifies
   if (providerType === 'anthropic_compat') return [
     'anthropic/claude-opus-4.6',
@@ -432,10 +435,11 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType): Ar
  * Derived from the first entry in getDefaultModelsForConnection() — single source of truth.
  *
  * @param providerType - Provider type from the connection
+ * @param piAuthProvider - Optional Pi auth provider for filtering Pi models
  * @returns Default model ID string
  */
-export function getDefaultModelForConnection(providerType: LlmProviderType): string {
-  const models = getDefaultModelsForConnection(providerType);
+export function getDefaultModelForConnection(providerType: LlmProviderType, piAuthProvider?: string): string {
+  const models = getDefaultModelsForConnection(providerType, piAuthProvider);
   const first = models[0];
   if (!first) return ANTHROPIC_MODELS[0]!.id;
   return typeof first === 'string' ? first : first.id;

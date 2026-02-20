@@ -144,8 +144,14 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_end': {
         // Pi SDK emits message_end for ALL messages (user, assistant, toolResult).
         // Only process assistant messages — skip user prompts and tool results.
-        const msg = event.message as { role?: string } | undefined;
+        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
         if (msg?.role !== 'assistant') break;
+
+        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures
+        if (msg.stopReason === 'error' && msg.errorMessage) {
+          yield { type: 'error', message: msg.errorMessage };
+          break;
+        }
 
         // Extract text content from the final assistant message
         const textContent = this.extractTextFromMessage(event.message);

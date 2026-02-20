@@ -72,7 +72,7 @@ function getModelOptionsForConnection(
   }
 
   // Fall back to registry models for this provider type
-  const registryModels = getModelsForProviderType(connection.providerType)
+  const registryModels = getModelsForProviderType(connection.providerType, connection.piAuthProvider)
   return registryModels.map((m) => ({
     value: m.id,
     label: m.name,

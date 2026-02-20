@@ -43,7 +43,7 @@ export interface ApiKeyInputProps {
   /** Disable the input (e.g. during validation) */
   disabled?: boolean
   /** Provider type determines which presets and placeholders to show */
-  providerType?: 'anthropic' | 'openai' | 'pi'
+  providerType?: 'anthropic' | 'openai' | 'pi' | 'google'
 }
 
 // Preset key includes both provider defaults ('anthropic', 'openai', 'pi') and third-party services
@@ -79,10 +79,16 @@ const PI_PRESETS: Preset[] = [
   { key: 'custom', label: 'Custom', url: '' },
 ]
 
+// Google AI Studio preset - single endpoint, no custom URL needed
+const GOOGLE_PRESETS: Preset[] = [
+  { key: 'google', label: 'Google AI Studio', url: '' },
+]
+
 const COMPAT_ANTHROPIC_DEFAULTS = 'anthropic/claude-opus-4.6, anthropic/claude-sonnet-4.5, anthropic/claude-haiku-4.5'
 const COMPAT_OPENAI_DEFAULTS = 'openai/gpt-5.2-codex, openai/gpt-5.1-codex-mini'
 
-function getPresetsForProvider(providerType: 'anthropic' | 'openai' | 'pi'): Preset[] {
+function getPresetsForProvider(providerType: 'anthropic' | 'openai' | 'pi' | 'google'): Preset[] {
+  if (providerType === 'google') return GOOGLE_PRESETS
   if (providerType === 'pi') return PI_PRESETS
   return providerType === 'openai' ? OPENAI_PRESETS : ANTHROPIC_PRESETS
 }
@@ -121,10 +127,10 @@ export function ApiKeyInput({
   const isDisabled = disabled || status === 'validating'
 
   // Determine if we're using the default provider preset (hide base URL field)
-  const isDefaultProviderPreset = activePreset === 'anthropic' || activePreset === 'openai' || activePreset === 'pi'
+  const isDefaultProviderPreset = activePreset === 'anthropic' || activePreset === 'openai' || activePreset === 'pi' || activePreset === 'google'
 
   // Provider-specific placeholders
-  const apiKeyPlaceholder = providerType === 'pi' ? 'pi-...' : providerType === 'openai' ? 'sk-...' : 'sk-ant-...'
+  const apiKeyPlaceholder = providerType === 'google' ? 'AIza...' : providerType === 'pi' ? 'pi-...' : providerType === 'openai' ? 'sk-...' : 'sk-ant-...'
 
   const handlePresetSelect = (preset: Preset) => {
     setActivePreset(preset.key)

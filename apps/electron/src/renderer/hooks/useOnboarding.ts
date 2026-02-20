@@ -84,10 +84,10 @@ const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   chatgpt_oauth: 'codex',
   openai_api_key: 'codex-api',
   copilot_oauth: 'copilot',
-  pi_api_key: 'pi-api',
   pi_claude_oauth: 'pi-claude-max',
   pi_chatgpt_oauth: 'pi-codex',
   pi_copilot_oauth: 'pi-copilot',
+  pi_google_api_key: 'pi-google',
 }
 
 /**
@@ -152,14 +152,6 @@ function apiSetupMethodToConnectionSetup(
         slug,
         credential: options.credential,
       }
-    case 'pi_api_key':
-      return {
-        slug,
-        credential: options.credential,
-        baseUrl: options.baseUrl,
-        defaultModel: options.connectionDefaultModel,
-        models: options.models,
-      }
     case 'pi_claude_oauth':
       return {
         slug,
@@ -171,6 +163,11 @@ function apiSetupMethodToConnectionSetup(
         credential: options.credential,
       }
     case 'pi_copilot_oauth':
+      return {
+        slug,
+        credential: options.credential,
+      }
+    case 'pi_google_api_key':
       return {
         slug,
         credential: options.credential,
@@ -321,7 +318,7 @@ export function useOnboarding({
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
     const isOpenAiFlow = state.apiSetupMethod === 'openai_api_key'
-    const isPiFlow = state.apiSetupMethod === 'pi_api_key'
+    const isPiGoogleFlow = state.apiSetupMethod === 'pi_google_api_key'
 
     try {
       // API key validation differs by provider:
@@ -337,12 +334,12 @@ export function useOnboarding({
           }))
           return
         }
-      } else if (isPiFlow) {
+      } else if (isPiGoogleFlow) {
         if (!data.apiKey.trim()) {
           setState(s => ({
             ...s,
             credentialStatus: 'error',
-            errorMessage: 'Please enter a valid Pi API key',
+            errorMessage: 'Please enter a valid Google AI Studio API key',
           }))
           return
         }
@@ -368,8 +365,8 @@ export function useOnboarding({
           data.baseUrl,
           data.models,
         )
-      } else if (isPiFlow) {
-        // Pi validation - skip connection test for now, just save the key
+      } else if (isPiGoogleFlow) {
+        // Pi/Google validation - skip connection test for now, just save the key
         testResult = { success: true }
       } else {
         // Anthropic validation - tests auth, endpoint, model, and tool support

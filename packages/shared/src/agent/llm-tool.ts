@@ -559,7 +559,8 @@ export function createLLMTool(options: LLMToolOptions) {
 - Parallel processing: call multiple times in one message - all run simultaneously
 - Context isolation: process content without polluting main context
 
-Pass file paths via 'attachments' - the tool loads content automatically.
+Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
+Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
 For large files (>2000 lines), use {path, startLine, endLine} to select a portion.
 
 Features depend on authentication:
@@ -567,13 +568,13 @@ Features depend on authentication:
 - OAuth: Basic features — structured output via prompt instructions, no thinking, text files only`,
     {
       prompt: z.string().min(1, 'Prompt cannot be empty')
-        .describe('Instructions for Claude'),
+        .describe('Instructions for the LLM'),
 
       attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional()
-        .describe(`File/image paths (max ${MAX_ATTACHMENTS}). Use {path, startLine, endLine} for large text files.`),
+        .describe(`File/image paths on disk (max ${MAX_ATTACHMENTS}). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.`),
 
       model: z.string().optional()
-        .describe('Model ID or short name (e.g., "haiku", "sonnet"). Defaults to Haiku.'),
+        .describe('Model ID or short name (e.g., "haiku", "sonnet"). Defaults to a fast model.'),
 
       systemPrompt: z.string().optional()
         .describe('Optional system prompt'),

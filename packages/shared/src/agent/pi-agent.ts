@@ -292,6 +292,15 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     const sessionToolDefs = getSessionToolProxyDefs();
+
+    // Patch call_llm description with provider-specific model hint
+    if (this.config.miniModel) {
+      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
+      if (callLlmDef) {
+        callLlmDef.description += `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+      }
+    }
+
     this.send({
       type: 'register_tools',
       tools: sessionToolDefs,
@@ -993,6 +1002,22 @@ export class PiAgent extends BaseAgent {
   }
 
   // ============================================================
+  // Model Forwarding
+  // ============================================================
+
+  override setModel(model: string): void {
+    const previousModel = this.getModel();
+    super.setModel(model);
+    // Forward to subprocess so it uses the new model on next turn
+    if (this.subprocess) {
+      this.debug(`Forwarding model change to subprocess: ${previousModel} → ${model}`);
+      this.send({ type: 'set_model', model });
+    } else {
+      this.debug(`Model updated but no subprocess to forward to: ${previousModel} → ${model}`);
+    }
+  }
+
+  // ============================================================
   // Permission Mode Forwarding
   // ============================================================
 
@@ -1050,10 +1075,10 @@ export class PiAgent extends BaseAgent {
       }
     }
 
-    // Clear tool mappings — we'll rebuild them
-    this.mcpToolToSlug.clear();
-    this.mcpToolToOriginal.clear();
-
+    // Build new maps in locals — old maps stay valid for in-flight tool calls
+    // until we swap atomically after all async work completes.
+    const newToolToSlug = new Map<string, string>();
+    const newToolToOriginal = new Map<string, string>();
     const allProxyDefs: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> = [];
 
     for (const [slug, serverConfig] of Object.entries(mcpServers)) {
@@ -1077,9 +1102,12 @@ export class PiAgent extends BaseAgent {
         this.debug(`Source ${slug}: ${tools.length} tools available`);
 
         for (const tool of tools) {
-          const proxyName = `${slug}_${tool.name}`;
-          this.mcpToolToSlug.set(proxyName, slug);
-          this.mcpToolToOriginal.set(proxyName, tool.name);
+          // Use mcp__slug__tool convention to match session tool naming
+          // (e.g., mcp__session__SubmitPlan). The model generalizes this
+          // pattern and expects all MCP tools to use it.
+          const proxyName = `mcp__${slug}__${tool.name}`;
+          newToolToSlug.set(proxyName, slug);
+          newToolToOriginal.set(proxyName, tool.name);
 
           allProxyDefs.push({
             name: proxyName,
@@ -1092,7 +1120,9 @@ export class PiAgent extends BaseAgent {
       }
     }
 
-    // Cache for re-registration when subprocess respawns
+    // Atomic swap — old maps were valid until this point
+    this.mcpToolToSlug = newToolToSlug;
+    this.mcpToolToOriginal = newToolToOriginal;
     this.mcpProxyDefs = allProxyDefs;
 
     // Register MCP source tools with subprocess

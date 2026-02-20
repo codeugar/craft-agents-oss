@@ -42,7 +42,7 @@ import type {
 } from '@mariozechner/pi-agent-core';
 
 // Pi AI types
-import type { Model as PiModel, TextContent as PiTextContent } from '@mariozechner/pi-ai';
+import type { TextContent as PiTextContent } from '@mariozechner/pi-ai';
 
 // Direct source imports from shared (bundled by bun build)
 import { shouldAllowToolInMode } from '../../shared/src/agent/mode-manager.ts';
@@ -59,6 +59,9 @@ import { buildCallLlmRequest, withTimeout } from '../../shared/src/agent/llm-too
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
+import { webSearchTool } from './tools/web-search.ts';
+import { webFetchTool } from './tools/web-fetch.ts';
+import { createGoogleSearchTool } from './tools/google-search.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -69,13 +72,13 @@ type InboundMessage =
   | { type: 'init'; apiKey: string; model: string; cwd: string; thinkingLevel: string; workspaceRootPath: string; sessionId: string; sessionPath: string; workingDirectory: string; permissionMode: PermissionMode; plansFolderPath: string; activeSourceSlugs: string[]; miniModel?: string; agentDir?: string; providerType?: string; authType?: string; workspaceId?: string; piAuth?: { provider: string; credential: { type: 'api_key'; key: string } | { type: 'oauth'; access: string; refresh: string; expires: number } } }
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
-  | { type: 'unregister_tools'; toolNames: string[] }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
   | { type: 'permission_response'; requestId: string; allowed: boolean }
   | { type: 'abort' }
   | { type: 'set_permission_mode'; mode: PermissionMode }
   | { type: 'set_active_sources'; slugs: string[] }
   | { type: 'mini_completion'; id: string; prompt: string }
+  | { type: 'set_model'; model: string }
   | { type: 'shutdown' };
 
 /** Proxy tool definition from main process */
@@ -110,6 +113,7 @@ type OutboundMessage =
 // ============================================================
 
 let piSession: AgentSession | null = null;
+let piModelRegistry: PiModelRegistry | null = null;
 let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
@@ -213,11 +217,21 @@ function resolvedCwd(): string {
 function resolvePiModel(
   modelRegistry: PiModelRegistry,
   modelId: string,
+  piAuthProvider?: string,
 ): PiModel<any> | undefined {
   // Strip Craft's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-5")
   const bareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
 
-  // First, try to find in all available models
+  // If we know the auth provider, do an exact provider+model lookup first.
+  // This avoids the getAll() ambiguity where the same model ID exists under
+  // multiple providers (e.g., "gpt-5.2" under both "openai" and
+  // "azure-openai-responses") and the wrong one matches first.
+  if (piAuthProvider) {
+    const exact = modelRegistry.find(piAuthProvider, bareId);
+    if (exact) return exact;
+  }
+
+  // Fallback: search all available models
   const allModels = modelRegistry.getAll();
   const match = allModels.find(m => m.id === bareId || m.name === bareId);
   if (match) return match;
@@ -231,6 +245,7 @@ function resolvePiModel(
 
   return undefined;
 }
+
 
 async function ensureSession(): Promise<AgentSession> {
   if (piSession) return piSession;
@@ -249,11 +264,22 @@ async function ensureSession(): Promise<AgentSession> {
     debugLog('Injected API key into auth storage (legacy fallback)');
   }
 
-  // Create model registry
+  // Create model registry (stored at module scope for set_model handler)
   const modelRegistry = new PiModelRegistry(authStorage);
+  piModelRegistry = modelRegistry;
 
-  // Build tools: coding tools wrapped with permission hooks + proxy tools
-  const wrappedCodingTools = wrapToolsWithHooks(codingTools);
+  // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
+  // When the provider is Google, replace DuckDuckGo web_search with a Google Search
+  // grounding tool that makes a separate Gemini API call with { googleSearch: {} }.
+  // (The main session can't combine googleSearch with function calling in one request.)
+  const isGoogleProvider = initConfig.piAuth?.provider === 'google';
+  const googleApiKey = initConfig.piAuth?.credential?.type === 'api_key'
+    ? initConfig.piAuth.credential.key : undefined;
+  const searchTool = isGoogleProvider && googleApiKey
+    ? createGoogleSearchTool(googleApiKey)
+    : webSearchTool;
+  const webTools = [searchTool, webFetchTool];
+  const wrappedCodingTools = wrapToolsWithHooks([...codingTools, ...webTools]);
   const proxyTools = buildProxyTools();
   const allTools = [...wrappedCodingTools, ...proxyTools];
   debugLog(`Session tools: ${wrappedCodingTools.length} coding + ${proxyTools.length} proxy = ${allTools.length} total`);
@@ -272,12 +298,21 @@ async function ensureSession(): Promise<AgentSession> {
     const agentDir = initConfig.agentDir || join(initConfig.sessionPath, '.pi-agent');
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
+
+    // Session resume: use a per-Craft-session directory so the Pi SDK can
+    // persist and resume its own session across subprocess restarts.
+    // continueRecent() loads the existing session if one exists, otherwise
+    // creates a new one — so this handles both first-run and resume.
+    const sessionDir = join(initConfig.sessionPath, '.pi-sessions');
+    mkdirSync(sessionDir, { recursive: true });
+    sessionOptions.sessionManager = PiSessionManager.continueRecent(cwd, sessionDir);
+
   }
 
   // Set model if specified
   if (initConfig.model) {
     try {
-      const piModel = resolvePiModel(modelRegistry, initConfig.model);
+      const piModel = resolvePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider);
       if (piModel) {
         sessionOptions.model = piModel;
       }
@@ -298,24 +333,11 @@ async function ensureSession(): Promise<AgentSession> {
   // CRITICAL: Pi SDK's createAgentSession ignores our wrapped tool objects.
   // It extracts only tool names from options.tools and creates its own internal
   // tool instances via createAllTools(). Our wrapSingleTool permission enforcement
-  // is silently discarded. To fix this, we inject our wrapped tools via the
-  // session's baseToolsOverride mechanism and rebuild the runtime.
-  const baseToolsOverride: Record<string, AgentTool<any>> = {};
-  for (const tool of wrappedCodingTools) {
-    baseToolsOverride[tool.name] = tool;
-  }
-  for (const tool of proxyTools) {
-    baseToolsOverride[tool.name] = tool;
-  }
-  const sessionInternal = session as any;
-  sessionInternal._baseToolsOverride = baseToolsOverride;
-  sessionInternal._buildRuntime({
-    activeToolNames: Object.keys(baseToolsOverride),
-    includeAllExtensionTools: true,
-  });
-  debugLog(`Injected ${Object.keys(baseToolsOverride).length} wrapped tools via baseToolsOverride`);
-
+  // is silently discarded. To fix this, we set piSession first and then call
+  // rebuildSessionTools() which injects our wrapped tools via the session's
+  // baseToolsOverride mechanism and rebuilds the runtime.
   piSession = session;
+  rebuildSessionTools();
   debugLog(`Created Pi session: ${session.sessionId}`);
 
   // Notify main process of session ID
@@ -332,7 +354,14 @@ async function ensureSession(): Promise<AgentSession> {
 function rebuildSessionTools(): void {
   if (!piSession) return;
 
-  const wrappedCodingTools = wrapToolsWithHooks(codingTools);
+  const isGoogleProvider = initConfig?.piAuth?.provider === 'google';
+  const googleApiKey = initConfig?.piAuth?.credential?.type === 'api_key'
+    ? initConfig.piAuth.credential.key : undefined;
+  const searchTool = isGoogleProvider && googleApiKey
+    ? createGoogleSearchTool(googleApiKey)
+    : webSearchTool;
+  const webTools = [searchTool, webFetchTool];
+  const wrappedCodingTools = wrapToolsWithHooks([...codingTools, ...webTools]);
   const proxyTools = buildProxyTools();
 
   const baseToolsOverride: Record<string, AgentTool<any>> = {};
@@ -549,7 +578,7 @@ function buildProxyTools(): AgentTool<any>[] {
     // Pi SDK's AgentTool requires `label` (human-readable name for UI).
     // Derive from tool name: 'mcp__session__SubmitPlan' → 'Submit Plan'
     label: def.name
-      .replace(/^mcp__session__/, '')
+      .replace(/^mcp__.*?__/, '')
       .replace(/_/g, ' ')
       .replace(/([a-z])([A-Z])/g, '$1 $2'),
     description: def.description,
@@ -649,11 +678,12 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
     // Check if the model belongs to the authenticated provider
     const modelRegistry = new PiModelRegistry(PiAuthStorage.inMemory());
-    const resolved = resolvePiModel(modelRegistry, bareModel);
-    if (resolved && (resolved as any).provider !== authProvider) {
-      // Model is for a different provider — fall back to default for the auth provider
-      debugLog(`[queryLlm] Mini model ${bareModel} uses provider ${(resolved as any).provider}, but auth is ${authProvider}. Falling back.`);
-      model = getDefaultSummarizationModel();
+    const resolved = resolvePiModel(modelRegistry, bareModel, authProvider);
+    if (!resolved || (resolved as any).provider !== authProvider) {
+      // Model doesn't exist in registry or belongs to a different provider — use miniModel
+      const fallback = initConfig.miniModel ?? getDefaultSummarizationModel();
+      debugLog(`[queryLlm] Model ${bareModel} incompatible with ${authProvider}, falling back to ${fallback}`);
+      model = fallback;
     }
   }
 
@@ -681,7 +711,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 
   // Resolve model
   try {
-    const piModel = resolvePiModel(modelRegistry, model);
+    const piModel = resolvePiModel(modelRegistry, model, initConfig.piAuth?.provider);
     if (piModel) {
       ephemeralOptions.model = piModel;
     }
@@ -762,6 +792,14 @@ async function runMiniCompletion(prompt: string): Promise<string | null> {
 // ============================================================
 
 function handleSessionEvent(event: AgentSessionEvent): void {
+  // Log API errors for debugging
+  if (event.type === 'message_end') {
+    const msg = event.message as { stopReason?: string; errorMessage?: string } | undefined;
+    if (msg?.stopReason === 'error') {
+      debugLog(`API error in message_end: ${msg.errorMessage || 'unknown'}`);
+    }
+  }
+
   // Detect session MCP tool completions
   if (event.type === 'tool_execution_start') {
     const toolName = event.toolName;
@@ -864,14 +902,6 @@ function handleRegisterTools(msg: Extract<InboundMessage, { type: 'register_tool
   rebuildSessionTools();
 }
 
-function handleUnregisterTools(msg: Extract<InboundMessage, { type: 'unregister_tools' }>): void {
-  const toRemove = new Set(msg.toolNames);
-  proxyToolDefs = proxyToolDefs.filter(t => !toRemove.has(t.name));
-  debugLog(`Unregistered tools: ${msg.toolNames.join(', ')}`);
-
-  rebuildSessionTools();
-}
-
 function handleToolExecuteResponse(msg: Extract<InboundMessage, { type: 'tool_execute_response' }>): void {
   const pending = pendingToolExecutions.get(msg.requestId);
   if (pending) {
@@ -911,6 +941,26 @@ async function handleAbort(): Promise<void> {
 async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_completion' }>): Promise<void> {
   const text = await runMiniCompletion(msg.prompt);
   send({ type: 'mini_completion_result', id: msg.id, text });
+}
+
+async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }>): Promise<void> {
+  debugLog(`[set_model] Received: ${msg.model}`);
+  if (!piSession || !piModelRegistry) {
+    debugLog(`[set_model] No active session or model registry, ignoring`);
+    return;
+  }
+  const piModel = resolvePiModel(piModelRegistry, msg.model, initConfig?.piAuth?.provider);
+  if (!piModel) {
+    debugLog(`[set_model] Could not resolve model: ${msg.model}`);
+    return;
+  }
+  try {
+    await piSession.setModel(piModel);
+    debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    debugLog(`[set_model] Failed to set model: ${errorMsg}`);
+  }
 }
 
 function handleShutdown(): void {
@@ -963,10 +1013,6 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       handleRegisterTools(msg);
       break;
 
-    case 'unregister_tools':
-      handleUnregisterTools(msg);
-      break;
-
     case 'tool_execute_response':
       handleToolExecuteResponse(msg);
       break;
@@ -991,6 +1037,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'mini_completion':
       await handleMiniCompletion(msg);
+      break;
+
+    case 'set_model':
+      await handleSetModel(msg);
       break;
 
     case 'shutdown':

@@ -43,10 +43,10 @@ export type ApiSetupMethod =
   | 'chatgpt_oauth'
   | 'openai_api_key'
   | 'copilot_oauth'
-  | 'pi_api_key'
   | 'pi_claude_oauth'
   | 'pi_chatgpt_oauth'
   | 'pi_copilot_oauth'
+  | 'pi_google_api_key'
 
 /**
  * Map ApiSetupMethod to the underlying LLM connection types.
@@ -66,14 +66,14 @@ export function apiSetupMethodToConnectionTypes(method: ApiSetupMethod): {
       return { providerType: 'openai', authType: 'api_key' };
     case 'copilot_oauth':
       return { providerType: 'copilot', authType: 'oauth' };
-    case 'pi_api_key':
-      return { providerType: 'pi', authType: 'api_key' };
     case 'pi_claude_oauth':
       return { providerType: 'pi', authType: 'oauth' };
     case 'pi_chatgpt_oauth':
       return { providerType: 'pi', authType: 'oauth' };
     case 'pi_copilot_oauth':
       return { providerType: 'pi', authType: 'oauth' };
+    case 'pi_google_api_key':
+      return { providerType: 'pi', authType: 'api_key' };
   }
 }
 
@@ -122,13 +122,6 @@ const API_SETUP_OPTIONS: ApiSetupOption[] = [
     providerType: 'copilot',
   },
   {
-    id: 'pi_api_key',
-    name: 'Pi · API Key',
-    description: 'Use your API key for 20+ LLM providers via Pi.',
-    icon: <Key className="size-4" />,
-    providerType: 'pi',
-  },
-  {
     id: 'pi_claude_oauth',
     name: 'Pi + Claude Max',
     description: 'Use your Claude subscription with Pi as the agent.',
@@ -147,6 +140,13 @@ const API_SETUP_OPTIONS: ApiSetupOption[] = [
     name: 'Pi + GitHub Copilot',
     description: 'Use your GitHub Copilot subscription with Pi as the agent.',
     icon: <Cpu className="size-4" />,
+    providerType: 'pi',
+  },
+  {
+    id: 'pi_google_api_key',
+    name: 'Pi + Google AI Studio',
+    description: 'Use your Google AI Studio API key for Gemini models via Pi.',
+    icon: <Key className="size-4" />,
     providerType: 'pi',
   },
 ]

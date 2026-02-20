@@ -111,13 +111,19 @@ const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
     name: 'Pi + ChatGPT Plus',
     providerType: 'pi',
     authType: 'oauth',
-    piAuthProvider: 'openai',
+    piAuthProvider: 'openai-codex',
   },
   'pi-copilot': {
     name: 'Pi + GitHub Copilot',
     providerType: 'pi',
     authType: 'oauth',
     piAuthProvider: 'github-copilot',
+  },
+  'pi-google': {
+    name: 'Pi + Google AI Studio',
+    providerType: 'pi',
+    authType: 'api_key',
+    piAuthProvider: 'google',
   },
 }
 
@@ -156,8 +162,8 @@ function createBuiltInConnection(slug: string, baseUrl?: string | null): LlmConn
     name,
     providerType,
     authType,
-    models: getDefaultModelsForConnection(providerType),
-    defaultModel: getDefaultModelForConnection(providerType),
+    models: getDefaultModelsForConnection(providerType, template.piAuthProvider),
+    defaultModel: getDefaultModelForConnection(providerType, template.piAuthProvider),
     piAuthProvider: template.piAuthProvider,
     createdAt: Date.now(),
   }

@@ -131,12 +131,44 @@ export const MODEL_REGISTRY: ModelDefinition[] = [
     contextWindow: 200_000,
   },
   {
+    id: 'pi/gpt-5.3-codex',
+    name: 'GPT-5.3 Codex (Pi)',
+    shortName: 'Codex (Pi)',
+    description: 'Latest OpenAI Codex via Pi unified API',
+    provider: 'pi',
+    contextWindow: 272_000,
+  },
+  {
+    id: 'pi/gpt-5.2-codex',
+    name: 'GPT-5.2 Codex (Pi)',
+    shortName: 'Codex 5.2 (Pi)',
+    description: 'OpenAI Codex via Pi unified API',
+    provider: 'pi',
+    contextWindow: 272_000,
+  },
+  {
     id: 'pi/gpt-5.2',
     name: 'GPT-5.2 (Pi)',
     shortName: 'GPT-5.2 (Pi)',
     description: 'OpenAI GPT via Pi unified API',
     provider: 'pi',
-    contextWindow: 128_000,
+    contextWindow: 272_000,
+  },
+  {
+    id: 'pi/gpt-5.1-codex-mini',
+    name: 'GPT-5.1 Codex Mini (Pi)',
+    shortName: 'Codex Mini (Pi)',
+    description: 'Fast OpenAI Codex via Pi unified API',
+    provider: 'pi',
+    contextWindow: 272_000,
+  },
+  {
+    id: 'pi/gpt-5.1-codex-max',
+    name: 'GPT-5.1 Codex Max (Pi)',
+    shortName: 'Codex Max (Pi)',
+    description: 'OpenAI Codex Max via Pi unified API',
+    provider: 'pi',
+    contextWindow: 272_000,
   },
   {
     id: 'pi/gemini-2.5-pro',
@@ -170,6 +202,39 @@ export const COPILOT_MODELS = getModelsByProvider('copilot');
 
 /** All Pi models */
 export const PI_MODELS = getModelsByProvider('pi');
+
+/**
+ * Pi model ID prefix → piAuthProvider mapping.
+ * Used to filter Pi fallback models based on which provider the user authenticated with.
+ */
+const PI_AUTH_PROVIDER_PREFIXES: Record<string, string[]> = {
+  'anthropic': ['claude'],
+  'openai': ['gpt', 'o1', 'o3', 'o4'],
+  'openai-codex': ['gpt', 'o1', 'o3', 'o4'],
+  'azure-openai-responses': ['gpt', 'o1', 'o3', 'o4'],
+  'github-copilot': ['claude', 'gpt', 'o1', 'o3', 'o4'],
+  'google': ['gemini'],
+};
+
+/**
+ * Get Pi models filtered by auth provider.
+ * When a Pi connection authenticates with a specific provider (e.g., Anthropic),
+ * only models from that provider should be shown.
+ *
+ * @param piAuthProvider - The Pi auth provider name (e.g., 'anthropic', 'openai', 'github-copilot')
+ * @returns Filtered Pi models matching the auth provider, or all PI_MODELS as fallback
+ */
+export function getPiModelsForAuthProvider(piAuthProvider: string): ModelDefinition[] {
+  const prefixes = PI_AUTH_PROVIDER_PREFIXES[piAuthProvider];
+  if (!prefixes) return PI_MODELS;
+
+  const filtered = PI_MODELS.filter(m => {
+    const bareId = m.id.replace(/^pi\//, '').toLowerCase();
+    return prefixes.some(p => bareId.startsWith(p));
+  });
+
+  return filtered.length > 0 ? filtered : PI_MODELS;
+}
 
 /**
  * Legacy compatibility export.

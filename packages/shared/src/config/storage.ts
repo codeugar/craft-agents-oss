@@ -37,7 +37,7 @@ import type { Workspace, AuthType } from '@craft-agent/core/types';
 
 // Import LLM connection types and constants
 import type { LlmConnection } from './llm-connections.ts';
-import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection } from './llm-connections.ts';
+import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider } from './llm-connections.ts';
 import {
   getModelProvider,
   isCodexModel,
@@ -1224,13 +1224,41 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
   if (!config.llmConnections) return false;
   let changed = false;
   for (const connection of config.llmConnections) {
-    const defaultModels = getDefaultModelsForConnection(connection.providerType);
-    const defaultModel = getDefaultModelForConnection(connection.providerType);
+    // Migrate pi-codex connections from 'openai' to 'openai-codex' provider.
+    // 'openai-codex' uses the ChatGPT Plus backend (chatgpt.com/backend-api),
+    // while 'openai' is for regular API key auth (api.openai.com).
+    if (isPiProvider(connection.providerType) && connection.piAuthProvider === 'openai') {
+      connection.piAuthProvider = 'openai-codex';
+      changed = true;
+    }
+
+    const defaultModels = getDefaultModelsForConnection(connection.providerType, connection.piAuthProvider);
+    const defaultModel = getDefaultModelForConnection(connection.providerType, connection.piAuthProvider);
 
     if (!connection.models || (Array.isArray(connection.models) && connection.models.length === 0)) {
       connection.models = defaultModels;
       changed = true;
     }
+
+    // For Pi connections with piAuthProvider, re-filter models to ensure
+    // only models matching the auth provider are shown. This migrates
+    // existing connections that were created before provider-based filtering.
+    if (isPiProvider(connection.providerType) && connection.piAuthProvider && connection.models) {
+      const correctIds = new Set(
+        (defaultModels as Array<{ id: string } | string>).map(m => typeof m === 'string' ? m : m.id)
+      );
+      const currentIds = new Set(
+        connection.models.map(m => typeof m === 'string' ? m : (m as { id: string }).id)
+      );
+      const mismatch = currentIds.size !== correctIds.size
+        || [...currentIds].some(id => !correctIds.has(id))
+        || [...correctIds].some(id => !currentIds.has(id));
+      if (mismatch) {
+        connection.models = defaultModels;
+        changed = true;
+      }
+    }
+
     if (!connection.defaultModel) {
       connection.defaultModel = defaultModel;
       changed = true;

@@ -81,7 +81,7 @@ import { type Session, type Message, type SessionEvent, type FileAttachment, typ
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
-import { getToolIconsDir, isCodexModel, getMiniModel, isAnthropicProvider, DEFAULT_MODEL, DEFAULT_CODEX_MODEL } from '@craft-agent/shared/config'
+import { getToolIconsDir, isCodexModel, getMiniModel, isAnthropicProvider, isPiProvider, DEFAULT_MODEL, DEFAULT_CODEX_MODEL } from '@craft-agent/shared/config'
 import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
@@ -3860,6 +3860,7 @@ export class SessionManager {
    * @param connection - Optional LLM connection slug (only applied if not already locked)
    */
   async updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void> {
+    sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.model = model ?? undefined
@@ -3879,7 +3880,10 @@ export class SessionManager {
         const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
         const sessionConn = resolveSessionConnection(managed.llmConnection, wsConfig?.defaults?.defaultLlmConnection)
         const effectiveModel = model ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
+        sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, connectionLocked=${managed.connectionLocked}]`)
         managed.agent.setModel(effectiveModel)
+      } else {
+        sessionLog.info(`[updateSessionModel] No agent yet, model will apply on next agent creation`)
       }
       // Notify renderer of the model change
       this.sendEvent({ type: 'session_model_changed', sessionId, model }, managed.workspace.id)
@@ -4979,15 +4983,25 @@ To view this task's output:
         // Format tool input paths to relative for better readability
         const formattedToolInput = formatToolInputPaths(event.input)
 
-        // Resolve call_llm model short name (e.g., "haiku") to full ID (e.g., "claude-haiku-4-5-20251001")
-        // for TurnCard badge display. The LLM sends short names but we want the resolved model shown.
-        if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
-          const shortName = String(formattedToolInput.model)
-          const modelDef = MODEL_REGISTRY.find(m => m.id === shortName)
-            || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === shortName.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === shortName.toLowerCase())
-          if (modelDef) {
-            formattedToolInput.model = modelDef.id
+        // Resolve call_llm model for TurnCard badge display.
+        if (event.toolName === 'mcp__session__call_llm') {
+          // For Pi sessions, call_llm ignores the model param — always uses miniModel.
+          // Show the actual model used instead of what the LLM requested.
+          const connection = managed.llmConnection ? getLlmConnection(managed.llmConnection) : null
+          if (connection && isPiProvider(connection.providerType)) {
+            const miniModel = getMiniModel(connection) ?? connection.defaultModel
+            if (miniModel) {
+              formattedToolInput.model = miniModel
+            }
+          } else if (formattedToolInput?.model) {
+            // For non-Pi sessions, resolve short names to full IDs
+            const shortName = String(formattedToolInput.model)
+            const modelDef = MODEL_REGISTRY.find(m => m.id === shortName)
+              || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === shortName.toLowerCase())
+              || MODEL_REGISTRY.find(m => m.name.toLowerCase() === shortName.toLowerCase())
+            if (modelDef) {
+              formattedToolInput.model = modelDef.id
+            }
           }
         }
 
