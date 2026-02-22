@@ -754,6 +754,7 @@ function AppShellContent({
   React.useEffect(() => {
     setSkillsAtom(skills)
   }, [skills, setSkillsAtom])
+
   // Whether local MCP servers are enabled (affects stdio source status)
   const [localMcpEnabled, setLocalMcpEnabled] = React.useState(true)
 
@@ -836,7 +837,7 @@ function AppShellContent({
 
   // Subscribe to live skill updates (when skills are added/removed dynamically)
   React.useEffect(() => {
-    const cleanup = window.electronAPI.onSkillsChanged?.((updatedSkills) => {
+    const cleanup = window.electronAPI.onSkillsChanged((updatedSkills) => {
       setSkills(updatedSkills || [])
     })
     return cleanup
@@ -998,7 +999,7 @@ function AppShellContent({
 
   // Zone navigation - explicit keyboard intent, always move DOM focus
   useAction('nav.focusSidebar', () => focusZone('sidebar', { intent: 'keyboard' }))
-  useAction('nav.focusSessionList', () => focusZone('session-list', { intent: 'keyboard' }))
+  useAction('nav.focusNavigator', () => focusZone('navigator', { intent: 'keyboard' }))
   useAction('nav.focusChat', () => focusZone('chat', { intent: 'keyboard' }))
 
   // Tab navigation between zones
@@ -1861,8 +1862,8 @@ function AppShellContent({
       }
       case 'ArrowRight': {
         e.preventDefault()
-        // Move to next zone (session list) - keyboard navigation
-        focusZone('session-list', { intent: 'keyboard' })
+        // Move to next zone (navigator) - keyboard navigation
+        focusZone('navigator', { intent: 'keyboard' })
         break
       }
       case 'Enter':

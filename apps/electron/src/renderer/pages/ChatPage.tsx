@@ -442,19 +442,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   ), [sharedUrl, handleShare, handleOpenInBrowser, handleCopyLink, handleUpdateShare, handleRevokeShare])
 
   // Build title menu content for chat sessions using shared SessionMenu
-  const sessionLabels = session?.labels ?? []
-  const titleMenu = React.useMemo(() => (
+  const titleMenu = React.useMemo(() => sessionMeta ? (
     <SessionMenu
-      sessionId={sessionId}
-      sessionName={displayTitle}
-      isFlagged={isFlagged}
-      isArchived={isArchived}
-      sharedUrl={sharedUrl}
-      hasMessages={hasMessages}
-      hasUnreadMessages={hasUnreadMessages}
-      currentSessionStatus={currentSessionStatus}
+      item={sessionMeta}
       sessionStatuses={sessionStatuses ?? []}
-      sessionLabels={sessionLabels}
       labels={labels ?? []}
       onLabelsChange={handleLabelsChange}
       onRename={handleRename}
@@ -467,17 +458,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
     />
-  ), [
-    sessionId,
-    displayTitle,
-    isFlagged,
-    isArchived,
-    sharedUrl,
-    hasMessages,
-    hasUnreadMessages,
-    currentSessionStatus,
+  ) : null, [
+    sessionMeta,
     sessionStatuses,
-    sessionLabels,
     labels,
     handleLabelsChange,
     handleRename,

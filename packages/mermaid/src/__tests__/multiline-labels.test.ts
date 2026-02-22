@@ -757,6 +757,81 @@ describe('renderMermaid – HTML entity decoding', () => {
 })
 
 // ============================================================================
+// Markdown formatting: **bold**, *italic*, ~~strike~~ → HTML tags
+// ============================================================================
+
+describe('normalizeBrTags – markdown formatting', () => {
+  it('converts **bold** to <b>bold</b>', () => {
+    expect(normalizeBrTags('Hello **World**')).toBe('Hello <b>World</b>')
+  })
+
+  it('converts *italic* to <i>italic</i>', () => {
+    expect(normalizeBrTags('Hello *World*')).toBe('Hello <i>World</i>')
+  })
+
+  it('converts ~~strikethrough~~ to <s>strikethrough</s>', () => {
+    expect(normalizeBrTags('Hello ~~World~~')).toBe('Hello <s>World</s>')
+  })
+
+  it('handles bold and italic together', () => {
+    expect(normalizeBrTags('**bold** and *italic*')).toBe('<b>bold</b> and <i>italic</i>')
+  })
+
+  it('does not match single * surrounded by spaces (multiplication)', () => {
+    expect(normalizeBrTags('a * b * c')).toBe('a * b * c')
+  })
+
+  it('handles ***bold italic*** (bold outer, italic inner)', () => {
+    const result = normalizeBrTags('***text***')
+    // ** matches first → <b>*text</b>, then * italic wraps across tag boundary
+    // Functionally correct: parseInlineFormatting() uses boolean state, not tag nesting
+    expect(result).toBe('<b><i>text</b></i>')
+  })
+
+  it('handles multiple bold segments', () => {
+    expect(normalizeBrTags('**one** and **two**')).toBe('<b>one</b> and <b>two</b>')
+  })
+
+  it('handles bold with <br> multiline', () => {
+    expect(normalizeBrTags('Line1<br>**Bold Line2**')).toBe('Line1\n<b>Bold Line2</b>')
+  })
+
+  it('preserves existing HTML <b> tags alongside markdown', () => {
+    expect(normalizeBrTags('<b>html</b> and **md**')).toBe('<b>html</b> and <b>md</b>')
+  })
+
+  it('does not affect text without markdown formatting', () => {
+    expect(normalizeBrTags('plain text')).toBe('plain text')
+  })
+})
+
+describe('renderMermaid – markdown formatting in labels', () => {
+  it('renders **bold** as font-weight="bold"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello **bold** text]')
+    expect(svg).toContain('font-weight="bold"')
+    expect(svg).toContain('>bold</tspan>')
+  })
+
+  it('renders *italic* as font-style="italic"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello *italic* text]')
+    expect(svg).toContain('font-style="italic"')
+    expect(svg).toContain('>italic</tspan>')
+  })
+
+  it('renders ~~strike~~ as text-decoration="line-through"', async () => {
+    const svg = await renderMermaid('graph TD\n  A[Hello ~~strike~~ text]')
+    expect(svg).toContain('text-decoration="line-through"')
+    expect(svg).toContain('>strike</tspan>')
+  })
+
+  it('renders **bold** in edge labels', async () => {
+    const svg = await renderMermaid('graph TD\n  A -->|**important**| B')
+    expect(svg).toContain('font-weight="bold"')
+    expect(svg).toContain('>important</tspan>')
+  })
+})
+
+// ============================================================================
 // Helper functions
 // ============================================================================
 
