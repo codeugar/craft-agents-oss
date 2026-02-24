@@ -311,17 +311,17 @@ export function copySessionServer(config: BuildConfig): void {
 export function copyPiAgentServer(config: BuildConfig): void {
   const { rootDir, electronDir } = config;
 
-  const piSource = join(rootDir, 'packages', 'pi-agent-server', 'dist', 'index.js');
-  const piDest = join(electronDir, 'resources', 'pi-agent-server', 'index.js');
+  const piSourceDir = join(rootDir, 'packages', 'pi-agent-server', 'dist');
+  const piDestDir = join(electronDir, 'resources', 'pi-agent-server');
 
-  if (!existsSync(piSource)) {
-    console.warn(`Warning: Pi agent server not found at ${piSource}. Pi SDK sessions will not work.`);
+  if (!existsSync(join(piSourceDir, 'index.js'))) {
+    console.warn(`Warning: Pi agent server not found at ${piSourceDir}/index.js. Pi SDK sessions will not work.`);
     return;
   }
 
   console.log('Copying Pi Agent Server...');
-  mkdirSync(dirname(piDest), { recursive: true });
-  copyFileSync(piSource, piDest);
+  mkdirSync(piDestDir, { recursive: true });
+  cpSync(piSourceDir, piDestDir, { recursive: true });
 }
 
 /**
