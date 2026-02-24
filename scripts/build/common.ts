@@ -11,6 +11,10 @@ import {
   copyFileSync,
   cpSync,
   lstatSync,
+  readdirSync,
+  openSync,
+  readSync,
+  closeSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -305,11 +309,51 @@ export function copySessionServer(config: BuildConfig): void {
 }
 
 /**
+ * Identify the platform and arch of a native .node binary by reading its header.
+ * Returns null if the file format is unrecognized.
+ */
+function identifyNativeBinary(filePath: string): { platform: Platform; arch: string } | null {
+  const fd = openSync(filePath, 'r');
+  const buf = Buffer.alloc(512);
+  readSync(fd, buf, 0, 512, 0);
+  closeSync(fd);
+
+  // ELF (Linux)
+  if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
+    const machine = buf.readUInt16LE(18);
+    const arch = machine === 0x3e ? 'x64' : machine === 0xb7 ? 'arm64' : 'other';
+    return { platform: 'linux', arch };
+  }
+
+  // Mach-O (macOS)
+  const magic = buf.readUInt32LE(0);
+  if (magic === 0xfeedfacf) {
+    const cpuType = buf.readUInt32LE(4);
+    const arch = cpuType === 0x0100000c ? 'arm64' : cpuType === 0x01000007 ? 'x64' : 'other';
+    return { platform: 'darwin', arch };
+  }
+
+  // PE (Windows) — MZ header
+  if (buf[0] === 0x4d && buf[1] === 0x5a) {
+    const peOffset = buf.readUInt32LE(60);
+    if (peOffset + 6 < 512) {
+      const machine = buf.readUInt16LE(peOffset + 4);
+      const arch = machine === 0x8664 ? 'x64' : machine === 0xaa64 ? 'arm64' : 'other';
+      return { platform: 'win32', arch };
+    }
+    return { platform: 'win32', arch: 'other' };
+  }
+
+  return null;
+}
+
+/**
  * Copy Pi Agent Server to packaged app resources.
- * The Pi agent server is the subprocess for Pi SDK sessions.
+ * Only copies .node native binaries matching the target platform/arch
+ * to avoid bundling ~80MB of unused cross-platform koffi binaries.
  */
 export function copyPiAgentServer(config: BuildConfig): void {
-  const { rootDir, electronDir } = config;
+  const { rootDir, electronDir, platform, arch } = config;
 
   const piSourceDir = join(rootDir, 'packages', 'pi-agent-server', 'dist');
   const piDestDir = join(electronDir, 'resources', 'pi-agent-server');
@@ -321,7 +365,24 @@ export function copyPiAgentServer(config: BuildConfig): void {
 
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
-  cpSync(piSourceDir, piDestDir, { recursive: true });
+
+  let copied = 0;
+  let skipped = 0;
+  for (const file of readdirSync(piSourceDir)) {
+    const src = join(piSourceDir, file);
+
+    if (file.endsWith('.node')) {
+      const info = identifyNativeBinary(src);
+      if (info && (info.platform !== platform || info.arch !== arch)) {
+        skipped++;
+        continue;
+      }
+      copied++;
+    }
+
+    copyFileSync(src, join(piDestDir, file));
+  }
+  console.log(`  Copied index.js + ${copied} native binaries (skipped ${skipped} other-platform)`);
 }
 
 /**
