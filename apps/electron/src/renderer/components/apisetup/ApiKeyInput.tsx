@@ -10,7 +10,7 @@
  * Used in: Onboarding CredentialsStep, Settings API dialog
  */
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -20,7 +20,7 @@ import {
   StyledDropdownMenuItem,
 } from "@/components/ui/styled-dropdown"
 import { cn } from "@/lib/utils"
-import { Check, ChevronDown, Eye, EyeOff } from "lucide-react"
+import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
 
 export type ApiKeyStatus = 'idle' | 'validating' | 'success' | 'error'
 
@@ -124,6 +124,31 @@ function parseModelList(value: string): string[] {
     .filter(Boolean)
 }
 
+// ============================================================
+// Pi model tier selection (for providers with many models)
+// ============================================================
+
+interface PiModelInfo {
+  id: string
+  name: string
+  costInput: number
+  costOutput: number
+  contextWindow: number
+  reasoning: boolean
+}
+
+/** Pick smart defaults for 3 tiers from a cost-sorted model list (expensive-first). */
+function pickTierDefaults(models: PiModelInfo[]): { best: string; default_: string; cheap: string } {
+  if (models.length === 0) return { best: '', default_: '', cheap: '' }
+  if (models.length === 1) return { best: models[0].id, default_: models[0].id, cheap: models[0].id }
+  const best = models[0].id
+  const cheap = models[models.length - 1].id
+  // ~40% from the top gives a mid-expensive model (list is top-10 + bottom-10)
+  const defaultIdx = Math.min(Math.floor(models.length * 0.4), models.length - 2)
+  const default_ = models[defaultIdx].id
+  return { best, default_, cheap }
+}
+
 export function ApiKeyInput({
   status,
   errorMessage,
@@ -148,6 +173,13 @@ export function ApiKeyInput({
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
   const [modelError, setModelError] = useState<string | null>(null)
 
+  // Pi model tier state (for providers with many models like OpenRouter, Vercel)
+  const [piModels, setPiModels] = useState<PiModelInfo[]>([])
+  const [piModelsLoading, setPiModelsLoading] = useState(false)
+  const [bestModel, setBestModel] = useState('')
+  const [defaultModel, setDefaultModel] = useState('')
+  const [cheapModel, setCheapModel] = useState('')
+
   const isDisabled = disabled || status === 'validating'
 
   const isPiApiKeyFlow = providerType === 'pi_api_key'
@@ -162,6 +194,37 @@ export function ApiKeyInput({
     : providerType === 'pi' ? 'pi-...'
     : providerType === 'openai' ? 'sk-...'
     : 'Paste your key here...')
+
+  // Fetch Pi SDK models when a provider is selected in pi_api_key flow.
+  // Providers with many models (openrouter, vercel, etc.) return top-10 expensive + bottom-10 cheap.
+  // Providers with few models (groq, cerebras) return all of them.
+  const loadPiModels = useCallback(async (provider: string) => {
+    if (!isPiApiKeyFlow || !provider || provider === 'custom' || DEFAULT_ENDPOINT_PROVIDERS.has(provider)) {
+      setPiModels([])
+      return
+    }
+    setPiModelsLoading(true)
+    try {
+      const result = await window.electronAPI.getPiProviderModels(provider)
+      setPiModels(result.models)
+      const defaults = pickTierDefaults(result.models)
+      setBestModel(defaults.best)
+      setDefaultModel(defaults.default_)
+      setCheapModel(defaults.cheap)
+    } catch (err) {
+      console.error('[ApiKeyInput] Failed to load models for', provider, err)
+      setPiModels([])
+    } finally {
+      setPiModelsLoading(false)
+    }
+  }, [isPiApiKeyFlow])
+
+  useEffect(() => {
+    loadPiModels(activePreset)
+  }, [activePreset, loadPiModels])
+
+  // Whether to show 3 tier dropdowns instead of text input
+  const hasPiModels = isPiApiKeyFlow && piModels.length > 0 && !isDefaultProviderPreset
 
   const handlePresetSelect = (preset: Preset) => {
     setActivePreset(preset.key)
@@ -200,6 +263,29 @@ export function ApiKeyInput({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Pi API key flow with tier dropdowns — submit selected models
+    if (hasPiModels) {
+      if (!bestModel || !defaultModel || !cheapModel) {
+        setModelError('Please select a model for each tier.')
+        return
+      }
+      // Deduplicate while preserving order
+      const seen = new Set<string>()
+      const models: string[] = []
+      for (const id of [bestModel, defaultModel, cheapModel]) {
+        if (!seen.has(id)) { seen.add(id); models.push(id) }
+      }
+      onSubmit({
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl.trim() || undefined,
+        connectionDefaultModel: bestModel,
+        models,
+        piAuthProvider: activePreset !== 'custom' ? activePreset : undefined,
+      })
+      return
+    }
+
     const effectiveBaseUrl = baseUrl.trim()
 
     const parsedModels = parseModelList(connectionDefaultModel)
@@ -304,8 +390,68 @@ export function ApiKeyInput({
       </div>
       )}
 
-      {/* Model Selection — hidden for providers with built-in model routing (standard presets) */}
-      {!isDefaultProviderPreset && (
+      {/* Model Selection — 3 tier dropdowns for Pi providers, text input for custom/compat */}
+      {hasPiModels ? (
+        <div className="space-y-3">
+          {piModelsLoading ? (
+            <div className="flex items-center gap-2 py-3 text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              <span className="text-xs">Loading models...</span>
+            </div>
+          ) : (
+            <>
+              {[
+                { label: 'Best', desc: 'most capable', value: bestModel, onChange: setBestModel },
+                { label: 'Default', desc: 'balanced', value: defaultModel, onChange: setDefaultModel },
+                { label: 'Cheap', desc: 'summarization & utility', value: cheapModel, onChange: setCheapModel },
+              ].map(({ label, desc, value, onChange }) => (
+                <div key={label} className="space-y-1.5">
+                  <Label className="text-muted-foreground font-normal text-xs">
+                    {label}{' '}
+                    <span className="text-foreground/30">· {desc}</span>
+                  </Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={isDisabled}
+                      className={cn(
+                        "flex h-9 w-full items-center justify-between rounded-md px-3 text-sm",
+                        "bg-foreground-2 shadow-minimal transition-colors",
+                        "hover:bg-background focus:outline-none focus:bg-background",
+                        isDisabled && "opacity-50 pointer-events-none"
+                      )}
+                    >
+                      <span className="truncate text-foreground">
+                        {piModels.find(m => m.id === value)?.name ?? 'Select model...'}
+                      </span>
+                      <ChevronDown className="size-3 opacity-50 shrink-0" />
+                    </DropdownMenuTrigger>
+                    <StyledDropdownMenuContent align="end" className="z-floating-menu w-[var(--radix-dropdown-menu-trigger-width)] max-h-[300px] overflow-y-auto">
+                      {piModels.map((model) => (
+                        <StyledDropdownMenuItem
+                          key={model.id}
+                          onClick={() => onChange(model.id)}
+                          className="justify-between"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="truncate">{model.name}</span>
+                            {model.reasoning && (
+                              <span className="text-[10px] text-foreground/30 shrink-0">reasoning</span>
+                            )}
+                          </div>
+                          <Check className={cn("size-3 shrink-0", value === model.id ? "opacity-100" : "opacity-0")} />
+                        </StyledDropdownMenuItem>
+                      ))}
+                    </StyledDropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))}
+              {modelError && (
+                <p className="text-xs text-destructive">{modelError}</p>
+              )}
+            </>
+          )}
+        </div>
+      ) : !isDefaultProviderPreset && (
         <div className="space-y-2">
           <Label htmlFor="connection-default-model" className="text-muted-foreground font-normal">
             Default Model{' '}

@@ -17,10 +17,12 @@ export class PiModelFetcher implements ModelFetcher {
     connection: LlmConnection,
     credentials: ModelFetcherCredentials,
   ): Promise<ModelFetchResult> {
+    // Copilot OAuth needs longer timeout (CLI startup + API call)
+    const isCopilot = connection.piAuthProvider === 'github-copilot'
     return fetchBackendModels({
       connection,
       credentials,
-      timeoutMs: 15_000,
+      timeoutMs: isCopilot ? 30_000 : 15_000,
       hostRuntime: {
         appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
         resourcesPath: process.resourcesPath,

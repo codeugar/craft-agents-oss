@@ -1307,8 +1307,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         if (providerName) {
           updates.name = `Craft Agents Backend (${providerName})`
         }
-        // Only set default models when using standard Pi provider (not custom endpoint)
-        if (!hasCustomEndpoint) {
+        // Only set default models when using standard Pi provider AND user didn't pick explicit models
+        if (!hasCustomEndpoint && !setup.models?.length) {
           updates.models = getDefaultModelsForConnection('pi', setup.piAuthProvider)
           updates.defaultModel = getDefaultModelForConnection('pi', setup.piAuthProvider)
         }
@@ -1361,9 +1361,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       }
 
       // Fetch available models (non-blocking — validation will also trigger refresh)
-      getModelRefreshService().refreshNow(setup.slug).catch(err => {
-        ipcLog.warn(`Model refresh after setup failed for ${setup.slug}: ${err instanceof Error ? err.message : err}`)
-      })
+      // Skip when user explicitly provided models (tier selection) to avoid overwriting their choices
+      if (!setup.models?.length) {
+        getModelRefreshService().refreshNow(setup.slug).catch(err => {
+          ipcLog.warn(`Model refresh after setup failed for ${setup.slug}: ${err instanceof Error ? err.message : err}`)
+        })
+      }
 
       // Reinitialize auth with the newly-created connection's slug
       // (not the default, which may be a different connection)
@@ -1911,37 +1914,64 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
   // GitHub Copilot OAuth
   // ============================================================
 
-  // Start GitHub Copilot OAuth flow (device flow)
+  let copilotOAuthAbort: AbortController | null = null
+
+  // Start GitHub Copilot OAuth flow (device flow via Pi SDK)
   ipcMain.handle(IPC_CHANNELS.COPILOT_START_OAUTH, async (event, connectionSlug: string): Promise<{
     success: boolean
     error?: string
   }> => {
     try {
-      const { startGithubOAuth } = await import('@craft-agent/shared/auth')
+      const { loginGitHubCopilot } = await import('@mariozechner/pi-ai')
       const credentialManager = getCredentialManager()
 
-      ipcLog.info(`Starting GitHub OAuth device flow for connection: ${connectionSlug}`)
+      // Cancel any previous in-flight flow
+      copilotOAuthAbort?.abort()
+      copilotOAuthAbort = new AbortController()
 
-      // Start device flow — tokens are returned directly once user authorizes
-      const tokens = await startGithubOAuth(
-        (status) => {
-          ipcLog.info(`[GitHub OAuth] ${status}`)
-        },
-        (deviceCode) => {
-          // Send device code to renderer so the UI can display it
-          event.sender.send(IPC_CHANNELS.COPILOT_DEVICE_CODE, deviceCode)
-        },
-      )
+      ipcLog.info(`Starting GitHub Copilot OAuth device flow for connection: ${connectionSlug}`)
 
-      // Store token in credential manager (no refresh token/expiry for device flow)
-      await credentialManager.setLlmOAuth(connectionSlug, {
-        accessToken: tokens.accessToken,
+      // Use Pi SDK's login flow — this handles the device code flow AND
+      // the critical Copilot token exchange that determines the correct
+      // API endpoint for the user's subscription tier (individual/business/enterprise).
+      const credentials = await loginGitHubCopilot({
+        onAuth: (url, instructions) => {
+          // Extract user code from instructions (format: "Enter code: XXXX-YYYY")
+          const codeMatch = instructions?.match(/:\s*(\S+)/)
+          const userCode = codeMatch?.[1] ?? ''
+          ipcLog.info(`[GitHub OAuth] Device code: ${userCode}`)
+          event.sender.send(IPC_CHANNELS.COPILOT_DEVICE_CODE, {
+            userCode,
+            verificationUri: url,
+          })
+        },
+        onPrompt: async () => {
+          // Pi SDK asks for GitHub Enterprise domain — return empty for github.com
+          return ''
+        },
+        onProgress: (message) => {
+          ipcLog.info(`[GitHub OAuth] ${message}`)
+        },
+        signal: copilotOAuthAbort.signal,
       })
 
-      ipcLog.info('GitHub OAuth completed successfully')
+      copilotOAuthAbort = null
+
+      // Store the full OAuth credential:
+      // - accessToken = Copilot API token (contains proxy-ep for correct endpoint)
+      // - refreshToken = GitHub access token (used to refresh the Copilot token)
+      // - expiresAt = Copilot token expiry (short-lived, ~1 hour)
+      await credentialManager.setLlmOAuth(connectionSlug, {
+        accessToken: credentials.access,
+        refreshToken: credentials.refresh,
+        expiresAt: credentials.expires,
+      })
+
+      ipcLog.info('GitHub Copilot OAuth completed successfully')
       return { success: true }
     } catch (error) {
-      ipcLog.error('GitHub OAuth failed:', error)
+      copilotOAuthAbort = null
+      ipcLog.error('GitHub Copilot OAuth failed:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'OAuth authentication failed',
@@ -1951,19 +1981,15 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Cancel ongoing GitHub OAuth flow
   ipcMain.handle(IPC_CHANNELS.COPILOT_CANCEL_OAUTH, async (): Promise<{ success: boolean }> => {
-    try {
-      const { cancelGithubOAuth } = await import('@craft-agent/shared/auth')
-      cancelGithubOAuth()
-      ipcLog.info('GitHub OAuth cancelled')
-      return { success: true }
-    } catch (error) {
-      ipcLog.error('Failed to cancel GitHub OAuth:', error)
-      return { success: false }
+    if (copilotOAuthAbort) {
+      copilotOAuthAbort.abort()
+      copilotOAuthAbort = null
+      ipcLog.info('GitHub Copilot OAuth cancelled')
     }
+    return { success: true }
   })
 
   // Get GitHub Copilot authentication status
-  // Device flow tokens don't expire — just check if access token exists
   ipcMain.handle(IPC_CHANNELS.COPILOT_GET_AUTH_STATUS, async (_event, connectionSlug: string): Promise<{
     authenticated: boolean
   }> => {

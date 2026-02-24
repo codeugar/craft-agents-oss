@@ -804,9 +804,11 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
     unsubscribeEvents = session.subscribe(handleSessionEvent);
 
-    // Fire prompt
+    // Fire prompt — use followUp when session is already streaming so the
+    // message is queued instead of throwing "Agent is already processing".
     await session.prompt(msg.message, {
       images: msg.images && msg.images.length > 0 ? msg.images : undefined,
+      streamingBehavior: 'followUp',
     });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
