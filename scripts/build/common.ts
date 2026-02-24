@@ -12,9 +12,6 @@ import {
   cpSync,
   lstatSync,
   readdirSync,
-  openSync,
-  readSync,
-  closeSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -309,48 +306,20 @@ export function copySessionServer(config: BuildConfig): void {
 }
 
 /**
- * Identify the platform and arch of a native .node binary by reading its header.
- * Returns null if the file format is unrecognized.
+ * Map our Platform type to koffi's directory naming convention.
+ * koffi uses: darwin_arm64, darwin_x64, linux_x64, win32_x64, etc.
  */
-function identifyNativeBinary(filePath: string): { platform: Platform; arch: string } | null {
-  const fd = openSync(filePath, 'r');
-  const buf = Buffer.alloc(512);
-  readSync(fd, buf, 0, 512, 0);
-  closeSync(fd);
-
-  // ELF (Linux)
-  if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
-    const machine = buf.readUInt16LE(18);
-    const arch = machine === 0x3e ? 'x64' : machine === 0xb7 ? 'arm64' : 'other';
-    return { platform: 'linux', arch };
-  }
-
-  // Mach-O (macOS)
-  const magic = buf.readUInt32LE(0);
-  if (magic === 0xfeedfacf) {
-    const cpuType = buf.readUInt32LE(4);
-    const arch = cpuType === 0x0100000c ? 'arm64' : cpuType === 0x01000007 ? 'x64' : 'other';
-    return { platform: 'darwin', arch };
-  }
-
-  // PE (Windows) — MZ header
-  if (buf[0] === 0x4d && buf[1] === 0x5a) {
-    const peOffset = buf.readUInt32LE(60);
-    if (peOffset + 6 < 512) {
-      const machine = buf.readUInt16LE(peOffset + 4);
-      const arch = machine === 0x8664 ? 'x64' : machine === 0xaa64 ? 'arm64' : 'other';
-      return { platform: 'win32', arch };
-    }
-    return { platform: 'win32', arch: 'other' };
-  }
-
-  return null;
+function koffiPlatformDir(platform: Platform, arch: Arch): string {
+  return `${platform}_${arch}`;
 }
 
 /**
  * Copy Pi Agent Server to packaged app resources.
- * Only copies .node native binaries matching the target platform/arch
- * to avoid bundling ~80MB of unused cross-platform koffi binaries.
+ *
+ * The bundled index.js has `import koffi from "koffi"` as a bare import
+ * (bun can't inline native modules). We copy the koffi npm package into
+ * node_modules next to index.js so the import resolves at runtime, but
+ * only include the target platform's native binary (~4MB instead of ~80MB).
  */
 export function copyPiAgentServer(config: BuildConfig): void {
   const { rootDir, electronDir, platform, arch } = config;
@@ -366,23 +335,44 @@ export function copyPiAgentServer(config: BuildConfig): void {
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
 
-  let copied = 0;
-  let skipped = 0;
-  for (const file of readdirSync(piSourceDir)) {
-    const src = join(piSourceDir, file);
+  // 1. Copy index.js (skip .node asset files — they're not used by the bare import)
+  copyFileSync(join(piSourceDir, 'index.js'), join(piDestDir, 'index.js'));
 
-    if (file.endsWith('.node')) {
-      const info = identifyNativeBinary(src);
-      if (info && (info.platform !== platform || info.arch !== arch)) {
-        skipped++;
-        continue;
-      }
-      copied++;
-    }
+  // 2. Copy koffi npm package with only the target platform's native binary
+  const koffiSource = join(rootDir, 'node_modules', 'koffi');
+  const koffiDest = join(piDestDir, 'node_modules', 'koffi');
 
-    copyFileSync(src, join(piDestDir, file));
+  if (!existsSync(koffiSource)) {
+    console.warn('  Warning: koffi not found in node_modules. Pi SDK sessions may not work.');
+    return;
   }
-  console.log(`  Copied index.js + ${copied} native binaries (skipped ${skipped} other-platform)`);
+
+  mkdirSync(koffiDest, { recursive: true });
+
+  // Copy koffi JS files (package.json, index.js, lib/)
+  for (const entry of ['package.json', 'index.js', 'indirect.js', 'index.d.ts', 'lib']) {
+    const src = join(koffiSource, entry);
+    if (existsSync(src)) {
+      cpSync(src, join(koffiDest, entry), { recursive: true });
+    }
+  }
+
+  // Copy only the target platform's native binary
+  const targetDir = koffiPlatformDir(platform, arch);
+  const nativeSrc = join(koffiSource, 'build', 'koffi', targetDir);
+  const nativeDest = join(koffiDest, 'build', 'koffi', targetDir);
+
+  if (existsSync(nativeSrc)) {
+    mkdirSync(nativeDest, { recursive: true });
+    cpSync(nativeSrc, nativeDest, { recursive: true });
+    const size = lstatSync(join(nativeSrc, readdirSync(nativeSrc)[0])).size;
+    console.log(`  Copied index.js + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
+  } else {
+    console.warn(`  Warning: koffi native binary not found for ${targetDir}`);
+    // Copy all as fallback
+    cpSync(join(koffiSource, 'build'), join(koffiDest, 'build'), { recursive: true });
+    console.log('  Copied index.js + koffi (all platforms as fallback)');
+  }
 }
 
 /**
