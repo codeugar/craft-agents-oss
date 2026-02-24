@@ -1944,6 +1944,10 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
             userCode,
             verificationUri: url,
           })
+          // Open GitHub device code page in default browser
+          shell.openExternal(url).catch(err => {
+            ipcLog.warn(`Failed to open browser for GitHub OAuth: ${err}`)
+          })
         },
         onPrompt: async () => {
           // Pi SDK asks for GitHub Enterprise domain — return empty for github.com
