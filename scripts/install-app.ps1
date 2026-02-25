@@ -31,12 +31,14 @@ New-Item -ItemType Directory -Force -Path $DOWNLOAD_DIR | Out-Null
 
 # Fetch YAML manifest directly from /electron/latest/ (no version endpoint needed)
 Write-Info "Fetching release info..."
+$yamlPath = Join-Path $DOWNLOAD_DIR "latest.yml"
 try {
-    $yamlContent = (Invoke-WebRequest -Uri "$VERSIONS_URL/latest/latest.yml" -UseBasicParsing).Content
+    Invoke-WebRequest -Uri "$VERSIONS_URL/latest/latest.yml" -OutFile $yamlPath -UseBasicParsing
 } catch {
     Write-Err "Failed to fetch release info: $_"
 }
 
+$yamlContent = Get-Content $yamlPath -Raw
 if (-not $yamlContent) {
     Write-Err "Failed to fetch release info from latest.yml"
 }
