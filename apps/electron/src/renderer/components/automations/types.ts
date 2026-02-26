@@ -10,7 +10,7 @@
  * See apps/electron/CLAUDE.md "Common Mistake: Node.js APIs in Renderer".
  */
 
-import { Cron } from 'croner'
+import { computeNextRuns } from './utils'
 
 // ============================================================================
 // Automation System Types (mirrored from packages/shared/src/automations/types.ts)
@@ -138,15 +138,12 @@ export interface ExecutionEntry {
 // Test Panel
 // ============================================================================
 
-export type TestState = 'idle' | 'running' | 'success' | 'error' | 'blocked'
+export type TestState = 'idle' | 'running' | 'success' | 'error'
 
 export interface TestResult {
   state: TestState
-  stdout?: string
   stderr?: string
-  exitCode?: number
   duration?: number
-  blockedReason?: string
 }
 
 // ============================================================================
@@ -253,22 +250,18 @@ function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher):
 /** Derive a summary line from the matcher/cron/event */
 function deriveAutomationSummary(event: string, matcher: AutomationsConfigMatcher): string {
   if (matcher.cron) {
-    try {
-      const job = new Cron(matcher.cron, { timezone: matcher.timezone })
-      const next = job.nextRun()
-      if (next) {
-        const tz = matcher.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
-        const tzCity = tz.split('/').pop()?.replace(/_/g, ' ') ?? tz
-        const formatted = next.toLocaleString('en-US', {
-          weekday: 'short',
-          hour: 'numeric',
-          minute: '2-digit',
-          timeZone: tz,
-        })
-        return `Next run: ${formatted} (${tzCity})`
-      }
-    } catch {
-      // Invalid cron — fall through to raw display
+    const runs = computeNextRuns(matcher.cron, 1)
+    if (runs.length > 0) {
+      const next = runs[0]!
+      const tz = matcher.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+      const tzCity = tz.split('/').pop()?.replace(/_/g, ' ') ?? tz
+      const formatted = next.toLocaleString('en-US', {
+        weekday: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: tz,
+      })
+      return `Next run: ${formatted} (${tzCity})`
     }
     const tz = matcher.timezone ? ` (${matcher.timezone})` : ''
     return `Cron: ${matcher.cron}${tz}`

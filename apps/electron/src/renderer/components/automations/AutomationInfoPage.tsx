@@ -205,7 +205,7 @@ export function AutomationInfoPage({
                 permissionMode: automation.permissionMode,
                 labels: automation.labels,
                 enabled: automation.enabled,
-                hooks: automation.actions,
+                actions: automation.actions,
               }, null, 2)}\n\`\`\``}
             </Info_Markdown>
           </div>

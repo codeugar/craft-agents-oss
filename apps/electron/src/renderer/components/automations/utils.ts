@@ -1,8 +1,28 @@
 /**
- * Shared cron expression utilities.
+ * Shared automation utilities.
  *
- * Used by CronBuilder (visual editor) and AutomationInfoPage (info display).
+ * Cron helpers used by CronBuilder (visual editor) and AutomationInfoPage (info display).
+ * Time formatting shared by AutomationsListPanel and AutomationEventTimeline.
  */
+
+import { Cron } from 'croner'
+
+/**
+ * Format a timestamp as a compact relative time string (e.g. "3m", "2h", "5d").
+ * Used by both AutomationsListPanel (trailing timestamp) and AutomationEventTimeline.
+ */
+export function formatShortRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(diff / 3600000)
+  const days = Math.floor(diff / 86400000)
+
+  if (seconds < 60) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  if (hours < 24) return `${hours}h ago`
+  return `${days}d ago`
+}
 
 /**
  * Describe a cron expression in human-readable form.
@@ -31,26 +51,13 @@ export function describeCron(cron: string): string {
 }
 
 /**
- * Compute the next N approximate run times for a cron expression.
- * Simplified computation — accurate enough for UI previews.
+ * Compute the next N run times for a cron expression using croner.
  */
 export function computeNextRuns(cron: string, count: number = 3): Date[] {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return []
-
-  const [minute, hour] = parts
-  const h = hour === '*' ? new Date().getHours() : parseInt(hour, 10)
-  const m = minute.startsWith('*/') ? 0 : (minute === '*' ? 0 : parseInt(minute, 10))
-
-  const now = new Date()
-  const runs: Date[] = []
-
-  for (let i = 0; i < count; i++) {
-    const d = new Date(now)
-    d.setDate(d.getDate() + i + 1)
-    d.setHours(isNaN(h) ? 0 : h, isNaN(m) ? 0 : m, 0, 0)
-    runs.push(d)
+  try {
+    const job = new Cron(cron)
+    return job.nextRuns(count)
+  } catch {
+    return []
   }
-
-  return runs
 }

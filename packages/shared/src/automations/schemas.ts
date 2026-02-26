@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import type { ValidationIssue } from '../config/validators.ts';
+import { APP_EVENTS, AGENT_EVENTS } from './types.ts';
 
 // ============================================================================
 // Zod Schemas
@@ -46,16 +47,12 @@ export const DEPRECATED_EVENT_ALIASES: Record<string, string> = {
   'TodoStateChange': 'SessionStatusChange',
 };
 
-export const VALID_EVENTS = [
-  // App events
-  'LabelAdd', 'LabelRemove', 'LabelConfigChange', 'PermissionModeChange', 'FlagChange', 'SessionStatusChange', 'SchedulerTick',
-  // Deprecated aliases (still accepted, rewritten in transform)
-  'TodoStateChange',
-  // Agent/SDK events
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
-  'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
-  'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup',
-] as const;
+/** All valid event names: canonical events + deprecated aliases. Derived from types.ts. */
+export const VALID_EVENTS: readonly string[] = [
+  ...APP_EVENTS,
+  ...AGENT_EVENTS,
+  ...Object.keys(DEPRECATED_EVENT_ALIASES),
+];
 
 export const AutomationsConfigSchema = z.object({
   version: z.number().optional(),
@@ -68,7 +65,7 @@ export const AutomationsConfigSchema = z.object({
   const invalidEvents: string[] = [];
 
   for (const [event, matchers] of Object.entries(automations)) {
-    if (VALID_EVENTS.includes(event as (typeof VALID_EVENTS)[number])) {
+    if (VALID_EVENTS.includes(event)) {
       // Rewrite deprecated aliases to canonical names
       const canonical = DEPRECATED_EVENT_ALIASES[event];
       if (canonical) {

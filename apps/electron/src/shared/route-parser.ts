@@ -690,72 +690,52 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
 }
 
 /**
- * Build a route string from NavigationState
+ * Convert NavigationState to ParsedCompoundRoute
  */
-export function buildRouteFromNavigationState(state: NavigationState): string {
+function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundRoute {
   if (state.navigator === 'settings') {
-    return `settings/${state.subpage}`
+    return {
+      navigator: 'settings',
+      details: { type: state.subpage, id: state.subpage },
+    }
   }
 
   if (state.navigator === 'sources') {
-    // Build base from filter (sources, sources/api, sources/mcp, sources/local)
-    let base = 'sources'
-    if (state.filter?.kind === 'type') {
-      base = `sources/${state.filter.sourceType}`
+    return {
+      navigator: 'sources',
+      sourceFilter: state.filter ?? undefined,
+      details: state.details ? { type: 'source', id: state.details.sourceSlug } : null,
     }
-    if (state.details) {
-      return `${base}/source/${state.details.sourceSlug}`
-    }
-    return base
   }
 
   if (state.navigator === 'skills') {
-    if (state.details?.type === 'skill') {
-      return `skills/skill/${state.details.skillSlug}`
+    return {
+      navigator: 'skills',
+      details: state.details?.type === 'skill' ? { type: 'skill', id: state.details.skillSlug } : null,
     }
-    return 'skills'
   }
 
   if (state.navigator === 'automations') {
-    // Build base from filter (automations, automations/scheduled, automations/event, automations/agentic)
-    let base = 'automations'
-    if (state.filter?.kind === 'type') {
-      base = `automations/${state.filter.automationType}`
+    return {
+      navigator: 'automations',
+      automationFilter: state.filter ?? undefined,
+      details: state.details ? { type: 'automation', id: state.details.automationId } : null,
     }
-    if (state.details) {
-      return `${base}/automation/${state.details.automationId}`
-    }
-    return base
   }
 
   // Sessions
-  const filter = state.filter
-  let base: string
-  switch (filter.kind) {
-    case 'allSessions':
-      base = 'allSessions'
-      break
-    case 'flagged':
-      base = 'flagged'
-      break
-    case 'archived':
-      base = 'archived'
-      break
-    case 'state':
-      base = `state/${filter.stateId}`
-      break
-    case 'label':
-      base = `label/${encodeURIComponent(filter.labelId)}`
-      break
-    case 'view':
-      base = `view/${encodeURIComponent(filter.viewId)}`
-      break
+  return {
+    navigator: 'sessions',
+    sessionFilter: state.filter,
+    details: state.details ? { type: 'session', id: state.details.sessionId } : null,
   }
+}
 
-  if (state.details) {
-    return `${base}/session/${state.details.sessionId}`
-  }
-  return base
+/**
+ * Build a route string from NavigationState
+ */
+export function buildRouteFromNavigationState(state: NavigationState): string {
+  return buildCompoundRoute(navigationStateToCompoundRoute(state))
 }
 
 // =============================================================================

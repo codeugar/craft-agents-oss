@@ -71,7 +71,6 @@ function AutomationInfoPagePlayground({
     setTimeout(() => {
       setTestResult({
         state: 'success',
-        stdout: 'Automation executed successfully.\nOutput: OK',
         duration: 42,
       })
     }, 1500)
@@ -287,7 +286,6 @@ const mockExecutions: ExecutionEntry[] = [
 
 const testResultSuccess: TestResult = {
   state: 'success',
-  stdout: 'Prompt delivered successfully. Session created.',
   duration: 42,
 }
 
@@ -552,7 +550,7 @@ export const automationComponents: ComponentEntry[] = [
       },
       {
         name: 'Success',
-        description: 'Successful test with stdout output',
+        description: 'Successful test with duration',
         props: { result: testResultSuccess },
       },
       {

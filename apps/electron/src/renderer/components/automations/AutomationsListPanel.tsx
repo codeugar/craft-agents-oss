@@ -12,8 +12,6 @@
 import * as React from 'react'
 import { useState, useCallback } from 'react'
 import { Webhook } from 'lucide-react'
-import { formatDistanceToNowStrict } from 'date-fns'
-import type { Locale } from 'date-fns'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
@@ -25,27 +23,21 @@ import { AutomationAvatar } from './AutomationAvatar'
 import { cn } from '@/lib/utils'
 import { automationSelection } from '@/hooks/useEntitySelection'
 import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter } from './types'
+import { formatShortRelativeTime } from './utils'
 
 const {
   useSelection: useAutomationSelection,
 } = automationSelection
 
-/** Short relative time locale — produces compact strings: "7m", "2h", "3d" */
-const shortTimeLocale: Pick<Locale, 'formatDistance'> = {
-  formatDistance: (token: string, count: number) => {
-    const units: Record<string, string> = {
-      xSeconds: `${count}s`,
-      xMinutes: `${count}m`,
-      xHours: `${count}h`,
-      xDays: `${count}d`,
-      xWeeks: `${count}w`,
-      xMonths: `${count}mo`,
-      xYears: `${count}y`,
-    }
-    return units[token] || `${count}`
-  },
-}
 
+/** Tiny inline badge used for event name and action type in automation rows */
+function MicroBadge({ children, colorClass }: { children: React.ReactNode; colorClass: string }) {
+  return (
+    <span className={cn('shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded', colorClass)}>
+      {children}
+    </span>
+  )
+}
 
 // ============================================================================
 // Automation Item
@@ -66,10 +58,6 @@ interface AutomationItemProps {
   onDuplicate: () => void
 }
 
-function getActionTypeBadge(_automation: AutomationListItem): { label: string; classes: string } {
-  return { label: 'Prompt', classes: 'bg-accent/10 text-accent' }
-}
-
 function AutomationItem({
   automation,
   isSelected,
@@ -84,8 +72,6 @@ function AutomationItem({
   onTest,
   onDuplicate,
 }: AutomationItemProps) {
-  const actionBadge = getActionTypeBadge(automation)
-
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right-click: auto-add to selection if multi-select active
@@ -117,18 +103,12 @@ function AutomationItem({
       title={automation.name}
       badges={
         <>
-          <span className={cn(
-            'shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded',
-            'bg-foreground/8 text-foreground/60'
-          )}>
+          <MicroBadge colorClass="bg-foreground/8 text-foreground/60">
             {getEventDisplayName(automation.event)}
-          </span>
-          <span className={cn(
-            'shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded',
-            actionBadge.classes
-          )}>
-            {actionBadge.label}
-          </span>
+          </MicroBadge>
+          <MicroBadge colorClass="bg-accent/10 text-accent">
+            Prompt
+          </MicroBadge>
         </>
       }
       trailing={
@@ -136,11 +116,11 @@ function AutomationItem({
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap cursor-default">
-                {formatDistanceToNowStrict(new Date(automation.lastExecutedAt), { locale: shortTimeLocale as Locale, roundingMethod: 'floor' })}
+                {formatShortRelativeTime(automation.lastExecutedAt)}
               </span>
             </TooltipTrigger>
             <TooltipContent side="bottom" sideOffset={4}>
-              Last ran {formatDistanceToNowStrict(new Date(automation.lastExecutedAt), { addSuffix: true })}
+              Last ran {formatShortRelativeTime(automation.lastExecutedAt)}
             </TooltipContent>
           </Tooltip>
         ) : undefined

@@ -82,9 +82,12 @@ export function useAutomations(
     return () => { cleanup() }
   }, [activeWorkspaceRootPath, loadAndHydrate])
 
+  // Shared lookup — avoids repeating automations.find() in every callback
+  const findAutomation = useCallback((id: string) => automations.find(h => h.id === id), [automations])
+
   // Test automation — aggregate all action results
   const handleTestAutomation = useCallback((automationId: string) => {
-    const automation = automations.find(h => h.id === automationId)
+    const automation = findAutomation(automationId)
     if (!automation || !activeWorkspaceId) return
 
     setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'running' } }))
@@ -116,10 +119,10 @@ export function useAutomations(
     }).catch((err: Error) => {
       setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'error', stderr: err.message } }))
     })
-  }, [automations, activeWorkspaceId])
+  }, [findAutomation, activeWorkspaceId])
 
   const handleToggleAutomation = useCallback((automationId: string) => {
-    const automation = automations.find(h => h.id === automationId)
+    const automation = findAutomation(automationId)
     if (!automation || !activeWorkspaceId) return
     window.electronAPI.setAutomationEnabled(
       activeWorkspaceId,
@@ -129,21 +132,21 @@ export function useAutomations(
     ).catch(() => {
       toast.error('Failed to toggle automation')
     })
-  }, [automations, activeWorkspaceId])
+  }, [findAutomation, activeWorkspaceId])
 
   const handleDuplicateAutomation = useCallback((automationId: string) => {
-    const automation = automations.find(h => h.id === automationId)
+    const automation = findAutomation(automationId)
     if (!automation || !activeWorkspaceId) return
     window.electronAPI.duplicateAutomation(activeWorkspaceId, automation.event, automation.matcherIndex)
       .catch(() => toast.error('Failed to duplicate automation'))
-  }, [automations, activeWorkspaceId])
+  }, [findAutomation, activeWorkspaceId])
 
   // Delete: show confirmation dialog
   const handleDeleteAutomation = useCallback((automationId: string) => {
     setAutomationPendingDelete(automationId)
   }, [])
 
-  const pendingDeleteAutomation = automationPendingDelete ? automations.find(h => h.id === automationPendingDelete) : undefined
+  const pendingDeleteAutomation = automationPendingDelete ? findAutomation(automationPendingDelete) : undefined
 
   const confirmDeleteAutomation = useCallback(() => {
     if (!pendingDeleteAutomation || !activeWorkspaceId) return
@@ -157,7 +160,7 @@ export function useAutomations(
     if (!activeWorkspaceId) return []
     try {
       const entries = await window.electronAPI.getAutomationHistory(activeWorkspaceId, automationId, 20)
-      const automation = automations.find(h => h.id === automationId)
+      const automation = findAutomation(automationId)
       return entries.map((e: { id: string; ts: number; ok: boolean; sessionId?: string; prompt?: string; error?: string }) => ({
         id: `${e.id}-${e.ts}`,
         automationId: e.id,
@@ -172,7 +175,7 @@ export function useAutomations(
     } catch {
       return []
     }
-  }, [activeWorkspaceId, automations])
+  }, [activeWorkspaceId, findAutomation])
 
   return {
     automations,

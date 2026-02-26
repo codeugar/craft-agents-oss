@@ -9,23 +9,11 @@ import { CheckCircle2, XCircle, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { type ExecutionEntry, type ExecutionStatus } from './types'
+import { formatShortRelativeTime } from './utils'
 
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp
-  const seconds = Math.floor(diff / 1000)
-  const minutes = Math.floor(diff / 60000)
-  const hours = Math.floor(diff / 3600000)
-  const days = Math.floor(diff / 86400000)
-
-  if (seconds < 60) return 'Just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (hours < 24) return `${hours}h ago`
-  return `${days}d ago`
-}
 
 const statusConfig: Record<ExecutionStatus, { icon: React.ElementType; classes: string }> = {
   success: { icon: CheckCircle2, classes: 'text-success' },
@@ -66,7 +54,7 @@ export function AutomationEventTimeline({ entries, className }: AutomationEventT
 
             {/* Time */}
             <span className="text-xs text-muted-foreground w-16 shrink-0 tabular-nums">
-              {formatRelativeTime(entry.timestamp)}
+              {formatShortRelativeTime(entry.timestamp)}
             </span>
 
             {/* Action summary — truncated prompt text */}

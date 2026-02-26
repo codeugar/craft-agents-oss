@@ -32,7 +32,6 @@ export function BatchAutomationMenu() {
 
   const {
     activeWorkspaceId,
-    onDeleteAutomation,
   } = useAppShellContext()
 
   // Resolve selected automations metadata
@@ -64,18 +63,21 @@ export function BatchAutomationMenu() {
     toast(`${count} ${count === 1 ? 'automation' : 'automations'} ${targetEnabled ? 'enabled' : 'disabled'}`)
   }, [activeWorkspaceId, selectedAutomations, allEnabled, clearMultiSelect])
 
-  // Batch delete — sequential to avoid same race
+  // Batch delete — sequential IPC in reverse matcherIndex order so earlier indices stay valid
   const handleBatchDelete = useCallback(async () => {
-    if (!onDeleteAutomation) return
+    if (!activeWorkspaceId) return
     const count = selectedIds.size
     clearMultiSelect()
-    // Delete in reverse matcherIndex order so earlier indices stay valid
     const sorted = [...selectedAutomations].sort((a, b) => b.matcherIndex - a.matcherIndex)
     for (const a of sorted) {
-      onDeleteAutomation(a.id)
+      await window.electronAPI.deleteAutomation(
+        activeWorkspaceId,
+        a.event,
+        a.matcherIndex,
+      ).catch(() => {})
     }
     toast(`${count} ${count === 1 ? 'automation' : 'automations'} deleted`)
-  }, [selectedIds.size, selectedAutomations, onDeleteAutomation, clearMultiSelect])
+  }, [activeWorkspaceId, selectedIds.size, selectedAutomations, clearMultiSelect])
 
   const count = selectedIds.size
 
@@ -100,7 +102,7 @@ export function BatchAutomationMenu() {
       <Separator />
 
       {/* Delete */}
-      {onDeleteAutomation && (
+      {activeWorkspaceId && (
         <MenuItem onClick={handleBatchDelete} variant="destructive">
           <Trash2 className="h-3.5 w-3.5" />
           <span className="flex-1">Delete</span>

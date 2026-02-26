@@ -8,17 +8,10 @@
 import { createLogger } from '../../utils/debug.ts';
 import type { EventBus, BaseEventPayload } from '../event-bus.ts';
 import type { AutomationHandler, PromptHandlerOptions, AutomationsConfigProvider } from './types.ts';
-import type { AutomationEvent, PromptAction, PendingPrompt, AppEvent } from '../types.ts';
+import { APP_EVENTS, type AutomationEvent, type PromptAction, type PendingPrompt, type AppEvent } from '../types.ts';
 import { matcherMatches, buildEnvFromPayload, expandEnvVars, parsePromptReferences } from '../utils.ts';
 
 const log = createLogger('prompt-handler');
-
-// App events that support prompt actions
-const APP_EVENTS: AppEvent[] = [
-  'LabelAdd', 'LabelRemove', 'LabelConfigChange',
-  'PermissionModeChange', 'FlagChange', 'SessionStatusChange',
-  'SchedulerTick'
-];
 
 // ============================================================================
 // PromptHandler Implementation

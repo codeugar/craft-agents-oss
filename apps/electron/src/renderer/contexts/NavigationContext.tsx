@@ -488,7 +488,7 @@ export function NavigationProvider({
         }
       }
 
-      // For tasks: no auto-selection yet (tasks aren't loaded from disk)
+      // For automations: no auto-selection yet
       if (isAutomationsNavigation(nextState)) {
         setNavigationState(nextState)
         return nextState
@@ -623,7 +623,7 @@ export function NavigationProvider({
       return true
     }
 
-    // Tasks: always valid for now (mock data, no real data layer yet)
+    // Automations: always valid (navigation doesn't depend on specific automation)
     if (isAutomationsNavigation(navState)) {
       return true
     }

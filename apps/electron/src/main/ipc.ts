@@ -9,7 +9,7 @@ import { SessionManager } from './sessions'
 import { ipcLog, windowLog, searchLog } from './logger'
 import { WindowManager } from './window-manager'
 import { registerOnboardingHandlers } from './onboarding'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type LlmConnectionSetup } from '../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type LlmConnectionSetup, type SkillFile } from '../shared/types'
 import { readFileAttachment, perf, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
 import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, addWorkspace, setActiveWorkspace, loadStoredConfig, saveConfig, type Workspace, getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
@@ -2508,13 +2508,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const skillsDir = getWorkspaceSkillsPath(workspace.rootPath)
     const skillDir = join(skillsDir, skillSlug)
 
-    interface SkillFile {
-      name: string
-      type: 'file' | 'directory'
-      size?: number
-      children?: SkillFile[]
-    }
-
     function scanDirectory(dirPath: string): SkillFile[] {
       try {
         const entries = readdirSync(dirPath, { withFileTypes: true })
@@ -2676,12 +2669,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     if (!workspace) throw new Error('Workspace not found')
 
     const results: import('../shared/types').TestAutomationActionResult[] = []
+    const { parsePromptReferences } = await import('@craft-agent/shared/automations')
 
     for (const action of payload.actions) {
       const start = Date.now()
 
       // Parse @mentions from the prompt to resolve source/skill references
-      const { parsePromptReferences } = await import('@craft-agent/shared/automations')
       const references = parsePromptReferences(action.prompt)
 
       try {
@@ -2709,7 +2702,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         // Write history entry for test runs
         if (payload.automationId) {
           const entry = { id: payload.automationId, ts: Date.now(), ok: true, sessionId, prompt: action.prompt.slice(0, 200) }
-          appendFile(join(workspace.rootPath, 'automations-history.jsonl'), JSON.stringify(entry) + '\n', 'utf-8').catch(() => {})
+          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => ipcLog.warn('[Automations] Failed to write history:', e))
         }
       } catch (err: unknown) {
         results.push({
@@ -2722,7 +2715,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         // Write failed history entry
         if (payload.automationId) {
           const entry = { id: payload.automationId, ts: Date.now(), ok: false, error: ((err as Error).message ?? '').slice(0, 200), prompt: action.prompt.slice(0, 200) }
-          appendFile(join(workspace.rootPath, 'automations-history.jsonl'), JSON.stringify(entry) + '\n', 'utf-8').catch(() => {})
+          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => ipcLog.warn('[Automations] Failed to write history:', e))
         }
       }
     }
@@ -2730,35 +2723,51 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return { actions: results } satisfies import('../shared/types').TestAutomationResult
   })
 
+  // History file name — matches AUTOMATIONS_HISTORY_FILE from @craft-agent/shared/automations/constants
+  const HISTORY_FILE = 'automations-history.jsonl'
+  interface HistoryEntry { id: string; ts: number; ok: boolean; sessionId?: string; prompt?: string; error?: string }
+
+  // Per-workspace config mutex: serializes read-modify-write cycles on automations.json
+  // to prevent concurrent IPC calls from clobbering each other's changes.
+  const configMutexes = new Map<string, Promise<void>>()
+  function withConfigMutex<T>(workspaceRoot: string, fn: () => Promise<T>): Promise<T> {
+    const prev = configMutexes.get(workspaceRoot) ?? Promise.resolve()
+    const next = prev.then(fn, fn) // run fn regardless of previous result
+    configMutexes.set(workspaceRoot, next.then(() => {}, () => {}))
+    return next
+  }
+
   // Shared helper: resolve workspace, read automations.json, validate matcher, mutate, write back
   interface AutomationsConfigJson { automations?: Record<string, Record<string, unknown>[]>; [key: string]: unknown }
   async function withAutomationMatcher(workspaceId: string, eventName: string, matcherIndex: number, mutate: (matchers: Record<string, unknown>[], index: number, config: AutomationsConfigJson, genId: () => string) => void) {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { resolveAutomationsConfigPath, generateShortId } = await import('@craft-agent/shared/automations/resolve-config-path')
-    const configPath = resolveAutomationsConfigPath(workspace.rootPath)
+    await withConfigMutex(workspace.rootPath, async () => {
+      const { resolveAutomationsConfigPath, generateShortId } = await import('@craft-agent/shared/automations/resolve-config-path')
+      const configPath = resolveAutomationsConfigPath(workspace.rootPath)
 
-    const raw = await readFile(configPath, 'utf-8')
-    const config = JSON.parse(raw)
+      const raw = await readFile(configPath, 'utf-8')
+      const config = JSON.parse(raw)
 
-    const eventMap = config.automations ?? {}
-    const matchers = eventMap[eventName]
-    if (!Array.isArray(matchers) || matcherIndex < 0 || matcherIndex >= matchers.length) {
-      throw new Error(`Invalid automation reference: ${eventName}[${matcherIndex}]`)
-    }
-
-    mutate(matchers, matcherIndex, config, generateShortId)
-
-    // Backfill missing IDs on all matchers before writing
-    for (const eventMatchers of Object.values(eventMap)) {
-      if (!Array.isArray(eventMatchers)) continue
-      for (const m of eventMatchers as Record<string, unknown>[]) {
-        if (!m.id) m.id = generateShortId()
+      const eventMap = config.automations ?? {}
+      const matchers = eventMap[eventName]
+      if (!Array.isArray(matchers) || matcherIndex < 0 || matcherIndex >= matchers.length) {
+        throw new Error(`Invalid automation reference: ${eventName}[${matcherIndex}]`)
       }
-    }
 
-    await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+      mutate(matchers, matcherIndex, config, generateShortId)
+
+      // Backfill missing IDs on all matchers before writing
+      for (const eventMatchers of Object.values(eventMap)) {
+        if (!Array.isArray(eventMatchers)) continue
+        for (const m of eventMatchers as Record<string, unknown>[]) {
+          if (!m.id) m.id = generateShortId()
+        }
+      }
+
+      await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8')
+    })
   }
 
   // Automation enabled state management (toggle enabled/disabled in automations.json)
@@ -2799,14 +2808,14 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const historyPath = join(workspace.rootPath, 'automations-history.jsonl')
+    const historyPath = join(workspace.rootPath, HISTORY_FILE)
     try {
       const content = await readFile(historyPath, 'utf-8')
       const lines = content.trim().split('\n').filter(Boolean)
 
       return lines
         .map(line => { try { return JSON.parse(line) } catch { return null } })
-        .filter((e): e is { id: string; ts: number; ok: boolean; sessionId?: string; prompt?: string; error?: string } => e?.id === automationId)
+        .filter((e): e is HistoryEntry => e?.id === automationId)
         .slice(-limit)
         .reverse()
     } catch {
@@ -2819,7 +2828,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const historyPath = join(workspace.rootPath, 'automations-history.jsonl')
+    const historyPath = join(workspace.rootPath, HISTORY_FILE)
     try {
       const content = await readFile(historyPath, 'utf-8')
       const result: Record<string, number> = {}

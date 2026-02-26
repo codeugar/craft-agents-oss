@@ -255,7 +255,25 @@ export function validateAutomations(workspaceRoot: string): ValidationResult {
     };
   }
 
-  // First validate content (JSON + schema)
+  // Parse JSON once — validateAutomationsContent also parses, but we need the
+  // parsed object for workspace-aware validations below
+  let content: unknown;
+  try {
+    content = JSON.parse(raw);
+  } catch (e) {
+    return {
+      valid: false,
+      errors: [{
+        file,
+        path: '',
+        message: `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        severity: 'error',
+      }],
+      warnings: [],
+    };
+  }
+
+  // Validate content (schema + semantic checks)
   const contentResult = validateAutomationsContent(raw);
   if (!contentResult.valid) {
     return contentResult;
@@ -266,7 +284,7 @@ export function validateAutomations(workspaceRoot: string): ValidationResult {
 
   // Validate labels and llmConnection slugs exist
   try {
-    const config = JSON.parse(raw) as { automations?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }> }>> };
+    const config = content as { automations?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }> }>> };
     const labelEntries = config.automations;
     if (labelEntries) {
       for (const [event, matchers] of Object.entries(labelEntries)) {

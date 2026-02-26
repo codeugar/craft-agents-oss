@@ -24,6 +24,7 @@ import { WorkspaceEventBus, type EventPayloadMap } from './event-bus.ts';
 import { PromptHandler, EventLogHandler, type AutomationsConfigProvider } from './handlers/index.ts';
 import { type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput } from './types.ts';
 import { validateAutomationsConfig } from './validation.ts';
+import { testMatcherAgainst, getMatchValueForSdkInput } from './utils.ts';
 import { SchedulerService, type SchedulerTickPayload } from '../scheduler/scheduler-service.ts';
 
 const log = createLogger('automation-system');
@@ -95,6 +96,16 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
+   * Read, parse, and validate automations.json. Shared pipeline for loadConfig/reloadConfig.
+   * Returns the raw parsed JSON alongside validation results (avoids re-reading for backfillIds).
+   */
+  private readAndValidateConfig(configPath: string): { raw: unknown; validation: import('./types.ts').AutomationsValidationResult } {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const validation = validateAutomationsConfig(raw);
+    return { raw, validation };
+  }
+
+  /**
    * Load automations configuration from automations.json.
    */
   private loadConfig(): void {
@@ -107,8 +118,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
     }
 
     try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-      const validation = validateAutomationsConfig(raw);
+      const { raw, validation } = this.readAndValidateConfig(configPath);
 
       if (!validation.valid) {
         console.warn('[AutomationSystem] Invalid automations config:', validation.errors);
@@ -117,7 +127,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
       }
 
       this.config = validation.config;
-      this.backfillIds(configPath);
+      this.backfillIds(configPath, raw);
       this.rotateHistory();
       const actionCount = this.getActionCount();
       log.debug(`[AutomationSystem] Loaded ${actionCount} actions from ${configPath}`);
@@ -141,15 +151,14 @@ export class AutomationSystem implements AutomationsConfigProvider {
     }
 
     try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-      const validation = validateAutomationsConfig(raw);
+      const { raw, validation } = this.readAndValidateConfig(configPath);
 
       if (!validation.valid) {
         return { success: false, automationCount: 0, errors: validation.errors };
       }
 
       this.config = validation.config;
-      this.backfillIds(configPath);
+      this.backfillIds(configPath, raw);
       const actionCount = this.getActionCount();
       log.debug(`[AutomationSystem] Reloaded ${actionCount} actions`);
       return { success: true, automationCount: actionCount, errors: [] };
@@ -160,14 +169,14 @@ export class AutomationSystem implements AutomationsConfigProvider {
   }
 
   /**
-   * Backfill missing IDs on matchers in the raw config file.
-   * Re-reads the file to preserve original structure (doesn't use Zod-normalized data).
+   * Backfill missing IDs on matchers in the raw config.
+   * Operates on the already-parsed raw JSON to avoid re-reading from disk.
    * Only writes if IDs were actually missing — no-op on subsequent loads.
    */
-  private backfillIds(configPath: string): void {
+  private backfillIds(configPath: string, raw: unknown): void {
     try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf-8'));
-      const eventMap = raw.automations ?? raw.tasks ?? raw.hooks;
+      const obj = raw as Record<string, unknown>;
+      const eventMap = (obj.automations ?? obj.tasks ?? obj.hooks) as Record<string, unknown[]> | undefined;
       if (!eventMap) return;
 
       let changed = false;
@@ -468,52 +477,15 @@ export class AutomationSystem implements AutomationsConfigProvider {
     const matchers = this.config.automations[event];
     if (!matchers?.length) return;
 
-    const matchValue = this.getMatchValueForSdkInput(event, input);
+    const matchValue = getMatchValueForSdkInput(event, input);
 
     for (const matcher of matchers) {
-      if (matcher.enabled === false) continue;
-
-      // Check regex matcher against the match value
-      if (matcher.matcher) {
-        try {
-          const regex = new RegExp(matcher.matcher);
-          if (!regex.test(matchValue)) continue;
-        } catch {
-          // Invalid regex — skip this matcher
-          continue;
-        }
-      }
+      if (!testMatcherAgainst(matcher, event, matchValue)) continue;
 
       // Note: Command execution has been removed. Prompt-based execution for
       // non-Claude backends is not yet implemented. This method currently only
       // validates matching — actual execution is a no-op.
       log.debug(`[AutomationSystem] Matched ${event} automation (prompt-based execution pending)`);
-    }
-  }
-
-  /**
-   * Extract the regex match target from SdkAutomationInput based on the event type.
-   * Mirrors the Claude SDK's `fieldToMatch` per event — each event type matches
-   * against a specific field from the input.
-   */
-  private getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomationInput): string {
-    switch (event) {
-      case 'PreToolUse':
-      case 'PostToolUse':
-      case 'PostToolUseFailure':
-      case 'PermissionRequest':
-        return input.tool_name ?? '';
-      case 'Notification':
-        // SDK matches against notification_type (not available in SdkAutomationInput — use message as fallback)
-        return input.message ?? '';
-      case 'SessionStart':
-        return input.source ?? '';
-      case 'SubagentStart':
-      case 'SubagentStop':
-        return input.agent_type ?? '';
-      default:
-        // UserPromptSubmit, Stop, SessionEnd — no meaningful match field
-        return '';
     }
   }
 

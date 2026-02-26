@@ -5,7 +5,7 @@
  * Uses Info_Alert variants for consistent styling.
  */
 
-import { CheckCircle2, XCircle, ShieldAlert, Loader2 } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Info_Alert } from '@/components/info'
 import { cn } from '@/lib/utils'
 import type { TestResult } from './types'
@@ -40,11 +40,6 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
             </span>
           )}
         </Info_Alert.Title>
-        {result.stdout && (
-          <Info_Alert.Description>
-            <pre className="font-mono text-xs mt-1 whitespace-pre-wrap">{result.stdout}</pre>
-          </Info_Alert.Description>
-        )}
       </Info_Alert>
     )
   }
@@ -53,31 +48,12 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
   if (result.state === 'error') {
     return (
       <Info_Alert variant="error" icon={<XCircle className="h-4 w-4" />} className={className}>
-        <Info_Alert.Title>
-          Test Failed
-          {result.exitCode != null && (
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              Error code: {result.exitCode}
-            </span>
-          )}
-        </Info_Alert.Title>
+        <Info_Alert.Title>Test Failed</Info_Alert.Title>
         {result.stderr && (
           <Info_Alert.Description>
             <pre className="font-mono text-xs mt-1 whitespace-pre-wrap text-destructive">{result.stderr}</pre>
           </Info_Alert.Description>
         )}
-      </Info_Alert>
-    )
-  }
-
-  // Blocked state
-  if (result.state === 'blocked') {
-    return (
-      <Info_Alert variant="warning" icon={<ShieldAlert className="h-4 w-4" />} className={className}>
-        <Info_Alert.Title>Action Blocked</Info_Alert.Title>
-        <Info_Alert.Description>
-          {result.blockedReason || 'This action was blocked by your safety settings.'}
-        </Info_Alert.Description>
       </Info_Alert>
     )
   }

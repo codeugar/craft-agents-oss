@@ -6,7 +6,7 @@
  */
 
 import type { BaseEventPayload } from './event-bus.ts';
-import type { AutomationEvent, AutomationMatcher, PromptReferences } from './types.ts';
+import type { AutomationEvent, AutomationMatcher, PromptReferences, AgentEvent, SdkAutomationInput } from './types.ts';
 import { matchesCron } from './cron-matcher.ts';
 import { sanitizeForShell } from './security.ts';
 
@@ -108,19 +108,52 @@ export function getMatchValue(event: AutomationEvent, data: Record<string, unkno
 }
 
 /**
- * Check if a matcher matches the given event and data.
+ * Get the match value for SDK agent events.
+ * Mirrors the Claude SDK's `fieldToMatch` per event — each event type matches
+ * against a specific field from the input.
  */
-export function matcherMatches(matcher: AutomationMatcher, event: AutomationEvent, data: Record<string, unknown>): boolean {
+export function getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomationInput): string {
+  switch (event) {
+    case 'PreToolUse':
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+    case 'PermissionRequest':
+      return input.tool_name ?? '';
+    case 'Notification':
+      return input.message ?? '';
+    case 'SessionStart':
+      return input.source ?? '';
+    case 'SubagentStart':
+    case 'SubagentStop':
+      return input.agent_type ?? '';
+    default:
+      // UserPromptSubmit, Stop, SessionEnd — no meaningful match field
+      return '';
+  }
+}
+
+/**
+ * Test if a matcher matches against a pre-computed match value.
+ * Shared core: used by both event-bus matching (matcherMatches) and SDK matching (executeAgentEvent).
+ */
+export function testMatcherAgainst(matcher: AutomationMatcher, event: AutomationEvent, matchValue: string): boolean {
   if (matcher.enabled === false) return false;
   if (event === 'SchedulerTick') {
-    // Use cron matching for SchedulerTick
     return !!matcher.cron && matchesCron(matcher.cron, matcher.timezone);
   }
-
-  // Use regex matching for other events
-  const matchValue = getMatchValue(event, data);
   if (!matcher.matcher) return true; // No matcher means match all
-  return new RegExp(matcher.matcher).test(matchValue);
+  try {
+    return new RegExp(matcher.matcher).test(matchValue);
+  } catch {
+    return false; // Invalid regex — skip
+  }
+}
+
+/**
+ * Check if a matcher matches the given event and data (event-bus payloads).
+ */
+export function matcherMatches(matcher: AutomationMatcher, event: AutomationEvent, data: Record<string, unknown>): boolean {
+  return testMatcherAgainst(matcher, event, getMatchValue(event, data));
 }
 
 // ============================================================================

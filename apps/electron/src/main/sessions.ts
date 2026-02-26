@@ -820,36 +820,14 @@ export class SessionManager {
     const callbacks: ConfigWatcherCallbacks = {
       onSourcesListChange: async (sources: LoadedSource[]) => {
         sessionLog.info(`Sources list changed in ${workspaceRootPath} (${sources.length} sources)`)
-        // Broadcast to UI
         this.broadcastSourcesChanged(sources)
-        // Reload sources for all sessions in this workspace
-        // Skip sessions that are currently processing to avoid interrupting tool calls
-        for (const [_, managed] of this.sessions) {
-          if (managed.workspace.rootPath === workspaceRootPath) {
-            if (managed.isProcessing) {
-              sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
-              continue
-            }
-            await this.reloadSessionSources(managed)
-          }
-        }
+        await this.reloadSourcesForWorkspace(workspaceRootPath)
       },
       onSourceChange: async (slug: string, source: LoadedSource | null) => {
         sessionLog.info(`Source '${slug}' changed:`, source ? 'updated' : 'deleted')
-        // Broadcast updated list to UI
         const sources = loadWorkspaceSources(workspaceRootPath)
         this.broadcastSourcesChanged(sources)
-        // Reload sources for all sessions in this workspace
-        // Skip sessions that are currently processing to avoid interrupting tool calls
-        for (const [_, managed] of this.sessions) {
-          if (managed.workspace.rootPath === workspaceRootPath) {
-            if (managed.isProcessing) {
-              sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
-              continue
-            }
-            await this.reloadSessionSources(managed)
-          }
-        }
+        await this.reloadSourcesForWorkspace(workspaceRootPath)
       },
       onSourceGuideChange: (sourceSlug: string) => {
         sessionLog.info(`Source guide changed: ${sourceSlug}`)
@@ -1023,7 +1001,7 @@ export class SessionManager {
               error: result.status === 'rejected' ? String(result.reason).slice(0, 200) : undefined,
             }
 
-            appendFile(historyPath, JSON.stringify(entry) + '\n', 'utf-8').catch(() => {})
+            appendFile(historyPath, JSON.stringify(entry) + '\n', 'utf-8').catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
 
             if (result.status === 'rejected') {
               sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
@@ -1038,6 +1016,21 @@ export class SessionManager {
       })
       this.automationSystems.set(workspaceRootPath, automationSystem)
       sessionLog.info(`Initialized AutomationSystem for workspace ${workspaceId}`)
+    }
+  }
+
+  /**
+   * Reload sources for all sessions in a workspace, skipping those currently processing.
+   */
+  private async reloadSourcesForWorkspace(workspaceRootPath: string): Promise<void> {
+    for (const [_, managed] of this.sessions) {
+      if (managed.workspace.rootPath === workspaceRootPath) {
+        if (managed.isProcessing) {
+          sessionLog.info(`Skipping source reload for session ${managed.id} (processing)`)
+          continue
+        }
+        await this.reloadSessionSources(managed)
+      }
     }
   }
 
