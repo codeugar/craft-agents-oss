@@ -2730,8 +2730,8 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     return { actions: results } satisfies import('../shared/types').TestAutomationResult
   })
 
-  // Shared helper: resolve workspace, read automations.json (or hooks.json), validate matcher, mutate, write back
-  interface AutomationsConfigJson { automations?: Record<string, Record<string, unknown>[]>; tasks?: Record<string, Record<string, unknown>[]>; hooks?: Record<string, Record<string, unknown>[]>; [key: string]: unknown }
+  // Shared helper: resolve workspace, read automations.json, validate matcher, mutate, write back
+  interface AutomationsConfigJson { automations?: Record<string, Record<string, unknown>[]>; [key: string]: unknown }
   async function withAutomationMatcher(workspaceId: string, eventName: string, matcherIndex: number, mutate: (matchers: Record<string, unknown>[], index: number, config: AutomationsConfigJson, genId: () => string) => void) {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
@@ -2742,8 +2742,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     const raw = await readFile(configPath, 'utf-8')
     const config = JSON.parse(raw)
 
-    // Support "automations" (v3), "tasks" (v2), and "hooks" (v1) top-level keys
-    const eventMap = config.automations ?? config.tasks ?? config.hooks ?? {}
+    const eventMap = config.automations ?? {}
     const matchers = eventMap[eventName]
     if (!Array.isArray(matchers) || matcherIndex < 0 || matcherIndex >= matchers.length) {
       throw new Error(`Invalid automation reference: ${eventName}[${matcherIndex}]`)
@@ -2789,7 +2788,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     await withAutomationMatcher(workspaceId, eventName, matcherIndex, (matchers, idx, config) => {
       matchers.splice(idx, 1)
       if (matchers.length === 0) {
-        const eventMap = config.automations ?? config.tasks ?? config.hooks
+        const eventMap = config.automations
         if (eventMap) delete eventMap[eventName]
       }
     })

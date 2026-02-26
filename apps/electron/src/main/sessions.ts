@@ -2298,7 +2298,7 @@ export class SessionManager {
         envOverrides,
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
-        hookSystem: this.automationSystems.get(managed.workspace.rootPath),
+        automationSystem: this.automationSystems.get(managed.workspace.rootPath),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: isDebugMode ? { enabled: true, logFilePath: getLogFilePath() } : undefined,
         // Source configs for postInit() — backends set up their own bridge/config

@@ -727,7 +727,7 @@ export class PiAgent extends BaseAgent {
     const { requestId, toolName, input } = req;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId})`);
 
-    // Fire PreToolUse hook event (hooks.json) — await so hooks run before tool executes
+    // Fire PreToolUse automation event — await so automations run before tool executes
     await this.emitAutomationEvent('PreToolUse', {
       hook_event_name: 'PreToolUse',
       tool_name: toolName,

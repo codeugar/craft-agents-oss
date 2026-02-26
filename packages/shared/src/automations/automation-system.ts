@@ -17,7 +17,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveAutomationsConfigPath, migrateHooksToAutomations, generateShortId } from './resolve-config-path.ts';
+import { resolveAutomationsConfigPath, generateShortId } from './resolve-config-path.ts';
 import { AUTOMATIONS_HISTORY_FILE } from './constants.ts';
 import { createLogger } from '../utils/debug.ts';
 import { WorkspaceEventBus, type EventPayloadMap } from './event-bus.ts';
@@ -95,13 +95,9 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
-   * Load automations configuration from automations.json (with hooks.json/tasks.json fallback).
-   * Runs one-time migration from hooks.json → automations.json if needed.
+   * Load automations configuration from automations.json.
    */
   private loadConfig(): void {
-    // Migrate hooks.json → automations.json if needed (one-time, idempotent)
-    migrateHooksToAutomations(this.options.workspaceRootPath);
-
     const configPath = resolveAutomationsConfigPath(this.options.workspaceRootPath);
 
     if (!existsSync(configPath)) {
@@ -134,7 +130,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
 
   /**
    * Reload automations configuration.
-   * Call this when automations.json (or hooks.json) changes.
+   * Call this when automations.json changes.
    */
   reloadConfig(): { success: boolean; automationCount: number; errors: string[] } {
     const configPath = resolveAutomationsConfigPath(this.options.workspaceRootPath);

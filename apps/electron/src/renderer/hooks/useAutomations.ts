@@ -16,23 +16,9 @@ import { automationsAtom } from '@/atoms/automations'
 import { parseAutomationsConfig, type AutomationListItem, type TestResult, type ExecutionEntry } from '@/components/automations/types'
 
 async function loadAutomationsFromDisk(rootPath: string): Promise<AutomationListItem[]> {
-  // automations.json is canonical. Legacy fallback is used only when hooks.json exists.
   const automationsPath = `${rootPath}/automations.json`
-  const hooksPath = `${rootPath}/hooks.json`
-
-  // 1) Try canonical automations.json
-  try {
-    const automationsContent = await window.electronAPI.readFile(automationsPath)
-    return parseAutomationsConfig(JSON.parse(automationsContent))
-  } catch {
-    // Continue to legacy fallback below
-  }
-
-  // 2) Legacy fallback: only if hooks.json exists/readable.
-  // This is a migration safety net, not a first-class config path.
-  const legacyContent = await window.electronAPI.readFile(hooksPath)
-  console.warn('[automations] Falling back to deprecated hooks.json in renderer. Please migrate to automations.json.')
-  return parseAutomationsConfig(JSON.parse(legacyContent))
+  const content = await window.electronAPI.readFile(automationsPath)
+  return parseAutomationsConfig(JSON.parse(content))
 }
 
 export interface UseAutomationsResult {
@@ -115,22 +101,16 @@ export function useAutomations(
         setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'error', stderr: 'No actions to execute' } }))
         return
       }
-      const hasBlocked = actions.some(a => a.blocked)
-      const hasError = actions.some(a => !a.success && !a.blocked)
-      const state = hasBlocked ? 'blocked' : hasError ? 'error' : 'success'
-      const stdout = actions.map(a => a.stdout).filter(Boolean).join('\n')
+      const hasError = actions.some(a => !a.success)
+      const state = hasError ? 'error' : 'success'
       const stderr = actions.map(a => a.stderr).filter(Boolean).join('\n')
       const duration = actions.reduce((sum, a) => sum + (a.duration ?? 0), 0)
-      const blockedReason = actions.map(a => a.blockedReason).filter(Boolean).join('; ')
       setAutomationTestResults(prev => ({
         ...prev,
         [automationId]: {
           state,
-          stdout: stdout || undefined,
           stderr: stderr || undefined,
-          exitCode: actions[actions.length - 1]?.exitCode,
           duration: duration || undefined,
-          blockedReason: blockedReason || undefined,
         },
       }))
     }).catch((err: Error) => {

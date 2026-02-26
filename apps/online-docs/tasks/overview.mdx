@@ -9,10 +9,6 @@ description: "Automate workflows by triggering actions on app and agent events"
 
 Tasks let you trigger actions automatically when events happen in Craft Agent. You can run shell commands, send prompts to start new sessions, or schedule recurring automations — all configured in a single JSON file.
 
-<Info>
-**Renamed from Hooks:** Tasks were previously called "Hooks". If you have an existing `hooks.json` file, it will be automatically migrated to `tasks.json` on workspace load. A backup is kept at `hooks.json.old`. Both formats are supported during the transition.
-</Info>
-
 ## Getting Started
 
 The easiest way to set up tasks is to describe what you want in plain language. Here are some prompts you can try:
@@ -33,7 +29,7 @@ Here's the simplest possible task — it logs a message every time a label is ad
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "LabelAdd": [
       {
         "actions": [
@@ -45,7 +41,7 @@ Here's the simplest possible task — it logs a message every time a label is ad
 }
 ```
 
-Save this as `~/.craft-agent/workspaces/{workspaceId}/tasks.json` and it starts working immediately — no restart needed.
+Save this as `~/.craft-agent/workspaces/{workspaceId}/automations.json` and it starts working immediately — no restart needed.
 
 ### Scheduling a Prompt
 
@@ -54,7 +50,7 @@ Want Craft Agent to do something for you on a schedule? Use a prompt action with
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "SchedulerTick": [
       {
         "cron": "0 9 * * 1-5",
@@ -82,10 +78,10 @@ There are two types of actions:
 
 ## Configuration File
 
-Tasks are configured per-workspace in `tasks.json`:
+Tasks are configured per-workspace in `automations.json`:
 
 ```
-~/.craft-agent/workspaces/{workspaceId}/tasks.json
+~/.craft-agent/workspaces/{workspaceId}/automations.json
 ```
 
 ### Basic Structure
@@ -93,7 +89,7 @@ Tasks are configured per-workspace in `tasks.json`:
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "EventName": [
       {
         "matcher": "regex-pattern",
@@ -408,7 +404,7 @@ Schedule a prompt every weekday at 9 AM:
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "SchedulerTick": [
       {
         "cron": "0 9 * * 1-5",
@@ -430,7 +426,7 @@ Track when labels are added or removed:
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "LabelAdd": [
       {
         "permissionMode": "allow-all",
@@ -456,7 +452,7 @@ Track when labels are added or removed:
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "LabelAdd": [
       {
         "matcher": "^urgent$",
@@ -478,7 +474,7 @@ Track when labels are added or removed:
 ```json
 {
   "version": 2,
-  "tasks": {
+  "automations": {
     "PermissionModeChange": [
       {
         "permissionMode": "allow-all",

@@ -1335,7 +1335,7 @@ import {
   getSourcePermissionsPath,
   getAppPermissionsDir,
 } from '../agent/permissions-config.ts';
-import { validateAutomationsContent, validateAutomations, ALL_CONFIG_FILES } from '../automations/index.ts';
+import { validateAutomationsContent, validateAutomations, AUTOMATIONS_CONFIG_FILE } from '../automations/index.ts';
 
 /**
  * Internal: Validate a single permissions.json file
@@ -1910,8 +1910,8 @@ export function detectConfigFileType(filePath: string, workspaceRootPath: string
     return { type: 'labels', displayFile: 'labels/config.json' };
   }
 
-  // Match: automations config files (automations.json, tasks.json, hooks.json)
-  if ((ALL_CONFIG_FILES as readonly string[]).includes(relativePath)) {
+  // Match: automations config file
+  if (relativePath === AUTOMATIONS_CONFIG_FILE) {
     return { type: 'automations', displayFile: relativePath };
   }
 

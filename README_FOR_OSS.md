@@ -106,16 +106,6 @@ bun run electron:start
 4. **Connect sources** (optional): Add MCP servers, REST APIs, or local filesystems
 5. **Start chatting**: Create sessions and interact with Claude
 
-## Automations Migration Troubleshooting
-
-`automations.json` is the canonical automation config. Legacy `hooks.json` and `tasks.json` files are deprecated and only used as migration fallbacks.
-
-If your automations appear missing and multiple config files exist in the same workspace root:
-
-1. Remove the empty/invalid `automations.json`
-2. Restart the app
-3. The app will re-migrate from the legacy file into a fresh `automations.json`
-
 ## Desktop App Features
 
 ### Session Management

@@ -217,13 +217,10 @@ export type EventCategory =
 // automations.json Parser
 // ============================================================================
 
-/** Raw automations.json file structure (accepts legacy keys for migration) */
+/** Raw automations.json file structure */
 interface AutomationsConfigFile {
   version: number
-  // Accept "automations" (canonical), "tasks" (v2 legacy), and "hooks" (v1 legacy)
   automations?: Record<string, AutomationsConfigMatcher[]>
-  hooks?: Record<string, AutomationsConfigMatcher[]>
-  tasks?: Record<string, AutomationsConfigMatcher[]>
 }
 
 interface AutomationsConfigMatcher {
@@ -235,15 +232,13 @@ interface AutomationsConfigMatcher {
   permissionMode?: 'safe' | 'ask' | 'allow-all'
   labels?: string[]
   enabled?: boolean
-  // Accept both "actions" (v2) and "hooks" (v1) inner arrays
-  hooks?: ({ type: 'prompt'; prompt: string })[]
   actions?: ({ type: 'prompt'; prompt: string })[]
 }
 
 /** Derive a human-readable name from task actions and event */
 function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher): string {
   if (matcher.name) return matcher.name
-  const allActions = matcher.actions ?? matcher.hooks ?? []
+  const allActions = matcher.actions ?? []
   const firstAction = allActions[0]
   if (!firstAction) return getEventDisplayName(event as AutomationTrigger)
 
@@ -291,8 +286,7 @@ function deriveAutomationSummary(event: string, matcher: AutomationsConfigMatche
 export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
   if (!json || typeof json !== 'object') return []
   const config = json as AutomationsConfigFile
-  // Support "automations" (canonical), "tasks" (v2 legacy), and "hooks" (v1 legacy)
-  const eventMap = config.automations ?? config.tasks ?? config.hooks
+  const eventMap = config.automations
   if (!eventMap || typeof eventMap !== 'object') return []
 
   const allEvents = [...APP_EVENTS, ...AGENT_EVENTS] as string[]
@@ -305,18 +299,11 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
 
     for (let matcherIdx = 0; matcherIdx < matchers.length; matcherIdx++) {
       const matcher = matchers[matcherIdx]
-      // Support both "actions" (v2) and "hooks" (v1) inner arrays
-      const rawActions = matcher.actions ?? matcher.hooks
+      const rawActions = matcher.actions
       if (!rawActions || !Array.isArray(rawActions) || rawActions.length === 0) continue
 
-      // Normalize actions: convert legacy command actions to prompt actions
-      const actions: AutomationAction[] = rawActions.map((a) => {
-        if (a.type === 'prompt') return a as AutomationAction
-        if (a.type === 'command' && a.command) {
-          return { type: 'prompt', prompt: `Run this command: ${a.command}` } as AutomationAction
-        }
-        return null
-      }).filter((a): a is AutomationAction => a !== null)
+      const actions: AutomationAction[] = rawActions
+        .filter((a): a is { type: 'prompt'; prompt: string } => a.type === 'prompt')
       if (actions.length === 0) continue
 
       items.push({

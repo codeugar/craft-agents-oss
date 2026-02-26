@@ -7,7 +7,7 @@
 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { AUTOMATIONS_CONFIG_FILE, LEGACY_CONFIG_FILES } from '@craft-agent/shared/automations';
+import { AUTOMATIONS_CONFIG_FILE } from '@craft-agent/shared/automations';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
@@ -19,7 +19,7 @@ import {
 import { getSourceConfigPath } from '../source-helpers.ts';
 
 export interface ConfigValidateArgs {
-  target: 'config' | 'sources' | 'statuses' | 'preferences' | 'permissions' | 'hooks' | 'automations' | 'tool-icons' | 'all';
+  target: 'config' | 'sources' | 'statuses' | 'preferences' | 'permissions' | 'automations' | 'tool-icons' | 'all';
   sourceSlug?: string;
 }
 
@@ -61,7 +61,6 @@ export async function handleConfigValidate(
         case 'permissions':
           result = ctx.validators.validatePermissions(ctx.workspacePath, sourceSlug);
           break;
-        case 'hooks':
         case 'automations':
           result = ctx.validators.validateAutomations(ctx.workspacePath);
           break;
@@ -154,21 +153,11 @@ export async function handleConfigValidate(
       return successResponse(formatValidationResult(result));
     }
 
-    case 'hooks':
     case 'automations': {
       const automationsPath = join(ctx.workspacePath, AUTOMATIONS_CONFIG_FILE);
-      // Check canonical file first
       if (ctx.fs.exists(automationsPath)) {
         const result = validateJsonFileHasFields(automationsPath, []);
         return successResponse(formatValidationResult(result));
-      }
-      // Fall back to legacy config files
-      for (const legacyFile of LEGACY_CONFIG_FILES) {
-        const legacyPath = join(ctx.workspacePath, legacyFile);
-        if (ctx.fs.exists(legacyPath)) {
-          const result = validateJsonFileHasFields(legacyPath, []);
-          return successResponse(formatValidationResult(result));
-        }
       }
       return successResponse(`✓ No ${AUTOMATIONS_CONFIG_FILE} (no automations configured)`);
     }

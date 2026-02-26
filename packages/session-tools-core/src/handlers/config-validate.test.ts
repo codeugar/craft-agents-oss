@@ -43,24 +43,15 @@ describe('config-validate automations target', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('validates tasks.json when present (legacy fallback)', async () => {
-    writeFileSync(join(tempDir, 'tasks.json'), JSON.stringify({ version: 2, tasks: {} }));
-    writeFileSync(join(tempDir, 'hooks.json'), JSON.stringify({ hooks: { LabelAdd: [] } }));
+  it('validates automations.json when present', async () => {
+    writeFileSync(join(tempDir, 'automations.json'), JSON.stringify({ version: 2, automations: {} }));
 
     const result = await handleConfigValidate(createCtx(tempDir), { target: 'automations' });
     expect(result.content[0]?.text).toContain('Validation passed');
   });
 
-  it('falls back to hooks.json when tasks.json is absent', async () => {
-    writeFileSync(join(tempDir, 'hooks.json'), JSON.stringify({ hooks: { LabelAdd: [] } }));
-
-    const result = await handleConfigValidate(createCtx(tempDir), { target: 'automations' });
-    expect(result.content[0]?.text).toContain('Validation passed');
-  });
-
-  it('returns no-config message when neither file exists', async () => {
+  it('returns no-config message when automations.json does not exist', async () => {
     const result = await handleConfigValidate(createCtx(tempDir), { target: 'automations' });
     expect(result.content[0]?.text).toContain('No automations.json');
   });
 });
-

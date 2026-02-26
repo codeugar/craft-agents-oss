@@ -73,10 +73,10 @@ export { AutomationsConfigSchema, zodErrorToIssues, VALID_EVENTS } from './schem
 export { sanitizeForShell } from './security.ts';
 
 // Config constants
-export { AUTOMATIONS_CONFIG_FILE, LEGACY_CONFIG_FILES, ALL_CONFIG_FILES, AUTOMATIONS_HISTORY_FILE } from './constants.ts';
+export { AUTOMATIONS_CONFIG_FILE, AUTOMATIONS_HISTORY_FILE } from './constants.ts';
 
-// Config path resolution & migration
-export { resolveAutomationsConfigPath, migrateHooksToAutomations, generateShortId } from './resolve-config-path.ts';
+// Config path resolution
+export { resolveAutomationsConfigPath, generateShortId } from './resolve-config-path.ts';
 
 // Cron matching
 export { matchesCron } from './cron-matcher.ts';

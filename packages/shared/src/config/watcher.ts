@@ -49,7 +49,7 @@ import {
 } from '../statuses/storage.ts';
 import { readSessionHeader } from '../sessions/jsonl.ts';
 import type { SessionHeader } from '../sessions/types.ts';
-import { ALL_CONFIG_FILES } from '../automations/constants.ts';
+import { AUTOMATIONS_CONFIG_FILE } from '../automations/constants.ts';
 import { loadAppTheme, loadPresetThemes, loadPresetTheme, getAppThemesDir } from './storage.ts';
 import type { ThemeOverrides, PresetTheme } from './theme.ts';
 
@@ -377,8 +377,8 @@ export class ConfigWatcher {
       return;
     }
 
-    // Workspace-level automations config file (automations.json, tasks.json, or hooks.json)
-    if ((ALL_CONFIG_FILES as readonly string[]).includes(relativePath)) {
+    // Workspace-level automations config file
+    if (relativePath === AUTOMATIONS_CONFIG_FILE) {
       debug('[ConfigWatcher] automations config change detected:', relativePath);
       this.debounce('automations-config', () => this.handleAutomationsConfigChange());
       return;

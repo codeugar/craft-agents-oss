@@ -89,16 +89,14 @@ export function validateAutomationsContent(jsonString: string, fileName?: string
 
   // Check for deprecated event aliases in the raw JSON (before transform rewrites them)
   try {
-    const rawConfig = JSON.parse(jsonString) as { hooks?: Record<string, unknown>; tasks?: Record<string, unknown>; automations?: Record<string, unknown> };
-    const events = rawConfig.automations ?? rawConfig.tasks ?? rawConfig.hooks;
-    if (events) {
-      for (const event of Object.keys(events)) {
+    const rawConfig = JSON.parse(jsonString) as { automations?: Record<string, unknown> };
+    if (rawConfig.automations) {
+      for (const event of Object.keys(rawConfig.automations)) {
         const canonical = DEPRECATED_EVENT_ALIASES[event];
         if (canonical) {
-          const keyName = rawConfig.automations ? 'automations' : (rawConfig.tasks ? 'tasks' : 'hooks');
           warnings.push({
             file,
-            path: `${keyName}.${event}`,
+            path: `automations.${event}`,
             message: `Event '${event}' has been renamed to '${canonical}'. The old name still works but is deprecated.`,
             severity: 'warning',
             suggestion: `Rename '${event}' to '${canonical}' in your config`,
@@ -225,7 +223,7 @@ export function validateAutomationsContent(jsonString: string, fileName?: string
  */
 export function validateAutomations(workspaceRoot: string): ValidationResult {
   const configPath = resolveAutomationsConfigPath(workspaceRoot);
-  const file = configPath.endsWith('automations.json') ? 'automations.json' : (configPath.endsWith('tasks.json') ? 'tasks.json' : 'hooks.json');
+  const file = 'automations.json';
 
   // Automations config is optional - no config means no automations (valid state)
   if (!existsSync(configPath)) {
@@ -268,8 +266,8 @@ export function validateAutomations(workspaceRoot: string): ValidationResult {
 
   // Validate labels and llmConnection slugs exist
   try {
-    const config = JSON.parse(raw) as { automations?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }>; hooks?: Array<{ type: string; llmConnection?: string }> }>>; tasks?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }>; hooks?: Array<{ type: string; llmConnection?: string }> }>>; hooks?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }>; hooks?: Array<{ type: string; llmConnection?: string }> }>> };
-    const labelEntries = config.automations ?? config.tasks ?? config.hooks;
+    const config = JSON.parse(raw) as { automations?: Record<string, Array<{ labels?: string[]; actions?: Array<{ type: string; llmConnection?: string }> }>> };
+    const labelEntries = config.automations;
     if (labelEntries) {
       for (const [event, matchers] of Object.entries(labelEntries)) {
         if (!matchers) continue;
@@ -291,7 +289,7 @@ export function validateAutomations(workspaceRoot: string): ValidationResult {
             }
           }
           // Validate llmConnection slugs in prompt actions
-          const actions = matcher?.actions ?? matcher?.hooks;
+          const actions = matcher?.actions;
           if (actions) {
             for (const action of actions) {
               if (action.type === 'prompt' && action.llmConnection) {

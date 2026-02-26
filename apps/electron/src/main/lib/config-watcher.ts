@@ -36,7 +36,7 @@ import {
   sourceNeedsIconDownload,
   downloadSourceIcon,
 } from '@craft-agent/shared/sources';
-import { ALL_CONFIG_FILES } from '@craft-agent/shared/automations';
+import { AUTOMATIONS_CONFIG_FILE } from '@craft-agent/shared/automations';
 import { permissionsConfigCache, getAppPermissionsDir } from '@craft-agent/shared/agent';
 import { getWorkspacePath, getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '@craft-agent/shared/workspaces';
 import type { LoadedSkill } from '@craft-agent/shared/skills';
@@ -122,7 +122,7 @@ export interface ConfigWatcherCallbacks {
   onLabelConfigChange?: (workspaceId: string) => void;
 
   // Automations callbacks
-  /** Called when automations.json (or legacy hooks.json/tasks.json) changes */
+  /** Called when automations.json changes */
   onAutomationsConfigChange?: (workspaceId: string) => void;
 
   // Theme callbacks (app-level only)
@@ -351,8 +351,8 @@ export class ConfigWatcher {
       return;
     }
 
-    // Workspace-level automations config file (automations.json, tasks.json, or hooks.json)
-    if ((ALL_CONFIG_FILES as readonly string[]).includes(relativePath)) {
+    // Workspace-level automations config file
+    if (relativePath === AUTOMATIONS_CONFIG_FILE) {
       debug('[ConfigWatcher] automations config change detected:', relativePath, '- triggering reload');
       this.debounce('automations-config', () => this.handleAutomationsConfigChange());
       return;

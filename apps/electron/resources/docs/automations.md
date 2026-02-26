@@ -9,8 +9,6 @@ Automations allow you to trigger actions automatically when specific events occu
 - Execute prompts on a schedule using cron expressions
 - Automate workflows based on permission mode changes, flags, or session status changes
 
-> **Note:** Automations were previously called "Hooks" / "Tasks". If you have an existing `hooks.json` or `tasks.json` file, it will be automatically migrated to `automations.json` on workspace load. A backup is kept at the original filename with `.old` appended.
-
 ## automations.json Location
 
 Automations are configured in `automations.json` at the root of your workspace:
@@ -289,17 +287,6 @@ This creates a session with the "Scheduled" and "morning-briefing" labels applie
   }
 }
 ```
-
-## Migration from hooks.json
-
-If you have an existing `hooks.json` or `tasks.json` file, it will be automatically migrated to `automations.json` when the workspace loads:
-
-1. The `"hooks"` or `"tasks"` top-level key is renamed to `"automations"`
-2. Inner `"hooks"` arrays are renamed to `"actions"`
-3. The version is set to `2`
-4. The original file is renamed with `.old` appended as a backup
-
-All three formats (`hooks.json`, `tasks.json`, and `automations.json`) are recognized during the transition.
 
 ## Validation
 
