@@ -180,7 +180,7 @@ def write(file: str, sheet: str | None, cell: str, value: str, val_type: str) ->
 def info(file: str, output: str | None) -> None:
     """Show workbook information: sheets, dimensions, cell counts."""
     try:
-        wb = load_workbook(file, read_only=True, data_only=True)
+        wb = load_workbook(file, data_only=True)
 
         sheets_info = []
         for name in wb.sheetnames:

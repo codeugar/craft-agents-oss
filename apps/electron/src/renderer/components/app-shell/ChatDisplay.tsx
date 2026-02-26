@@ -51,8 +51,7 @@ import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
-import { useSetAtom } from "jotai"
-import { addSessionAtom, type SessionMeta } from "@/atoms/sessions"
+import { routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { flattenLabels } from "@craft-agent/shared/labels"
 
@@ -455,9 +454,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const internalTextareaRef = React.useRef<RichTextInputHandle>(null)
   const textareaRef = externalTextareaRef || internalTextareaRef
 
-  // Navigation and atom access for session branching
-  const { navigateToSession } = useNavigation()
-  const addSession = useSetAtom(addSessionAtom)
+  // Navigation for session branching
+  const { navigate, navigateToSession } = useNavigation()
 
   // Get isDark from useTheme hook for overlay theme
   // This accounts for scenic themes (like Haze) that force dark mode
@@ -1438,9 +1436,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         onOpenUrl={onOpenUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
-                        onBranch={session?.supportsBranching ? async (messageId: string) => {
+                        onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return
-                          const child = await window.electronAPI.createSubSession(
+                          const child = await appShellContext.onCreateSubSession(
                             session.workspaceId,
                             session.id,
                             {
@@ -1448,10 +1446,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                               name: `Branch of ${session.name || 'Untitled'}`,
                             }
                           )
-                          // Optimistically add to atom so navigation finds it
-                          // (session_created event fires async and may arrive late)
-                          addSession(child)
-                          navigateToSession(child.id)
+                          navigate(routes.view.allSessions(child.id), { newPanel: true })
                         } : undefined}
                         onAcceptPlan={() => {
                           window.dispatchEvent(new CustomEvent('craft:approve-plan', {

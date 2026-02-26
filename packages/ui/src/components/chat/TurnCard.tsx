@@ -275,7 +275,7 @@ export interface TurnCardProps {
   /** Hide footers for compact embedding (EditPopover) */
   compactMode?: boolean
   /** Callback to branch the session from a specific message */
-  onBranch?: (messageId: string) => void
+  onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
 }
 
 // ============================================================================
@@ -1312,7 +1312,7 @@ export interface ResponseCardProps {
   /** Hide footer for compact embedding (EditPopover) */
   compactMode?: boolean
   /** Callback to branch the session from this response */
-  onBranch?: () => void
+  onBranch?: (e: React.MouseEvent) => void
 }
 
 const MAX_HEIGHT = 540
@@ -2076,7 +2076,7 @@ export const TurnCard = React.memo(function TurnCard({
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse && index === planActivities.length - 1}
             compactMode={compactMode}
-            onBranch={onBranch ? () => onBranch(planActivity.id) : undefined}
+            onBranch={onBranch ? (e: React.MouseEvent) => onBranch(planActivity.id, { newPanel: e.metaKey || e.ctrlKey }) : undefined}
           />
         </div>
       ))}
@@ -2104,7 +2104,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onAcceptWithCompact={onAcceptPlanWithCompact}
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
-                onBranch={onBranch && response.messageId ? () => onBranch(response.messageId!) : undefined}
+                onBranch={onBranch && response.messageId ? (e: React.MouseEvent) => onBranch(response.messageId!, { newPanel: e.metaKey || e.ctrlKey }) : undefined}
               />
             </motion.div>
           )}
@@ -2125,7 +2125,7 @@ export const TurnCard = React.memo(function TurnCard({
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
             compactMode={compactMode}
-            onBranch={onBranch && response.messageId ? () => onBranch(response.messageId!) : undefined}
+            onBranch={onBranch && response.messageId ? (e: React.MouseEvent) => onBranch(response.messageId!, { newPanel: e.metaKey || e.ctrlKey }) : undefined}
           />
         </div>
       )}

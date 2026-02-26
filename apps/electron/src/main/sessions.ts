@@ -1844,6 +1844,12 @@ export class SessionManager {
       messagesLoaded: !options?.branchFromMessageId,  // Branched sessions: lazy-load messages from JSONL
     })
 
+    // Eagerly load messages for branched sessions so the renderer gets the full
+    // conversation immediately (needed for scroll-to-bottom on panel open)
+    if (options?.branchFromMessageId) {
+      await this.ensureMessagesLoaded(managed)
+    }
+
     this.sessions.set(storedSession.id, managed)
 
     // Notify all windows that a sub-session was created (for session list updates)
@@ -1853,7 +1859,7 @@ export class SessionManager {
       parentSessionId: storedSession.parentSessionId,
     }, workspace.id)
 
-    return managedToSession(managed)
+    return managedToSession(managed, { messages: managed.messages })
   }
 
   /**

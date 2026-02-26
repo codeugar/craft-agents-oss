@@ -107,7 +107,7 @@ export { AbortReason, type RecoveryMessage };
 /** File extensions that can be converted to readable text by CLI tools. */
 const CONVERTIBLE_FILE_HINTS: Record<string, string> = {
   pdf: 'markitdown or pdf-tool extract',
-  docx: 'markitdown', xlsx: 'markitdown or xlsx-tool', pptx: 'markitdown or pptx-tool',
+  docx: 'markitdown', xlsx: 'markitdown or xlsx-tool read', pptx: 'markitdown or pptx-tool extract',
   doc: 'markitdown', xls: 'markitdown', ppt: 'markitdown',
   msg: 'markitdown', eml: 'markitdown', rtf: 'markitdown',
   ics: 'ical-tool read',
@@ -1201,7 +1201,9 @@ export class ClaudeAgent extends BaseAgent {
                 const ext = filePath.split('.').pop()?.toLowerCase();
                 const hint = ext ? CONVERTIBLE_FILE_HINTS[ext] : undefined;
                 if (hint) {
-                  yield { ...event, result: `${event.result}\n\nTip: Use \`${hint} "${filePath}"\` to convert this file to readable text.` };
+                  // Split "or" alternatives into separate backtick-wrapped commands
+                  const commands = hint.split(' or ').map(cmd => `\`${cmd} "${filePath}"\``).join(' or ');
+                  yield { ...event, result: `${event.result}\n\nTip: Use ${commands} to convert this file to readable text.` };
                   continue;
                 }
               }

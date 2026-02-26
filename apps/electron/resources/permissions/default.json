@@ -1,5 +1,5 @@
 {
-  "version": "2026-02-07",
+  "version": "2026-02-26",
 
   "allowedBashPatterns": [
     { "pattern": "^ls\\b", "comment": "List directory contents" },

@@ -580,6 +580,7 @@ export default function App() {
               } else {
                 addSession(createdSession)
               }
+              populateSessionOptions(createdSession)
               return
             }
             return window.electronAPI.getSessions().then(initializeSessions)
@@ -710,12 +711,9 @@ export default function App() {
     }
   }, [])
 
-  const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
-    // Add to per-session atom and metadata map (no sessionsAtom)
-    addSession(session)
-
-    // Apply session defaults to the unified sessionOptions
+  // Populate sessionOptions for a session with non-default permission mode or thinking level.
+  // Centralised helper used by all session creation paths (create, branch, event handler).
+  const populateSessionOptions = useCallback((session: Session) => {
     const hasNonDefaultMode = session.permissionMode && session.permissionMode !== 'ask'
     const hasNonDefaultThinking = session.thinkingLevel && session.thinkingLevel !== 'think'
     if (hasNonDefaultMode || hasNonDefaultThinking) {
@@ -729,9 +727,27 @@ export default function App() {
         return next
       })
     }
+  }, [])
+
+  const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
+    const session = await window.electronAPI.createSession(workspaceId, options)
+    // Add to per-session atom and metadata map (no sessionsAtom)
+    addSession(session)
+    populateSessionOptions(session)
 
     return session
-  }, [addSession])
+  }, [addSession, populateSessionOptions])
+
+  const handleCreateSubSession = useCallback(async (
+    workspaceId: string,
+    parentSessionId: string,
+    options?: import('../shared/types').CreateSessionOptions
+  ): Promise<Session> => {
+    const session = await window.electronAPI.createSubSession(workspaceId, parentSessionId, options)
+    addSession(session)
+    populateSessionOptions(session)
+    return session
+  }, [addSession, populateSessionOptions])
 
   // Deep link navigation is initialized later after handleInputChange is defined
 
@@ -1295,6 +1311,7 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onCreateSubSession: handleCreateSubSession,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
@@ -1337,6 +1354,7 @@ export default function App() {
     getDraft,
     sessionOptions,
     handleCreateSession,
+    handleCreateSubSession,
     handleSendMessage,
     handleRenameSession,
     handleFlagSession,
