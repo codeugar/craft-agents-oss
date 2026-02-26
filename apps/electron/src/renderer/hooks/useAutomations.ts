@@ -63,43 +63,38 @@ export function useAutomations(
     setAutomationsAtom(automations)
   }, [automations, setAutomationsAtom])
 
-  // Load automations from workspace automations.json
-  useEffect(() => {
+  // Load automations from disk and hydrate lastExecutedAt from history in one step.
+  // This avoids the race where a config reload wipes timestamps before the
+  // history effect can re-merge them.
+  const loadAndHydrate = useCallback(async () => {
     if (!activeWorkspaceRootPath) return
-    let stale = false
-    loadAutomationsFromDisk(activeWorkspaceRootPath)
-      .then((items) => { if (!stale) setAutomations(items) })
-      .catch(() => { if (!stale) setAutomations([]) })
-    return () => { stale = true }
-  }, [activeWorkspaceRootPath])
+    try {
+      const items = await loadAutomationsFromDisk(activeWorkspaceRootPath)
+      if (activeWorkspaceId) {
+        try {
+          const map = await window.electronAPI.getAutomationLastExecuted(activeWorkspaceId)
+          for (const item of items) {
+            item.lastExecutedAt = map[item.id] ?? item.lastExecutedAt
+          }
+        } catch { /* history unavailable — timestamps stay undefined */ }
+      }
+      setAutomations(items)
+    } catch {
+      setAutomations([])
+    }
+  }, [activeWorkspaceRootPath, activeWorkspaceId])
 
-  // Populate lastExecutedAt from history file
+  // Initial load
   useEffect(() => {
-    if (!activeWorkspaceId || automations.length === 0) return
-    let stale = false
-    window.electronAPI.getAutomationLastExecuted(activeWorkspaceId)
-      .then((map) => {
-        if (stale) return
-        setAutomations(prev => prev.map(a => ({
-          ...a,
-          lastExecutedAt: map[a.id] ?? a.lastExecutedAt,
-        })))
-      })
-      .catch(() => {})
-    return () => { stale = true }
-  }, [activeWorkspaceId, automations.length])
+    loadAndHydrate()
+  }, [loadAndHydrate])
 
   // Subscribe to live automations updates (when automations.json changes on disk)
   useEffect(() => {
     if (!activeWorkspaceRootPath) return
-    let stale = false
-    const cleanup = window.electronAPI.onAutomationsChanged(() => {
-      loadAutomationsFromDisk(activeWorkspaceRootPath)
-        .then((items) => { if (!stale) setAutomations(items) })
-        .catch(() => { if (!stale) setAutomations([]) })
-    })
-    return () => { stale = true; cleanup() }
-  }, [activeWorkspaceRootPath])
+    const cleanup = window.electronAPI.onAutomationsChanged(() => { loadAndHydrate() })
+    return () => { cleanup() }
+  }, [activeWorkspaceRootPath, loadAndHydrate])
 
   // Test automation — aggregate all action results
   const handleTestAutomation = useCallback((automationId: string) => {

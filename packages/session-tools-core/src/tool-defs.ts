@@ -42,7 +42,7 @@ export const SubmitPlanSchema = z.object({
 });
 
 export const ConfigValidateSchema = z.object({
-  target: z.enum(['config', 'sources', 'statuses', 'preferences', 'permissions', 'hooks', 'tool-icons', 'all'])
+  target: z.enum(['config', 'sources', 'statuses', 'preferences', 'permissions', 'hooks', 'automations', 'tool-icons', 'all'])
     .describe('Which config file(s) to validate'),
   sourceSlug: z.string().optional().describe('Validate a specific source by slug'),
 });

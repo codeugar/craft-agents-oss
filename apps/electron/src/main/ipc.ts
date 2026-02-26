@@ -2680,25 +2680,35 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     for (const action of payload.actions) {
       const start = Date.now()
 
-      // Prompt actions create a new session
+      // Parse @mentions from the prompt to resolve source/skill references
+      const { parsePromptReferences } = await import('@craft-agent/shared/automations')
+      const references = parsePromptReferences(action.prompt)
+
       try {
-        const session = await sessionManager.createSession(payload.workspaceId, {
-          name: `Test: ${action.prompt.slice(0, 50)}`,
-          labels: payload.labels,
-        })
-        if (session) {
-          await sessionManager.sendMessage(session.id, action.prompt)
-        }
+        // Delegate to executePromptAutomation which handles:
+        // - @mention resolution (sources + skills)
+        // - enabledSourceSlugs, llmConnection, model, permissionMode on createSession
+        // - skillSlugs passed to sendMessage
+        const { sessionId } = await sessionManager.executePromptAutomation(
+          payload.workspaceId,
+          workspace.rootPath,
+          action.prompt,
+          payload.labels,
+          payload.permissionMode,
+          references.mentions,
+          action.llmConnection,
+          action.model,
+        )
         results.push({
           type: 'prompt',
           success: true,
-          sessionId: session?.id,
+          sessionId,
           duration: Date.now() - start,
         })
 
         // Write history entry for test runs
         if (payload.automationId) {
-          const entry = { id: payload.automationId, ts: Date.now(), ok: true, sessionId: session?.id, prompt: action.prompt.slice(0, 200) }
+          const entry = { id: payload.automationId, ts: Date.now(), ok: true, sessionId, prompt: action.prompt.slice(0, 200) }
           appendFile(join(workspace.rootPath, 'automations-history.jsonl'), JSON.stringify(entry) + '\n', 'utf-8').catch(() => {})
         }
       } catch (err: unknown) {

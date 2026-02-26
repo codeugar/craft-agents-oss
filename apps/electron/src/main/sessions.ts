@@ -5082,7 +5082,7 @@ To view this task's output:
   /**
    * Execute a prompt automation by creating a new session and sending the prompt
    */
-  private async executePromptAutomation(
+  async executePromptAutomation(
     workspaceId: string,
     workspaceRootPath: string,
     prompt: string,

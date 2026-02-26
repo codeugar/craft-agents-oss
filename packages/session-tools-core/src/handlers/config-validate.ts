@@ -19,7 +19,7 @@ import {
 import { getSourceConfigPath } from '../source-helpers.ts';
 
 export interface ConfigValidateArgs {
-  target: 'config' | 'sources' | 'statuses' | 'preferences' | 'permissions' | 'automations' | 'tool-icons' | 'all';
+  target: 'config' | 'sources' | 'statuses' | 'preferences' | 'permissions' | 'hooks' | 'automations' | 'tool-icons' | 'all';
   sourceSlug?: string;
 }
 
@@ -61,6 +61,7 @@ export async function handleConfigValidate(
         case 'permissions':
           result = ctx.validators.validatePermissions(ctx.workspacePath, sourceSlug);
           break;
+        case 'hooks':
         case 'automations':
           result = ctx.validators.validateAutomations(ctx.workspacePath);
           break;
@@ -153,6 +154,7 @@ export async function handleConfigValidate(
       return successResponse(formatValidationResult(result));
     }
 
+    case 'hooks':
     case 'automations': {
       const automationsPath = join(ctx.workspacePath, AUTOMATIONS_CONFIG_FILE);
       // Check canonical file first

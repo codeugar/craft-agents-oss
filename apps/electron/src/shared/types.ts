@@ -913,7 +913,7 @@ export interface TestAutomationPayload {
   workspaceId: string
   /** Matcher ID for writing history entries */
   automationId?: string
-  actions: Array<{ type: 'prompt'; prompt: string }>
+  actions: Array<{ type: 'prompt'; prompt: string; llmConnection?: string; model?: string }>
   permissionMode?: 'safe' | 'ask' | 'allow-all'
   labels?: string[]
 }
