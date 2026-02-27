@@ -469,7 +469,12 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       return content
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('readFile error:', message)
+      // ENOENT is expected for optional config files (e.g. automations.json)
+      if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        ipcLog.debug('readFile: file not found:', path)
+      } else {
+        ipcLog.error('readFile error:', message)
+      }
       throw new Error(`Failed to read file: ${message}`)
     }
   })

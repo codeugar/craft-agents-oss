@@ -14,8 +14,9 @@ import { useState, useCallback } from 'react'
 import { Webhook } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
+import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { EntityRow } from '@/components/ui/entity-row'
+import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SessionSearchHeader } from '@/components/app-shell/SessionSearchHeader'
 import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
@@ -154,6 +155,7 @@ export interface AutomationsListPanelProps {
   onTestAutomation?: (automationId: string) => void
   onDuplicateAutomation?: (automationId: string) => void
   selectedAutomationId?: string | null
+  workspaceRootPath?: string
   className?: string
 }
 
@@ -166,6 +168,7 @@ export function AutomationsListPanel({
   onTestAutomation,
   onDuplicateAutomation,
   selectedAutomationId,
+  workspaceRootPath,
   className,
 }: AutomationsListPanelProps) {
   const [searchQuery, setSearchQuery] = useState('')
@@ -230,18 +233,24 @@ export function AutomationsListPanel({
   if (automations.length === 0) {
     return (
       <div className={cn('flex flex-col flex-1 min-h-0', className)}>
-        <Empty className="flex-1">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Webhook />
-            </EmptyMedia>
-            <EmptyTitle>No automations configured</EmptyTitle>
-            <EmptyDescription>
-              Automations run actions when events occur — execute commands on schedules,
-              react to label changes, or trigger prompts automatically.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <EntityListEmptyScreen
+          icon={<Webhook />}
+          title="No automations configured"
+          description="Automations run actions when events occur — execute commands on schedules, react to label changes, or trigger prompts automatically."
+          docKey="automations"
+        >
+          {workspaceRootPath && (
+            <EditPopover
+              align="center"
+              trigger={
+                <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
+                  Add Automation
+                </button>
+              }
+              {...getEditConfig('automation-config', workspaceRootPath)}
+            />
+          )}
+        </EntityListEmptyScreen>
       </div>
     )
   }

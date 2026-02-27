@@ -31,6 +31,7 @@ import {
   Radio,
   Bot,
   Info,
+  Webhook,
 } from "lucide-react"
 import { PanelRightRounded } from "../icons/PanelRightRounded"
 import { PanelLeftRounded } from "../icons/PanelLeftRounded"
@@ -2464,6 +2465,11 @@ function AppShellContent({
                         <span className="flex-1">Permissions</span>
                         <ExternalLink className="h-3 w-3 text-muted-foreground" />
                       </StyledDropdownMenuItem>
+                      <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
+                        <Webhook className="h-3.5 w-3.5" />
+                        <span className="flex-1">Automations</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                      </StyledDropdownMenuItem>
                       <StyledDropdownMenuSeparator />
                       <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs')}>
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -3150,6 +3156,7 @@ function AppShellContent({
                 onDuplicateAutomation={handleDuplicateAutomation}
                 onDeleteAutomation={handleDeleteAutomation}
                 selectedAutomationId={isAutomationsNavigation(navState) && navState.details ? navState.details.automationId : null}
+                workspaceRootPath={activeWorkspace?.rootPath}
               />
             )}
             {isSettingsNavigation(navState) && (
