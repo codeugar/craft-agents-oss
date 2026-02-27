@@ -106,6 +106,7 @@ import {
   isSourcesNavigation,
   isSettingsNavigation,
   isSkillsNavigation,
+  isBrowserNavigation,
   type NavigationState,
   type SessionFilter,
 } from "@/contexts/NavigationContext"
@@ -117,6 +118,7 @@ import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui
 import { getDocUrl } from "@craft-agent/shared/docs/doc-links"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
 import { RightSidebar } from "./RightSidebar"
+import { RightPinnedBrowserHost } from "@/components/browser/RightPinnedBrowserHost"
 import { PANEL_GAP, PANEL_EDGE_INSET, RADIUS_EDGE, RADIUS_INNER } from "./panel-constants"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { hasOpenOverlay } from "@/lib/overlay-detection"
@@ -506,6 +508,10 @@ function AppShellContent({
   const [rightSidebarWidth, setRightSidebarWidth] = React.useState(() => {
     return storage.get(storage.KEYS.rightSidebarWidth, 300)
   })
+  // Full-height pinned browser host lane width (min 320, max 680)
+  const [browserHostWidth, setBrowserHostWidth] = React.useState(() => {
+    return storage.get(storage.KEYS.browserHostWidth, 420)
+  })
   const [skipRightSidebarAnimation, setSkipRightSidebarAnimation] = React.useState(false)
 
   // Hides both sidebar and navigator (CMD+. toggle)
@@ -533,21 +539,22 @@ function AppShellContent({
   // Window width tracking for responsive behavior
   const [windowWidth, setWindowWidth] = React.useState(window.innerWidth)
 
-  // Calculate overlay threshold dynamically based on actual sidebar widths
-  // Formula: 600px (300px right sidebar + 300px center) + leftSidebar + sessionList
-  // This ensures we switch to overlay mode when inline right sidebar would compress content
-  const MIN_INLINE_SPACE = 600 // 300px for right sidebar + 300px for center content
+  // Calculate overlay threshold dynamically based on baseline sidebar widths.
+  // Browser host lane is always inline; metadata sidebar switches to overlay when space is constrained.
+  const MIN_INLINE_SPACE = 600 // 300px metadata lane + 300px center content baseline
   const leftSidebarEffectiveWidth = isSidebarVisible ? sidebarWidth : 0
   const OVERLAY_THRESHOLD = MIN_INLINE_SPACE + leftSidebarEffectiveWidth + sessionListWidth
   const shouldUseOverlay = windowWidth < OVERLAY_THRESHOLD
 
-  const [isResizing, setIsResizing] = React.useState<'sidebar' | 'session-list' | 'right-sidebar' | null>(null)
+  const [isResizing, setIsResizing] = React.useState<'sidebar' | 'session-list' | 'right-sidebar' | 'browser-host' | null>(null)
   const [sidebarHandleY, setSidebarHandleY] = React.useState<number | null>(null)
   const [sessionListHandleY, setSessionListHandleY] = React.useState<number | null>(null)
   const [rightSidebarHandleY, setRightSidebarHandleY] = React.useState<number | null>(null)
+  const [browserHostHandleY, setBrowserHostHandleY] = React.useState<number | null>(null)
   const resizeHandleRef = React.useRef<HTMLDivElement>(null)
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const rightSidebarHandleRef = React.useRef<HTMLDivElement>(null)
+  const browserHostHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
@@ -560,8 +567,17 @@ function AppShellContent({
   const navState = useNavigationState()
 
   const store = useStore()
+  const panelStack = useAtomValue(panelStackAtom)
   const panelCount = useAtomValue(panelCountAtom)
   const focusedSessionId = useAtomValue(focusedSessionIdAtom)
+
+  // Right-pinned browser lane source of truth: at most one browser panel exists in this lane.
+  const rightPinnedBrowserInstanceId = useMemo(() => {
+    const browserEntry = panelStack.find((entry) => entry.laneId === 'rightPinned' && entry.route.startsWith('browser/'))
+    if (!browserEntry) return null
+    return browserEntry.route.slice('browser/'.length)
+  }, [panelStack])
+  const isBrowserHostVisible = !!rightPinnedBrowserInstanceId
 
   // Navigate the focused panel to a session.
   // If the session is already open in another panel, focus that panel instead.
@@ -1164,7 +1180,7 @@ function AppShellContent({
     return () => document.removeEventListener('paste', handleGlobalPaste)
   }, [])
 
-  // Resize effect for sidebar, session list, and right sidebar
+  // Resize effect for sidebar, session list, browser host lane, and metadata right sidebar.
   React.useEffect(() => {
     if (!isResizing) return
 
@@ -1184,6 +1200,16 @@ function AppShellContent({
           const rect = sessionListHandleRef.current.getBoundingClientRect()
           setSessionListHandleY(e.clientY - rect.top)
         }
+      } else if (isResizing === 'browser-host') {
+        // Browser host sits to the left of optional inline metadata sidebar.
+        // Subtract inline metadata width so drag maps to browser lane width correctly.
+        const metadataInlineWidth = !shouldUseOverlay && isRightSidebarVisible ? rightSidebarWidth + PANEL_GAP : 0
+        const newWidth = Math.min(Math.max(window.innerWidth - e.clientX - metadataInlineWidth, 320), 680)
+        setBrowserHostWidth(newWidth)
+        if (browserHostHandleRef.current) {
+          const rect = browserHostHandleRef.current.getBoundingClientRect()
+          setBrowserHostHandleY(e.clientY - rect.top)
+        }
       } else if (isResizing === 'right-sidebar') {
         // Calculate from right edge
         const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, 280), 480)
@@ -1202,6 +1228,9 @@ function AppShellContent({
       } else if (isResizing === 'session-list') {
         storage.set(storage.KEYS.sessionListWidth, sessionListWidth)
         setSessionListHandleY(null)
+      } else if (isResizing === 'browser-host') {
+        storage.set(storage.KEYS.browserHostWidth, browserHostWidth)
+        setBrowserHostHandleY(null)
       } else if (isResizing === 'right-sidebar') {
         storage.set(storage.KEYS.rightSidebarWidth, rightSidebarWidth)
         setRightSidebarHandleY(null)
@@ -1216,7 +1245,16 @@ function AppShellContent({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isResizing, sidebarWidth, sessionListWidth, rightSidebarWidth, isSidebarVisible])
+  }, [
+    isResizing,
+    sidebarWidth,
+    sessionListWidth,
+    browserHostWidth,
+    rightSidebarWidth,
+    isSidebarVisible,
+    isRightSidebarVisible,
+    shouldUseOverlay,
+  ])
 
   // Spring transition config - shared between sidebar and header
   // Critical damping (no bounce): damping = 2 * sqrt(stiffness * mass)
@@ -1740,11 +1778,35 @@ function AppShellContent({
     setSearchQuery('')
 
     // Delegate to NavigationContext which handles session creation
-    navigate(routes.action.newSession(), newPanel ? { newPanel: true } : undefined)
+    navigate(
+      routes.action.newSession(),
+      newPanel ? { newPanel: true, targetLaneId: 'main' } : undefined
+    )
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone])
+  }, [activeWorkspace, focusZone, navigate])
+
+  // Create a new browser panel and focus it.
+  // Explicitly target the rightPinned lane so browser remains spatially stable
+  // (always rightmost, singleton slot) regardless of current focused panel.
+  const handleNewBrowserPanel = useCallback(async () => {
+    try {
+      const instanceId = await window.electronAPI.browserPane.create()
+      navigate(routes.view.browser(instanceId), { newPanel: true, targetLaneId: 'rightPinned' })
+    } catch (error) {
+      console.error('[Chat] Failed to create browser panel:', error)
+      toast.error('Failed to create browser panel')
+    }
+  }, [navigate])
+
+  const handleCloseRightPinnedBrowser = useCallback(async () => {
+    if (!rightPinnedBrowserInstanceId) return
+    await window.electronAPI.browserPane.destroy(rightPinnedBrowserInstanceId)
+    if (isBrowserNavigation(navState)) {
+      navigate(routes.view.allSessions())
+    }
+  }, [rightPinnedBrowserInstanceId, navState, navigate])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {
@@ -2028,6 +2090,7 @@ function AppShellContent({
         {/* === TOP BAR === */}
         <TopBar
           workspaceName={activeWorkspace?.name}
+          focusedRoute={isBrowserNavigation(navState) ? `browser/${navState.instanceId}` : null}
           onNewChat={() => handleNewChat()}
           onNewWindow={() => window.electronAPI.menuNewWindow()}
           onOpenSettings={onOpenSettings}
@@ -2040,7 +2103,8 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={() => setIsSidebarVisible(prev => !prev)}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          onAddPanel={() => handleNewChat(true)}
+          onAddSessionPanel={() => handleNewChat(true)}
+          onAddBrowserPanel={() => { void handleNewBrowserPanel() }}
         />
 
       {/* === OUTER LAYOUT: Unified Panel Stack | Right Sidebar === */}
@@ -2959,8 +3023,8 @@ function AppShellContent({
                 onSelectSubpage={(subpage) => handleSettingsClick(subpage)}
               />
             )}
-            {isSessionsNavigation(navState) && (
-              /* Sessions List */
+            {(isSessionsNavigation(navState) || isBrowserNavigation(navState)) && (
+              /* Sessions List (also shown in browser mode to keep navigator populated) */
               <>
                 {/* SessionList: Scrollable list of session cards */}
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
@@ -3069,6 +3133,57 @@ function AppShellContent({
           />
         </div>
         )}
+
+          {/* Dedicated right-pinned browser host lane (native bounds owner) */}
+          {isBrowserHostVisible && rightPinnedBrowserInstanceId && (
+            <>
+              <div
+                ref={browserHostHandleRef}
+                onMouseDown={(e) => { e.preventDefault(); setIsResizing('browser-host') }}
+                onMouseMove={(e) => {
+                  if (browserHostHandleRef.current) {
+                    const rect = browserHostHandleRef.current.getBoundingClientRect()
+                    setBrowserHostHandleY(e.clientY - rect.top)
+                  }
+                }}
+                onMouseLeave={() => { if (isResizing !== 'browser-host') setBrowserHostHandleY(null) }}
+                className="relative w-0 h-full cursor-col-resize flex justify-center shrink-0"
+              >
+                <div className="absolute inset-y-0 -left-1.5 -right-1.5 flex justify-center cursor-col-resize">
+                  <div
+                    className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5"
+                    style={getResizeGradientStyle(browserHostHandleY)}
+                  />
+                </div>
+              </div>
+
+              <motion.div
+                initial={false}
+                animate={{ width: browserHostWidth, marginLeft: 0 }}
+                transition={isResizing === 'browser-host' ? { duration: 0 } : springTransition}
+                className="h-full shrink-0 overflow-visible"
+              >
+                <motion.div
+                  initial={false}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={isResizing === 'browser-host' ? { duration: 0 } : springTransition}
+                  className="h-full bg-foreground-2 shadow-middle"
+                  style={{
+                    width: browserHostWidth,
+                    borderTopLeftRadius: RADIUS_INNER,
+                    borderBottomLeftRadius: RADIUS_INNER,
+                    borderTopRightRadius: RADIUS_INNER,
+                    borderBottomRightRadius: isRightSidebarVisible && !shouldUseOverlay ? RADIUS_INNER : RADIUS_EDGE,
+                  }}
+                >
+                  <RightPinnedBrowserHost
+                    instanceId={rightPinnedBrowserInstanceId}
+                    onClose={() => { void handleCloseRightPinnedBrowser() }}
+                  />
+                </motion.div>
+              </motion.div>
+            </>
+          )}
 
           {/* Right Sidebar - Inline Mode (≥ 920px) */}
           {!shouldUseOverlay && (

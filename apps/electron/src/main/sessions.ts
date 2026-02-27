@@ -4,7 +4,7 @@ import { basename, join, normalize, isAbsolute, sep } from 'path'
 import { existsSync } from 'fs'
 import { readFile, realpath } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
-import { type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -274,7 +274,7 @@ async function refreshOAuthTokensIfNeeded(
     const intendedSlugs = enabledSources.map(s => s.config.slug)
     await agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
 
-    // Update bridge-mcp-server config/credentials for backends that use it (Codex, Copilot)
+    // Update bridge-mcp-server config/credentials for backends that need it
     if (options?.sessionId && options?.workspaceRootPath) {
       await applyBridgeUpdates(agent, sessionPath, enabledSources, mcpServers, options.sessionId, options.workspaceRootPath, 'token refresh', options.poolServerUrl)
     }
@@ -288,7 +288,7 @@ async function refreshOAuthTokensIfNeeded(
 /**
  * Apply bridge-mcp-server updates for backends that use it.
  * Delegates to the backend's own applyBridgeUpdates() method.
- * Each backend handles its own strategy (Codex: config.toml, Copilot: bridge-config.json, others: no-op).
+ * Each backend handles its own strategy via applyBridgeUpdates().
  */
 async function applyBridgeUpdates(
   agent: AgentInstance,
@@ -358,6 +358,16 @@ function resolveToolDisplayMeta(
           'transform_data': 'Transform Data',
           'render_template': 'Render Template',
           'update_user_preferences': 'Update Preferences',
+          'browser_navigate': 'Browser Navigate',
+          'browser_snapshot': 'Browser Snapshot',
+          'browser_click': 'Browser Click',
+          'browser_fill': 'Browser Fill',
+          'browser_select': 'Browser Select',
+          'browser_screenshot': 'Browser Screenshot',
+          'browser_scroll': 'Browser Scroll',
+          'browser_back': 'Browser Back',
+          'browser_forward': 'Browser Forward',
+          'browser_evaluate': 'Browser Evaluate',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -513,7 +523,7 @@ interface ManagedSession {
   permissionMode?: PermissionMode
   /** Centralized MCP client pool for this session's source connections */
   mcpPool?: McpClientPool
-  /** HTTP MCP server exposing pool tools to external SDK subprocesses (Codex, Copilot) */
+  /** HTTP MCP server exposing pool tools to external SDK subprocesses */
   poolServer?: McpPoolServer
   // SDK session ID for conversation continuity
   sdkSessionId?: string
@@ -606,6 +616,8 @@ interface ManagedSession {
   // Whether this session is hidden from session list (e.g., mini edit sessions)
   hidden?: boolean
   branchFromMessageId?: string
+  // Parent session's SDK session ID (for SDK-level fork via resume + forkSession)
+  branchFromSdkSessionId?: string
   // Token refresh manager for OAuth token refresh with rate limiting
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by hooks (automation)
@@ -667,15 +679,17 @@ function resolveSupportsBranching(managed: ManagedSession): boolean {
   if (managed.agent) {
     return managed.agent.supportsBranching
   }
-  // Otherwise resolve from connection's provider type
+
+  // Fallback for not-yet-instantiated sessions: infer from locked connection.
+  // Pi backend currently does not support SDK-level session fork semantics.
   if (managed.llmConnection) {
     const conn = getLlmConnection(managed.llmConnection)
     if (conn) {
-      const provider = providerTypeToAgentProvider(conn.providerType)
-      // Copilot doesn't support branching; all others do
-      return provider !== 'copilot'
+      const provider = providerTypeToAgentProvider(conn.providerType || 'anthropic')
+      return provider !== 'pi'
     }
   }
+
   return true // default: branching enabled
 }
 
@@ -760,8 +774,14 @@ export class SessionManager {
     return this.initGate.wait()
   }
 
+  private browserPaneManager: import('./browser-pane-manager').BrowserPaneManager | null = null
+
   setWindowManager(wm: WindowManager): void {
     this.windowManager = wm
+  }
+
+  setBrowserPaneManager(bpm: import('./browser-pane-manager').BrowserPaneManager): void {
+    this.browserPaneManager = bpm
   }
 
   /** Returns a strictly increasing timestamp (ms). When Date.now() collides with
@@ -1078,7 +1098,7 @@ export class SessionManager {
     const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager, managed.agent?.getSummarizeCallback())
     const intendedSlugs = enabledSources.map(s => s.config.slug)
 
-    // Update bridge-mcp-server config/credentials for backends that use it (Codex, Copilot)
+    // Update bridge-mcp-server config/credentials for backends that need it
     await applyBridgeUpdates(managed.agent, sessionPath, enabledSources, mcpServers, managed.id, workspaceRootPath, 'source reload', managed.poolServer?.url)
 
     await managed.agent.setSourceServers(mcpServers, apiServers, intendedSlugs)
@@ -1460,7 +1480,7 @@ export class SessionManager {
     // Persist session with updated auth message and enabled sources
     this.persistSession(managed)
 
-    // Update bridge-mcp-server config/credentials for backends that use it (Codex, Copilot)
+    // Update bridge-mcp-server config/credentials for backends that need it
     if (result.success && result.sourceSlug && managed.agent) {
       const workspaceRootPath = managed.workspace.rootPath
       const sessionPath = getSessionStoragePath(workspaceRootPath, managed.id)
@@ -1721,6 +1741,13 @@ export class SessionManager {
     // Get default enabled sources from workspace config
     const defaultEnabledSourceSlugs = options?.enabledSourceSlugs ?? wsConfig?.defaults?.enabledSourceSlugs
 
+    // Resolve backend target early for branching policy checks.
+    const targetBackendContext = resolveBackendContext({
+      sessionConnectionSlug: options?.llmConnection,
+      workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
+      managedModel: options?.model || defaultModel,
+    })
+
     // Resolve working directory from options:
     // - 'user_default' or undefined: Use workspace's configured default
     // - 'none': No working directory (empty string means session folder only)
@@ -1734,17 +1761,94 @@ export class SessionManager {
       resolvedWorkingDir = options.workingDirectory
     }
 
-    // If branching from another session, flush source session to disk first
-    if (options?.branchFromSessionId && options?.branchFromMessageId) {
+    // Validate branch request up-front so branch metadata is only set for valid branches.
+    // This prevents creating sessions that claim to be branched but don't have copied history.
+    let validatedBranch: {
+      sourceSessionId: string
+      sourceMessageId: string
+      sourceSession: StoredSession
+      branchIdx: number
+      branchFromSdkSessionId?: string
+    } | undefined
+
+    if (options?.branchFromSessionId || options?.branchFromMessageId) {
+      if (!options.branchFromSessionId || !options.branchFromMessageId) {
+        sessionLog.warn('Branch validation failed: missing branchFromSessionId or branchFromMessageId', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          branchFromMessageId: options.branchFromMessageId,
+        })
+        throw new Error('Invalid branch request: both branchFromSessionId and branchFromMessageId are required')
+      }
+
+      if (targetBackendContext.provider === 'pi') {
+        sessionLog.warn('Branch validation failed: target backend does not support branching', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          provider: targetBackendContext.provider,
+          connectionSlug: targetBackendContext.connection?.slug,
+        })
+        throw new Error('Branching is not supported for the selected LLM connection')
+      }
+
       const sourceManaged = this.sessions.get(options.branchFromSessionId)
       if (sourceManaged) {
+        if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
+          sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
+            workspaceId,
+            targetWorkspaceRootPath: workspaceRootPath,
+            sourceWorkspaceRootPath: sourceManaged.workspace.rootPath,
+            branchFromSessionId: options.branchFromSessionId,
+          })
+          throw new Error('Invalid branch request: source session belongs to a different workspace')
+        }
+
+        // Flush source session to disk to ensure latest message list is available for branch copy.
         this.persistSession(sourceManaged)
         await sessionPersistenceQueue.flush(sourceManaged.id)
       }
+
+      const sourceSession = loadStoredSession(workspaceRootPath, options.branchFromSessionId)
+      if (!sourceSession) {
+        sessionLog.warn('Branch validation failed: source session not found on disk', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+        })
+        throw new Error(`Invalid branch request: source session ${options.branchFromSessionId} not found`)
+      }
+
+      const branchIdx = sourceSession.messages.findIndex(m => m.id === options.branchFromMessageId)
+      if (branchIdx === -1) {
+        sessionLog.warn('Branch validation failed: message not found in source session', {
+          workspaceId,
+          branchFromSessionId: options.branchFromSessionId,
+          branchFromMessageId: options.branchFromMessageId,
+        })
+        throw new Error(`Invalid branch request: message ${options.branchFromMessageId} not found in source session`)
+      }
+
+      const branchFromSdkSessionId = sourceManaged?.sdkSessionId || sourceSession.sdkSessionId
+
+      validatedBranch = {
+        sourceSessionId: options.branchFromSessionId,
+        sourceMessageId: options.branchFromMessageId,
+        sourceSession,
+        branchIdx,
+        branchFromSdkSessionId,
+      }
+
+      sessionLog.info('Branch validation succeeded', {
+        workspaceId,
+        branchFromSessionId: validatedBranch.sourceSessionId,
+        branchFromMessageId: validatedBranch.sourceMessageId,
+        branchFromSdkSessionId: !!validatedBranch.branchFromSdkSessionId,
+        copiedMessageCount: validatedBranch.branchIdx + 1,
+      })
     }
 
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
+      name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       hidden: options?.hidden,
@@ -1754,19 +1858,16 @@ export class SessionManager {
     })
 
     // Branch: copy messages from source session up to and including the branch point
-    if (options?.branchFromSessionId && options?.branchFromMessageId) {
-      const sourceSession = loadStoredSession(workspaceRootPath, options.branchFromSessionId)
-      if (sourceSession && sourceSession.messages.length > 0) {
-        const branchIdx = sourceSession.messages.findIndex(m => m.id === options.branchFromMessageId)
-        if (branchIdx !== -1) {
-          const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
-          if (branchedStored) {
-            branchedStored.messages = sourceSession.messages.slice(0, branchIdx + 1)
-            branchedStored.branchFromMessageId = options.branchFromMessageId
-            await saveStoredSession(branchedStored)
-          }
-        }
+    if (validatedBranch) {
+      const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
+      if (!branchedStored) {
+        throw new Error(`Failed to load newly created session ${storedSession.id} for branch copy`)
       }
+
+      branchedStored.messages = validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1)
+      branchedStored.branchFromMessageId = validatedBranch.sourceMessageId
+      branchedStored.branchFromSdkSessionId = validatedBranch.branchFromSdkSessionId
+      await saveStoredSession(branchedStored)
     }
 
     // Resolve connection/provider/auth/model using the provider-agnostic backend resolver.
@@ -1782,7 +1883,7 @@ export class SessionManager {
       sessionLog.info(`🤖 Creating mini agent session: model=${resolvedModel}, systemPromptPreset=${options?.systemPromptPreset}`)
     }
 
-    const isBranch = !!(options?.branchFromSessionId && options?.branchFromMessageId)
+    const isBranch = !!validatedBranch
 
     const managed = createManagedSession(storedSession, workspace, {
       permissionMode: defaultPermissionMode,
@@ -1792,7 +1893,8 @@ export class SessionManager {
       thinkingLevel: defaultThinkingLevel,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
-      branchFromMessageId: options?.branchFromMessageId,
+      branchFromMessageId: validatedBranch?.sourceMessageId,
+      branchFromSdkSessionId: validatedBranch?.branchFromSdkSessionId,
       messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
     })
 
@@ -1821,7 +1923,7 @@ export class SessionManager {
 
   /**
    * Get or create agent for a session (lazy loading)
-   * Creates CraftAgent for Claude or CodexBackend for Codex based on LLM connection.
+   * Creates the appropriate backend agent based on LLM connection.
    *
    * Provider resolution order:
    * 1. session.llmConnection (locked after first message)
@@ -1848,6 +1950,14 @@ export class SessionManager {
         managed.connectionLocked = true
         sessionLog.info(`Locked session ${managed.id} to connection "${connection.slug}"`)
         this.persistSession(managed)
+
+        // Keep renderer session capabilities in sync when auto-locking the connection.
+        this.sendEvent({
+          type: 'connection_changed',
+          sessionId: managed.id,
+          connectionSlug: connection.slug,
+          supportsBranching: resolveSupportsBranching(managed),
+        }, managed.workspace.id)
       }
 
       const provider = backendContext.provider
@@ -1905,6 +2015,8 @@ export class SessionManager {
         id: managed.id,
         workspaceRootPath: managed.workspace.rootPath,
         sdkSessionId: managed.sdkSessionId,
+        branchFromSdkSessionId: managed.branchFromSdkSessionId,
+        branchFromMessageId: managed.branchFromMessageId,
         createdAt: managed.lastMessageAt,
         lastUsedAt: managed.lastMessageAt,
         workingDirectory: managed.workingDirectory,
@@ -2005,6 +2117,57 @@ export class SessionManager {
       // Wire up large response handling in the MCP pool (all backends)
       if (managed.mcpPool && managed.agent) {
         managed.mcpPool.setSummarizeCallback(managed.agent.getSummarizeCallback())
+      }
+
+      // Wire up browser pane tools — merge BrowserPaneFns into session callbacks
+      // so browser_* tools can delegate to BrowserPaneManager
+      if (this.browserPaneManager) {
+        const bpm = this.browserPaneManager
+        const sid = managed.id
+        mergeSessionScopedToolCallbacks(sid, {
+          browserPaneFns: {
+            navigate: (url) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.navigate(instanceId, url)
+            },
+            snapshot: () => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.getAccessibilitySnapshot(instanceId)
+            },
+            click: (ref) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.clickElement(instanceId, ref)
+            },
+            fill: (ref, value) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.fillElement(instanceId, ref, value)
+            },
+            select: (ref, value) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.selectOption(instanceId, ref, value)
+            },
+            screenshot: () => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.screenshot(instanceId)
+            },
+            scroll: (direction, amount) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.scroll(instanceId, direction, amount)
+            },
+            goBack: () => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.goBack(instanceId)
+            },
+            goForward: () => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.goForward(instanceId)
+            },
+            evaluate: (expression) => {
+              const instanceId = bpm.getOrCreateForSession(sid)
+              return bpm.evaluate(instanceId, expression)
+            },
+          } satisfies BrowserPaneFns,
+        })
       }
 
       // Signal that the agent instance is ready (unblocks title generation)
@@ -2271,7 +2434,7 @@ export class SessionManager {
           .filter(isSourceUsable)
           .map(s => s.config.slug)
 
-        // Update bridge-mcp-server config/credentials for backends that use it (Codex, Copilot)
+        // Update bridge-mcp-server config/credentials for backends that need it
         await applyBridgeUpdates(managed.agent!, sessionPath, allEnabledSources, mcpServers, managed.id, workspaceRootPath, 'source enable', managed.poolServer?.url)
 
         await managed.agent!.setSourceServers(mcpServers, apiServers, intendedSlugs)
@@ -2406,6 +2569,7 @@ export class SessionManager {
       type: 'connection_changed',
       sessionId,
       connectionSlug,
+      supportsBranching: resolveSupportsBranching(managed),
     }, managed.workspace.id)
   }
 
@@ -2681,7 +2845,7 @@ export class SessionManager {
       // Set active source servers (tools are only available from these)
       const intendedSlugs = sources.filter(isSourceUsable).map(s => s.config.slug)
 
-      // Update bridge-mcp-server config/credentials for backends that use it (Codex, Copilot)
+      // Update bridge-mcp-server config/credentials for backends that need it
       const usableSources = sources.filter(isSourceUsable)
       await applyBridgeUpdates(managed.agent, sessionPath, usableSources, mcpServers, managed.id, workspaceRootPath, 'source config change', managed.poolServer?.url)
 
@@ -3071,6 +3235,11 @@ export class SessionManager {
     // Clean up session-scoped tool callbacks to prevent memory accumulation
     unregisterSessionScopedToolCallbacks(sessionId)
 
+    // Destroy browser instances bound to this session
+    if (this.browserPaneManager) {
+      this.browserPaneManager.destroyForSession(sessionId)
+    }
+
     // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
     if (managed.agent) {
       managed.agent.dispose()
@@ -3117,7 +3286,7 @@ export class SessionManager {
 
     // If currently processing, redirect mid-stream. Each backend decides its strategy:
     // - Pi: steers (injects message, events continue through existing stream)
-    // - Claude/Codex/Copilot: aborts internally, session layer queues for re-send
+    // - Claude: aborts internally, session layer queues for re-send
     if (managed.isProcessing) {
       const agent = managed.agent
       const steered = agent?.redirect(message) ?? false
@@ -3503,7 +3672,7 @@ export class SessionManager {
         }
 
         // NOTE: We no longer break early on !isProcessing or stopRequested.
-        // After soft interrupt (forceAbort), Codex sets turnComplete=true which causes
+        // After soft interrupt (forceAbort), the backend sets turnComplete=true which causes
         // the generator to yield remaining queued events and then complete naturally.
         // This ensures we don't lose in-flight messages.
       }
@@ -3597,14 +3766,14 @@ export class SessionManager {
     }
 
     // Signal intent to stop - let the event loop drain remaining events before clearing isProcessing
-    // This prevents losing in-flight messages from Codex after soft interrupt
+    // This prevents losing in-flight messages after soft interrupt
     managed.stopRequested = true
 
     // Track interruption so the next user message gets a context note
     // telling the LLM the previous response was cut short
     managed.wasInterrupted = true
 
-    // Force-abort via Query.close() - sends soft interrupt to Codex
+    // Force-abort via Query.close() - sends soft interrupt to the backend
     if (managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
     }

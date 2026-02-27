@@ -482,6 +482,15 @@ const api: ElectronAPI = {
       ipcRenderer.removeListener(IPC_CHANNELS.BADGE_DRAW, handler)
     }
   },
+  onBadgeDrawWindows: (callback: (data: { count: number }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: { count: number }) => {
+      callback(data)
+    }
+    ipcRenderer.on(IPC_CHANNELS.BADGE_DRAW_WINDOWS, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.BADGE_DRAW_WINDOWS, handler)
+    }
+  },
   getWindowFocusState: () =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW_GET_FOCUS_STATE),
   onWindowFocusChange: (callback: (isFocused: boolean) => void) => {
@@ -525,6 +534,44 @@ const api: ElectronAPI = {
   menuCopy: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_COPY),
   menuPaste: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_PASTE),
   menuSelectAll: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_SELECT_ALL),
+
+  // Browser pane management
+  browserPane: {
+    create: (id?: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_CREATE, id),
+    destroy: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_DESTROY, id),
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_LIST),
+    navigate: (id: string, url: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_NAVIGATE, id, url),
+    goBack: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_GO_BACK, id),
+    goForward: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_GO_FORWARD, id),
+    reload: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_RELOAD, id),
+    stop: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_STOP, id),
+    attach: (id: string, bounds: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_ATTACH, id, bounds),
+    detach: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_DETACH, id),
+    updateBounds: (id: string, bounds: { x: number; y: number; width: number; height: number }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_UPDATE_BOUNDS, id, bounds),
+    onStateChanged: (callback: (info: import('../shared/types').BrowserInstanceInfo) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, info: import('../shared/types').BrowserInstanceInfo) => {
+        callback(info)
+      }
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED, handler)
+    },
+    onRemoved: (callback: (id: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, id: string) => {
+        callback(id)
+      }
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_REMOVED, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_REMOVED, handler)
+    },
+    onInteracted: (callback: (id: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, id: string) => {
+        callback(id)
+      }
+      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_INTERACTED, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_INTERACTED, handler)
+    },
+  },
 
   // LLM Connections (provider configurations)
   listLlmConnections: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_LIST),

@@ -298,12 +298,20 @@ function renderExpandedContent(
 ): React.ReactNode {
   // Flat sortable (e.g., statuses): wrap items in SortableList
   if (link.sortable && link.items) {
+    // Split at first separator: items before are sortable, items after are trailing (non-sortable)
+    const separatorIndex = link.items.findIndex(isSeparatorItem)
+    const sortableItems = separatorIndex >= 0 ? link.items.slice(0, separatorIndex) : link.items
+    const trailingItems = separatorIndex >= 0
+      ? link.items.slice(separatorIndex + 1).filter((item): item is LinkItem => !isSeparatorItem(item))
+      : []
+
     return (
       <SortableStatusList
-        items={link.items}
+        items={sortableItems}
         onReorder={link.sortable.onReorder}
         getItemProps={getItemProps}
         focusedItemId={focusedItemId}
+        trailingItems={trailingItems.length > 0 ? trailingItems : undefined}
       />
     )
   }
@@ -329,9 +337,11 @@ interface SortableStatusListProps {
   onReorder: (orderedIds: string[]) => void
   getItemProps: LeftSidebarProps['getItemProps']
   focusedItemId: string | null | undefined
+  /** Non-sortable items rendered after the sortable list (e.g., Flagged, Archived) */
+  trailingItems?: LinkItem[]
 }
 
-function SortableStatusList({ items, onReorder, getItemProps, focusedItemId }: SortableStatusListProps) {
+function SortableStatusList({ items, onReorder, getItemProps, focusedItemId, trailingItems }: SortableStatusListProps) {
   // Filter to LinkItems only (separators don't participate in DnD)
   const linkItems = items.filter((item): item is LinkItem => !isSeparatorItem(item))
 
@@ -408,6 +418,24 @@ function SortableStatusList({ items, onReorder, getItemProps, focusedItemId }: S
             />
           )}
         />
+        {/* Non-sortable trailing items (e.g., Flagged, Archived) */}
+        {trailingItems && trailingItems.length > 0 && (
+          <>
+            <div className="my-1 ml-2" aria-hidden="true">
+              <div className="h-px bg-foreground/5" />
+            </div>
+            <div className="grid gap-0.5">
+              {trailingItems.map(item => (
+                <div key={item.id} className="group/section">
+                  <SidebarButton
+                    link={item}
+                    itemProps={getItemProps?.(item.id)}
+                  />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

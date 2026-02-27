@@ -175,7 +175,7 @@ Write-Host "Copying interceptor..."
 New-Item -ItemType Directory -Force -Path "$ElectronDir\packages\shared\src" | Out-Null
 Copy-Item $InterceptorSource "$ElectronDir\packages\shared\src\"
 # Also copy dependencies imported by the interceptor at runtime
-foreach ($dep in @("interceptor-common.ts", "feature-flags.ts")) {
+foreach ($dep in @("interceptor-common.ts", "feature-flags.ts", "interceptor-request-utils.ts")) {
     $depPath = "$RootDir\packages\shared\src\$dep"
     if (Test-Path $depPath) {
         Copy-Item $depPath "$ElectronDir\packages\shared\src\"

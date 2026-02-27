@@ -1240,21 +1240,28 @@ export default function App() {
       store.set(sourcesAtom, [])
       store.set(skillsAtom, [])
 
-      // 8. Clear session atoms BEFORE navigating
-      // This prevents applyNavigationState from auto-selecting a session from the old workspace.
-      // Without this, getFirstSessionId() would return a session ID from the previous workspace,
-      // causing the detail panel to show a stale chat until sessions reload.
+      // 8. Clear session atoms BEFORE workspace switch
+      // This prevents stale session data from the previous workspace being visible.
       store.set(sessionMetaMapAtom, new Map())
       store.set(sessionIdsAtom, [])
 
-      // 9. Navigate to allSessions view without a specific session selected
-      // This ensures the UI is in a clean state for the new workspace
-      navigate(routes.view.allSessions())
-
-      // Note: Sessions and theme will reload automatically due to windowWorkspaceId dependency
-      // in useEffect hooks
+      // Note: NavigationContext detects the workspaceId change and handles
+      // panel restoration from the stored workspace URL (or defaults to allSessions).
+      // Sessions and theme will reload automatically due to windowWorkspaceId dependency
+      // in useEffect hooks.
     }
   }, [windowWorkspaceId, setSession, store])
+
+  // Handle workspace switch by slug (called by NavigationContext on popstate when ?ws= changes)
+  const handleSwitchWorkspaceBySlug = useCallback((slug: string) => {
+    const target = workspaces.find(w => {
+      const wsSlug = extractWorkspaceSlugFromPath(w.rootPath, w.id)
+      return wsSlug === slug
+    })
+    if (target) {
+      handleSelectWorkspace(target.id)
+    }
+  }, [workspaces, handleSelectWorkspace])
 
   // Handle workspace refresh (e.g., after icon upload)
   const handleRefreshWorkspaces = useCallback(() => {
@@ -1445,6 +1452,8 @@ export default function App() {
         <TooltipProvider delayDuration={0}>
         <NavigationProvider
           workspaceId={windowWorkspaceId}
+          workspaceSlug={windowWorkspaceSlug}
+          onSwitchWorkspaceBySlug={handleSwitchWorkspaceBySlug}
           onCreateSession={handleCreateSession}
           onInputChange={handleInputChange}
           getDraft={getDraft}

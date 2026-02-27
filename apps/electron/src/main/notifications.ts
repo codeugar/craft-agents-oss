@@ -11,6 +11,7 @@ import { Notification, app, BrowserWindow, nativeImage } from 'electron'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { mainLog } from './logger'
+import { IPC_CHANNELS } from '../shared/types'
 import type { WindowManager } from './window-manager'
 
 let windowManager: WindowManager | null = null
@@ -149,7 +150,7 @@ function updateBadgeCountMacOS(count: number): void {
       const windows = BrowserWindow.getAllWindows()
       const window = windows[0]
       if (window && !window.isDestroyed() && !window.webContents.isDestroyed() && baseIconDataUrl) {
-        window.webContents.send('badge:draw', { count, iconDataUrl: baseIconDataUrl })
+        window.webContents.send(IPC_CHANNELS.BADGE_DRAW, { count, iconDataUrl: baseIconDataUrl })
       }
     } else {
       // Reset to original icon (no badge)
@@ -177,9 +178,9 @@ function updateBadgeCountWindows(count: number): void {
 
     if (count > 0) {
       // Create a simple overlay icon with the count
-      // We'll ask the renderer to draw it and send back via IPC
-      if (!window.webContents.isDestroyed() && baseIconDataUrl) {
-        window.webContents.send('badge:draw-windows', { count })
+      // Ask the renderer to draw the overlay and send it back via IPC
+      if (!window.webContents.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.BADGE_DRAW_WINDOWS, { count })
       }
     } else {
       // Clear the overlay

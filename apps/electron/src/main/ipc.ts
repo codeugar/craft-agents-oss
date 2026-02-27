@@ -8,6 +8,7 @@ import { execSync } from 'child_process'
 import { SessionManager } from './sessions'
 import { ipcLog, windowLog, searchLog } from './logger'
 import { WindowManager } from './window-manager'
+import type { BrowserPaneManager } from './browser-pane-manager'
 import { registerOnboardingHandlers } from './onboarding'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type LlmConnectionSetup } from '../shared/types'
 import { readFileAttachment, perf, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
@@ -133,7 +134,7 @@ async function validateFilePath(filePath: string): Promise<string> {
   return realPath
 }
 
-export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager): void {
+export function registerIpcHandlers(sessionManager: SessionManager, windowManager: WindowManager, browserPaneManager?: BrowserPaneManager): void {
   // Get all sessions for the calling window's workspace
   // Waits for initialization to complete so sessions are never returned empty during startup
   ipcMain.handle(IPC_CHANNELS.GET_SESSIONS, async (event) => {
@@ -3031,5 +3032,156 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Note: Permission mode cycling settings (cyclablePermissionModes) are now workspace-level
   // and managed via WORKSPACE_SETTINGS_GET/UPDATE channels
+
+  // =========================================================================
+  // Browser Pane Management
+  // =========================================================================
+
+  if (browserPaneManager) {
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_CREATE, (_event, id?: string) => {
+      return browserPaneManager.createInstance(id)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_DESTROY, (_event, id: string) => {
+      browserPaneManager.destroyInstance(id)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_LIST, () => {
+      return browserPaneManager.listInstances()
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_NAVIGATE, async (_event, id: string, url: string) => {
+      try {
+        return await browserPaneManager.navigate(id, url)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] navigate failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_GO_BACK, async (_event, id: string) => {
+      try {
+        return await browserPaneManager.goBack(id)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] goBack failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_GO_FORWARD, async (_event, id: string) => {
+      try {
+        return await browserPaneManager.goForward(id)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] goForward failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_RELOAD, (_event, id: string) => {
+      browserPaneManager.reload(id)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_STOP, (_event, id: string) => {
+      browserPaneManager.stop(id)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_ATTACH, (event, id: string, bounds: { x: number; y: number; width: number; height: number }) => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      if (window) {
+        browserPaneManager.attachToWindow(id, window, bounds)
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_DETACH, (_event, id: string) => {
+      browserPaneManager.detachFromWindow(id)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_UPDATE_BOUNDS, (_event, id: string, bounds: { x: number; y: number; width: number; height: number }) => {
+      browserPaneManager.updateBounds(id, bounds)
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_SNAPSHOT, async (_event, id: string) => {
+      try {
+        return await browserPaneManager.getAccessibilitySnapshot(id)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] snapshot failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_CLICK, async (_event, id: string, ref: string) => {
+      try {
+        return await browserPaneManager.clickElement(id, ref)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] click failed for ${id} ref=${ref}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_FILL, async (_event, id: string, ref: string, value: string) => {
+      try {
+        return await browserPaneManager.fillElement(id, ref, value)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] fill failed for ${id} ref=${ref}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_SELECT, async (_event, id: string, ref: string, value: string) => {
+      try {
+        return await browserPaneManager.selectOption(id, ref, value)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] select failed for ${id} ref=${ref}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_SCREENSHOT, async (_event, id: string) => {
+      try {
+        const buffer = await browserPaneManager.screenshot(id)
+        return buffer.toString('base64')
+      } catch (err) {
+        ipcLog.error(`[browser-pane] screenshot failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_EVALUATE, async (_event, id: string, expression: string) => {
+      try {
+        return await browserPaneManager.evaluate(id, expression)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] evaluate failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    ipcMain.handle(IPC_CHANNELS.BROWSER_PANE_SCROLL, async (_event, id: string, direction: string, amount?: number) => {
+      const validDirections = ['up', 'down', 'left', 'right']
+      if (!validDirections.includes(direction)) {
+        throw new Error(`Invalid scroll direction: ${direction}`)
+      }
+      try {
+        return await browserPaneManager.scroll(id, direction as 'up' | 'down' | 'left' | 'right', amount)
+      } catch (err) {
+        ipcLog.error(`[browser-pane] scroll failed for ${id}:`, err)
+        throw err
+      }
+    })
+
+    // Forward browser state changes to all windows
+    browserPaneManager.onStateChange((info) => {
+      windowManager.broadcastToAll(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED, info)
+    })
+
+    // Forward browser removals so renderer can immediately drop stale tabs
+    browserPaneManager.onRemoved((id) => {
+      windowManager.broadcastToAll(IPC_CHANNELS.BROWSER_PANE_REMOVED, id)
+    })
+
+    // Forward browser interaction/focus events so renderer can align panel focus.
+    browserPaneManager.onInteracted((id) => {
+      windowManager.broadcastToAll(IPC_CHANNELS.BROWSER_PANE_INTERACTED, id)
+    })
+  }
 
 }

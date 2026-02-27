@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect, useMemo } from "react"
+import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
 import { getSessionStatus } from "@/utils/session"
+import * as storage from "@/lib/local-storage"
+import { KEYS } from "@/lib/local-storage"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import { flattenLabels } from "@craft-agent/shared/labels"
 import * as MultiSelect from "@/hooks/useMultiSelect"
@@ -154,8 +156,14 @@ export function SessionList({
   const [renameName, setRenameName] = useState("")
   // Track if search input has actual DOM focus (for proper keyboard navigation gating)
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false)
-  // Collapsed group keys (for collapsible group headers)
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  // Collapsed group keys (for collapsible group headers) — persisted to localStorage
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    const stored = storage.get<string[]>(KEYS.collapsedSessionGroups, [])
+    return new Set(stored)
+  })
+  useEffect(() => {
+    storage.set(KEYS.collapsedSessionGroups, Array.from(collapsedGroups))
+  }, [collapsedGroups])
   const toggleGroupCollapse = useCallback((groupKey: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev)
@@ -166,6 +174,8 @@ export function SessionList({
   }, [])
 
   // --- Data pipeline (search, filtering, pagination, grouping) ---
+  const scrollViewportRef = useRef<HTMLDivElement>(null)
+
   const {
     isSearchMode,
     highlightQuery,
@@ -176,7 +186,7 @@ export function SessionList({
     exceededSearchLimit,
     flatItems,
     hasMore,
-    sentinelRef,
+    collapsedGroupsMeta,
     searchInputRef,
   } = useSessionSearch({
     items,
@@ -187,6 +197,9 @@ export function SessionList({
     evaluateViews,
     statusFilter,
     labelFilterMap,
+    collapsedGroups,
+    groupingMode,
+    scrollViewportRef,
   })
 
   const rowData = useMemo(() => {
@@ -208,31 +221,44 @@ export function SessionList({
       }
     }
 
+    // flatItems only contains visible (expanded + paginated) items.
+    // collapsedGroupsMeta provides key + count for collapsed groups so we
+    // can insert header-only placeholder groups in the correct position.
     const rows: SessionListRow[] = flatItems.map(item => ({ item }))
 
     if (groupingMode === 'status') {
-      // Group by session status, sorted by status order
       const statusOrder = new Map<string, number>()
       sessionStatuses.forEach((state, index) => statusOrder.set(state.id, index))
 
-      const groupsByStatus = new Map<string, SessionListRow[]>()
+      // Build groups from visible items
+      const groupsByKey = new Map<string, { rows: SessionListRow[], statusId: string }>()
       for (const row of rows) {
         const statusId = getSessionStatus(row.item)
-        if (!groupsByStatus.has(statusId)) groupsByStatus.set(statusId, [])
-        groupsByStatus.get(statusId)!.push(row)
+        const key = `status-${statusId}`
+        if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], statusId })
+        groupsByKey.get(key)!.rows.push(row)
+      }
+
+      // Insert collapsed placeholder groups
+      for (const meta of collapsedGroupsMeta) {
+        if (!groupsByKey.has(meta.key)) {
+          const statusId = meta.key.replace('status-', '')
+          groupsByKey.set(meta.key, { rows: [], statusId })
+        }
       }
 
       const orderedGroups: EntityListGroup<SessionListRow>[] = []
-      for (const [statusId, groupRows] of groupsByStatus) {
+      for (const [key, { rows: groupRows, statusId }] of groupsByKey) {
         const state = sessionStatuses.find(s => s.id === statusId)
         if (!state) continue
-        // Sort sessions within group by lastMessageAt descending
         groupRows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
+        const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
         orderedGroups.push({
-          key: `status-${statusId}`,
+          key,
           label: state.label,
           items: groupRows,
           collapsible: true,
+          ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
         })
       }
       orderedGroups.sort((a, b) => {
@@ -240,6 +266,11 @@ export function SessionList({
         const bOrder = statusOrder.get(b.key.replace('status-', '')) ?? 999
         return aOrder - bOrder
       })
+
+      // If only one group exists, disable collapsing — there's nothing to collapse into
+      if (orderedGroups.length === 1) {
+        orderedGroups[0].collapsible = false
+      }
 
       return {
         rows: orderedGroups.flatMap(g => g.items),
@@ -249,32 +280,73 @@ export function SessionList({
 
     // Default: group by date
     const groupsByKey = new Map<string, EntityListGroup<SessionListRow>>()
-    const orderedGroups: EntityListGroup<SessionListRow>[] = []
+    const groupDates = new Map<string, Date>()
 
     for (const row of rows) {
       const day = startOfDay(new Date(row.item.lastMessageAt || 0))
       const groupKey = day.toISOString()
 
       if (!groupsByKey.has(groupKey)) {
-        const group: EntityListGroup<SessionListRow> = {
+        groupsByKey.set(groupKey, {
           key: groupKey,
           label: formatDateGroupLabel(day),
           items: [],
           collapsible: true,
-        }
-        groupsByKey.set(groupKey, group)
-        orderedGroups.push(group)
+        })
+        groupDates.set(groupKey, day)
       }
       groupsByKey.get(groupKey)!.items.push(row)
+    }
+
+    // Insert collapsed placeholder groups (header-only, items: [])
+    for (const meta of collapsedGroupsMeta) {
+      if (!groupsByKey.has(meta.key)) {
+        const date = new Date(meta.key)
+        groupsByKey.set(meta.key, {
+          key: meta.key,
+          label: formatDateGroupLabel(date),
+          items: [],
+          collapsible: true,
+          collapsedCount: meta.count,
+        })
+        groupDates.set(meta.key, date)
+      }
+    }
+
+    // Sort all groups by date descending
+    const orderedKeys = Array.from(groupDates.entries())
+      .sort(([, a], [, b]) => b.getTime() - a.getTime())
+      .map(([key]) => key)
+
+    const orderedGroups = orderedKeys.map(key => groupsByKey.get(key)!)
+
+    // If only one group exists, disable collapsing — there's nothing to collapse into
+    if (orderedGroups.length === 1) {
+      orderedGroups[0].collapsible = false
     }
 
     return {
       rows,
       groups: orderedGroups,
     }
-  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses])
+  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, collapsedGroupsMeta])
 
   const flatRows = rowData.rows
+
+  const collapseAllGroups = useCallback(() => {
+    if (groupingMode === 'status') {
+      const allKeys = new Set(items.map(item => `status-${getSessionStatus(item)}`))
+      setCollapsedGroups(allKeys)
+    } else {
+      const allKeys = new Set(items.map(item =>
+        startOfDay(new Date(item.lastMessageAt || 0)).toISOString()
+      ))
+      setCollapsedGroups(allKeys)
+    }
+  }, [items, groupingMode])
+  const expandAllGroups = useCallback(() => {
+    setCollapsedGroups(new Set())
+  }, [])
 
   const rowIndexMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -469,7 +541,8 @@ export function SessionList({
   ])
 
   // --- Empty state (non-search) — render before EntityList ---
-  if (flatRows.length === 0 && !searchActive) {
+  // Don't show empty state when there are collapsed groups with content
+  if (flatRows.length === 0 && rowData.groups.length === 0 && !searchActive) {
     if (currentFilter?.kind === 'archived') {
       return (
         <EntityListEmptyScreen
@@ -505,7 +578,7 @@ export function SessionList({
 
   // --- Render ---
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col flex-1 min-h-0">
       <SessionListProvider value={listContext}>
       <EntityList<SessionListRow>
         groups={rowData.groups}
@@ -568,11 +641,12 @@ export function SessionList({
         }
         footer={
           hasMore ? (
-            <div ref={sentinelRef} className="flex justify-center py-4">
+            <div className="flex justify-center py-4">
               <Spinner className="text-muted-foreground" />
             </div>
           ) : undefined
         }
+        viewportRef={scrollViewportRef}
         containerRef={zoneRef}
         containerProps={{
           'data-focus-zone': 'navigator',
@@ -582,6 +656,8 @@ export function SessionList({
         scrollAreaClassName="select-none mask-fade-top-short"
         collapsedGroups={collapsedGroups}
         onToggleCollapse={toggleGroupCollapse}
+        onCollapseAll={collapseAllGroups}
+        onExpandAll={expandAllGroups}
       />
       </SessionListProvider>
 

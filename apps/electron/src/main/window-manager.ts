@@ -130,7 +130,7 @@ export class WindowManager {
         // is disabled - the preload only exposes safe, read-only version data via IPC.
         // If sandbox is re-enabled, process.versions becomes undefined.
         sandbox: false,
-        webviewTag: true // Enable webview for browser panel
+        webviewTag: false // Browser integration uses WebContentsView, not <webview>
       }
     })
 
@@ -145,7 +145,7 @@ export class WindowManager {
       return { action: 'deny' }
     })
 
-    // Handle navigation in webviews to external URLs
+    // Handle external navigation attempts from renderer WebContents
     window.webContents.on('will-navigate', (event, url) => {
       // Allow navigation within the app (file:// in prod, localhost dev server)
       const isInternalUrl = url.startsWith('file://') ||

@@ -9,9 +9,11 @@
  * (which determines sidebar highlight, navigator content, etc.).
  * `navigate(route)` updates the focused panel's route.
  *
- * SNAPSHOT HISTORY:
- * Every meaningful state change (navigate, panel add/remove, focus change,
- * sidebar toggle) pushes a NavigationSnapshot. Back/forward restores snapshots.
+ * URL-DRIVEN HISTORY:
+ * The URL is the source of truth. Every meaningful navigation pushes a
+ * browser history entry via pushState. Back/forward uses the browser's
+ * native popstate, with smart panel reconciliation to preserve React keys
+ * (and thus scroll position, streaming state, etc.).
  *
  * Usage:
  *   import { useNavigation, useNavigationState } from '@/contexts/NavigationContext'
@@ -41,7 +43,6 @@ import {
   parseRoute,
   parseRouteToNavigationState,
   buildRouteFromNavigationState,
-  buildUrlWithState,
   buildRightSidebarParam,
   type ParsedRoute,
 } from '../../shared/route-parser'
@@ -62,6 +63,7 @@ import {
   isSourcesNavigation,
   isSettingsNavigation,
   isSkillsNavigation,
+  isBrowserNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
 import { isValidSettingsSubpage, type SettingsSubpage } from '../../shared/settings-registry'
@@ -71,8 +73,7 @@ import { skillsAtom } from '@/atoms/skills'
 import {
   panelStackAtom,
   pushPanelAtom,
-  restorePanelStackAtom,
-  closeAllOtherPanelsAtom,
+  reconcilePanelStackAtom,
   focusedPanelIdAtom,
   focusedPanelRouteAtom,
   focusedPanelIndexAtom,
@@ -86,31 +87,7 @@ export type { Route }
 
 // Re-export navigation state types for consumers
 export type { NavigationState, SessionFilter }
-export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation }
-
-// =============================================================================
-// Snapshot History Types
-// =============================================================================
-
-interface NavigationSnapshot {
-  /** All panels and their routes + proportions */
-  panels: { route: ViewRoute; proportion: number }[]
-  /** Which panel index is focused */
-  focusedIndex: number
-  /** Right sidebar state */
-  rightSidebar?: RightSidebarPanel
-}
-
-/** Compare snapshots for deduplication (ignores proportions — resize shouldn't create history) */
-function snapshotsEqual(a: NavigationSnapshot, b: NavigationSnapshot): boolean {
-  if (a.focusedIndex !== b.focusedIndex) return false
-  if (a.panels.length !== b.panels.length) return false
-  for (let i = 0; i < a.panels.length; i++) {
-    if (a.panels[i].route !== b.panels[i].route) return false
-  }
-  if (a.rightSidebar?.type !== b.rightSidebar?.type) return false
-  return true
-}
+export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isBrowserNavigation }
 
 // =============================================================================
 // Context
@@ -147,6 +124,10 @@ interface NavigationProviderProps {
   children: ReactNode
   /** Current workspace ID */
   workspaceId: string | null
+  /** Current workspace slug (used for URL ?ws= param and localStorage) */
+  workspaceSlug: string | null
+  /** Switch to a workspace by slug (called on popstate when ?ws= changes) */
+  onSwitchWorkspaceBySlug?: (slug: string) => void
   /** Session creation handler */
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
   /** Input change handler for pre-filling chat input */
@@ -162,6 +143,8 @@ interface NavigationProviderProps {
 export function NavigationProvider({
   children,
   workspaceId,
+  workspaceSlug,
+  onSwitchWorkspaceBySlug,
   onCreateSession,
   onInputChange,
   getDraft,
@@ -206,17 +189,26 @@ export function NavigationProvider({
   }, [focusedRoute, rightSidebar])
 
   // =========================================================================
-  // SNAPSHOT HISTORY
+  // BROWSER HISTORY TRACKING
   // =========================================================================
 
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
 
-  const historyStackRef = useRef<NavigationSnapshot[]>([])
-  const historyIndexRef = useRef(-1)
+  // Sequence numbers stored in history.state for tracking position
+  const historySeqRef = useRef(0)                // Current history position
+  const historyMaxSeqRef = useRef(0)              // Highest pushed seq (for canGoForward)
+  const nextHistorySeqRef = useRef(1)             // Next seq to assign on pushState
 
-  // Flag to suppress snapshot pushes during back/forward restore
-  const isRestoringHistoryRef = useRef(false)
+  // Suppress pushState in atom subscriptions during restore/reconciliation
+  const suppressPushRef = useRef(false)
+
+  // Coalesce compound atom writes (e.g. pushPanelAtom sets both panelStackAtom
+  // and focusedPanelIdAtom) into a single pushState via microtask debounce
+  const pendingPushRef = useRef(false)
+
+  // Flag: workspace switch was triggered by popstate (URL already correct)
+  const isPopstateSwitchRef = useRef(false)
 
   // Queue navigation if not ready yet
   const pendingNavigationRef = useRef<ParsedRoute | null>(null)
@@ -227,128 +219,35 @@ export function NavigationProvider({
   // Track whether initial route restoration has been attempted
   const initialRouteRestoredRef = useRef(false)
 
-  // Update canGoBack/canGoForward from current history state
   const updateCanGoBackForward = useCallback(() => {
-    setCanGoBack(historyIndexRef.current > 0)
-    setCanGoForward(historyIndexRef.current < historyStackRef.current.length - 1)
+    setCanGoBack(historySeqRef.current > 0)
+    setCanGoForward(historySeqRef.current < historyMaxSeqRef.current)
   }, [])
 
-  /**
-   * Push a snapshot of the current state onto the history stack.
-   * Reads atom values synchronously from the Jotai store (always fresh).
-   * Reads right sidebar from ref (always fresh).
-   * Deduplicates: won't push if identical to current snapshot.
-   */
-  const pushSnapshot = useCallback(() => {
-    if (isRestoringHistoryRef.current) return
-
-    const panels = store.get(panelStackAtom)
-    const focusedIdx = store.get(focusedPanelIndexAtom)
-
-    // Don't push if panel stack is empty (initial state before restore)
-    if (panels.length === 0) return
-
-    const snapshot: NavigationSnapshot = {
-      panels: panels.map(p => ({ route: p.route, proportion: p.proportion })),
-      focusedIndex: focusedIdx,
-      rightSidebar: rightSidebarRef.current,
-    }
-
-    // Deduplicate
-    const current = historyStackRef.current[historyIndexRef.current]
-    if (current && snapshotsEqual(current, snapshot)) return
-
-    // Truncate forward history and push
-    const newIndex = historyIndexRef.current + 1
-    historyStackRef.current = historyStackRef.current.slice(0, newIndex)
-    historyStackRef.current.push(snapshot)
-    historyIndexRef.current = newIndex
-
-    updateCanGoBackForward()
-  }, [store, updateCanGoBackForward])
-
-  // Keep pushSnapshot ref fresh for use in atom subscriptions
-  const pushSnapshotRef = useRef(pushSnapshot)
-  useEffect(() => { pushSnapshotRef.current = pushSnapshot }, [pushSnapshot])
-
-  /**
-   * Restore a snapshot (for back/forward navigation).
-   * Atomically restores panel stack, focus, and sidebar.
-   */
-  const restoreSnapshot = useCallback((snapshot: NavigationSnapshot) => {
-    isRestoringHistoryRef.current = true
-
-    // 1. Restore full panel stack (routes + proportions)
-    store.set(restorePanelStackAtom, snapshot.panels)
-
-    // 2. Restore focus (restorePanelStackAtom defaults to index 0, override if needed)
-    const stack = store.get(panelStackAtom)
-    const idx = Math.min(snapshot.focusedIndex, stack.length - 1)
-    store.set(focusedPanelIdAtom, stack[idx]?.id ?? null)
-
-    // 3. Restore right sidebar
-    setRightSidebar(snapshot.rightSidebar)
-
-    // 4. Sync URL immediately
-    syncUrlRef.current?.()
-
-    // Clear restoring flag after React processes the batched state updates.
-    // Atom subscriptions already fired synchronously (suppressed by the flag).
-    // The RAF ensures React effects from setRightSidebar are also suppressed.
-    requestAnimationFrame(() => {
-      isRestoringHistoryRef.current = false
-    })
-  }, [store])
-
   // =========================================================================
-  // Subscribe to atom changes for snapshot pushes
-  // =========================================================================
-
-  // Panel stack changes (push, close, route change, resize)
-  // Resize produces same snapshot (proportions excluded from equality) → deduped
-  useEffect(() => {
-    const unsub = store.sub(panelStackAtom, () => {
-      pushSnapshotRef.current?.()
-    })
-    return unsub
-  }, [store])
-
-  // Focus changes (clicking a panel, keyboard focus cycling)
-  useEffect(() => {
-    const unsub = store.sub(focusedPanelIdAtom, () => {
-      pushSnapshotRef.current?.()
-    })
-    return unsub
-  }, [store])
-
-  // Right sidebar changes (via effect since it's React state, not atom)
-  const prevSidebarTypeRef = useRef(rightSidebar?.type)
-  useEffect(() => {
-    if (rightSidebar?.type === prevSidebarTypeRef.current) return
-    prevSidebarTypeRef.current = rightSidebar?.type
-    if (isRestoringHistoryRef.current) return
-    if (!initialRouteRestoredRef.current) return
-    pushSnapshot()
-  }, [rightSidebar, pushSnapshot])
-
-  // =========================================================================
-  // URL SYNC
+  // URL SYNC (builds URL from current state, push or replace)
   // =========================================================================
 
   /**
-   * Sync the current state to the browser URL (for reload restoration).
-   * ?route= is the focused panel's route (backward compat / deep links).
-   * ?panels= encodes ALL panels (route:proportion, comma-separated).
-   * ?fi= is the focused panel index (omitted if 0).
-   * ?sidebar= is the right sidebar state.
+   * Build the current URL from atom state and either push or replace.
+   *
+   * push=true: creates a new browser history entry (meaningful navigation)
+   * push=false: updates the current entry (resize, auto-select, etc.)
+   *
+   * Also persists the URL per-workspace in localStorage for workspace switch restoration.
    */
-  const syncUrl = useCallback(() => {
+  const syncUrl = useCallback((push: boolean = false) => {
     const panels = store.get(panelStackAtom)
     const focusedIdx = store.get(focusedPanelIndexAtom)
     if (panels.length === 0) return
 
     const focusedPanel = panels[focusedIdx] ?? panels[0]
     const url = new URL(window.location.href)
+
+    // ?ws= workspace slug
+    if (workspaceSlug) {
+      url.searchParams.set('ws', workspaceSlug)
+    }
 
     // ?route= is the focused panel's route
     url.searchParams.set('route', focusedPanel.route)
@@ -361,7 +260,7 @@ export function NavigationProvider({
       url.searchParams.delete('panels')
     }
 
-    // ?fi= is focused panel index — always written for multi-panel to disambiguate from old format
+    // ?fi= is focused panel index (for multi-panel layouts)
     if (panels.length > 1) {
       url.searchParams.set('fi', String(focusedIdx))
     } else {
@@ -376,19 +275,160 @@ export function NavigationProvider({
       url.searchParams.delete('sidebar')
     }
 
-    history.replaceState({ route: focusedPanel.route }, '', url.toString())
-  }, [store])
+    const urlStr = url.toString()
+
+    if (push) {
+      const seq = nextHistorySeqRef.current++
+      history.pushState({ seq }, '', urlStr)
+      historySeqRef.current = seq
+      historyMaxSeqRef.current = seq // Forward history discarded by browser
+      updateCanGoBackForward()
+    } else {
+      history.replaceState({ ...history.state, seq: historySeqRef.current }, '', urlStr)
+    }
+
+    // Persist per-workspace URL for workspace switch restoration
+    if (workspaceSlug) {
+      storage.set(storage.KEYS.workspaceUrl, url.search, workspaceSlug)
+    }
+  }, [store, workspaceSlug, updateCanGoBackForward])
 
   const syncUrlRef = useRef(syncUrl)
   useEffect(() => { syncUrlRef.current = syncUrl }, [syncUrl])
 
-  // Sync URL when panel stack, focus, or sidebar changes
+  // replaceState sync when panel stack, focus, or sidebar changes (catches resize, etc.)
   const panelStack = useAtomValue(panelStackAtom)
   const focusedPanelId = useAtomValue(focusedPanelIdAtom)
   useEffect(() => {
     if (!initialRouteRestoredRef.current) return
-    syncUrl()
-  }, [panelStack, focusedPanelId, rightSidebar, syncUrl])
+    syncUrlRef.current(false)
+  }, [panelStack, focusedPanelId, rightSidebar])
+
+  // =========================================================================
+  // ATOM SUBSCRIPTIONS FOR pushState (meaningful navigation)
+  // =========================================================================
+
+  // Panel stack changes: push history on add/remove/route change (NOT resize)
+  useEffect(() => {
+    let prevRoutes = store.get(panelStackAtom).map(p => p.route)
+    const unsub = store.sub(panelStackAtom, () => {
+      if (suppressPushRef.current || !initialRouteRestoredRef.current) return
+      const currRoutes = store.get(panelStackAtom).map(p => p.route)
+      if (currRoutes.length !== prevRoutes.length || !currRoutes.every((r, i) => r === prevRoutes[i])) {
+        if (!pendingPushRef.current) {
+          pendingPushRef.current = true
+          queueMicrotask(() => { pendingPushRef.current = false; syncUrlRef.current?.(true) })
+        }
+      }
+      prevRoutes = currRoutes
+    })
+    return unsub
+  }, [store])
+
+  // Focus changes: push history when active panel changes
+  useEffect(() => {
+    let prevFocusId = store.get(focusedPanelIdAtom)
+    const unsub = store.sub(focusedPanelIdAtom, () => {
+      if (suppressPushRef.current || !initialRouteRestoredRef.current) return
+      const newFocusId = store.get(focusedPanelIdAtom)
+      if (newFocusId !== prevFocusId) {
+        if (!pendingPushRef.current) {
+          pendingPushRef.current = true
+          queueMicrotask(() => { pendingPushRef.current = false; syncUrlRef.current?.(true) })
+        }
+        prevFocusId = newFocusId
+      }
+    })
+    return unsub
+  }, [store])
+
+  // Right sidebar changes: push history
+  const prevSidebarTypeRef = useRef(rightSidebar?.type)
+  useEffect(() => {
+    if (rightSidebar?.type === prevSidebarTypeRef.current) return
+    prevSidebarTypeRef.current = rightSidebar?.type
+    if (suppressPushRef.current) return
+    if (!initialRouteRestoredRef.current) return
+    syncUrl(true)
+  }, [rightSidebar, syncUrl])
+
+  // =========================================================================
+  // RECONCILE PANELS FROM URL PARAMS
+  // =========================================================================
+
+  /**
+   * Parse URL search params and reconcile the panel stack + sidebar.
+   * Uses reconcilePanelStackAtom for smart matching (preserves React keys).
+   */
+  const reconcileFromUrlParams = useCallback(
+    (params: URLSearchParams) => {
+      const initialRoute = params.get('route')
+      const sidebarParam = params.get('sidebar') || undefined
+      const panelsParam = params.get('panels')
+      const focusedIndexParam = params.get('fi')
+
+      // Restore right sidebar
+      if (sidebarParam) {
+        const parsed = parseRouteToNavigationState('allSessions', sidebarParam)
+        if (parsed?.rightSidebar) {
+          setRightSidebar(parsed.rightSidebar)
+        } else {
+          setRightSidebar(undefined)
+        }
+      } else {
+        setRightSidebar(undefined)
+      }
+
+      // Parse panel entries from URL
+      let entries: { route: ViewRoute; proportion: number }[] = []
+      let focusedIndex = 0
+
+      if (panelsParam) {
+        // Canonical format: ?panels= contains ALL panels, ?fi= is focused index.
+        // We intentionally no longer support older mixed route/panels formats.
+        entries = panelsParam.split(',').filter(Boolean).map(entry => {
+          const colonIdx = entry.lastIndexOf(':')
+          if (colonIdx > 0) {
+            const proportion = parseFloat(entry.slice(colonIdx + 1))
+            if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
+              return { route: entry.slice(0, colonIdx) as ViewRoute, proportion }
+            }
+          }
+          return { route: entry as ViewRoute, proportion: 0 }
+        })
+
+        const hasProportions = entries.some(e => e.proportion > 0)
+        if (!hasProportions) {
+          const equal = 1 / entries.length
+          entries.forEach(e => { e.proportion = equal })
+        } else {
+          const total = entries.reduce((s, e) => s + e.proportion, 0)
+          if (total > 0 && Math.abs(total - 1) > 0.001) {
+            entries.forEach(e => { e.proportion = e.proportion / total })
+          }
+        }
+
+        focusedIndex = focusedIndexParam != null ? (parseInt(focusedIndexParam, 10) || 0) : 0
+      } else if (initialRoute) {
+        // Single panel from ?route=
+        const navState = parseRouteToNavigationState(initialRoute)
+        if (navState) {
+          const resolved = resolveAutoSelectionRef.current(navState)
+          const finalRoute = buildRouteFromNavigationState(resolved) as ViewRoute
+          entries = [{ route: finalRoute, proportion: 1 }]
+        }
+      }
+
+      if (entries.length > 0) {
+        store.set(reconcilePanelStackAtom, { entries, focusedIndex })
+      }
+    },
+    [store]
+  )
+
+  // Keep ref fresh for use in event handlers / effects that capture stale closures
+  const reconcileFromUrlParamsRef = useRef(reconcileFromUrlParams)
+  useEffect(() => { reconcileFromUrlParamsRef.current = reconcileFromUrlParams }, [reconcileFromUrlParams])
 
   // =========================================================================
   // EMPTY SESSION CLEANUP (reactive — covers navigate, close tab, etc.)
@@ -433,10 +473,16 @@ export function NavigationProvider({
     if (isSessionsNavigation(navigationState) && navigationState.details) {
       setSession({ selected: navigationState.details.sessionId })
       if (workspaceId) {
-        storage.set(storage.KEYS.lastSelectedSessionId, navigationState.details.sessionId, workspaceId)
+        // Only persist if the session belongs to this workspace (prevents cross-workspace
+        // pollution during workspace switch, when workspaceId changed but navigationState
+        // still reflects the old workspace's focused panel)
+        const meta = store.get(sessionMetaMapAtom).get(navigationState.details.sessionId)
+        if (meta && meta.workspaceId === workspaceId) {
+          storage.set(storage.KEYS.lastSelectedSessionId, navigationState.details.sessionId, workspaceId)
+        }
       }
     }
-  }, [navigationState, setSession, workspaceId])
+  }, [navigationState, setSession, workspaceId, store])
 
   // =========================================================================
   // HELPERS
@@ -574,12 +620,16 @@ export function NavigationProvider({
     [store, workspaceId, getLastSelectedSessionId, getFirstSessionId, getFirstSourceSlug, getFirstSkillSlug]
   )
 
+  // Ref keeps resolveAutoSelection fresh for reconcileFromUrlParams (defined earlier in the file)
+  const resolveAutoSelectionRef = useRef(resolveAutoSelection)
+  useEffect(() => { resolveAutoSelectionRef.current = resolveAutoSelection }, [resolveAutoSelection])
+
   // =========================================================================
   // ACTION NAVIGATION
   // =========================================================================
 
   const handleActionNavigation = useCallback(
-    async (parsed: ParsedRoute, options?: { newPanel?: boolean }) => {
+    async (parsed: ParsedRoute, options?: { newPanel?: boolean; targetLaneId?: 'main' | 'rightPinned' }) => {
       if (!workspaceId) return
 
       switch (parsed.name) {
@@ -624,8 +674,12 @@ export function NavigationProvider({
             { kind: 'allSessions' }
 
           if (options?.newPanel) {
-            // Open the new session in a new panel (pushPanel auto-focuses it)
-            pushPanel({ route: routes.view.allSessions(session.id) as ViewRoute })
+            // Open the new session in a new panel using lane-aware routing (pushPanel auto-focuses it)
+            pushPanel({
+              route: routes.view.allSessions(session.id) as ViewRoute,
+              targetLaneId: options.targetLaneId,
+              intent: 'explicit',
+            })
           } else {
             // Navigate the focused panel to the new session
             const newState: NavigationState = {
@@ -756,9 +810,18 @@ export function NavigationProvider({
         return
       }
 
-      // For view routes with newPanel: push a panel (pushPanelAtom auto-focuses)
+      // For view routes with newPanel: push a panel using lane-aware routing.
+      //
+      // Important distinction:
+      // - explicit opens (intent='explicit') can target a specific lane
+      // - implicit navigation (updateFocusedPanelRouteAtom path) applies lock/fallback
+      // This mirrors VS Code-style "locked group" behavior.
       if (options?.newPanel) {
-        pushPanel({ route: route as ViewRoute })
+        pushPanel({
+          route: route as ViewRoute,
+          targetLaneId: options.targetLaneId,
+          intent: 'explicit',
+        })
         return
       }
 
@@ -793,159 +856,121 @@ export function NavigationProvider({
           storage.set(storage.KEYS.lastSelectedSessionId, resolvedState.details.sessionId, workspaceId)
         }
 
-        // Clear the restoring flag — user-initiated navigation overrides any pending restore
-        isRestoringHistoryRef.current = false
-
         // Update the focused panel's route (atom update is synchronous)
+        // The panelStack atom subscription detects the route change and calls syncUrl(true)
         store.set(updateFocusedPanelRouteAtom, finalRoute)
-
-        // Atom subscription already called pushSnapshot() synchronously.
-        // URL sync effect will fire on the next render.
       }
     },
     [isReady, handleActionNavigation, resolveAutoSelection, store, pushPanel, workspaceId]
   )
 
   // =========================================================================
-  // ROUTE VALIDATION (for history navigation)
-  // =========================================================================
-
-  const isRouteValid = useCallback((route: string): boolean => {
-    const navState = parseRouteToNavigationState(route)
-    if (!navState) return true
-
-    if (isSessionsNavigation(navState) && navState.details) {
-      const meta = sessionMetaMap.get(navState.details.sessionId)
-      return meta != null && !meta.hidden
-    }
-
-    if (isSourcesNavigation(navState) && navState.details) {
-      return sources.some(s => s.config.slug === navState.details!.sourceSlug)
-    }
-
-    if (isSkillsNavigation(navState) && navState.details) {
-      if (navState.details.type === 'skill') {
-        return skills.some(s => s.slug === navState.details!.skillSlug)
-      }
-      return true
-    }
-
-    return true
-  }, [sessionMetaMap, sources, skills])
-
-  /** Check if all panel routes in a snapshot are still valid */
-  const isSnapshotValid = useCallback((snapshot: NavigationSnapshot): boolean => {
-    return snapshot.panels.every(p => isRouteValid(p.route))
-  }, [isRouteValid])
-
-  // =========================================================================
-  // BACK / FORWARD
+  // BACK / FORWARD (browser history)
   // =========================================================================
 
   const goBack = useCallback(() => {
-    const currentIndex = historyIndexRef.current
-    if (currentIndex <= 0) return
-
-    // Find first valid snapshot going backwards, removing invalid ones
-    const invalidIndices: number[] = []
-    let targetIndex = -1
-
-    for (let i = currentIndex - 1; i >= 0; i--) {
-      if (isSnapshotValid(historyStackRef.current[i])) {
-        targetIndex = i
-        break
-      }
-      invalidIndices.push(i)
-    }
-
-    // Remove invalid entries (reverse order to preserve indices)
-    if (invalidIndices.length > 0) {
-      for (const idx of invalidIndices.sort((a, b) => b - a)) {
-        historyStackRef.current.splice(idx, 1)
-      }
-    }
-
-    // Adjust indices after removal
-    if (targetIndex >= 0) {
-      const removedBefore = invalidIndices.filter(i => i < targetIndex).length
-      targetIndex -= removedBefore
-    }
-    const removedBeforeCurrent = invalidIndices.filter(i => i < currentIndex).length
-    historyIndexRef.current = currentIndex - removedBeforeCurrent
-
-    if (targetIndex >= 0) {
-      historyIndexRef.current = targetIndex
-      restoreSnapshot(historyStackRef.current[targetIndex])
-    }
-
-    updateCanGoBackForward()
-  }, [isSnapshotValid, restoreSnapshot, updateCanGoBackForward])
+    history.back()
+  }, [])
 
   const goForward = useCallback(() => {
-    const currentIndex = historyIndexRef.current
-    const stackLength = historyStackRef.current.length
-    if (currentIndex >= stackLength - 1) return
+    history.forward()
+  }, [])
 
-    // Find first valid snapshot going forwards, removing invalid ones
-    const invalidIndices: number[] = []
-    let targetIndex = -1
+  // =========================================================================
+  // POPSTATE HANDLER (browser back/forward)
+  // =========================================================================
 
-    for (let i = currentIndex + 1; i < stackLength; i++) {
-      if (isSnapshotValid(historyStackRef.current[i])) {
-        targetIndex = i
-        break
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // Update sequence tracking
+      const eventSeq = event.state?.seq ?? 0
+      historySeqRef.current = eventSeq
+      updateCanGoBackForward()
+
+      // Read state from URL (the browser already navigated to it)
+      const params = new URLSearchParams(window.location.search)
+      const wsSlug = params.get('ws')
+
+      // Check if workspace changed
+      if (wsSlug && wsSlug !== workspaceSlug && onSwitchWorkspaceBySlug) {
+        // Workspace boundary crossed — trigger workspace switch
+        // The workspace switch effect will handle reconciliation
+        isPopstateSwitchRef.current = true
+        onSwitchWorkspaceBySlug(wsSlug)
+        return
       }
-      invalidIndices.push(i)
+
+      // Same workspace — reconcile panels from the URL
+      suppressPushRef.current = true
+      reconcileFromUrlParamsRef.current(params)
+      requestAnimationFrame(() => {
+        suppressPushRef.current = false
+      })
     }
 
-    // Remove invalid entries (reverse order to preserve indices)
-    if (invalidIndices.length > 0) {
-      for (const idx of invalidIndices.sort((a, b) => b - a)) {
-        historyStackRef.current.splice(idx, 1)
-      }
-    }
-
-    // Adjust target index after removal
-    if (targetIndex >= 0) {
-      targetIndex -= invalidIndices.length
-    }
-
-    if (targetIndex >= 0 && targetIndex < historyStackRef.current.length) {
-      historyIndexRef.current = targetIndex
-      restoreSnapshot(historyStackRef.current[targetIndex])
-    }
-
-    updateCanGoBackForward()
-  }, [isSnapshotValid, restoreSnapshot, updateCanGoBackForward])
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [workspaceSlug, onSwitchWorkspaceBySlug, updateCanGoBackForward])
 
   // =========================================================================
   // WORKSPACE SWITCH
   // =========================================================================
 
-  const previousWorkspaceIdRef = useRef<string | null>(null)
+  const previousWorkspaceSlugRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !workspaceSlug) return
 
-    if (previousWorkspaceIdRef.current !== null && previousWorkspaceIdRef.current !== workspaceId) {
-      // Clear history — old snapshots belong to previous workspace
-      historyStackRef.current = []
-      historyIndexRef.current = -1
-      setCanGoBack(false)
-      setCanGoForward(false)
-
-      // Close right sidebar
-      setRightSidebar(undefined)
-
-      // Close all panels except the first
-      store.set(closeAllOtherPanelsAtom)
-
-      // Reset initial route restoration for new workspace
-      initialRouteRestoredRef.current = false
+    if (previousWorkspaceSlugRef.current === null) {
+      // First mount — initial route restoration handles it
+      previousWorkspaceSlugRef.current = workspaceSlug
+      return
     }
 
-    previousWorkspaceIdRef.current = workspaceId
-  }, [workspaceId, store])
+    if (previousWorkspaceSlugRef.current === workspaceSlug) return
+    previousWorkspaceSlugRef.current = workspaceSlug
+
+    // Suppress pushState during reconciliation
+    suppressPushRef.current = true
+
+    if (isPopstateSwitchRef.current) {
+      // Popstate-triggered: URL is already correct, just reconcile from it
+      isPopstateSwitchRef.current = false
+      reconcileFromUrlParamsRef.current(new URLSearchParams(window.location.search))
+    } else {
+      // UI-triggered: load stored URL for the new workspace, push history entry
+      const savedSearch = storage.get<string>(storage.KEYS.workspaceUrl, '', workspaceSlug)
+
+      const url = new URL(window.location.href)
+      if (savedSearch) {
+        // Replace all params with the saved workspace's URL
+        url.search = savedSearch
+      } else {
+        // No saved state — default to allSessions
+        for (const key of [...url.searchParams.keys()]) {
+          url.searchParams.delete(key)
+        }
+        url.searchParams.set('ws', workspaceSlug)
+        url.searchParams.set('route', 'allSessions')
+      }
+
+      // Push a new history entry for the workspace switch
+      const seq = nextHistorySeqRef.current++
+      history.pushState({ seq }, '', url.toString())
+      historySeqRef.current = seq
+      historyMaxSeqRef.current = seq
+      updateCanGoBackForward()
+
+      // Reconcile panels from the new URL
+      reconcileFromUrlParamsRef.current(new URLSearchParams(url.search))
+    }
+
+    initialRouteRestoredRef.current = true
+
+    requestAnimationFrame(() => {
+      suppressPushRef.current = false
+    })
+  }, [workspaceId, workspaceSlug, store, updateCanGoBackForward])
 
   // =========================================================================
   // INITIAL ROUTE RESTORATION (CMD+R reload)
@@ -955,92 +980,28 @@ export function NavigationProvider({
     if (!isReady || !workspaceId || initialRouteRestoredRef.current) return
     initialRouteRestoredRef.current = true
 
+    // Suppress pushState during initial restoration
+    suppressPushRef.current = true
+
     const params = new URLSearchParams(window.location.search)
-    const initialRoute = params.get('route')
-    const sidebarParam = params.get('sidebar') || undefined
-    const panelsParam = params.get('panels')
-    const focusedIndexParam = params.get('fi')
 
-    // Restore right sidebar
-    if (sidebarParam) {
-      const parsed = parseRouteToNavigationState('allSessions', sidebarParam)
-      if (parsed?.rightSidebar) {
-        setRightSidebar(parsed.rightSidebar)
-      }
+    // Reconcile panels + sidebar from current URL
+    reconcileFromUrlParamsRef.current(params)
+
+    // If nothing was in the URL, navigate to default
+    if (!params.get('route') && !params.get('panels')) {
+      navigate(routes.view.allSessions())
     }
 
-    // Restore panels
-    if (panelsParam) {
-      const hasFocusedIndex = focusedIndexParam != null
-      const entries = panelsParam.split(',').filter(Boolean).map(entry => {
-        const colonIdx = entry.lastIndexOf(':')
-        if (colonIdx > 0) {
-          const proportion = parseFloat(entry.slice(colonIdx + 1))
-          if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
-            return { route: entry.slice(0, colonIdx) as ViewRoute, proportion }
-          }
-        }
-        return { route: entry as ViewRoute, proportion: 0 }
-      })
+    // Initialize history with seq=0 (replaceState so we don't create an extra entry)
+    history.replaceState({ seq: 0 }, '', window.location.href)
+    historySeqRef.current = 0
+    historyMaxSeqRef.current = 0
 
-      if (hasFocusedIndex) {
-        // New format: ?panels= contains ALL panels, ?fi= is the focused index
-        const hasProportions = entries.some(e => e.proportion > 0)
-        if (!hasProportions) {
-          const equal = 1 / entries.length
-          entries.forEach(e => { e.proportion = equal })
-        } else {
-          // Normalize proportions to sum to 1.0 (guards against malformed URLs)
-          const total = entries.reduce((s, e) => s + e.proportion, 0)
-          if (total > 0 && Math.abs(total - 1) > 0.001) {
-            entries.forEach(e => { e.proportion = e.proportion / total })
-          }
-        }
-        store.set(restorePanelStackAtom, entries)
-
-        // Restore focus
-        const fi = parseInt(focusedIndexParam!, 10) || 0
-        const stack = store.get(panelStackAtom)
-        const idx = Math.min(fi, stack.length - 1)
-        store.set(focusedPanelIdAtom, stack[idx]?.id ?? null)
-      } else {
-        // Old format: ?route= is panel[0], ?panels= are additional panels
-        const firstPanelRoute = initialRoute ?? 'allSessions'
-        const hasProportions = entries.some(e => e.proportion > 0)
-        const additionalPanelsProp = entries.reduce((s, e) => s + e.proportion, 0)
-
-        let allEntries: { route: ViewRoute; proportion: number }[]
-        if (hasProportions && additionalPanelsProp < 1) {
-          allEntries = [
-            { route: firstPanelRoute as ViewRoute, proportion: 1 - additionalPanelsProp },
-            ...entries,
-          ]
-        } else {
-          const equal = 1 / (1 + entries.length)
-          allEntries = [
-            { route: firstPanelRoute as ViewRoute, proportion: equal },
-            ...entries.map(e => ({ ...e, proportion: equal })),
-          ]
-        }
-        store.set(restorePanelStackAtom, allEntries)
-      }
-    } else if (initialRoute) {
-      // Single panel from ?route=
-      const navState = parseRouteToNavigationState(initialRoute)
-      if (navState) {
-        const resolved = resolveAutoSelection(navState)
-        const finalRoute = buildRouteFromNavigationState(resolved) as ViewRoute
-        store.set(restorePanelStackAtom, [{ route: finalRoute, proportion: 1 }])
-      } else {
-        navigate(initialRoute as Route)
-      }
-    }
-
-    // Initialize history stack with current state
     requestAnimationFrame(() => {
-      pushSnapshotRef.current?.()
+      suppressPushRef.current = false
     })
-  }, [isReady, workspaceId, navigate, resolveAutoSelection, store, pushSnapshot])
+  }, [isReady, workspaceId, navigate, store])
 
   // =========================================================================
   // PENDING NAVIGATION
@@ -1112,10 +1073,10 @@ export function NavigationProvider({
 
   useEffect(() => {
     const handleNavigateEvent = (event: Event) => {
-      const customEvent = event as CustomEvent<{ route: Route; newPanel?: boolean }>
+      const customEvent = event as CustomEvent<{ route: Route; newPanel?: boolean; targetLaneId?: 'main' | 'rightPinned' }>
       if (customEvent.detail?.route) {
-        const { route: r, newPanel } = customEvent.detail
-        navigate(r, newPanel ? { newPanel } : undefined)
+        const { route: r, newPanel, targetLaneId } = customEvent.detail
+        navigate(r, newPanel ? { newPanel, targetLaneId } : undefined)
       }
     }
 
@@ -1131,7 +1092,7 @@ export function NavigationProvider({
 
   const updateRightSidebar = useCallback((panel: RightSidebarPanel | undefined) => {
     setRightSidebar(panel)
-    // Snapshot push handled by the rightSidebar change effect
+    // pushState handled by the rightSidebar change effect
   }, [])
 
   const toggleRightSidebar = useCallback((panel?: RightSidebarPanel) => {

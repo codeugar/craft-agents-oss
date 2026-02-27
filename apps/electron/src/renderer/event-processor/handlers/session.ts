@@ -445,7 +445,11 @@ export function handleConnectionChanged(
 
   return {
     state: {
-      session: { ...session, llmConnection: event.connectionSlug },
+      session: {
+        ...session,
+        llmConnection: event.connectionSlug,
+        ...(event.supportsBranching !== undefined && { supportsBranching: event.supportsBranching }),
+      },
       streaming,
     },
     effects: [],

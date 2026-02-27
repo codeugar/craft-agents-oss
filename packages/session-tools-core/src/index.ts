@@ -183,6 +183,17 @@ export {
   UpdatePreferencesSchema,
   TransformDataSchema,
   RenderTemplateSchema,
+  // Browser tool schemas
+  BrowserNavigateSchema,
+  BrowserSnapshotSchema,
+  BrowserClickSchema,
+  BrowserFillSchema,
+  BrowserSelectSchema,
+  BrowserScreenshotSchema,
+  BrowserScrollSchema,
+  BrowserBackSchema,
+  BrowserForwardSchema,
+  BrowserEvaluateSchema,
   // Descriptions
   TOOL_DESCRIPTIONS,
   // Registry

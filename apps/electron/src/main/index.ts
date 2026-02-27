@@ -81,6 +81,7 @@ import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
 import { initializeBackendHostRuntime } from '@craft-agent/shared/agent/backend'
 import { setPowerShellValidatorRoot } from '@craft-agent/shared/agent'
 import { handleDeepLink } from './deep-link'
+import { BrowserPaneManager } from './browser-pane-manager'
 import { registerThumbnailScheme, registerThumbnailHandler } from './thumbnail-protocol'
 import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
 import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
@@ -135,6 +136,7 @@ const DEEPLINK_SCHEME = process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'
 
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
+let browserPaneManager: BrowserPaneManager | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -368,8 +370,12 @@ app.whenReady().then(async () => {
       }
     })
 
+    // Initialize browser pane manager
+    browserPaneManager = new BrowserPaneManager()
+    sessionManager.setBrowserPaneManager(browserPaneManager)
+
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager)
+    registerIpcHandlers(sessionManager, windowManager, browserPaneManager)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()
@@ -506,6 +512,11 @@ app.on('before-quit', async (event) => {
     }
     // Clean up SessionManager resources (file watchers, timers, etc.)
     sessionManager.cleanup()
+
+    // Clean up browser pane instances
+    if (browserPaneManager) {
+      browserPaneManager.destroyAll()
+    }
 
     // Stop all model refresh timers
     getModelRefreshService().stopAll()

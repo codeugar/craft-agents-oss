@@ -10,6 +10,13 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
 import { debug } from './debug.ts';
+import {
+  looksLikeBinary,
+  extractBase64Binary,
+  detectExtensionFromMagic,
+  saveBinaryResponse,
+  sanitizeFilename,
+} from './binary-detection.ts';
 
 // ============================================================
 // Constants (re-exported from summarize.ts for convenience)
@@ -220,22 +227,21 @@ export interface HandleLargeResponseResult {
 }
 
 /**
- * Full pipeline: save to disk, optionally summarize, format result message.
+ * Thin guard wrapper: returns the replacement text if the result is too large
+ * or contains binary data, or null if the result should be passed through as-is.
  *
- * Call this when a tool result exceeds TOKEN_LIMIT.
- * If `summarize` callback is provided and tokens are within MAX_SUMMARIZATION_INPUT,
- * it will be called with the built prompt. Otherwise falls back to preview.
+ * Accepts string | Buffer:
+ * - Buffer: binary detection on raw bytes (preserves data integrity for file saving).
+ *   Used by api-tools which has raw HTTP response buffers.
+ * - string: binary detection via Buffer conversion. Used by MCP pool and Claude SDK
+ *   where data is already a string.
  *
- * @returns Formatted result, or null if the text is not large enough to handle
- */
-/**
- * Thin guard wrapper: returns the replacement text if the result is too large,
- * or null if the result should be passed through as-is.
+ * Pipeline: binary check → (if text) size check → save + summarize.
  *
- * Shared by McpClientPool.callTool() and api-tools.ts.
+ * Shared by McpClientPool.callTool(), api-tools.ts, and claude-agent.ts.
  */
 export async function guardLargeResult(
-  text: string,
+  input: string | Buffer,
   opts: {
     sessionPath: string;
     toolName: string;
@@ -244,6 +250,39 @@ export async function guardLargeResult(
     summarize?: (prompt: string) => Promise<string | null>;
   }
 ): Promise<string | null> {
+  // 1. Binary detection — check before any text processing
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf-8');
+  if (looksLikeBinary(buffer)) {
+    debug('large-response', `${opts.toolName}: binary content detected (${buffer.length} bytes)`);
+    const ext = detectExtensionFromMagic(buffer) || '.bin';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeName = sanitizeFilename(opts.toolName);
+    const filename = `${safeName}_${timestamp}${ext}`;
+    const result = saveBinaryResponse(opts.sessionPath, filename, buffer, null);
+    if (result.type === 'file_download') {
+      return `[Binary content detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${ext.slice(1).toUpperCase() || 'unknown'}\n\nUse the Read tool or reference this path to work with the file.`;
+    }
+    return `[Binary content detected but save failed: ${result.error}]`;
+  }
+
+  // 2. Convert to string (no-op if already string, toString if Buffer that passed binary check)
+  const text = typeof input === 'string' ? input : buffer.toString('utf-8');
+
+  // 2b. Inline base64-encoded binary detection (data URLs and raw base64 blobs)
+  const base64Result = extractBase64Binary(text);
+  if (base64Result) {
+    debug('large-response', `${opts.toolName}: ${base64Result.source} binary detected (${base64Result.buffer.length} decoded bytes)`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safeName = sanitizeFilename(opts.toolName);
+    const filename = `${safeName}_${timestamp}${base64Result.ext}`;
+    const result = saveBinaryResponse(opts.sessionPath, filename, base64Result.buffer, base64Result.mimeType);
+    if (result.type === 'file_download') {
+      return `[Base64-encoded binary detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${base64Result.ext.slice(1).toUpperCase() || 'unknown'}\n\nThe tool result contained base64-encoded binary data which has been decoded and saved.`;
+    }
+    return `[Base64-encoded binary detected but save failed: ${result.error}]`;
+  }
+
+  // 3. Existing size check + summarize flow
   if (estimateTokens(text) <= TOKEN_LIMIT) return null;
   const result = await handleLargeResponse({
     text,

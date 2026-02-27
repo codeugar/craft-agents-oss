@@ -44,6 +44,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'isArchived', 'archivedAt',
   // Branching
   'branchFromMessageId',
+  'branchFromSdkSessionId',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -153,6 +154,8 @@ export interface SessionConfig {
   archivedAt?: number;
   /** Message ID this session was branched from (set when created via branching). */
   branchFromMessageId?: string;
+  /** Parent session's SDK session ID (for SDK-level fork via resume + forkSession). */
+  branchFromSdkSessionId?: string;
 }
 
 /**

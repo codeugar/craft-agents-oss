@@ -477,7 +477,7 @@ export type SessionEvent =
   | { type: 'sources_changed'; sessionId: string; enabledSourceSlugs: string[] }
   | { type: 'labels_changed'; sessionId: string; labels: string[] }
   // LLM connection events
-  | { type: 'connection_changed'; sessionId: string; connectionSlug: string }
+  | { type: 'connection_changed'; sessionId: string; connectionSlug: string; supportsBranching?: boolean }
   // Background task/shell events
   | { type: 'task_backgrounded'; sessionId: string; toolUseId: string; taskId: string; intent?: string; turnId?: string }
   | { type: 'shell_backgrounded'; sessionId: string; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }
@@ -836,6 +836,7 @@ export const IPC_CHANNELS = {
   BADGE_CLEAR: 'badge:clear',
   BADGE_SET_ICON: 'badge:setIcon',
   BADGE_DRAW: 'badge:draw',  // Broadcast: { count: number, iconDataUrl: string }
+  BADGE_DRAW_WINDOWS: 'badge:draw-windows',  // Broadcast: { count: number }
   WINDOW_FOCUS_STATE: 'window:focusState',  // Broadcast: boolean (isFocused)
   WINDOW_GET_FOCUS_STATE: 'window:getFocusState',
 
@@ -850,6 +851,30 @@ export const IPC_CHANNELS = {
   GITBASH_CHECK: 'gitbash:check',
   GITBASH_BROWSE: 'gitbash:browse',
   GITBASH_SET_PATH: 'gitbash:setPath',
+
+  // Browser pane management
+  BROWSER_PANE_CREATE: 'browser-pane:create',
+  BROWSER_PANE_DESTROY: 'browser-pane:destroy',
+  BROWSER_PANE_LIST: 'browser-pane:list',
+  BROWSER_PANE_NAVIGATE: 'browser-pane:navigate',
+  BROWSER_PANE_GO_BACK: 'browser-pane:go-back',
+  BROWSER_PANE_GO_FORWARD: 'browser-pane:go-forward',
+  BROWSER_PANE_RELOAD: 'browser-pane:reload',
+  BROWSER_PANE_STOP: 'browser-pane:stop',
+  BROWSER_PANE_ATTACH: 'browser-pane:attach',
+  BROWSER_PANE_DETACH: 'browser-pane:detach',
+  BROWSER_PANE_UPDATE_BOUNDS: 'browser-pane:update-bounds',
+  BROWSER_PANE_SNAPSHOT: 'browser-pane:snapshot',
+  BROWSER_PANE_CLICK: 'browser-pane:click',
+  BROWSER_PANE_FILL: 'browser-pane:fill',
+  BROWSER_PANE_SELECT: 'browser-pane:select',
+  BROWSER_PANE_SCREENSHOT: 'browser-pane:screenshot',
+  BROWSER_PANE_EVALUATE: 'browser-pane:evaluate',
+  BROWSER_PANE_SCROLL: 'browser-pane:scroll',
+  // Browser pane events (main → renderer)
+  BROWSER_PANE_STATE_CHANGED: 'browser-pane:state-changed',
+  BROWSER_PANE_REMOVED: 'browser-pane:removed',
+  BROWSER_PANE_INTERACTED: 'browser-pane:interacted',
 
   // Menu actions (renderer → main for window/app control)
   MENU_QUIT: 'menu:quit',
@@ -1146,6 +1171,7 @@ export interface ElectronAPI {
   clearBadgeCount(): Promise<void>
   setDockIconWithBadge(dataUrl: string): Promise<void>
   onBadgeDraw(callback: (data: { count: number; iconDataUrl: string }) => void): () => void
+  onBadgeDrawWindows(callback: (data: { count: number }) => void): () => void
   getWindowFocusState(): Promise<boolean>
   onWindowFocusChange(callback: (isFocused: boolean) => void): () => void
   onNotificationNavigate(callback: (data: { workspaceId: string; sessionId: string }) => void): () => void
@@ -1181,6 +1207,24 @@ export interface ElectronAPI {
   menuCopy(): Promise<void>
   menuPaste(): Promise<void>
   menuSelectAll(): Promise<void>
+
+  // Browser pane management
+  browserPane: {
+    create(id?: string): Promise<string>
+    destroy(id: string): Promise<void>
+    list(): Promise<BrowserInstanceInfo[]>
+    navigate(id: string, url: string): Promise<{ url: string; title: string }>
+    goBack(id: string): Promise<void>
+    goForward(id: string): Promise<void>
+    reload(id: string): Promise<void>
+    stop(id: string): Promise<void>
+    attach(id: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+    detach(id: string): Promise<void>
+    updateBounds(id: string, bounds: { x: number; y: number; width: number; height: number }): Promise<void>
+    onStateChanged(callback: (info: BrowserInstanceInfo) => void): () => void
+    onRemoved(callback: (id: string) => void): () => void
+    onInteracted(callback: (id: string) => void): () => void
+  }
 
   // LLM Connections (provider configurations)
   listLlmConnections(): Promise<LlmConnection[]>
@@ -1338,6 +1382,34 @@ export interface SettingsNavigationState {
 }
 
 /**
+ * Browser pane instance info (synced from main process)
+ */
+export interface BrowserInstanceInfo {
+  id: string
+  url: string
+  title: string
+  favicon: string | null
+  isLoading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  boundSessionId: string | null
+}
+
+/**
+ * Browser navigation state.
+ *
+ * The route still lives in the panel stack for focus/history semantics,
+ * but native browser rendering is hosted by the dedicated right-pinned
+ * browser host lane in AppShell for resize stability.
+ */
+export interface BrowserNavigationState {
+  navigator: 'browser'
+  instanceId: string
+  /** Optional right sidebar panel state */
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Skills navigation state - shows SkillsListPanel in navigator
  */
 export interface SkillsNavigationState {
@@ -1361,6 +1433,7 @@ export type NavigationState =
   | SourcesNavigationState
   | SettingsNavigationState
   | SkillsNavigationState
+  | BrowserNavigationState
 
 /**
  * Type guard to check if state is sessions navigation
@@ -1391,6 +1464,13 @@ export const isSkillsNavigation = (
 ): state is SkillsNavigationState => state.navigator === 'skills'
 
 /**
+ * Type guard to check if state is browser navigation
+ */
+export const isBrowserNavigation = (
+  state: NavigationState
+): state is BrowserNavigationState => state.navigator === 'browser'
+
+/**
  * Default navigation state - allSessions with no selection
  */
 export const DEFAULT_NAVIGATION_STATE: NavigationState = {
@@ -1417,6 +1497,9 @@ export const getNavigationStateKey = (state: NavigationState): string => {
   }
   if (state.navigator === 'settings') {
     return `settings:${state.subpage}`
+  }
+  if (isBrowserNavigation(state)) {
+    return `browser/${state.instanceId}`
   }
   // Chats
   const f = state.filter
@@ -1462,6 +1545,14 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
     const subpage = key.slice(9)
     if (isValidSettingsSubpage(subpage)) {
       return { navigator: 'settings', subpage }
+    }
+  }
+
+  // Handle browser
+  if (key.startsWith('browser/')) {
+    const instanceId = key.slice(8)
+    if (instanceId) {
+      return { navigator: 'browser' as const, instanceId } as BrowserNavigationState
     }
   }
 

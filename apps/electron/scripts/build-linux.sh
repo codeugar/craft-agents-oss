@@ -129,7 +129,7 @@ echo "Copying interceptor..."
 mkdir -p "$ELECTRON_DIR/packages/shared/src"
 cp "$INTERCEPTOR_SOURCE" "$ELECTRON_DIR/packages/shared/src/"
 # Also copy dependencies imported by the interceptor at runtime
-for dep in interceptor-common.ts feature-flags.ts; do
+for dep in interceptor-common.ts feature-flags.ts interceptor-request-utils.ts; do
   if [ -f "$ROOT_DIR/packages/shared/src/$dep" ]; then
     cp "$ROOT_DIR/packages/shared/src/$dep" "$ELECTRON_DIR/packages/shared/src/"
   fi

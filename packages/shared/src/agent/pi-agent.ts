@@ -181,6 +181,10 @@ export class PiAgent extends BaseAgent {
     const modelDef = getModelById(resolvedModel);
     super(config, resolvedModel, modelDef?.contextWindow);
 
+    // Pi session resume works, but SDK-level branch/fork semantics are not implemented yet.
+    // Keep this false so UI and runtime capabilities stay in sync.
+    this._supportsBranching = false;
+
     this.piSessionId = config.session?.sdkSessionId || null;
     this.adapter = new PiEventAdapter();
     if (modelDef?.contextWindow) {
@@ -334,6 +338,8 @@ export class PiAgent extends BaseAgent {
       authType: this.config.authType,
       workspaceId: this.config.workspace.id,
       piAuth,
+      // Branch params for SDK-level fork (resume parent + forkSession)
+      branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
     });
 
     // Wait for subprocess to report ready

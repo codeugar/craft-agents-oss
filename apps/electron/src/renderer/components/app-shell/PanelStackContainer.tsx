@@ -20,7 +20,7 @@ import { useRef, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
 import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
-import { panelStackAtom, focusedPanelIdAtom, focusedPanelIndexAtom } from '@/atoms/panel-stack'
+import { panelStackAtom, focusedPanelIdAtom } from '@/atoms/panel-stack'
 import { PanelSlot } from './PanelSlot'
 import { PanelResizeSash } from './PanelResizeSash'
 import { PANEL_GAP, PANEL_EDGE_INSET, RADIUS_EDGE, RADIUS_INNER } from './panel-constants'
@@ -49,18 +49,22 @@ export function PanelStackContainer({
 }: PanelStackContainerProps) {
   const panelStack = useAtomValue(panelStackAtom)
   const focusedPanelId = useAtomValue(focusedPanelIdAtom)
-  const focusedIndex = useAtomValue(focusedPanelIndexAtom)
+
+  // Browser (rightPinned lane) is hosted by AppShell in a dedicated full-height lane,
+  // so only non-rightPinned entries are rendered as center content panels here.
+  const contentPanels = panelStack.filter((entry) => entry.laneId !== 'rightPinned')
+
   const scrollRef = useRef<HTMLDivElement>(null)
-  const prevCountRef = useRef(panelStack.length)
+  const prevCountRef = useRef(contentPanels.length)
 
   const hasSidebar = sidebarWidth > 0
   const hasNavigator = navigatorWidth > 0
-  const isMultiPanel = panelStack.length > 1
+  const isMultiPanel = contentPanels.length > 1
   const isLeftEdge = !hasSidebar && !hasNavigator
 
   // Auto-scroll to newly pushed content panel
   useEffect(() => {
-    if (panelStack.length > prevCountRef.current && scrollRef.current) {
+    if (contentPanels.length > prevCountRef.current && scrollRef.current) {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({
           left: scrollRef.current.scrollWidth,
@@ -68,8 +72,8 @@ export function PanelStackContainer({
         })
       })
     }
-    prevCountRef.current = panelStack.length
-  }, [panelStack.length])
+    prevCountRef.current = contentPanels.length
+  }, [contentPanels.length])
 
   const transition = isResizing ? { duration: 0 } : PANEL_SPRING
 
@@ -144,18 +148,18 @@ export function PanelStackContainer({
         </motion.div>
 
         {/* === CONTENT PANELS WITH SASHES === */}
-        {panelStack.length === 0 ? (
+        {contentPanels.length === 0 ? (
           <div className="flex-1 flex items-center justify-center" />
         ) : (
-          panelStack.map((entry, index) => (
+          contentPanels.map((entry, index) => (
             <PanelSlot
               key={entry.id}
               entry={entry}
-              isOnly={panelStack.length === 1}
-              isFocusedPanel={isMultiPanel ? index === focusedIndex : true}
+              isOnly={contentPanels.length === 1}
+              isFocusedPanel={isMultiPanel ? entry.id === focusedPanelId : true}
               isSidebarAndNavigatorHidden={isSidebarAndNavigatorHidden}
               isAtLeftEdge={index === 0 && isLeftEdge}
-              isAtRightEdge={index === panelStack.length - 1 && !isRightSidebarVisible}
+              isAtRightEdge={index === contentPanels.length - 1 && !isRightSidebarVisible}
               proportion={entry.proportion}
               sash={index > 0 ? (
                 <PanelResizeSash

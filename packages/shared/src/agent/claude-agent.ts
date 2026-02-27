@@ -326,6 +326,7 @@ export class ClaudeAgent extends BaseAgent {
   private currentQueryAbortController: AbortController | null = null;
   private lastAbortReason: AbortReason | null = null;
   private sessionId: string | null = null;
+  private branchFromSdkSessionId: string | null = null;
   private isHeadless: boolean = false;
   private pendingPermissions: Map<string, PendingPermission> = new Map();
   // Permission whitelists are now managed by this.permissionManager (inherited from BaseAgent)
@@ -438,6 +439,10 @@ export class ClaudeAgent extends BaseAgent {
     // Initialize sessionId from session config for conversation resumption
     if (config.session?.sdkSessionId) {
       this.sessionId = config.session.sdkSessionId;
+    }
+    // Initialize branch params for SDK-level fork (resume parent + forkSession)
+    if (config.session?.branchFromSdkSessionId) {
+      this.branchFromSdkSessionId = config.session.branchFromSdkSessionId;
     }
 
     // Initialize permission mode state with callbacks
@@ -1024,7 +1029,12 @@ export class ClaudeAgent extends BaseAgent {
         })(),
         // Continue from previous session if we have one (enables conversation history & auto compaction)
         // Skip resume on retry (after session expiry) to start fresh
-        ...(!_isRetry && this.sessionId ? { resume: this.sessionId } : {}),
+        // For branched sessions: fork the parent session so the agent has full conversation context
+        ...(!_isRetry && this.sessionId
+          ? { resume: this.sessionId }
+          : !_isRetry && this.branchFromSdkSessionId
+            ? { resume: this.branchFromSdkSessionId, forkSession: true }
+            : {}),
         mcpServers,
         // NOTE: This callback is NOT called by the SDK because we set `permissionMode: 'bypassPermissions'` above.
         // All permission logic is handled via the PreToolUse hook instead (see hooks.PreToolUse above).
@@ -1180,11 +1190,16 @@ export class ClaudeAgent extends BaseAgent {
               this.resetPrerequisiteState();
             }
 
-            // Intercept large Bash results — save to disk and summarize
-            if (event.type === 'tool_result' && event.toolName === 'Bash' && !event.isError && event.result) {
+            // Intercept large or binary tool results — save to disk and/or summarize
+            // Skip for image content blocks (e.g. browser_screenshot) — the SDK sends
+            // the image directly to the API; the serialized JSON here is just for display
+            // and would waste an LLM summarization call on base64 gibberish.
+            const hasImageContent = event.type === 'tool_result' && event.result
+              && event.result.includes('"type":"image"');
+            if (event.type === 'tool_result' && !event.isError && event.result && !hasImageContent) {
               const guarded = await guardLargeResult(event.result, {
                 sessionPath: metadataSessionDir,
-                toolName: 'Bash',
+                toolName: event.toolName || 'unknown',
                 input: event.input,
                 summarize: summarizeCallback,
               });

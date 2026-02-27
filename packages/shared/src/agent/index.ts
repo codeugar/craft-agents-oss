@@ -19,8 +19,10 @@ export {
   // Callback registry for session-scoped tool notifications
   registerSessionScopedToolCallbacks,
   unregisterSessionScopedToolCallbacks,
+  mergeSessionScopedToolCallbacks,
   // Types
   type SessionScopedToolCallbacks,
+  type BrowserPaneFns,
   // Auth request types (unified auth flow)
   type AuthRequest,
   type AuthRequestType,

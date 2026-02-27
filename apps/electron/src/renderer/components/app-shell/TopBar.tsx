@@ -36,6 +36,7 @@ import type { MenuItem, MenuSection, SettingsMenuItem } from "../../../shared/me
 import { SETTINGS_ICONS } from "../icons/SettingsIcons"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { useEffect, useState } from "react"
+import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 
 // --- Menu rendering (moved from AppMenu) ---
 
@@ -141,7 +142,9 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
-  onAddPanel: () => void
+  onAddSessionPanel: () => void
+  onAddBrowserPanel: () => void
+  focusedRoute?: string | null
 }
 
 export function TopBar({
@@ -158,7 +161,9 @@ export function TopBar({
   canGoForward,
   onToggleSidebar,
   onToggleFocusMode,
-  onAddPanel,
+  onAddSessionPanel,
+  onAddBrowserPanel,
+  focusedRoute,
 }: TopBarProps) {
   const [isDebugMode, setIsDebugMode] = useState(false)
 
@@ -347,16 +352,31 @@ export function TopBar({
         </div>
       </div>
 
-      {/* === RIGHT: Add Panel === */}
+      {/* === RIGHT: Browser Tabs + Add Panel === */}
       <div className="pointer-events-auto titlebar-no-drag flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <TopBarButton onClick={onAddPanel} aria-label="Add panel">
-              <Icons.Plus className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">New Panel</TooltipContent>
-        </Tooltip>
+        <BrowserTabStrip focusedRoute={focusedRoute} />
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <TopBarButton aria-label="Add panel menu">
+                  <Icons.Plus className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
+                </TopBarButton>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New Panel</TooltipContent>
+          </Tooltip>
+          <StyledDropdownMenuContent align="end" minWidth="min-w-56">
+            <StyledDropdownMenuItem onClick={onAddSessionPanel}>
+              <SquarePenRounded className="h-3.5 w-3.5" />
+              New Session in Panel
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
+              <Icons.Globe className="h-3.5 w-3.5" />
+              New Browser in Panel
+            </StyledDropdownMenuItem>
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   )

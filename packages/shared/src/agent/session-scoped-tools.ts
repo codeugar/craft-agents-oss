@@ -33,6 +33,7 @@ import {
 } from '@craft-agent/session-tools-core';
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { createSpawnSessionTool, type SpawnSessionFn } from './spawn-session-tool.ts';
+import { createBrowserTools, type BrowserPaneFns } from './browser-tools.ts';
 
 // Re-export types for backward compatibility
 export type {
@@ -49,6 +50,9 @@ export type {
   SlackService,
   MicrosoftService,
 } from '@craft-agent/session-tools-core';
+
+// Re-export browser pane types for session manager wiring
+export type { BrowserPaneFns } from './browser-tools.ts';
 
 // ============================================================
 // Session-Scoped Tool Callbacks
@@ -81,6 +85,13 @@ export interface SessionScopedToolCallbacks {
    * Each agent backend delegates to its onSpawnSession callback.
    */
   spawnSessionFn?: SpawnSessionFn;
+
+  /**
+   * Browser pane functions for browser_* tools.
+   * Set by the Electron session manager — wraps BrowserPaneManager
+   * with the session's bound browser instance.
+   */
+  browserPaneFns?: BrowserPaneFns;
 }
 
 // Registry of callbacks keyed by sessionId
@@ -95,6 +106,20 @@ export function registerSessionScopedToolCallbacks(
 ): void {
   sessionScopedToolCallbackRegistry.set(sessionId, callbacks);
   debug('session-scoped-tools', `Registered callbacks for session ${sessionId}`);
+}
+
+/**
+ * Merge additional callbacks into an existing session's callback set.
+ * Used by the Electron session manager to add browser pane functions
+ * after the agent has already registered its core callbacks.
+ */
+export function mergeSessionScopedToolCallbacks(
+  sessionId: string,
+  callbacks: Partial<SessionScopedToolCallbacks>
+): void {
+  const existing = sessionScopedToolCallbackRegistry.get(sessionId) ?? {};
+  sessionScopedToolCallbackRegistry.set(sessionId, { ...existing, ...callbacks });
+  debug('session-scoped-tools', `Merged callbacks for session ${sessionId}`);
 }
 
 /**
@@ -282,6 +307,17 @@ export function getSessionScopedTools(
       getSpawnSessionFn: () => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         return callbacks?.spawnSessionFn;
+      },
+    }),
+  );
+
+  // Add browser_* tools — backend-specific (requires BrowserPaneManager in Electron)
+  tools.push(
+    ...createBrowserTools({
+      sessionId,
+      getBrowserPaneFns: () => {
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        return callbacks?.browserPaneFns;
       },
     }),
   );

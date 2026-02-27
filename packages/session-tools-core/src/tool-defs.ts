@@ -126,6 +126,39 @@ export const RenderTemplateSchema = z.object({
   data: z.record(z.string(), z.unknown()).describe('JSON data to render into the template'),
 });
 
+// Browser tool schemas (backend-specific — requires BrowserPaneManager in Electron)
+export const BrowserNavigateSchema = z.object({
+  url: z.string().describe('URL to navigate to (e.g., "https://example.com" or "example.com")'),
+});
+
+export const BrowserClickSchema = z.object({
+  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e1")'),
+});
+
+export const BrowserFillSchema = z.object({
+  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e5")'),
+  value: z.string().describe('Text to type into the element'),
+});
+
+export const BrowserSelectSchema = z.object({
+  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e3")'),
+  value: z.string().describe('Option value to select'),
+});
+
+export const BrowserScrollSchema = z.object({
+  direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction'),
+  amount: z.number().optional().describe('Scroll amount in pixels (default: 500)'),
+});
+
+export const BrowserEvaluateSchema = z.object({
+  expression: z.string().describe('JavaScript expression to evaluate in the page context'),
+});
+
+export const BrowserSnapshotSchema = z.object({});
+export const BrowserScreenshotSchema = z.object({});
+export const BrowserBackSchema = z.object({});
+export const BrowserForwardSchema = z.object({});
+
 export const SpawnSessionSchema = z.object({
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
@@ -279,6 +312,48 @@ Use this when a source provides HTML templates for rich rendering of its data (e
 
 Templates use Mustache syntax — the tool handles rendering and writes the output HTML to the session data folder.`,
 
+  browser_navigate: `Navigate the built-in browser to a URL.
+
+The browser pane is a real Chromium browser embedded in the app. Use this to load web pages for inspection, testing, or data extraction.
+
+Returns the final URL and page title after navigation completes.`,
+
+  browser_snapshot: `Get an accessibility tree snapshot of the current browser page.
+
+Returns a structured list of interactive elements (buttons, links, inputs, etc.) and content nodes (headings, paragraphs, images) with ref IDs like @e1, @e2.
+
+Use these refs with browser_click and browser_fill to interact with elements. The snapshot is the primary way to understand page structure — prefer it over screenshots for element interaction.`,
+
+  browser_click: `Click an element in the browser by its ref ID (e.g., @e1).
+
+Get refs from browser_snapshot first. This performs a real mouse click at the element's center coordinates.`,
+
+  browser_fill: `Fill a text input or textarea in the browser by its ref ID.
+
+Clears the existing value first, then types the new value character by character. Get refs from browser_snapshot first.`,
+
+  browser_select: `Select an option in a <select> dropdown by its ref ID.
+
+Pass the option's value attribute. Get refs from browser_snapshot first.`,
+
+  browser_screenshot: `Take a screenshot of the current browser page.
+
+Returns the screenshot as a base64-encoded PNG. Use browser_snapshot instead when you need to interact with elements — screenshots are better for visual verification.`,
+
+  browser_scroll: `Scroll the browser page in a given direction.
+
+Useful for revealing content below the fold before taking a snapshot. Default scroll amount is 500 pixels.`,
+
+  browser_back: `Navigate the browser back to the previous page in history.`,
+
+  browser_forward: `Navigate the browser forward to the next page in history.`,
+
+  browser_evaluate: `Execute JavaScript in the browser page and return the result.
+
+Use this for advanced interactions not covered by other browser tools, like reading computed styles, extracting data from the DOM, or triggering custom events.
+
+The expression is evaluated in the page context. Return values are serialized to JSON.`,
+
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)
 - Structured output: JSON schema compliance via prompt instructions
@@ -336,6 +411,17 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'render_template', description: TOOL_DESCRIPTIONS.render_template, inputSchema: RenderTemplateSchema, handler: handleRenderTemplate },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, handler: null },
+  // Browser tools (backend-specific — requires BrowserPaneManager in Electron)
+  { name: 'browser_navigate', description: TOOL_DESCRIPTIONS.browser_navigate, inputSchema: BrowserNavigateSchema, handler: null },
+  { name: 'browser_snapshot', description: TOOL_DESCRIPTIONS.browser_snapshot, inputSchema: BrowserSnapshotSchema, handler: null },
+  { name: 'browser_click', description: TOOL_DESCRIPTIONS.browser_click, inputSchema: BrowserClickSchema, handler: null },
+  { name: 'browser_fill', description: TOOL_DESCRIPTIONS.browser_fill, inputSchema: BrowserFillSchema, handler: null },
+  { name: 'browser_select', description: TOOL_DESCRIPTIONS.browser_select, inputSchema: BrowserSelectSchema, handler: null },
+  { name: 'browser_screenshot', description: TOOL_DESCRIPTIONS.browser_screenshot, inputSchema: BrowserScreenshotSchema, handler: null },
+  { name: 'browser_scroll', description: TOOL_DESCRIPTIONS.browser_scroll, inputSchema: BrowserScrollSchema, handler: null },
+  { name: 'browser_back', description: TOOL_DESCRIPTIONS.browser_back, inputSchema: BrowserBackSchema, handler: null },
+  { name: 'browser_forward', description: TOOL_DESCRIPTIONS.browser_forward, inputSchema: BrowserForwardSchema, handler: null },
+  { name: 'browser_evaluate', description: TOOL_DESCRIPTIONS.browser_evaluate, inputSchema: BrowserEvaluateSchema, handler: null },
 ];
 
 // ============================================================

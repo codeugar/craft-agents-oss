@@ -14,6 +14,13 @@
 import * as React from 'react'
 import { ChevronRight } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  StyledContextMenuContent,
+  StyledContextMenuItem,
+  StyledContextMenuSeparator,
+} from '@/components/ui/styled-context-menu'
 import { cn } from '@/lib/utils'
 
 // ============================================================================
@@ -25,10 +32,12 @@ export interface EntityListGroup<T> {
   key: string
   /** Label shown in the section header */
   label: string
-  /** Items in this group */
+  /** Items in this group (empty array for collapsed groups — items are excluded from the data pipeline) */
   items: T[]
   /** Whether this group supports collapse/expand (default: false) */
   collapsible?: boolean
+  /** Number of hidden items when collapsed. Present on collapsed placeholder groups (items will be []). */
+  collapsedCount?: number
 }
 
 export interface EntityListProps<T> {
@@ -50,6 +59,8 @@ export interface EntityListProps<T> {
   containerRef?: React.Ref<HTMLDivElement>
   /** Props spread on the inner list container (role, aria-label, data-focus-zone) */
   containerProps?: Record<string, string>
+  /** Ref to the ScrollArea viewport element (for scroll-based pagination) */
+  viewportRef?: React.RefObject<HTMLDivElement>
   /** Additional ScrollArea class */
   scrollAreaClassName?: string
   className?: string
@@ -57,6 +68,10 @@ export interface EntityListProps<T> {
   collapsedGroups?: Set<string>
   /** Called when a collapsible group header is clicked */
   onToggleCollapse?: (groupKey: string) => void
+  /** Collapse all collapsible groups */
+  onCollapseAll?: () => void
+  /** Expand all collapsible groups */
+  onExpandAll?: () => void
 }
 
 // ============================================================================
@@ -79,27 +94,48 @@ function CollapsibleGroupHeader({
   isCollapsed,
   itemCount,
   onToggle,
+  onCollapseAll,
+  onExpandAll,
 }: {
   label: string
   isCollapsed: boolean
   itemCount: number
   onToggle: () => void
+  onCollapseAll?: () => void
+  onExpandAll?: () => void
 }) {
   return (
-    <button
-      onClick={onToggle}
-      className="w-full py-2 px-4 flex items-center gap-1.5 hover:bg-foreground/5 transition-colors cursor-pointer"
-    >
-      <ChevronRight
-        className={cn(
-          "h-3 w-3 text-muted-foreground/60 transition-transform",
-          !isCollapsed && "rotate-90"
-        )}
-      />
-      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}{isCollapsed && <> · <span className="text-muted-foreground/50">{itemCount}</span></>}
-      </span>
-    </button>
+    <ContextMenu modal>
+      <ContextMenuTrigger asChild>
+        <button
+          onClick={onToggle}
+          className="w-full py-2 px-4 flex items-center gap-1.5 cursor-pointer group/header relative"
+        >
+          <div className="absolute inset-y-0.5 left-2 right-2 rounded-[6px] group-hover/header:bg-foreground/2 transition-colors pointer-events-none" />
+          <ChevronRight
+            className={cn(
+              "h-3 w-3 text-muted-foreground/60 transition-transform relative",
+              !isCollapsed && "rotate-90"
+            )}
+          />
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground relative">
+            {label}{isCollapsed && <> · <span className="text-muted-foreground/50">{itemCount}</span></>}
+          </span>
+        </button>
+      </ContextMenuTrigger>
+      <StyledContextMenuContent>
+        <StyledContextMenuItem onClick={onToggle}>
+          {isCollapsed ? 'Expand' : 'Collapse'}
+        </StyledContextMenuItem>
+        <StyledContextMenuSeparator />
+        <StyledContextMenuItem onClick={onCollapseAll}>
+          Collapse All
+        </StyledContextMenuItem>
+        <StyledContextMenuItem onClick={onExpandAll}>
+          Expand All
+        </StyledContextMenuItem>
+      </StyledContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -117,10 +153,13 @@ export function EntityList<T>({
   footer,
   containerRef,
   containerProps,
+  viewportRef,
   scrollAreaClassName,
   className,
   collapsedGroups,
   onToggleCollapse,
+  onCollapseAll,
+  onExpandAll,
 }: EntityListProps<T>) {
   // Determine if we have content
   const hasGroups = groups && groups.length > 0
@@ -140,7 +179,7 @@ export function EntityList<T>({
   return (
     <div className={cn('flex flex-col flex-1 min-h-0', className)}>
       {header}
-      <ScrollArea className={cn('flex-1', scrollAreaClassName)}>
+      <ScrollArea className={cn('flex-1', scrollAreaClassName)} viewportRef={viewportRef}>
         <div
           ref={containerRef}
           className="flex flex-col pb-2"
@@ -157,13 +196,15 @@ export function EntityList<T>({
                         <CollapsibleGroupHeader
                           label={group.label}
                           isCollapsed={!!isCollapsed}
-                          itemCount={group.items.length}
+                          itemCount={isCollapsed ? (group.collapsedCount ?? 0) : group.items.length}
                           onToggle={() => onToggleCollapse(group.key)}
+                          onCollapseAll={onCollapseAll}
+                          onExpandAll={onExpandAll}
                         />
                       ) : (
                         <SectionHeader label={group.label} />
                       )}
-                      {!isCollapsed && group.items.map((item, indexInGroup) =>
+                      {group.items.map((item, indexInGroup) =>
                         <React.Fragment key={getKey(item)}>
                           {renderItem(item, indexInGroup, indexInGroup === 0)}
                         </React.Fragment>

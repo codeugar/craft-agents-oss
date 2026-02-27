@@ -161,6 +161,10 @@ export const routes = {
       subpage
         ? `settings/${subpage}` as const
         : 'settings' as const,
+
+    /** Browser pane view */
+    browser: (instanceId: string) =>
+      `browser/${instanceId}` as const,
   },
 } as const
 

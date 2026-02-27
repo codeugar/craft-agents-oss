@@ -303,6 +303,7 @@ export interface LLMConnectionChangedEvent {
   type: 'connection_changed'
   sessionId: string
   connectionSlug: string
+  supportsBranching?: boolean
 }
 
 /**

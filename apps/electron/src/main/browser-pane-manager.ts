@@ -1,0 +1,493 @@
+/**
+ * BrowserPaneManager
+ *
+ * Central class that owns all browser instances as WebContentsView objects.
+ * Browser lifecycle is decoupled from panel visibility — instances keep
+ * running when removed from the window's view hierarchy.
+ *
+ * Session partition: all instances share `persist:browser-pane` for a
+ * unified cookie store, isolated from the app's own renderer session.
+ */
+
+import { WebContentsView, BrowserWindow, session, type Rectangle, type Session as ElectronSession } from 'electron'
+import { mainLog } from './logger'
+import { BrowserCDP, type AccessibilitySnapshot } from './browser-cdp'
+import type { BrowserInstanceInfo } from '../shared/types'
+
+export type { BrowserInstanceInfo }
+
+const SESSION_PARTITION = 'persist:browser-pane'
+
+interface BrowserInstance {
+  id: string
+  view: WebContentsView
+  cdp: BrowserCDP
+  currentUrl: string
+  title: string
+  favicon: string | null
+  isLoading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  attachedWindow: BrowserWindow | null
+  bounds: Rectangle | null
+  boundSessionId: string | null
+}
+
+let instanceCounter = 0
+
+export class BrowserPaneManager {
+  private instances: Map<string, BrowserInstance> = new Map()
+  private stateChangeCallback: ((info: BrowserInstanceInfo) => void) | null = null
+  private removedCallback: ((id: string) => void) | null = null
+  private interactedCallback: ((id: string) => void) | null = null
+  private partitionPermissionsInitialized = false
+
+  /**
+   * Register a callback for browser state changes (forwarded to renderer via IPC)
+   */
+  onStateChange(callback: (info: BrowserInstanceInfo) => void): void {
+    this.stateChangeCallback = callback
+  }
+
+  /**
+   * Register a callback when a browser instance is removed.
+   */
+  onRemoved(callback: (id: string) => void): void {
+    this.removedCallback = callback
+  }
+
+  /**
+   * Register a callback when a browser instance receives direct interaction/focus.
+   */
+  onInteracted(callback: (id: string) => void): void {
+    this.interactedCallback = callback
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
+  createInstance(id?: string): string {
+    const instanceId = id || `browser-${++instanceCounter}`
+
+    // Idempotent create: if caller provides an existing ID, return it.
+    // This prevents accidental overwrite/leaks from duplicate creates.
+    if (this.instances.has(instanceId)) {
+      mainLog.warn(`[browser-pane] Instance already exists, reusing: ${instanceId}`)
+      return instanceId
+    }
+
+    const ses = session.fromPartition(SESSION_PARTITION)
+    this.setupSessionPermissions(ses)
+
+    const view = new WebContentsView({
+      webPreferences: {
+        partition: SESSION_PARTITION,
+        session: ses,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+
+    const cdp = new BrowserCDP(view.webContents)
+
+    const instance: BrowserInstance = {
+      id: instanceId,
+      view,
+      cdp,
+      currentUrl: 'about:blank',
+      title: 'New Tab',
+      favicon: null,
+      isLoading: false,
+      canGoBack: false,
+      canGoForward: false,
+      attachedWindow: null,
+      bounds: null,
+      boundSessionId: null,
+    }
+
+    // Reduce obvious Electron fingerprint in UA string (helps with bot heuristics on some providers).
+    const defaultUa = view.webContents.userAgent || ''
+    const sanitizedUa = defaultUa.replace(/\sElectron\/[^\s]+/g, '')
+    if (sanitizedUa && sanitizedUa !== defaultUa) {
+      view.webContents.setUserAgent(sanitizedUa)
+    }
+
+    this.setupWebContentsListeners(instance)
+    this.instances.set(instanceId, instance)
+    mainLog.info(`[browser-pane] Created instance: ${instanceId}`)
+
+    return instanceId
+  }
+
+  destroyInstance(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance) return
+
+    // Detach from window first
+    this.detachFromWindow(id)
+
+    // Destroy the CDP connection
+    instance.cdp.detach()
+
+    // Destroy the view
+    // WebContentsView.webContents doesn't have explicit destroy — we just
+    // remove all references and let GC handle it. Removing from window
+    // (done in detach) is the important part.
+    try { instance.view.webContents.close() } catch { /* already destroyed */ }
+
+    this.instances.delete(id)
+    this.removedCallback?.(id)
+    mainLog.info(`[browser-pane] Destroyed instance: ${id}`)
+  }
+
+  getInstance(id: string): BrowserInstance | undefined {
+    return this.instances.get(id)
+  }
+
+  listInstances(): BrowserInstanceInfo[] {
+    return Array.from(this.instances.values()).map(i => this.toInfo(i))
+  }
+
+  // ---------------------------------------------------------------------------
+  // Navigation
+  // ---------------------------------------------------------------------------
+
+  async navigate(id: string, url: string): Promise<{ url: string; title: string }> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+
+    // Normalize URL.
+    // - If scheme missing and input looks like host/path, prepend https://
+    // - Otherwise treat as search query
+    let normalizedUrl = url.trim()
+    const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedUrl)
+    const isAbout = normalizedUrl.startsWith('about:')
+    if (!hasScheme && !isAbout) {
+      const looksLikeHost = /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[\w-]+(?:\.[\w-]+)+)(?::\d+)?(?:\/|$)/i.test(normalizedUrl)
+      if (looksLikeHost) {
+        normalizedUrl = `https://${normalizedUrl}`
+      } else {
+        normalizedUrl = `https://duckduckgo.com/?q=${encodeURIComponent(normalizedUrl)}`
+      }
+    }
+
+    const timeoutMs = 30_000
+    const loaded = instance.view.webContents.loadURL(normalizedUrl)
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Navigation timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+    )
+    await Promise.race([loaded, timeout])
+    return { url: instance.currentUrl, title: instance.title }
+  }
+
+  async goBack(id: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    if (instance.view.webContents.canGoBack()) {
+      instance.view.webContents.goBack()
+    }
+  }
+
+  async goForward(id: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    if (instance.view.webContents.canGoForward()) {
+      instance.view.webContents.goForward()
+    }
+  }
+
+  reload(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance) return
+    instance.view.webContents.reload()
+  }
+
+  stop(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance) return
+    instance.view.webContents.stop()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Visibility (attach/detach from BrowserWindow)
+  // ---------------------------------------------------------------------------
+
+  attachToWindow(id: string, window: BrowserWindow, bounds: Rectangle): void {
+    const instance = this.instances.get(id)
+    if (!instance) return
+
+    // Detach from previous window if any
+    if (instance.attachedWindow && !instance.attachedWindow.isDestroyed()) {
+      try {
+        instance.attachedWindow.contentView.removeChildView(instance.view)
+      } catch { /* view may not be a child */ }
+    }
+
+    instance.attachedWindow = window
+    instance.bounds = bounds
+
+    window.contentView.addChildView(instance.view)
+    instance.view.setBounds(bounds)
+  }
+
+  detachFromWindow(id: string): void {
+    const instance = this.instances.get(id)
+    if (!instance || !instance.attachedWindow) return
+
+    if (!instance.attachedWindow.isDestroyed()) {
+      try {
+        instance.attachedWindow.contentView.removeChildView(instance.view)
+      } catch { /* view may not be a child */ }
+    }
+
+    instance.attachedWindow = null
+    instance.bounds = null
+  }
+
+  updateBounds(id: string, bounds: Rectangle): void {
+    const instance = this.instances.get(id)
+    if (!instance) return
+
+    instance.bounds = bounds
+    instance.view.setBounds(bounds)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Agent tools (CDP-powered)
+  // ---------------------------------------------------------------------------
+
+  async getAccessibilitySnapshot(id: string): Promise<AccessibilitySnapshot> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.cdp.getAccessibilitySnapshot()
+  }
+
+  async clickElement(id: string, ref: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.cdp.clickElement(ref)
+  }
+
+  async fillElement(id: string, ref: string, value: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.cdp.fillElement(ref, value)
+  }
+
+  async selectOption(id: string, ref: string, value: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.cdp.selectOption(ref, value)
+  }
+
+  async screenshot(id: string): Promise<Buffer> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    const image = await instance.view.webContents.capturePage()
+    return image.toPNG()
+  }
+
+  async evaluate(id: string, expression: string): Promise<unknown> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.view.webContents.executeJavaScript(expression)
+  }
+
+  async scroll(id: string, direction: 'up' | 'down' | 'left' | 'right', amount = 500): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+
+    const deltaX = direction === 'left' ? -amount : direction === 'right' ? amount : 0
+    const deltaY = direction === 'up' ? -amount : direction === 'down' ? amount : 0
+
+    await instance.view.webContents.executeJavaScript(
+      `window.scrollBy(${deltaX}, ${deltaY})`
+    )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Session binding
+  // ---------------------------------------------------------------------------
+
+  bindSession(id: string, sessionId: string): void {
+    const instance = this.instances.get(id)
+    if (instance) {
+      instance.boundSessionId = sessionId
+      this.emitStateChange(instance)
+    }
+  }
+
+  unbindSession(id: string): void {
+    const instance = this.instances.get(id)
+    if (instance) {
+      instance.boundSessionId = null
+      this.emitStateChange(instance)
+    }
+  }
+
+  /**
+   * Get or create a browser instance for a session.
+   * If the session already has a bound browser, returns it.
+   * Otherwise, creates a new one and binds it.
+   */
+  getOrCreateForSession(sessionId: string): string {
+    // Check if session already has a bound browser
+    for (const instance of this.instances.values()) {
+      if (instance.boundSessionId === sessionId) {
+        return instance.id
+      }
+    }
+    // Create new instance
+    const id = this.createInstance()
+    this.bindSession(id, sessionId)
+    return id
+  }
+
+  /**
+   * Destroy all browser instances bound to a given session.
+   * Called when a session is deleted to prevent orphaned instances.
+   */
+  destroyForSession(sessionId: string): void {
+    for (const [id, instance] of this.instances) {
+      if (instance.boundSessionId === sessionId) {
+        this.destroyInstance(id)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cleanup
+  // ---------------------------------------------------------------------------
+
+  destroyAll(): void {
+    for (const id of [...this.instances.keys()]) {
+      this.destroyInstance(id)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private setupSessionPermissions(ses: ElectronSession): void {
+    if (this.partitionPermissionsInitialized) return
+    this.partitionPermissionsInitialized = true
+
+    const allow = new Set([
+      'fullscreen',
+      'pointerLock',
+      'window-management',
+      'notifications',
+      'geolocation',
+      'media',
+      'clipboard-read',
+      'clipboard-sanitized-write',
+      // Keep broad auth support (WebAuthn-related flows are browser/OS-mediated)
+      'idle-detection',
+    ])
+
+    if (typeof ses.setPermissionCheckHandler === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ses.setPermissionCheckHandler((_webContents, permission: string, requestingOrigin: string, _details: any) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          mainLog.warn(`[browser-pane] permission denied (check): ${permission} origin=${requestingOrigin}`)
+        }
+        return allowed
+      })
+    }
+
+    if (typeof ses.setPermissionRequestHandler === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ses.setPermissionRequestHandler((_webContents, permission: string, callback: (allow: boolean) => void, details: any) => {
+        const allowed = allow.has(permission)
+        if (!allowed) {
+          mainLog.warn(`[browser-pane] permission denied (request): ${permission} origin=${details?.requestingOrigin ?? 'unknown'}`)
+        }
+        callback(allowed)
+      })
+    }
+  }
+
+  private setupWebContentsListeners(instance: BrowserInstance): void {
+    const wc = instance.view.webContents
+
+    wc.on('did-start-loading', () => {
+      instance.isLoading = true
+      this.emitStateChange(instance)
+    })
+
+    wc.on('did-stop-loading', () => {
+      instance.isLoading = false
+      instance.canGoBack = wc.canGoBack()
+      instance.canGoForward = wc.canGoForward()
+      this.emitStateChange(instance)
+    })
+
+    wc.on('did-navigate', (_event, url) => {
+      instance.currentUrl = url
+      instance.title = wc.getTitle()
+      instance.canGoBack = wc.canGoBack()
+      instance.canGoForward = wc.canGoForward()
+      this.emitStateChange(instance)
+    })
+
+    wc.on('did-navigate-in-page', (_event, url) => {
+      instance.currentUrl = url
+      instance.canGoBack = wc.canGoBack()
+      instance.canGoForward = wc.canGoForward()
+      this.emitStateChange(instance)
+    })
+
+    wc.on('page-title-updated', (_event, title) => {
+      instance.title = title
+      this.emitStateChange(instance)
+    })
+
+    wc.on('page-favicon-updated', (_event, favicons) => {
+      instance.favicon = favicons[0] || null
+      this.emitStateChange(instance)
+    })
+
+    wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      mainLog.warn(`[browser-pane] did-fail-load id=${instance.id} code=${errorCode} url=${validatedURL} error=${errorDescription}`)
+    })
+
+    wc.on('console-message', (_event, level, message) => {
+      if (level >= 2) {
+        mainLog.warn(`[browser-pane] console id=${instance.id} level=${level}: ${message}`)
+      }
+    })
+
+    // Bridge native browser focus back into panel focus model.
+    wc.on('focus', () => {
+      this.interactedCallback?.(instance.id)
+    })
+
+    // Open external links in default browser
+    wc.setWindowOpenHandler((details) => {
+      // Load in the same webContents instead of opening externally
+      wc.loadURL(details.url)
+      return { action: 'deny' }
+    })
+  }
+
+  private toInfo(instance: BrowserInstance): BrowserInstanceInfo {
+    return {
+      id: instance.id,
+      url: instance.currentUrl,
+      title: instance.title,
+      favicon: instance.favicon,
+      isLoading: instance.isLoading,
+      canGoBack: instance.canGoBack,
+      canGoForward: instance.canGoForward,
+      boundSessionId: instance.boundSessionId,
+    }
+  }
+
+  private emitStateChange(instance: BrowserInstance): void {
+    this.stateChangeCallback?.(this.toInfo(instance))
+  }
+}

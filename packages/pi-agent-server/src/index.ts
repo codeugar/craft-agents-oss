@@ -61,7 +61,7 @@ import { createGoogleSearchTool } from './tools/google-search.ts';
 
 /** Messages from main process (stdin) */
 type InboundMessage =
-  | { type: 'init'; apiKey: string; model: string; cwd: string; thinkingLevel: string; workspaceRootPath: string; sessionId: string; sessionPath: string; workingDirectory: string; plansFolderPath: string; miniModel?: string; agentDir?: string; providerType?: string; authType?: string; workspaceId?: string; piAuth?: { provider: string; credential: { type: 'api_key'; key: string } | { type: 'oauth'; access: string; refresh: string; expires: number } } }
+  | { type: 'init'; apiKey: string; model: string; cwd: string; thinkingLevel: string; workspaceRootPath: string; sessionId: string; sessionPath: string; workingDirectory: string; plansFolderPath: string; miniModel?: string; agentDir?: string; providerType?: string; authType?: string; workspaceId?: string; branchFromSdkSessionId?: string; piAuth?: { provider: string; credential: { type: 'api_key'; key: string } | { type: 'oauth'; access: string; refresh: string; expires: number } } }
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
@@ -80,9 +80,22 @@ interface ProxyToolDef {
   inputSchema: Record<string, unknown>;
 }
 
+/** Canonical tool metadata propagated on Pi tool start events */
+interface ToolExecutionMetadata {
+  intent?: string;
+  displayName?: string;
+  source: 'interceptor';
+}
+
+type EnrichedToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_execution_start' }> & {
+  toolMetadata?: ToolExecutionMetadata;
+};
+
+type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent;
+
 /** Messages to main process (stdout) */
 interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
-interface OutboundEvent { type: 'event'; event: AgentSessionEvent }
+interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq { type: 'pre_tool_use_request'; requestId: string; toolName: string; input: Record<string, unknown> }
 interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
@@ -240,6 +253,26 @@ function resolvePiModel(
   return undefined;
 }
 
+/**
+ * Expose the active Pi model API/provider/base URL to the interceptor process.
+ * This gives the interceptor a robust routing hint (instead of brittle URL-only matching).
+ */
+function setInterceptorApiHints(model: { api?: string; provider?: string; baseUrl?: string } | undefined): void {
+  if (!model) {
+    delete process.env.CRAFT_PI_MODEL_API;
+    delete process.env.CRAFT_PI_MODEL_PROVIDER;
+    delete process.env.CRAFT_PI_MODEL_BASE_URL;
+    return;
+  }
+
+  process.env.CRAFT_PI_MODEL_API = model.api || '';
+  process.env.CRAFT_PI_MODEL_PROVIDER = model.provider || '';
+  process.env.CRAFT_PI_MODEL_BASE_URL = model.baseUrl || '';
+
+  debugLog(
+    `[interceptor-hint] api=${process.env.CRAFT_PI_MODEL_API || '-'} provider=${process.env.CRAFT_PI_MODEL_PROVIDER || '-'} baseUrl=${process.env.CRAFT_PI_MODEL_BASE_URL || '-'}`,
+  );
+}
 
 /**
  * Create an in-memory auth storage pre-loaded with the user's credentials
@@ -327,10 +360,16 @@ async function ensureSession(): Promise<AgentSession> {
       const piModel = resolvePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider);
       if (piModel) {
         sessionOptions.model = piModel;
+        setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
+      } else {
+        setInterceptorApiHints(undefined);
       }
     } catch {
       debugLog(`Could not resolve Pi model: ${initConfig.model}`);
+      setInterceptorApiHints(undefined);
     }
+  } else {
+    setInterceptorApiHints(undefined);
   }
 
   // Set thinking level
@@ -707,7 +746,24 @@ async function runMiniCompletion(prompt: string): Promise<string | null> {
 // Event Handling
 // ============================================================
 
+function extractToolExecutionMetadata(args: Record<string, unknown> | undefined): ToolExecutionMetadata | undefined {
+  if (!args) return undefined;
+
+  const intent = typeof args._intent === 'string' ? args._intent : undefined;
+  const displayName = typeof args._displayName === 'string' ? args._displayName : undefined;
+
+  if (!intent && !displayName) return undefined;
+
+  return {
+    intent,
+    displayName,
+    source: 'interceptor',
+  };
+}
+
 function handleSessionEvent(event: AgentSessionEvent): void {
+  let forwardedEvent: OutboundAgentEvent = event;
+
   // Log API errors for debugging
   if (event.type === 'message_end') {
     const msg = event.message as { stopReason?: string; errorMessage?: string } | undefined;
@@ -716,7 +772,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
   }
 
-  // Detect session MCP tool completions
+  // Detect session MCP tool completions + enrich tool starts with canonical metadata
   if (event.type === 'tool_execution_start') {
     const toolName = event.toolName;
     if (toolName.startsWith('session__') || toolName.startsWith('mcp__session__')) {
@@ -725,6 +781,14 @@ function handleSessionEvent(event: AgentSessionEvent): void {
         toolName: mcpToolName,
         arguments: (event.args ?? {}) as Record<string, unknown>,
       });
+    }
+
+    const toolMetadata = extractToolExecutionMetadata((event.args ?? {}) as Record<string, unknown>);
+    if (toolMetadata) {
+      forwardedEvent = {
+        ...event,
+        toolMetadata,
+      };
     }
   }
 
@@ -742,7 +806,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
   }
 
   // Forward all events to main process
-  send({ type: 'event', event });
+  send({ type: 'event', event: forwardedEvent });
 }
 
 // ============================================================
@@ -895,10 +959,12 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   const piModel = resolvePiModel(piModelRegistry, msg.model, initConfig?.piAuth?.provider);
   if (!piModel) {
     debugLog(`[set_model] Could not resolve model: ${msg.model}`);
+    setInterceptorApiHints(undefined);
     return;
   }
   try {
     await piSession.setModel(piModel);
+    setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);

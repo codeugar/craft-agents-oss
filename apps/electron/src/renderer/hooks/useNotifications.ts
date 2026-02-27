@@ -75,6 +75,50 @@ function drawBadgeOnIcon(iconDataUrl: string, count: number): Promise<string> {
 }
 
 /**
+ * Draw Windows taskbar overlay badge icon (transparent background + red circle)
+ */
+function drawWindowsBadgeOverlay(count: number): string {
+  const canvas = document.createElement('canvas')
+  const size = 32
+  canvas.width = size
+  canvas.height = size
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new Error('Could not get canvas context')
+  }
+
+  const text = count > 99 ? '99+' : count.toString()
+  const badgeRadius = size * 0.46
+  const badgeX = size / 2
+  const badgeY = size / 2
+
+  // Subtle shadow so overlay reads better on varied taskbar colors
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.35)'
+  ctx.shadowBlur = 3
+  ctx.shadowOffsetY = 1
+
+  ctx.beginPath()
+  ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2)
+  ctx.fillStyle = '#FF3B30'
+  ctx.fill()
+
+  // Reset shadow for text
+  ctx.shadowColor = 'transparent'
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetY = 0
+
+  const fontSize = count > 99 ? size * 0.34 : size * 0.48
+  ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  ctx.fillStyle = '#FFFFFF'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, badgeX, badgeY)
+
+  return canvas.toDataURL('image/png')
+}
+
+/**
  * Check if a session has unread messages using metadata
  * Uses the explicit hasUnread flag (state machine approach)
  */
@@ -159,14 +203,22 @@ export function useNotifications({
     return cleanup
   }, [])
 
+  // Subscribe to Windows taskbar overlay draw requests from main process
+  useEffect(() => {
+    const cleanup = window.electronAPI.onBadgeDrawWindows(async (data) => {
+      try {
+        const overlayDataUrl = drawWindowsBadgeOverlay(data.count)
+        await window.electronAPI.setDockIconWithBadge(overlayDataUrl)
+      } catch (error) {
+        console.error('[Notifications] Failed to draw Windows badge overlay:', error)
+      }
+    })
+
+    return cleanup
+  }, [])
+
   // Update badge count when session metadata changes
   const updateBadgeCount = useCallback(() => {
-    // Only show badge if notifications are enabled
-    if (!enabled) {
-      window.electronAPI.updateBadgeCount(0)
-      return
-    }
-
     // Count sessions that have unread messages using metadata
     // Exclude hidden sessions (mini-agent sessions) from badge count
     const metas = Array.from(sessionMetaMap.values())
@@ -184,7 +236,7 @@ export function useNotifications({
     // Badge always shows unread count (regardless of focus)
     lastBadgeCountRef.current = totalUnread
     window.electronAPI.updateBadgeCount(totalUnread)
-  }, [sessionMetaMap, enabled])
+  }, [sessionMetaMap])
 
   // Auto-update badge when session metadata or focus changes
   useEffect(() => {

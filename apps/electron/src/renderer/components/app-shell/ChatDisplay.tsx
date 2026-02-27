@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
+import { toast } from "sonner"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -54,6 +55,7 @@ import { useAppShellContext } from "@/context/AppShellContext"
 import { routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { flattenLabels } from "@craft-agent/shared/labels"
+import { resolveBranchNewPanelOption } from "./branching"
 
 // ============================================================================
 // Overlay State Types
@@ -92,6 +94,7 @@ function isPlanFilePath(filePath: string | undefined): boolean {
   return (filePath.includes('/plans/') || filePath.startsWith('plans/')) &&
          filePath.endsWith('.md')
 }
+
 
 interface ChatDisplayProps {
   session: Session | null
@@ -1442,15 +1445,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return
-                          const child = await appShellContext.onCreateSession(
-                            session.workspaceId,
-                            {
-                              branchFromMessageId: messageId,
-                              branchFromSessionId: session.id,
-                              name: `Branch of ${session.name || 'Untitled'}`,
-                            }
-                          )
-                          navigate(routes.view.allSessions(child.id), { newPanel: true })
+                          try {
+                            const child = await appShellContext.onCreateSession(
+                              session.workspaceId,
+                              {
+                                branchFromMessageId: messageId,
+                                branchFromSessionId: session.id,
+                                name: `Branch of ${session.name || 'Untitled'}`,
+                              }
+                            )
+                            navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
+                          } catch (error) {
+                            const message = error instanceof Error ? error.message : 'Failed to create branch'
+                            toast.error('Could not create branch', { description: message })
+                          }
                         } : undefined}
                         onAcceptPlan={() => {
                           window.dispatchEvent(new CustomEvent('craft:approve-plan', {

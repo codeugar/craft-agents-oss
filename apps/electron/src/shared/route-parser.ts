@@ -34,7 +34,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'settings' | 'browser'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -58,7 +58,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'settings', 'browser'
 ]
 
 /**
@@ -154,6 +154,15 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
+  // Browser navigator
+  if (first === 'browser') {
+    if (segments.length < 2) return null
+    return {
+      navigator: 'browser',
+      details: { type: 'browser', id: segments[1] },
+    }
+  }
+
   // Sessions navigator (allSessions, flagged, state)
   let sessionFilter: SessionFilter
   let detailsStartIndex: number
@@ -234,6 +243,11 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   if (parsed.navigator === 'skills') {
     if (!parsed.details) return 'skills'
     return `skills/skill/${parsed.details.id}`
+  }
+
+  if (parsed.navigator === 'browser') {
+    if (!parsed.details) return 'browser'
+    return `browser/${parsed.details.id}`
   }
 
   // Sessions navigator
@@ -326,6 +340,11 @@ export function parseRoute(route: string): ParsedRoute | null {
  * Convert a parsed compound route to ParsedRoute format (type: 'view')
  */
 function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute {
+  // Browser
+  if (compound.navigator === 'browser' && compound.details) {
+    return { type: 'view', name: 'browser', id: compound.details.id, params: {} }
+  }
+
   // Settings
   if (compound.navigator === 'settings') {
     const subpage = compound.details?.type || 'app'
@@ -435,6 +454,11 @@ export function parseRouteToNavigationState(
  * Convert a ParsedCompoundRoute to NavigationState
  */
 function convertCompoundToNavigationState(compound: ParsedCompoundRoute): NavigationState {
+  // Browser
+  if (compound.navigator === 'browser' && compound.details) {
+    return { navigator: 'browser', instanceId: compound.details.id }
+  }
+
   // Settings
   if (compound.navigator === 'settings') {
     const subpage = (compound.details?.type || 'app') as SettingsSubpage
@@ -494,6 +518,11 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
   }
 
   switch (parsed.name) {
+    case 'browser':
+      if (parsed.id) {
+        return { navigator: 'browser', instanceId: parsed.id }
+      }
+      return null
     case 'settings':
       return { navigator: 'settings', subpage: 'app' }
     case 'workspace':
@@ -607,6 +636,10 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
  * Build a route string from NavigationState
  */
 export function buildRouteFromNavigationState(state: NavigationState): string {
+  if (state.navigator === 'browser') {
+    return `browser/${state.instanceId}`
+  }
+
   if (state.navigator === 'settings') {
     return `settings/${state.subpage}`
   }
@@ -712,24 +745,4 @@ export function buildRightSidebarParam(panel?: RightSidebarPanel): string | unde
     default:
       return undefined
   }
-}
-
-/**
- * Build full URL with navigation state and sidebar param
- */
-export function buildUrlWithState(navState: NavigationState, panels?: string[]): string {
-  const route = buildRouteFromNavigationState(navState)
-  const params = new URLSearchParams()
-  params.set('route', route)
-
-  const sidebarParam = buildRightSidebarParam(navState.rightSidebar)
-  if (sidebarParam) {
-    params.set('sidebar', sidebarParam)
-  }
-
-  if (panels && panels.length > 0) {
-    params.set('panels', panels.join(','))
-  }
-
-  return `?${params.toString()}`
 }
