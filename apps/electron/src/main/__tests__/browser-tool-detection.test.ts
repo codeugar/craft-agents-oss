@@ -8,18 +8,15 @@ import {
 
 describe('browser-tool-detection', () => {
   describe('normalizeBrowserToolName', () => {
-    it('normalizes direct browser tool names', () => {
-      expect(normalizeBrowserToolName('browser_open')).toBe('browser_open')
-      expect(normalizeBrowserToolName('browser_snapshot')).toBe('browser_snapshot')
-    })
-
-    it('normalizes namespaced browser tool names', () => {
-      expect(normalizeBrowserToolName('mcp__session__browser_open')).toBe('browser_open')
+    it('normalizes direct and namespaced browser_tool names only', () => {
+      expect(normalizeBrowserToolName('browser_tool')).toBe('browser_tool')
       expect(normalizeBrowserToolName('mcp__session__browser_tool')).toBe('browser_tool')
-      expect(normalizeBrowserToolName('mcp__workspace__browser_click')).toBe('browser_click')
+      expect(normalizeBrowserToolName('mcp__workspace__browser_tool')).toBe('browser_tool')
     })
 
-    it('returns null for non-browser tool names', () => {
+    it('returns null for non-browser_tool names', () => {
+      expect(normalizeBrowserToolName('browser_open')).toBeNull()
+      expect(normalizeBrowserToolName('mcp__session__browser_snapshot')).toBeNull()
       expect(normalizeBrowserToolName('mcp__session__read')).toBeNull()
       expect(normalizeBrowserToolName('write')).toBeNull()
       expect(normalizeBrowserToolName('')).toBeNull()
@@ -42,30 +39,29 @@ describe('browser-tool-detection', () => {
   })
 
   describe('shouldActivateBrowserOverlay', () => {
-    it('activates for direct browser tools', () => {
-      expect(shouldActivateBrowserOverlay('browser_open', {})).toBe(true)
-      expect(shouldActivateBrowserOverlay('browser_snapshot', {})).toBe(true)
+    it('does not activate for non-browser_tool names', () => {
+      expect(shouldActivateBrowserOverlay('browser_open', {})).toBe(false)
+      expect(shouldActivateBrowserOverlay('mcp__session__browser_snapshot', {})).toBe(false)
+      expect(shouldActivateBrowserOverlay('mcp__session__read', {})).toBe(false)
+      expect(shouldActivateBrowserOverlay('write', {})).toBe(false)
     })
 
-    it('activates for namespaced browser tools (PI/Claude-compatible)', () => {
-      expect(shouldActivateBrowserOverlay('mcp__session__browser_open', {})).toBe(true)
-      expect(shouldActivateBrowserOverlay('mcp__session__browser_snapshot', {})).toBe(true)
-    })
-
-    it('does not activate for browser_tool help/release commands', () => {
+    it('does not activate for browser_tool help/release/teardown commands', () => {
       expect(shouldActivateBrowserOverlay('browser_tool', { command: '--help' })).toBe(false)
       expect(shouldActivateBrowserOverlay('browser_tool', { command: 'help' })).toBe(false)
       expect(shouldActivateBrowserOverlay('mcp__session__browser_tool', { command: 'release' })).toBe(false)
+      expect(shouldActivateBrowserOverlay('browser_tool', { command: 'close' })).toBe(false)
+      expect(shouldActivateBrowserOverlay('browser_tool', { command: 'hide' })).toBe(false)
+    })
+
+    it('does not activate when browser_tool command is missing', () => {
+      expect(shouldActivateBrowserOverlay('browser_tool', {})).toBe(false)
+      expect(shouldActivateBrowserOverlay('mcp__session__browser_tool', { command: '   ' })).toBe(false)
     })
 
     it('activates for browser_tool actionable commands', () => {
       expect(shouldActivateBrowserOverlay('browser_tool', { command: 'snapshot' })).toBe(true)
       expect(shouldActivateBrowserOverlay('mcp__session__browser_tool', { command: 'navigate https://linear.app' })).toBe(true)
-    })
-
-    it('does not activate for non-browser tools', () => {
-      expect(shouldActivateBrowserOverlay('mcp__session__read', {})).toBe(false)
-      expect(shouldActivateBrowserOverlay('write', {})).toBe(false)
     })
   })
 })

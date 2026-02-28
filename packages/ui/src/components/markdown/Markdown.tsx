@@ -14,6 +14,7 @@ import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 import { MarkdownDatatableBlock } from './MarkdownDatatableBlock'
 import { MarkdownSpreadsheetBlock } from './MarkdownSpreadsheetBlock'
 import { MarkdownHtmlBlock } from './MarkdownHtmlBlock'
+import { MarkdownImageBlock } from './MarkdownImageBlock'
 import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { preprocessLinks } from './linkify'
@@ -222,6 +223,10 @@ function createComponents(
           if (match?.[1] === 'pdf-preview') {
             return <MarkdownPdfBlock code={code} className="my-2" />
           }
+          // Image preview blocks → inline image with expand to full viewer
+          if (match?.[1] === 'image-preview') {
+            return <MarkdownImageBlock code={code} className="my-2" />
+          }
           // LaTeX/math code blocks → KaTeX rendered display math
           if (match?.[1] === 'latex' || match?.[1] === 'math') {
             return <MarkdownLatexBlock code={code} className="my-2" />
@@ -321,6 +326,10 @@ function createComponents(
         // PDF preview blocks → inline first page with expand to full viewer
         if (match?.[1] === 'pdf-preview') {
           return <MarkdownPdfBlock code={code} className="my-2" />
+        }
+        // Image preview blocks → inline image with expand to full viewer
+        if (match?.[1] === 'image-preview') {
+          return <MarkdownImageBlock code={code} className="my-2" />
         }
         // LaTeX/math code blocks → KaTeX rendered display math
         if (match?.[1] === 'latex' || match?.[1] === 'math') {

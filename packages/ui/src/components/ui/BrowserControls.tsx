@@ -109,14 +109,32 @@ function colorLuminance(color: string): number | null {
   const hm = /^#([0-9a-f]{3,8})$/i.exec(color)
   if (hm) {
     const h = hm[1]
-    if (h.length === 3) { r = parseInt(h[0]+h[0],16); g = parseInt(h[1]+h[1],16); b = parseInt(h[2]+h[2],16) }
-    else if (h.length >= 6) { r = parseInt(h.slice(0,2),16); g = parseInt(h.slice(2,4),16); b = parseInt(h.slice(4,6),16) }
-    else return null
+    if (!h) return null
+
+    if (h.length === 3) {
+      r = Number.parseInt(h.charAt(0).repeat(2), 16)
+      g = Number.parseInt(h.charAt(1).repeat(2), 16)
+      b = Number.parseInt(h.charAt(2).repeat(2), 16)
+    } else if (h.length >= 6) {
+      r = Number.parseInt(h.slice(0, 2), 16)
+      g = Number.parseInt(h.slice(2, 4), 16)
+      b = Number.parseInt(h.slice(4, 6), 16)
+    } else {
+      return null
+    }
   } else {
     // rgb/rgba — comma or space separated
     const rm = color.match(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/)
     if (!rm) return null
-    r = +rm[1]; g = +rm[2]; b = +rm[3]
+
+    const rStr = rm[1]
+    const gStr = rm[2]
+    const bStr = rm[3]
+    if (!rStr || !gStr || !bStr) return null
+
+    r = Number(rStr)
+    g = Number(gStr)
+    b = Number(bStr)
   }
   const toLinear = (c: number) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4 }
   return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b)

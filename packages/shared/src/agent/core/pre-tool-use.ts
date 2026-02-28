@@ -31,6 +31,8 @@ import {
   shouldAllowToolInMode,
   isApiEndpointAllowed,
   isReadOnlyBashCommandWithConfig,
+  getPermissionModeDiagnostics,
+  PERMISSION_MODE_CONFIG,
   type PermissionMode,
 } from '../mode-manager.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
@@ -426,6 +428,8 @@ export interface PreToolUseInput {
   toolName: string;
   /** Tool input object */
   input: Record<string, unknown>;
+  /** Current session ID */
+  sessionId: string;
   /** Current permission mode */
   permissionMode: PermissionMode;
   /** Absolute path to workspace root */
@@ -496,10 +500,24 @@ const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
  *
  * @returns A discriminated union that the agent translates to its SDK format
  */
+function withPermissionModeContext(reason: string, sessionId: string, effectiveMode: PermissionMode): string {
+  if (reason.includes('Effective mode:')) return reason;
+
+  const diagnostics = getPermissionModeDiagnostics(sessionId);
+  const modeDisplayName = PERMISSION_MODE_CONFIG[effectiveMode]?.displayName ?? effectiveMode;
+  return [
+    reason,
+    '',
+    `Effective mode: ${modeDisplayName}`,
+    `Last mode change: ${diagnostics.lastChangedBy} at ${diagnostics.lastChangedAt} (modeVersion=${diagnostics.modeVersion})`,
+  ].join('\n');
+}
+
 export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult {
   const {
     toolName,
     input,
+    sessionId,
     permissionMode,
     workspaceRootPath,
     workspaceId,
@@ -532,8 +550,9 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   );
 
   if (!modeResult.allowed) {
-    onDebug?.(`Permission mode ${permissionMode}: blocking ${toolName} — ${modeResult.reason}`);
-    return { type: 'block', reason: modeResult.reason };
+    const reasonWithContext = withPermissionModeContext(modeResult.reason, sessionId, permissionMode);
+    onDebug?.(`Permission mode ${permissionMode}: blocking ${toolName} — ${reasonWithContext}`);
+    return { type: 'block', reason: reasonWithContext };
   }
 
   // ============================================================

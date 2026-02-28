@@ -1,31 +1,27 @@
 /**
  * Browser tool detection helpers.
  *
- * Browser tools can arrive as either:
- * - direct native names (e.g. "browser_snapshot")
- * - namespaced proxy names (e.g. "mcp__session__browser_snapshot")
- *
- * We normalize both shapes to a canonical "browser_*" form so overlay
- * activation logic behaves consistently across backends (Claude + PI).
+ * Browser overlay activation is now driven by the unified `browser_tool` only.
+ * Tool names can be direct (`browser_tool`) or namespaced
+ * (`mcp__session__browser_tool`).
  */
 
-const BROWSER_TOOL_MATCH = /(?:^|__)(browser_[a-z0-9_-]+)$/i
+const BROWSER_TOOL_MATCH = /(?:^|__)browser_tool$/i
 
 const BROWSER_TOOL_OVERLAY_EXCLUDED_COMMANDS = new Set([
   '--help',
   '-h',
   'help',
   'release',
+  'close',
+  'hide',
 ])
 
 export function normalizeBrowserToolName(toolName: string): string | null {
   const normalized = toolName.trim()
   if (!normalized) return null
 
-  const match = normalized.match(BROWSER_TOOL_MATCH)
-  if (!match) return null
-
-  return match[1].toLowerCase()
+  return BROWSER_TOOL_MATCH.test(normalized) ? 'browser_tool' : null
 }
 
 export function getBrowserToolCommandVerb(toolInput: unknown): string {
@@ -39,9 +35,7 @@ export function getBrowserToolCommandVerb(toolInput: unknown): string {
 
 export function shouldActivateBrowserOverlay(toolName: string, toolInput: unknown): boolean {
   const normalizedToolName = normalizeBrowserToolName(toolName)
-  if (!normalizedToolName) return false
-
-  if (normalizedToolName !== 'browser_tool') return true
+  if (normalizedToolName !== 'browser_tool') return false
 
   const verb = getBrowserToolCommandVerb(toolInput)
   if (!verb) return false

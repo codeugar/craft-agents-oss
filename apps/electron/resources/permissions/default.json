@@ -1,5 +1,5 @@
 {
-  "version": "2026-02-27",
+  "version": "2026-02-28",
 
   "allowedBashPatterns": [
     { "pattern": "^ls\\b", "comment": "List directory contents" },
@@ -53,6 +53,13 @@
     { "pattern": "^pnpm\\s+(list|ls|why|outdated|audit)\\b", "comment": "pnpm read operations: list packages, check outdated" },
     { "pattern": "^bun\\s+(pm\\s+ls)\\b", "comment": "Bun package manager list" },
     { "pattern": "^bun\\s+run\\s+browser-tool\\b", "comment": "Browser-tool helper CLI (templates/help)" },
+    { "pattern": "^bun\\s+run\\s+typecheck\\b$", "comment": "Project typecheck script (read-only quality gate)" },
+    { "pattern": "^bun\\s+run\\s+typecheck:all\\b$", "comment": "Monorepo typecheck script (read-only quality gate)" },
+    { "pattern": "^bunx\\s+tsc\\b.*--noEmit\\b", "comment": "TypeScript compiler check without emitting artifacts" },
+    { "pattern": "^tsc\\b.*--noEmit\\b", "comment": "TypeScript compiler check without emitting artifacts" },
+    { "pattern": "^npm\\s+run\\s+typecheck\\b$", "comment": "npm typecheck script (read-only quality gate)" },
+    { "pattern": "^yarn\\s+typecheck\\b$", "comment": "yarn typecheck script (read-only quality gate)" },
+    { "pattern": "^pnpm\\s+typecheck\\b$", "comment": "pnpm typecheck script (read-only quality gate)" },
     { "pattern": "^pip\\s+(list|show|freeze|check)\\b", "comment": "pip read operations: list packages, show info" },
     { "pattern": "^pip3\\s+(list|show|freeze|check)\\b", "comment": "pip3 read operations: list packages, show info" },
     { "pattern": "^cargo\\s+(tree|metadata|pkgid|verify-project)\\b", "comment": "Cargo read operations: dependency tree, metadata" },

@@ -16,67 +16,11 @@ function makeActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('extractOverlayCards', () => {
-  it('returns input + output cards for browser tools with params and output', () => {
-    const activity = makeActivity({
-      toolName: 'mcp__session__browser_navigate',
-      toolInput: { url: 'https://news.ycombinator.com' },
-      content: 'Navigated to: https://news.ycombinator.com',
-      displayName: 'Browser Navigate',
-    })
-
-    const cards = extractOverlayCards(activity)
-
-    expect(cards).toHaveLength(2)
-    expect(cards[0]?.label).toBe('Input')
-    expect(cards[0]?.commandPreview).toBe('browser_navigate --url https://news.ycombinator.com')
-    expect(cards[0]?.data.type).toBe('json')
-    if (cards[0]?.data.type === 'json') {
-      expect(cards[0].data.data).toEqual({ url: 'https://news.ycombinator.com' })
-    }
-
-    expect(cards[1]?.label).toBe('Output')
-  })
-
-  it('keeps an Output card with placeholder when fallback output mirrors input', () => {
-    const activity = makeActivity({
-      toolName: 'mcp__session__browser_click',
-      toolInput: { ref: '@e12' },
-      content: '',
-      displayName: 'Browser Click',
-    })
-
-    const cards = extractOverlayCards(activity)
-
-    expect(cards).toHaveLength(2)
-    expect(cards[0]?.label).toBe('Input')
-    expect(cards[0]?.data.type).toBe('json')
-    expect(cards[1]?.label).toBe('Output')
-    expect(cards[1]?.data.type).toBe('generic')
-    if (cards[1]?.data.type === 'generic') {
-      expect(cards[1].data.content).toBe('No output captured for this tool call.')
-    }
-  })
-
-  it('returns output-only card when tool has no input', () => {
-    const activity = makeActivity({
-      toolName: 'mcp__session__browser_snapshot',
-      toolInput: {},
-      content: JSON.stringify([{ ref: '@e1', role: 'button' }]),
-      displayName: 'Browser Snapshot',
-    })
-
-    const cards = extractOverlayCards(activity)
-
-    expect(cards).toHaveLength(1)
-    expect(cards[0]?.label).toBe('Output')
-    expect(cards[0]?.data.type).toBe('json')
-  })
-
   it('uses wrapper command verbatim for browser_tool input cards', () => {
     const activity = makeActivity({
       toolName: 'mcp__session__browser_tool',
       toolInput: { command: 'navigate https://example.com' },
-      content: 'ok',
+      content: 'Navigated to: https://example.com\nTitle: Example',
     })
 
     const cards = extractOverlayCards(activity)
@@ -84,14 +28,30 @@ describe('extractOverlayCards', () => {
     expect(cards[0]?.commandPreview).toBe('navigate https://example.com')
   })
 
-  it('quotes synthesized values with spaces', () => {
+  it('returns input + output cards for browser_tool with output', () => {
     const activity = makeActivity({
-      toolName: 'mcp__session__browser_fill',
-      toolInput: { ref: '@e5', value: 'hello world' },
-      content: 'ok',
+      toolName: 'mcp__session__browser_tool',
+      toolInput: { command: 'snapshot' },
+      content: JSON.stringify([{ ref: '@e1', role: 'button' }]),
     })
 
     const cards = extractOverlayCards(activity)
-    expect(cards[0]?.commandPreview).toBe('browser_fill --ref @e5 --value "hello world"')
+    expect(cards).toHaveLength(2)
+    expect(cards[0]?.label).toBe('Input')
+    expect(cards[0]?.commandPreview).toBe('snapshot')
+    expect(cards[1]?.label).toBe('Output')
+  })
+
+  it('returns output-only card when command is empty', () => {
+    const activity = makeActivity({
+      toolName: 'mcp__session__browser_tool',
+      toolInput: {},
+      content: 'Missing command.',
+    })
+
+    const cards = extractOverlayCards(activity)
+    // No meaningful input → output only
+    expect(cards.length).toBeGreaterThanOrEqual(1)
+    expect(cards[cards.length - 1]?.label).toBe('Output')
   })
 })

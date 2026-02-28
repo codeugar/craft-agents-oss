@@ -1,14 +1,13 @@
 # Browser Tools
 
-Use browser tools to control built-in **browser windows** (Chromium) inside Craft Agents.
+Use `browser_tool` to control built-in browser windows (Chromium) inside Craft Agents.
 
-> **Quick start:** Run `browser_tool --help` to see all available commands and usage examples. This is the fastest way to discover what's available and how to call it.
+> **Quick start:** Run `browser_tool --help` to see all available commands and usage examples.
 
 ## Browser usage paths
 
-1. **Primary (recommended):** `browser_tool` command tool — unified CLI-like interface with strict validation and actionable feedback.
-2. **Direct tools:** `browser_*` tools (`browser_open`, `browser_navigate`, ...) when you have exact structured arguments. These are stateful and session-bound.
-3. **Secondary helper:** `browser-tool` CLI helper (`bun run browser-tool --help`) for operation discovery and JSON templates.
+1. **Primary and only in-session tool surface:** `browser_tool`
+2. **Secondary helper CLI:** `bun run browser-tool --help` for command discovery/templates outside agent turns
 
 ---
 
@@ -19,45 +18,32 @@ Use browser workflows when creating a source would add unnecessary overhead for 
 **Good fit for browser-first:**
 - One-off tasks that don’t need reusable integration
 - UI-only workflows where API/MCP coverage is poor
-- Known fragile auth/setup cases where user needs results now
+- Fragile source setup/auth cases where user needs results now
 
 **Still prefer sources when:**
 - Work is repeatable and automation/reporting is needed
 - Team-wide reuse and stable tooling matter
 
-### Quick recipes
-
-1. **One-off operational task**
-   - `open` → `navigate` → `snapshot` → `click/fill/select` → `extract/evaluate`
-   - Complete task without adding long-term source maintenance
-
-2. **API/UI capability gap**
-   - Use browser interactions for the missing capability
-   - Note the API limitation in guidance if a source exists
-
-3. **Source setup fallback**
-   - If source auth/setup is blocked, switch to browser to unblock the user
-   - Offer optional source setup later if recurring workflows emerge
-
 ---
 
 ## Core workflow
 
-If you're unsure which window to use, run `browser_tool({ command: "windows" })` first.
+If you're unsure which window to use, run:
 
-When the browser might not be open or focused, **start with `browser_open`**:
+```text
+browser_tool({ command: "windows" })
+```
 
-1. `browser_open` — ensure browser window exists (opens in background by default)
-2. `browser_navigate` — load a URL or search query
-3. `browser_snapshot` — inspect accessible elements and get refs (`@e1`, `@e2`, ...)
-4. `browser_click` / `browser_fill` / `browser_select` — interact using refs
-5. `browser_screenshot` — visual verification when needed
+Recommended flow:
+1. `open` — ensure browser window exists (background by default)
+2. `navigate <url>` — load a URL
+3. `snapshot` — inspect accessible elements and get refs (`@e1`, `@e2`, ...)
+4. `click` / `fill` / `select` — interact using refs
+5. `screenshot` (or `screenshot-region`) — visual verification when needed
 
 ---
 
-## `browser_tool` command wrapper
-
-Use `browser_tool` when you want one command-style entry point:
+## `browser_tool` command examples
 
 ```text
 browser_tool({ command: "--help" })
@@ -66,344 +52,160 @@ browser_tool({ command: "open --foreground" })
 browser_tool({ command: "navigate https://example.com" })
 browser_tool({ command: "snapshot" })
 browser_tool({ command: "click @e12" })
+browser_tool({ command: "click-at 350 200" })
 browser_tool({ command: "fill @e5 user@example.com" })
+browser_tool({ command: "type Hello World" })
+browser_tool({ command: "select @e3 optionValue" })
+browser_tool({ command: "set-clipboard Name\tAge\nAlice\t30" })
+browser_tool({ command: "get-clipboard" })
+browser_tool({ command: "paste Name\tAge\nAlice\t30" })
 browser_tool({ command: "scroll down 800" })
 browser_tool({ command: "evaluate document.title" })
 browser_tool({ command: "console 50 warn" })
-browser_tool({ command: "screenshot-region 100 200 640 480" })
+browser_tool({ command: "screenshot" })
 browser_tool({ command: "screenshot-region --ref @e12 --padding 8" })
-browser_tool({ command: "screenshot-region --selector div[data-testid=\"chart\"]" })
 browser_tool({ command: "window-resize 1280 720" })
 browser_tool({ command: "network 50 failed" })
 browser_tool({ command: "wait network-idle 8000" })
 browser_tool({ command: "key Enter" })
-browser_tool({ command: "key k meta" })
 browser_tool({ command: "downloads wait 15000" })
 browser_tool({ command: "focus" })
-browser_tool({ command: "focus browser-1" })
 browser_tool({ command: "windows" })
 browser_tool({ command: "release" })
-browser_tool({ command: "close" })
 browser_tool({ command: "hide" })
+browser_tool({ command: "close" })
 ```
 
 The wrapper validates commands and returns actionable errors when arguments are missing or invalid.
 
-### `browser_tool focus [windowId]`
-Focus an existing browser window and bring it to the foreground.
+---
 
-**Use when:**
-- you want explicit foreground behavior without implying "open"
-- re-showing a hidden browser window for the current session
-- targeting a specific window by id (from `windows` output)
+## Key commands
 
-**Behavior:**
-- `focus` (no id): focuses the current session-bound window
-- `focus <windowId>`: focuses that window if it is available to the session
-- does **not** create a new window
+### `open [--foreground|-f]`
+Create or reuse the session browser window.
+- Default: opens in background
+- `--foreground` / `-f`: focuses in foreground
 
-### `browser_tool windows`
-List currently known browser windows and ownership state.
+### `snapshot`
+Returns an accessibility tree with refs and element metadata.
 
-**Use when:**
-- deciding whether to reuse an existing window
-- checking if a session-bound window already exists
-- confirming whether agent control is currently active on any window
+### `click <ref> [waitFor] [timeoutMs]`
+Click an element ref from `snapshot`. Optional wait modes: `none`, `navigation`, `network-idle`.
 
-**Output fields per window:**
-- `id`
-- `title`
-- `url`
-- `visible`
-- `ownerType`
-- `ownerSessionId`
-- `boundSessionId`
-- `lockState` (`unlocked` or `locked-session(...)`)
-- `availableToSession` (whether current agent session can reuse without rebinding conflicts)
-- `agentControlActive`
+### `click-at <x> <y>`
+Click at raw pixel coordinates. Use this for **canvas-based UIs** (e.g., Google Sheets cells, map elements, chart data points) where `snapshot` can't produce element refs. Get coordinates from `screenshot` or `screenshot-region`.
+
+### `fill <ref> <value>` / `select <ref> <value>`
+Fill text inputs or select dropdown values. Requires an element ref from `snapshot`.
+
+### `type <text>`
+Type text character-by-character into the **currently focused element** without needing a ref. Use this when:
+- The target is a canvas-based input (no DOM ref available)
+- You've already focused an element via `click` or `click-at`
+- The application uses a custom input mechanism
+
+Difference from `fill`: `fill` focuses a ref and replaces its value. `type` sends keystrokes to whatever is currently focused.
+
+### `set-clipboard <text>` / `get-clipboard`
+Read or write the page clipboard programmatically.
+- `set-clipboard` writes text (supports `\t` for tabs, `\n` for newlines in TSV data)
+- `get-clipboard` reads the current clipboard text content
+
+### `paste <text>`
+Convenience command: writes text to clipboard then triggers Ctrl+V (or Cmd+V on Mac). Equivalent to `set-clipboard <text>` followed by `key v meta`/`key v control`. Ideal for bulk data entry — e.g., pasting TSV data into a spreadsheet.
+
+### `screenshot` / `screenshot-region ...`
+Capture full-window or targeted screenshots.
+
+### `console`, `network`, `wait`
+Debug runtime issues, requests, and synchronization points.
+
+### `focus [windowId]` / `windows`
+Manage and inspect browser window ownership and visibility.
+
+### Lifecycle commands
+- `release` — dismiss agent overlay, keep window visible for user
+- `hide` — hide window but preserve session state
+- `close` — close and destroy window
 
 ---
 
-## Tool details
-
-### `browser_open`
-Create or reuse the session's browser window instance. Opens in the **background** by default.
-
-**Use when:**
-- Starting a browser workflow
-- Ensuring a browser instance exists before navigating
-
-**CLI variant:** `browser_tool open [--foreground|-f]`
-- Without flag: creates/reuses window in background (default)
-- With `--foreground` or `-f`: shows and focuses the window
-
-**Returns:** browser instance ID
-
----
-
-### `browser_navigate`
-Navigate to a URL. If input is not a URL, implementations may treat it as a search query.
-
-**Use when:**
-- Loading a new page
-- Redirecting to another site/workflow step
-
-**Tip:** call `browser_open` first if visibility/focus is uncertain.
-
----
-
-### `browser_snapshot`
-Returns a structured accessibility tree with element refs and metadata.
-
-**Use when:**
-- Planning interactions
-- Locating inputs/buttons/links reliably
-
-**Important:** refs are not stable forever. Re-run snapshot after navigation or major DOM updates.
-
----
-
-### `browser_click`
-Click an element by ref from `browser_snapshot`.
-
-**Input:**
-- `ref` (e.g. `@e12`)
-- optional `waitFor`: `none` (default), `navigation`, `network-idle`
-- optional `timeoutMs`
-
----
-
-### `browser_fill`
-Type text into an input or textarea by ref.
-
-**Input:** `ref`, `value`
-
----
-
-### `browser_select`
-Select option in a `<select>` by ref + option value.
-
-**Input:** `ref`, `value`
-
----
-
-### `browser_scroll`
-Scroll page in a direction.
-
-**Input:** `direction` (`up|down|left|right`), optional `amount`
-
----
-
-### `browser_back` / `browser_forward`
-Navigate browser history.
-
----
-
-### `browser_evaluate`
-Execute JavaScript expression in page context.
-
-**Use when:**
-- Extracting complex DOM data
-- Reading computed values/styles
-- Triggering advanced interactions not covered by click/fill/select
-
----
-
-### `browser_screenshot`
-Capture screenshot of current browser window content.
-
-**Use when:**
-- Visual confirmation
-- Reviewing rendering/layout issues
-
-**Note:** prefer `browser_snapshot` for interaction targeting.
-
----
-
-### `browser_screenshot_region`
-Capture only a specific region or element instead of the full viewport.
-
-**Target modes:**
-- Coordinates (`x`, `y`, `width`, `height`)
-- Ref (`ref` from `browser_snapshot`, e.g. `@e12`)
-- Selector (`selector` CSS query, e.g. `div[data-testid="chart"]`) — resolves to the **first visible match** (falls back to first DOM match)
-
-**Optional:**
-- `padding` to expand capture around target box
-
-**Validation rules:**
-- Provide exactly one mode: coordinates, `ref`, or `selector`
-- Coordinate mode requires all four fields (`x`, `y`, `width`, `height`)
-- `width` and `height` must be > 0 in coordinate mode
-
----
-
-### `browser_console`
-Get recent browser console messages from the active page.
-
-**Input:** optional `level` (`all|log|info|warn|error`) and `limit`
-
-**Use when:**
-- Debugging runtime errors without opening DevTools
-- Validating warnings after interactions
-
----
-
-### `browser_window_resize`
-Resize browser viewport to deterministic dimensions.
-
-**Input:** `width`, `height` in pixels
-
-**Use when:**
-- Consistent screenshot framing
-- Responsive layout checks
-
-**Note:** returned dimensions represent the effective applied viewport after platform/window minimum constraints.
-
----
-
-### `browser_network`
-Inspect recent network request activity for the active page.
-
-**Input:** optional `limit`, `status`, `method`, `resourceType`
-
-**Use when:**
-- Debugging failed API calls after interactions
-- Understanding what requests a click/navigation triggered
-
----
-
-### `browser_wait`
-Wait for a page condition.
-
-**Kinds:**
-- `selector` (wait until selector exists)
-- `text` (wait until text appears in page body)
-- `url` (wait until URL contains substring)
-- `network-idle` (wait until in-flight requests settle)
-
----
-
-### `browser_key`
-Send keyboard input to the active page.
-
-**Input:** `key`, optional `modifiers` (`shift|control|alt|meta`)
-
----
-
-### `browser_downloads`
-Inspect download activity from the active page.
-
-**Input:**
-- `action`: `list` (default) or `wait`
-- `limit` (for list)
-- `timeoutMs` (for wait)
-
----
-
-### Common validation errors
-- `Provide exactly one target mode...` → You passed neither or multiple region target modes.
-- `Coordinate mode requires x, y, width, and height together.` → One or more coordinate fields are missing.
-- `Coordinate mode width and height must be greater than 0.` → Invalid region size.
-- `Resolved screenshot region is outside the current viewport` → Scroll/navigate first or adjust coordinates/padding.
-
----
-
-## End-to-end examples
-
-### Example 1 — Open, navigate, inspect, click
-```text
-browser_open()
-browser_navigate({ url: "https://example.com" })
-browser_snapshot()
-# find button ref, e.g. @e7
-browser_click({ ref: "@e7" })
-```
-
-### Example 2 — Login form fill
-```text
-browser_open()
-browser_navigate({ url: "https://app.example.com/login" })
-browser_snapshot()
-# fill email/password refs from snapshot
-browser_fill({ ref: "@e3", value: "user@example.com" })
-browser_fill({ ref: "@e5", value: "••••••••" })
-browser_click({ ref: "@e6" })
-```
-
-### Example 3 — Extract custom data with evaluate
-```text
-browser_open()
-browser_navigate({ url: "https://news.ycombinator.com" })
-browser_evaluate({ expression: "Array.from(document.querySelectorAll('.titleline a')).slice(0,5).map(a => a.textContent)" })
-```
-
-### Example 4 — Recover stale refs
-```text
-# click fails because ref changed after navigation
-browser_snapshot()   # refresh refs
-browser_click({ ref: "@e11" })
-```
-
----
-
-## `browser-tool` helper CLI (secondary path)
-
-Use the helper CLI to discover browser operations and get deterministic JSON templates:
-
-```bash
-bun run browser-tool --help
-bun run browser-tool list
-bun run browser-tool template browser_navigate
-bun run browser-tool all-templates
-```
-
-The helper prints structured payload templates (`{ tool, input }`) that map to native `browser_*` tools.
-
-### `browser_tool close`
-Close and destroy the browser window entirely.
-
-**Use when:**
-- Task is fully complete and browser is no longer needed
-- You want to clean up resources
-
-**Effect:** Window is destroyed. All state (cookies, history within the window) is lost. Next `open` creates a fresh window.
-
-### `browser_tool hide`
-Hide the browser window but keep it alive in memory.
-
-**Use when:**
-- Temporarily done with the browser but may need it again
-- Want to keep the page state (login, form data) for later
-
-**Effect:** Window is hidden but preserved. `open` re-shows it instantly without reloading.
-
-### Lifecycle guidance
-
-| Command | When | Effect |
-|---------|------|--------|
-| `close` | Task fully complete, browser not needed | Destroys window |
-| `release` | Agent done, user may want to keep browsing | Dismisses overlay, window stays visible |
-| `hide` | Temporarily done, may need browser later | Hides window, preserves state |
+## Common validation errors
+
+- `Missing command...` → pass a command string (try `--help`)
+- `Unknown browser_tool command ...` → typo/unsupported verb; check help
+- `...requires ...` → required argument is missing for that command
+- `...must be numbers` → numeric argument parse failed
 
 ---
 
 ## Behavior notes
 
 - Browser tools are allowed in **Explore/Safe mode** by default.
-- For browser-first one-offs, avoid destructive UI actions unless explicitly requested, and never expose secrets in outputs.
 - Before first browser tool usage, the agent must read this guide (`~/.craft-agent/docs/browser-tools.md`).
-- Closing a browser window UI (via OS close button) **hides** it (keeps session/browser context alive).
-- Use `browser_tool close` for explicit full teardown/reset.
+- Closing browser UI via OS controls may hide the window; use `browser_tool close` for explicit teardown.
+
+---
+
+## Recipe: Canvas-based UIs (Google Sheets, etc.)
+
+Canvas-based web apps (Google Sheets, Google Docs, some map/chart UIs) render content as pixels on `<canvas>` — individual cells or elements are not DOM nodes and won't appear in `snapshot`. Use these patterns instead:
+
+### Google Sheets workflow
+
+```text
+# 1. Navigate and wait for load
+navigate https://docs.google.com/spreadsheets/d/{id}/edit
+wait selector [aria-label="Name Box"] 10000
+
+# 2. Navigate to a cell via Name Box (a DOM element — snapshot finds it)
+snapshot
+click @nameBoxRef
+type A1
+key Enter
+
+# 3. Edit a cell
+key F2
+type Hello World
+key Enter
+
+# 4. Bulk write via TSV clipboard paste
+snapshot
+click @nameBoxRef
+type A1
+key Enter
+paste Name\tAge\tCity\nAlice\t30\tNYC\nBob\t25\tLA
+
+# 5. Read data via clipboard
+key a meta           # Select all (Cmd+A)
+key c meta           # Copy (Cmd+C)
+get-clipboard        # Returns TSV string
+
+# 6. Click a canvas cell by coordinates (from screenshot)
+click-at 350 200
+
+# 7. Read data via export URL (no editing needed)
+navigate https://docs.google.com/spreadsheets/d/{id}/export?format=csv&gid=0
+```
+
+### Key principles for canvas UIs
+- **Name Box and formula bar are DOM elements** — `snapshot` can find them
+- **Cells are canvas pixels** — use `click-at` or keyboard navigation, not `click`
+- **Keyboard shortcuts are more reliable than clicking** — use `key` for navigation
+- **Clipboard TSV is the fastest bulk data path** — `paste` with tab-separated values
+- **Export URLs work with session cookies** — no API key needed for reads
+
+---
 
 ## Troubleshooting
 
 ### "Browser window controls are not available"
-The desktop browser manager isn’t wired for this runtime/session. Ensure you’re using the Electron desktop app and the session is initialized.
+The desktop browser manager isn’t wired for this runtime/session. Ensure you’re in the Electron desktop app and session is initialized.
 
 ### "Element @eX not found"
-Ref is stale. Run `browser_snapshot` again and use fresh refs.
+Refs are stale. Re-run `snapshot` and use fresh refs.
 
-### Input interactions are flaky
-Ensure page is loaded and element is visible. Retry with:
-`browser_open` → `browser_snapshot` → interaction.
+### Interaction feels flaky
+Wait for page readiness and retry using:
+`open` → `snapshot` → interaction

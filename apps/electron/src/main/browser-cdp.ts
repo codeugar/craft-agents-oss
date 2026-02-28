@@ -549,6 +549,45 @@ export class BrowserCDP {
   // Element Interaction
   // ---------------------------------------------------------------------------
 
+  async clickAtCoordinates(x: number, y: number): Promise<void> {
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x, y,
+      button: 'left',
+      clickCount: 1,
+    })
+    await this.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x, y,
+      button: 'left',
+      clickCount: 1,
+    })
+  }
+
+  async typeText(text: string): Promise<void> {
+    for (const char of text) {
+      await this.send('Input.dispatchKeyEvent', { type: 'keyDown', text: char })
+      await this.send('Input.dispatchKeyEvent', { type: 'keyUp', text: char })
+    }
+  }
+
+  async setClipboard(text: string): Promise<void> {
+    await this.send('Runtime.evaluate', {
+      expression: `navigator.clipboard.writeText(${JSON.stringify(text)})`,
+      awaitPromise: true,
+      userGesture: true,
+    })
+  }
+
+  async getClipboard(): Promise<string> {
+    const result = await this.send('Runtime.evaluate', {
+      expression: 'navigator.clipboard.readText()',
+      awaitPromise: true,
+      userGesture: true,
+    })
+    return (result as any).result?.value ?? ''
+  }
+
   async clickElement(ref: string): Promise<ElementGeometry> {
     const backendNodeId = this.refMap.get(ref)
     if (!backendNodeId) {

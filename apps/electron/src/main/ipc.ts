@@ -484,17 +484,16 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
     }
   })
 
-  // Read a file as a data URL for in-app binary preview (images).
-  // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay.
-  // Note: PDFs use file:// URLs directly (Chromium's PDF viewer doesn't support data: URLs).
+  // Read an image file as a data URL for in-app image preview overlays.
+  // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay and markdown image blocks.
   ipcMain.handle(IPC_CHANNELS.READ_FILE_DATA_URL, async (_event, path: string) => {
     try {
       const safePath = await validateFilePath(path)
       const buffer = await readFile(safePath)
       const ext = safePath.split('.').pop()?.toLowerCase() ?? ''
 
-      // Map extensions to MIME types (only formats Chromium can render in-app).
-      // HEIC/HEIF and TIFF are excluded — no Chromium codec, opened externally instead.
+      // Map previewable image extensions to MIME types.
+      // HEIC/HEIF/TIFF are intentionally excluded — no Chromium codec, opened externally instead.
       const mimeMap: Record<string, string> = {
         png: 'image/png',
         jpg: 'image/jpeg',
@@ -505,7 +504,6 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
         bmp: 'image/bmp',
         ico: 'image/x-icon',
         avif: 'image/avif',
-        pdf: 'application/pdf',
       }
       const mime = mimeMap[ext] || 'application/octet-stream'
       const base64 = buffer.toString('base64')
@@ -539,7 +537,7 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
       filters: [
         // Allow all files by default - the agent can figure out how to handle them
         { name: 'All Files', extensions: ['*'] },
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'ico', 'icns', 'heic', 'heif', 'svg'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
         { name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'md', 'rtf'] },
         { name: 'Code', extensions: ['js', 'ts', 'tsx', 'jsx', 'py', 'json', 'css', 'html', 'xml', 'yaml', 'yml', 'sh', 'sql', 'go', 'rs', 'rb', 'php', 'java', 'c', 'cpp', 'h', 'swift', 'kt'] },
       ]

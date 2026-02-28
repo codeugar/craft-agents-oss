@@ -684,6 +684,60 @@ export class BrowserPaneManager {
     return instance.cdp.getAccessibilitySnapshot()
   }
 
+  async clickAtCoordinates(id: string, x: number, y: number): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+
+    try {
+      await instance.cdp.clickAtCoordinates(x, y)
+      instance.lastAction = {
+        tool: 'browser_click_at',
+        status: 'succeeded',
+        timestamp: Date.now(),
+      }
+    } catch (error) {
+      instance.lastAction = {
+        tool: 'browser_click_at',
+        status: 'failed',
+        timestamp: Date.now(),
+      }
+      throw error
+    }
+  }
+
+  async typeText(id: string, text: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+
+    try {
+      await instance.cdp.typeText(text)
+      instance.lastAction = {
+        tool: 'browser_type',
+        status: 'succeeded',
+        timestamp: Date.now(),
+      }
+    } catch (error) {
+      instance.lastAction = {
+        tool: 'browser_type',
+        status: 'failed',
+        timestamp: Date.now(),
+      }
+      throw error
+    }
+  }
+
+  async setClipboard(id: string, text: string): Promise<void> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    await instance.cdp.setClipboard(text)
+  }
+
+  async getClipboard(id: string): Promise<string> {
+    const instance = this.instances.get(id)
+    if (!instance) throw new Error(`Browser instance not found: ${id}`)
+    return instance.cdp.getClipboard()
+  }
+
   async clickElement(
     id: string,
     ref: string,
@@ -2061,7 +2115,22 @@ export class BrowserPaneManager {
       void this.extractThemeColor(instance)
     })
 
-    pageWc.on('did-navigate', (_event, url) => {
+    pageWc.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return
+      const cmdOrCtrl = process.platform === 'darwin' ? input.meta : input.control
+      if (!cmdOrCtrl) return
+
+      if (input.key === 'r' && !input.shift) {
+        _event.preventDefault()
+        this.reload(instance.id)
+      } else if (input.key === 'r' && input.shift) {
+        _event.preventDefault()
+        instance.pageView.webContents.reloadIgnoringCache()
+      }
+    })
+
+    pageWc.on('did-navigate', (_event, _url) => {
+      const url = pageWc.getURL()
       if (instance.inPageThemeTimer) {
         clearTimeout(instance.inPageThemeTimer)
         instance.inPageThemeTimer = null
@@ -2082,7 +2151,8 @@ export class BrowserPaneManager {
       this.reapplyAgentControlVisual(instance)
     })
 
-    pageWc.on('did-navigate-in-page', (_event, url) => {
+    pageWc.on('did-navigate-in-page', (_event, _url) => {
+      const url = pageWc.getURL()
       const normalized = this.normalizePageState(url, instance.title)
       instance.currentUrl = normalized.url
       instance.title = normalized.title

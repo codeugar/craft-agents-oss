@@ -26,7 +26,7 @@ import { basename } from 'node:path';
 import {
   SESSION_BACKEND_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
-  SESSION_TOOL_DEFS,
+  getSessionToolDefs,
   TOOL_DESCRIPTIONS as BASE_DESCRIPTIONS,
   // Types
   type ToolResult,
@@ -35,6 +35,7 @@ import {
 import { createLLMTool, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { createSpawnSessionTool, type SpawnSessionFn } from './spawn-session-tool.ts';
 import { createBrowserTools, type BrowserPaneFns } from './browser-tools.ts';
+import { FEATURE_FLAGS } from '../feature-flags.ts';
 
 // Re-export types for backward compatibility
 export type {
@@ -142,24 +143,6 @@ export function getSessionScopedToolCallbacks(sessionId: string): SessionScopedT
 export const CLAUDE_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
-  'browser_open',
-  'browser_navigate',
-  'browser_snapshot',
-  'browser_click',
-  'browser_fill',
-  'browser_select',
-  'browser_screenshot',
-  'browser_screenshot_region',
-  'browser_console',
-  'browser_window_resize',
-  'browser_network',
-  'browser_wait',
-  'browser_key',
-  'browser_downloads',
-  'browser_scroll',
-  'browser_back',
-  'browser_forward',
-  'browser_evaluate',
   'browser_tool',
 ]);
 
@@ -327,8 +310,9 @@ export function getSessionScopedTools(
   // Ensure backend-mode tool wiring is in sync with core metadata.
   assertClaudeBackendSessionToolParity();
 
-  // Create tools from the canonical registry — all tools with handlers
-  const tools = SESSION_TOOL_DEFS
+  // Create tools from the canonical registry — all tools with handlers.
+  // Tool visibility is centrally filtered in session-tools-core to avoid backend drift.
+  const tools = getSessionToolDefs({ includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback })
     .filter(def => def.handler !== null) // Skip backend-specific tools (call_llm)
     .map(def => registryTool(def.name, def.inputSchema.shape));
 

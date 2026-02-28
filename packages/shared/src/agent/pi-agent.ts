@@ -67,6 +67,7 @@ import {
   type ToolResult as SessionToolResult,
 } from '@craft-agent/session-tools-core';
 import { createClaudeContext, type SessionToolContext } from './claude-context.ts';
+import { getPermissionModeDiagnostics } from './mode-manager.ts';
 
 // call_llm pre-execution pipeline
 
@@ -78,7 +79,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 // Session storage (plans folder path)
-import { getSessionPlansPath } from '../sessions/storage.ts';
+import { getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
 
 // Error typing
 import { parseError, type AgentError } from './errors.ts';
@@ -91,6 +92,8 @@ import { extractWorkspaceSlug } from '../utils/workspace.ts';
 
 // LLM tool types
 import { LLM_QUERY_TIMEOUT_MS, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
+import { executeBrowserToolCommand } from './browser-tool-runtime.ts';
+import { saveBinaryResponse } from '../utils/binary-detection.ts';
 
 // ============================================================
 // PiAgent Implementation
@@ -100,24 +103,6 @@ import { LLM_QUERY_TIMEOUT_MS, type LLMQueryRequest, type LLMQueryResult } from 
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'call_llm',
   'spawn_session',
-  'browser_open',
-  'browser_navigate',
-  'browser_snapshot',
-  'browser_click',
-  'browser_fill',
-  'browser_select',
-  'browser_screenshot',
-  'browser_screenshot_region',
-  'browser_console',
-  'browser_window_resize',
-  'browser_network',
-  'browser_wait',
-  'browser_key',
-  'browser_downloads',
-  'browser_scroll',
-  'browser_back',
-  'browser_forward',
-  'browser_evaluate',
   'browser_tool',
 ]);
 
@@ -810,6 +795,7 @@ export class PiAgent extends BaseAgent {
     const checkResult = runPreToolUseChecks({
       toolName,
       input,
+      sessionId,
       permissionMode: this.permissionManager.getPermissionMode(),
       workspaceRootPath: this.workingDirectory,
       workspaceId: workspaceSlug,
@@ -832,9 +818,20 @@ export class PiAgent extends BaseAgent {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
         return;
 
-      case 'block':
+      case 'block': {
+        const diagnostics = getPermissionModeDiagnostics(sessionId);
+        this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
+          sessionId,
+          toolName,
+          effectiveMode: diagnostics.permissionMode,
+          modeVersion: diagnostics.modeVersion,
+          changedBy: diagnostics.lastChangedBy,
+          changedAt: diagnostics.lastChangedAt,
+          reason: checkResult.reason,
+        })}`);
         this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
         return;
+      }
 
       case 'source_activation_needed': {
         const { sourceSlug, sourceExists } = checkResult;
@@ -869,6 +866,7 @@ export class PiAgent extends BaseAgent {
         const postResult = runPreToolUseChecks({
           toolName,
           input,
+          sessionId,
           permissionMode: this.permissionManager.getPermissionMode(),
           workspaceRootPath: this.workingDirectory,
           workspaceId: workspaceSlug,
@@ -1082,509 +1080,48 @@ export class PiAgent extends BaseAgent {
         }
       }
 
-      // Browser tools are backend-specific in Pi (handlers are not in core registry).
-      if (toolName.startsWith('browser_')) {
+      // browser_tool — single CLI-like tool for all browser actions
+      if (toolName === 'browser_tool') {
         const callbacks = getSessionScopedToolCallbacks(this._sessionId);
         const browserFns = callbacks?.browserPaneFns;
         if (!browserFns) {
           return { content: 'Browser window controls are not available. This tool requires the desktop app.', isError: true };
         }
 
-        switch (toolName) {
-          case 'browser_open': {
-            const result = await browserFns.openPanel();
-            return { content: `Opened in-app browser window (instance: ${result.instanceId})`, isError: false };
-          }
-          case 'browser_navigate': {
-            const url = String(args.url ?? '');
-            const result = await browserFns.navigate(url);
-            return { content: `Navigated to: ${result.url}\nTitle: ${result.title}`, isError: false };
-          }
-          case 'browser_snapshot': {
-            const snapshot = await browserFns.snapshot();
-            const lines: string[] = [
-              `URL: ${snapshot.url}`,
-              `Title: ${snapshot.title}`,
-              '',
-              `Elements (${snapshot.nodes.length}):`,
-            ];
-            for (const node of snapshot.nodes) {
-              let line = `  ${node.ref} [${node.role}] "${node.name}"`;
-              if (node.value !== undefined) line += ` value="${node.value}"`;
-              if (node.focused) line += ' (focused)';
-              if (node.checked) line += ' (checked)';
-              if (node.disabled) line += ' (disabled)';
-              if (node.description) line += ` — ${node.description}`;
-              lines.push(line);
-            }
-            return { content: lines.join('\n'), isError: false };
-          }
-          case 'browser_click':
-            await browserFns.click(String(args.ref ?? ''), {
-              waitFor: args.waitFor as 'none' | 'navigation' | 'network-idle' | undefined,
-              timeoutMs: args.timeoutMs as number | undefined,
-            });
-            return { content: `Clicked element ${String(args.ref ?? '')}${args.waitFor ? ` (waitFor=${String(args.waitFor)})` : ''}`, isError: false };
-          case 'browser_fill':
-            await browserFns.fill(String(args.ref ?? ''), String(args.value ?? ''));
-            return { content: `Filled element ${String(args.ref ?? '')} with "${String(args.value ?? '')}"`, isError: false };
-          case 'browser_select':
-            await browserFns.select(String(args.ref ?? ''), String(args.value ?? ''));
-            return { content: `Selected "${String(args.value ?? '')}" in element ${String(args.ref ?? '')}`, isError: false };
-          case 'browser_screenshot': {
-            const result = await browserFns.screenshot({
-              mode: (args.mode as 'raw' | 'agent' | undefined),
-              refs: Array.isArray(args.refs) ? args.refs.map(String) : undefined,
-              includeLastAction: args.includeLastAction as boolean | undefined,
-              includeMetadata: args.includeMetadata as boolean | undefined,
-            });
-            let content = `Screenshot captured (${Math.round(result.png.length / 1024)}KB PNG, base64 omitted in Pi proxy mode)`;
-            if (result.metadata) {
-              content += `\n\nMetadata:\n${JSON.stringify(result.metadata, null, 2)}`;
-            }
-            return { content, isError: false };
-          }
-          case 'browser_screenshot_region': {
-            const result = await browserFns.screenshotRegion({
-              x: args.x as number | undefined,
-              y: args.y as number | undefined,
-              width: args.width as number | undefined,
-              height: args.height as number | undefined,
-              ref: args.ref as string | undefined,
-              selector: args.selector as string | undefined,
-              padding: args.padding as number | undefined,
-            });
-            let content = `Region screenshot captured (${Math.round(result.png.length / 1024)}KB PNG, base64 omitted in Pi proxy mode)`;
-            if (result.metadata) {
-              content += `\n\nMetadata:\n${JSON.stringify(result.metadata, null, 2)}`;
-            }
-            return { content, isError: false };
-          }
-          case 'browser_console': {
-            const entries = await browserFns.getConsoleLogs({
-              level: args.level as 'all' | 'log' | 'info' | 'warn' | 'error' | undefined,
-              limit: args.limit as number | undefined,
-            });
-            const lines: string[] = [`Console entries (${entries.length}):`];
-            for (const entry of entries) {
-              lines.push(`[${new Date(entry.timestamp).toISOString()}] [${entry.level}] ${entry.message}`);
-            }
-            return { content: lines.join('\n'), isError: false };
-          }
-          case 'browser_window_resize': {
-            const resized = await browserFns.windowResize({
-              width: Number(args.width),
-              height: Number(args.height),
-            });
-            return { content: `Window resized to ${resized.width}x${resized.height}`, isError: false };
-          }
-          case 'browser_network': {
-            const entries = await browserFns.getNetworkLogs({
-              limit: args.limit as number | undefined,
-              status: args.status as 'all' | 'failed' | '2xx' | '3xx' | '4xx' | '5xx' | undefined,
-              method: args.method as string | undefined,
-              resourceType: args.resourceType as string | undefined,
-            });
-            const lines: string[] = [`Network entries (${entries.length}):`];
-            for (const entry of entries) {
-              lines.push(`[${new Date(entry.timestamp).toISOString()}] ${entry.method} ${entry.status} ${entry.resourceType} ${entry.url}`);
-            }
-            return { content: lines.join('\n'), isError: false };
-          }
-          case 'browser_wait': {
-            const result = await browserFns.waitFor({
-              kind: args.kind as 'selector' | 'text' | 'url' | 'network-idle',
-              value: args.value as string | undefined,
-              timeoutMs: args.timeoutMs as number | undefined,
-              pollMs: args.pollMs as number | undefined,
-              idleMs: args.idleMs as number | undefined,
-            });
-            return { content: `Wait succeeded (${result.kind}) in ${result.elapsedMs}ms — ${result.detail}`, isError: false };
-          }
-          case 'browser_key': {
-            await browserFns.sendKey({
-              key: String(args.key ?? ''),
-              modifiers: args.modifiers as Array<'shift' | 'control' | 'alt' | 'meta'> | undefined,
-            });
-            return { content: `Key sent: ${String(args.key ?? '')}`, isError: false };
-          }
-          case 'browser_downloads': {
-            const entries = await browserFns.getDownloads({
-              action: args.action as 'list' | 'wait' | undefined,
-              limit: args.limit as number | undefined,
-              timeoutMs: args.timeoutMs as number | undefined,
-            });
-            const lines: string[] = [`Downloads (${entries.length}):`];
-            for (const entry of entries) {
-              lines.push(`[${new Date(entry.timestamp).toISOString()}] [${entry.state}] ${entry.filename} (${entry.bytesReceived}/${entry.totalBytes})`);
-            }
-            return { content: lines.join('\n'), isError: false };
-          }
-          case 'browser_scroll':
-            await browserFns.scroll((args.direction as 'up' | 'down' | 'left' | 'right') ?? 'down', args.amount as number | undefined);
-            return { content: `Scrolled ${String(args.direction ?? 'down')}${args.amount != null ? ` by ${String(args.amount)}px` : ''}`, isError: false };
-          case 'browser_back':
-            await browserFns.goBack();
-            return { content: 'Navigated back', isError: false };
-          case 'browser_forward':
-            await browserFns.goForward();
-            return { content: 'Navigated forward', isError: false };
-          case 'browser_evaluate': {
-            const result = await browserFns.evaluate(String(args.expression ?? ''));
-            const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-            return { content: text || 'null', isError: false };
-          }
-          case 'browser_tool': {
-            const command = String(args.command ?? '').trim();
-            const help = [
-              'browser_tool command help',
-              '',
-              'Usage:',
-              '  --help',
-              '  open',
-              '  navigate <url>',
-              '  snapshot',
-              '  click <ref> [none|navigation|network-idle] [timeoutMs]',
-              '  fill <ref> <value>',
-              '  select <ref> <value>',
-              '  screenshot',
-              '  screenshot-region <x> <y> <width> <height>',
-              '  screenshot-region --ref <@eN> [--padding <px>]',
-              '  screenshot-region --selector <css-selector> [--padding <px>]',
-              '  console [limit] [level]',
-              '  window-resize <width> <height>',
-              '  network [limit] [status]',
-              '  wait <selector|text|url|network-idle> <value?> [timeoutMs]',
-              '  key <key> [modifiers]',
-              '  downloads [list|wait] [limit|timeoutMs]',
-              '  scroll <up|down|left|right> [amount]',
-              '  back',
-              '  forward',
-              '  evaluate <expression>',
-              '  focus [windowId]',
-              '  windows',
-              '  release',
-            ].join('\n');
+        try {
+          const result = await executeBrowserToolCommand({
+            command: String(args.command ?? ''),
+            fns: browserFns,
+            sessionId: this._sessionId,
+          });
 
-            if (!command) {
-              return { content: 'Missing command. Use "--help" to see supported browser_tool commands.', isError: true };
-            }
+          let content = result.output;
+          if (result.image) {
+            const sessionPath = getSessionPath(this.config.workspace.rootPath, this._sessionId);
+            const imageBuffer = Buffer.from(result.image.data, 'base64');
+            const saved = saveBinaryResponse(sessionPath, 'browser-screenshot.png', imageBuffer, result.image.mimeType);
 
-            const parts = command.split(/\s+/);
-            const cmd = parts[0]?.toLowerCase();
-
-            if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
-              return { content: help, isError: false };
-            }
-
-            if (cmd === 'open') {
-              const result = await browserFns.openPanel();
-              return { content: `Opened in-app browser window (instance: ${result.instanceId})`, isError: false };
-            }
-
-            if (cmd === 'navigate') {
-              const url = parts.slice(1).join(' ').trim();
-              if (!url) return { content: 'navigate requires a URL. Example: navigate https://example.com', isError: true };
-              const result = await browserFns.navigate(url);
-              return { content: `Navigated to: ${result.url}\nTitle: ${result.title}`, isError: false };
-            }
-
-            if (cmd === 'snapshot') {
-              const snapshot = await browserFns.snapshot();
-              const lines: string[] = [
-                `URL: ${snapshot.url}`,
-                `Title: ${snapshot.title}`,
+            if (saved.type === 'file_download') {
+              content += [
                 '',
-                `Elements (${snapshot.nodes.length}):`,
-              ];
-              for (const node of snapshot.nodes) {
-                let line = `  ${node.ref} [${node.role}] "${node.name}"`;
-                if (node.value !== undefined) line += ` value="${node.value}"`;
-                if (node.focused) line += ' (focused)';
-                if (node.checked) line += ' (checked)';
-                if (node.disabled) line += ' (disabled)';
-                if (node.description) line += ` — ${node.description}`;
-                lines.push(line);
-              }
-              return { content: lines.join('\n'), isError: false };
+                `Saved screenshot: ${saved.path}`,
+                '',
+                '```image-preview',
+                JSON.stringify({
+                  src: saved.path,
+                  title: 'Browser Screenshot',
+                }, null, 2),
+                '```',
+              ].join('\n');
+            } else {
+              content += `\n\n[Screenshot captured (${Math.round(result.image.sizeBytes / 1024)}KB ${result.image.mimeType}) but failed to save: ${saved.error}]`;
             }
-
-            if (cmd === 'click') {
-              const ref = parts[1];
-              if (!ref) return { content: 'click requires a ref. Example: click @e1', isError: true };
-              const waitForRaw = parts[2] as 'none' | 'navigation' | 'network-idle' | undefined;
-              const waitFor = waitForRaw && ['none', 'navigation', 'network-idle'].includes(waitForRaw)
-                ? waitForRaw
-                : undefined;
-              if (waitForRaw && !waitFor) {
-                return { content: 'click waitFor must be one of: none, navigation, network-idle', isError: true };
-              }
-              const timeoutRaw = parts[3];
-              const timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
-              if (timeoutRaw && Number.isNaN(timeoutMs)) {
-                return { content: `Invalid click timeout "${timeoutRaw}". Expected a number.`, isError: true };
-              }
-              await browserFns.click(ref, { waitFor, timeoutMs });
-              return { content: `Clicked element ${ref}${waitFor ? ` (waitFor=${waitFor})` : ''}`, isError: false };
-            }
-
-            if (cmd === 'fill') {
-              const ref = parts[1];
-              const value = parts.slice(2).join(' ');
-              if (!ref || !value) return { content: 'fill requires ref and value. Example: fill @e5 hello world', isError: true };
-              await browserFns.fill(ref, value);
-              return { content: `Filled element ${ref} with "${value}"`, isError: false };
-            }
-
-            if (cmd === 'select') {
-              const ref = parts[1];
-              const value = parts.slice(2).join(' ');
-              if (!ref || !value) return { content: 'select requires ref and value. Example: select @e3 optionValue', isError: true };
-              await browserFns.select(ref, value);
-              return { content: `Selected "${value}" in element ${ref}`, isError: false };
-            }
-
-            if (cmd === 'screenshot') {
-              const result = await browserFns.screenshot();
-              return { content: `Screenshot captured (${Math.round(result.png.length / 1024)}KB PNG, base64 omitted in Pi proxy mode)`, isError: false };
-            }
-
-            if (cmd === 'screenshot-region') {
-              const rest = parts.slice(1);
-              if (rest.length === 0) {
-                return { content: 'screenshot-region requires either coordinates, --ref, or --selector.', isError: true };
-              }
-
-              const parsePadding = (tokens: string[]) => {
-                const idx = tokens.findIndex((t) => t === '--padding');
-                if (idx === -1) return { padding: undefined as number | undefined, cleaned: tokens };
-                const raw = tokens[idx + 1];
-                if (!raw) throw new Error('Missing value for --padding');
-                const padding = Number(raw);
-                if (Number.isNaN(padding)) throw new Error(`Invalid padding "${raw}". Expected a number.`);
-                const cleaned = [...tokens.slice(0, idx), ...tokens.slice(idx + 2)];
-                return { padding, cleaned };
-              };
-
-              const { padding, cleaned } = parsePadding(rest);
-              let screenshotArgs: Record<string, unknown>;
-
-              if (cleaned[0] === '--ref') {
-                const ref = cleaned[1];
-                if (!ref) return { content: 'screenshot-region --ref requires a ref value.', isError: true };
-                screenshotArgs = { ref, padding };
-              } else if (cleaned[0] === '--selector') {
-                const selector = cleaned.slice(1).join(' ').trim();
-                if (!selector) return { content: 'screenshot-region --selector requires a CSS selector value.', isError: true };
-                screenshotArgs = { selector, padding };
-              } else {
-                if (cleaned.length < 4) return { content: 'screenshot-region coordinates require: x y width height', isError: true };
-                const [xRaw, yRaw, widthRaw, heightRaw] = cleaned;
-                const x = Number(xRaw);
-                const y = Number(yRaw);
-                const width = Number(widthRaw);
-                const height = Number(heightRaw);
-                if ([x, y, width, height].some((n) => Number.isNaN(n))) {
-                  return { content: 'screenshot-region coordinates must be numbers.', isError: true };
-                }
-                screenshotArgs = { x, y, width, height, padding };
-              }
-
-              const result = await browserFns.screenshotRegion(screenshotArgs as any);
-              let content = `Region screenshot captured (${Math.round(result.png.length / 1024)}KB PNG, base64 omitted in Pi proxy mode)`;
-              if (result.metadata) {
-                content += `\n\nMetadata:\n${JSON.stringify(result.metadata, null, 2)}`;
-              }
-              return { content, isError: false };
-            }
-
-            if (cmd === 'console') {
-              const limitRaw = parts[1];
-              const levelRaw = parts[2];
-              const limit = limitRaw ? Number(limitRaw) : undefined;
-              if (limitRaw && Number.isNaN(limit)) {
-                return { content: `Invalid console limit "${limitRaw}". Expected a number.`, isError: true };
-              }
-              const level = (levelRaw ?? 'all') as 'all' | 'log' | 'info' | 'warn' | 'error';
-              if (!['all', 'log', 'info', 'warn', 'error'].includes(level)) {
-                return { content: `Invalid console level "${String(levelRaw)}". Use one of: all, log, info, warn, error.`, isError: true };
-              }
-
-              const entries = await browserFns.getConsoleLogs({ limit, level });
-              const lines: string[] = [`Console entries (${entries.length}):`];
-              for (const entry of entries) {
-                lines.push(`[${new Date(entry.timestamp).toISOString()}] [${entry.level}] ${entry.message}`);
-              }
-              return { content: lines.join('\n'), isError: false };
-            }
-
-            if (cmd === 'window-resize') {
-              const widthRaw = parts[1];
-              const heightRaw = parts[2];
-              if (!widthRaw || !heightRaw) {
-                return { content: 'window-resize requires width and height. Example: window-resize 1280 720', isError: true };
-              }
-              const width = Number(widthRaw);
-              const height = Number(heightRaw);
-              if (Number.isNaN(width) || Number.isNaN(height)) {
-                return { content: 'window-resize width and height must be numbers.', isError: true };
-              }
-              const resized = await browserFns.windowResize({ width, height });
-              return { content: `Window resized to ${resized.width}x${resized.height}`, isError: false };
-            }
-
-            if (cmd === 'network') {
-              const limitRaw = parts[1];
-              const statusRaw = parts[2] as 'all' | 'failed' | '2xx' | '3xx' | '4xx' | '5xx' | undefined;
-              const limit = limitRaw ? Number(limitRaw) : undefined;
-              if (limitRaw && Number.isNaN(limit)) {
-                return { content: `Invalid network limit "${limitRaw}". Expected a number.`, isError: true };
-              }
-              const status = statusRaw ?? 'all';
-              if (!['all', 'failed', '2xx', '3xx', '4xx', '5xx'].includes(status)) {
-                return { content: `Invalid network status "${String(statusRaw)}". Use one of: all, failed, 2xx, 3xx, 4xx, 5xx.`, isError: true };
-              }
-              const entries = await browserFns.getNetworkLogs({ limit, status });
-              const lines: string[] = [`Network entries (${entries.length}):`];
-              for (const entry of entries) {
-                lines.push(`[${new Date(entry.timestamp).toISOString()}] ${entry.method} ${entry.status} ${entry.resourceType} ${entry.url}`);
-              }
-              return { content: lines.join('\n'), isError: false };
-            }
-
-            if (cmd === 'wait') {
-              const kind = parts[1] as 'selector' | 'text' | 'url' | 'network-idle' | undefined;
-              if (!kind || !['selector', 'text', 'url', 'network-idle'].includes(kind)) {
-                return { content: 'wait requires kind: selector|text|url|network-idle', isError: true };
-              }
-
-              let value: string | undefined;
-              let timeoutMs: number | undefined;
-              if (kind === 'network-idle') {
-                const timeoutRaw = parts[2];
-                timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
-                if (timeoutRaw && Number.isNaN(timeoutMs)) {
-                  return { content: `Invalid wait timeout "${timeoutRaw}". Expected a number.`, isError: true };
-                }
-              } else {
-                value = parts[2];
-                if (!value) return { content: `wait ${kind} requires a value.`, isError: true };
-                const timeoutRaw = parts[3];
-                timeoutMs = timeoutRaw ? Number(timeoutRaw) : undefined;
-                if (timeoutRaw && Number.isNaN(timeoutMs)) {
-                  return { content: `Invalid wait timeout "${timeoutRaw}". Expected a number.`, isError: true };
-                }
-              }
-
-              const result = await browserFns.waitFor({ kind, value, timeoutMs });
-              return { content: `Wait succeeded (${result.kind}) in ${result.elapsedMs}ms — ${result.detail}`, isError: false };
-            }
-
-            if (cmd === 'key') {
-              const key = parts[1];
-              if (!key) return { content: 'key requires key value. Example: key Enter', isError: true };
-              const modifiers = (parts[2] ? parts[2].split('+') : []) as Array<'shift' | 'control' | 'alt' | 'meta'>;
-              for (const m of modifiers) {
-                if (!['shift', 'control', 'alt', 'meta'].includes(m)) {
-                  return { content: `Invalid key modifier "${m}". Use shift|control|alt|meta`, isError: true };
-                }
-              }
-              await browserFns.sendKey({ key, modifiers });
-              return { content: `Key sent: ${key}${modifiers.length ? ` (${modifiers.join('+')})` : ''}`, isError: false };
-            }
-
-            if (cmd === 'downloads') {
-              const actionRaw = parts[1] as 'list' | 'wait' | undefined;
-              const action = actionRaw && ['list', 'wait'].includes(actionRaw) ? actionRaw : 'list';
-              const valueRaw = parts[2];
-              const valueNum = valueRaw ? Number(valueRaw) : undefined;
-              if (valueRaw && Number.isNaN(valueNum)) {
-                return { content: `Invalid downloads numeric value "${valueRaw}".`, isError: true };
-              }
-              const entries = await browserFns.getDownloads({
-                action,
-                ...(action === 'wait' ? { timeoutMs: valueNum } : { limit: valueNum }),
-              });
-              const lines: string[] = [`Downloads (${entries.length}):`];
-              for (const entry of entries) {
-                lines.push(`[${new Date(entry.timestamp).toISOString()}] [${entry.state}] ${entry.filename} (${entry.bytesReceived}/${entry.totalBytes})`);
-              }
-              return { content: lines.join('\n'), isError: false };
-            }
-
-            if (cmd === 'scroll') {
-              const direction = parts[1] as 'up' | 'down' | 'left' | 'right' | undefined;
-              const amountRaw = parts[2];
-              if (!direction || !['up', 'down', 'left', 'right'].includes(direction)) {
-                return { content: 'scroll requires direction up|down|left|right. Example: scroll down 800', isError: true };
-              }
-              const amount = amountRaw ? Number(amountRaw) : undefined;
-              if (amountRaw && Number.isNaN(amount)) {
-                return { content: `Invalid scroll amount "${amountRaw}". Expected a number.`, isError: true };
-              }
-              await browserFns.scroll(direction, amount);
-              return { content: `Scrolled ${direction}${amount != null ? ` by ${amount}px` : ''}`, isError: false };
-            }
-
-            if (cmd === 'back') {
-              await browserFns.goBack();
-              return { content: 'Navigated back', isError: false };
-            }
-
-            if (cmd === 'forward') {
-              await browserFns.goForward();
-              return { content: 'Navigated forward', isError: false };
-            }
-
-            if (cmd === 'evaluate') {
-              const expression = parts.slice(1).join(' ').trim();
-              if (!expression) return { content: 'evaluate requires an expression. Example: evaluate document.title', isError: true };
-              const result = await browserFns.evaluate(expression);
-              const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-              return { content: text || 'null', isError: false };
-            }
-
-            if (cmd === 'focus') {
-              const instanceId = parts[1];
-              const result = await browserFns.focusWindow(instanceId);
-              return {
-                content: `Focused browser window ${result.instanceId}\nTitle: ${result.title || 'New Tab'}\nURL: ${result.url || 'about:blank'}`,
-                isError: false,
-              };
-            }
-
-            if (cmd === 'windows') {
-              const windows = await browserFns.listWindows();
-              const lines: string[] = [`Browser windows (${windows.length}):`];
-              for (const w of windows) {
-                const lockState = w.boundSessionId ? `locked-session(${w.boundSessionId})` : 'unlocked';
-                const availableToSession = !w.boundSessionId || w.boundSessionId === this._sessionId;
-                lines.push(
-                  '',
-                  `- ${w.id}`,
-                  `  title: ${w.title || 'New Tab'}`,
-                  `  url: ${w.url || 'about:blank'}`,
-                  `  visible: ${w.isVisible}`,
-                  `  ownerType: ${w.ownerType}`,
-                  `  ownerSessionId: ${w.ownerSessionId ?? 'none'}`,
-                  `  boundSessionId: ${w.boundSessionId ?? 'none'}`,
-                  `  lockState: ${lockState}`,
-                  `  availableToSession: ${availableToSession}`,
-                  `  agentControlActive: ${!!w.agentControlActive}`,
-                );
-              }
-              return { content: lines.join('\n'), isError: false };
-            }
-
-            if (cmd === 'release') {
-              await browserFns.releaseControl();
-              return { content: 'Browser control released. Agent overlay dismissed.', isError: false };
-            }
-
-            return { content: `Unknown browser_tool command "${cmd}". Use "--help" to see supported commands.`, isError: true };
           }
-          default:
-            return { content: `Unknown session tool: ${toolName}`, isError: true };
+
+          return { content, isError: false };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return { content: msg, isError: true };
         }
       }
 

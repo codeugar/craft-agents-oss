@@ -5,7 +5,7 @@ import { existsSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir, realpath } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -399,24 +399,8 @@ function resolveToolDisplayMeta(
           'transform_data': 'Transform Data',
           'render_template': 'Render Template',
           'update_user_preferences': 'Update Preferences',
-          'browser_navigate': 'Browser Navigate',
-          'browser_snapshot': 'Browser Snapshot',
-          'browser_click': 'Browser Click',
-          'browser_fill': 'Browser Fill',
-          'browser_select': 'Browser Select',
-          'browser_screenshot': 'Browser Screenshot',
-          'browser_screenshot_region': 'Browser Screenshot Region',
-          'browser_console': 'Browser Console',
-          'browser_window_resize': 'Browser Window Resize',
-          'browser_network': 'Browser Network',
-          'browser_wait': 'Browser Wait',
-          'browser_key': 'Browser Key',
-          'browser_downloads': 'Browser Downloads',
-          'browser_scroll': 'Browser Scroll',
-          'browser_back': 'Browser Back',
-          'browser_forward': 'Browser Forward',
-          'browser_evaluate': 'Browser Evaluate',
-          'browser_tool': 'Browser Tool',
+          'send_developer_feedback': 'Send Feedback',
+          'browser_tool': 'Browser',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -2336,7 +2320,30 @@ export class SessionManager {
       // Post-construction: debug callback, auth callback, postInit()
       // ============================================================
 
-      managed.agent.onDebug = (msg: string) => sessionLog.info(msg)
+      managed.agent.onDebug = (msg: string) => {
+        const marker = '__PERMISSION_BLOCK__'
+        if (msg.includes(marker)) {
+          const idx = msg.indexOf(marker)
+          const payloadRaw = msg.slice(idx + marker.length)
+          try {
+            const payload = JSON.parse(payloadRaw) as {
+              sessionId: string
+              toolName: string
+              effectiveMode: string
+              modeVersion: number
+              changedBy: string
+              changedAt: string
+              reason: string
+            }
+            sessionLog.info('Tool blocked by permission mode', payload)
+            return
+          } catch {
+            // fall through to plain logging when payload parsing fails
+          }
+        }
+
+        sessionLog.info(msg)
+      }
 
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
       managed.agent.onBackendAuthRequired = (reason: string) => {
@@ -2401,13 +2408,29 @@ export class SessionManager {
               const instanceId = resolveSessionBrowserInstance('browser_click')
               return bpm.clickElement(instanceId, ref, options)
             },
+            clickAt: (x, y) => {
+              const instanceId = resolveSessionBrowserInstance('browser_click_at')
+              return bpm.clickAtCoordinates(instanceId, x, y)
+            },
             fill: (ref, value) => {
               const instanceId = resolveSessionBrowserInstance('browser_fill')
               return bpm.fillElement(instanceId, ref, value)
             },
+            type: (text) => {
+              const instanceId = resolveSessionBrowserInstance('browser_type')
+              return bpm.typeText(instanceId, text)
+            },
             select: (ref, value) => {
               const instanceId = resolveSessionBrowserInstance('browser_select')
               return bpm.selectOption(instanceId, ref, value)
+            },
+            setClipboard: (text) => {
+              const instanceId = resolveSessionBrowserInstance('browser_set_clipboard')
+              return bpm.setClipboard(instanceId, text)
+            },
+            getClipboard: () => {
+              const instanceId = resolveSessionBrowserInstance('browser_get_clipboard')
+              return bpm.getClipboard(instanceId)
             },
             screenshot: (options) => {
               const instanceId = resolveSessionBrowserInstance('browser_screenshot')
@@ -2531,8 +2554,19 @@ export class SessionManager {
 
       // Set up mode change handlers
       managed.agent.onPermissionModeChange = (mode) => {
-        sessionLog.info(`Permission mode changed for session ${managed.id}:`, mode)
+        if (managed.permissionMode === mode) {
+          return
+        }
+
         managed.permissionMode = mode
+        const diagnostics = getPermissionModeDiagnostics(managed.id)
+        sessionLog.info('Permission mode changed (agent callback)', {
+          sessionId: managed.id,
+          permissionMode: mode,
+          modeVersion: diagnostics.modeVersion,
+          changedBy: diagnostics.lastChangedBy,
+          changedAt: diagnostics.lastChangedAt,
+        })
         this.sendEvent({
           type: 'permission_mode_changed',
           sessionId: managed.id,
@@ -2799,9 +2833,16 @@ export class SessionManager {
       // Apply session-scoped permission mode to the newly created agent
       // This ensures the UI toggle state is reflected in the agent before first message
       if (managed.permissionMode) {
-        setPermissionMode(managed.id, managed.permissionMode)
+        setPermissionMode(managed.id, managed.permissionMode, { changedBy: 'restore' })
         managed.agent!.setPermissionMode(managed.permissionMode)
-        sessionLog.info(`Applied permission mode '${managed.permissionMode}' to agent for session ${managed.id}`)
+        const diagnostics = getPermissionModeDiagnostics(managed.id)
+        sessionLog.info('Applied permission mode to agent', {
+          sessionId: managed.id,
+          permissionMode: managed.permissionMode,
+          modeVersion: diagnostics.modeVersion,
+          changedBy: diagnostics.lastChangedBy,
+          changedAt: diagnostics.lastChangedAt,
+        })
       }
       end()
     }
@@ -4522,11 +4563,24 @@ To view this task's output:
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void {
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      // No-op when unchanged to avoid duplicate logs/events
+      if (managed.permissionMode === mode) {
+        return
+      }
+
       // Update permission mode
       managed.permissionMode = mode
 
       // Update the mode state for this specific session via mode manager
-      setPermissionMode(sessionId, mode)
+      setPermissionMode(sessionId, mode, { changedBy: 'user' })
+      const diagnostics = getPermissionModeDiagnostics(sessionId)
+      sessionLog.info('Permission mode changed', {
+        sessionId,
+        permissionMode: mode,
+        modeVersion: diagnostics.modeVersion,
+        changedBy: diagnostics.lastChangedBy,
+        changedAt: diagnostics.lastChangedAt,
+      })
 
       // Forward to the agent instance so backends (e.g. PiAgent) can
       // propagate the mode change to their subprocess

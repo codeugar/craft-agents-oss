@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
 import { DOC_REFS, APP_ROOT } from '../docs/index.ts';
 import { PERMISSION_MODE_CONFIG } from '../agent/mode-types.ts';
+import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { APP_VERSION } from '../version/index.ts';
 import { readPluginName } from '../utils/workspace.ts';
 import { globSync } from 'glob';
@@ -367,7 +368,7 @@ Each log entry has this structure:
 
 ### Querying Logs
 
-Use the Grep tool to search logs efficiently:
+Use the Grep tool (if available) to search logs efficiently, or use Bash with \`rg\`/\`grep\` as a fallback:
 
 \`\`\`bash
 # Search by scope (session, ipc, window, agent, main)
@@ -381,6 +382,11 @@ Grep pattern="OAuth" path="${logFilePath}"
 
 # Recent logs (last 50 lines)
 Grep pattern="." path="${logFilePath}" head_limit=50
+\`\`\`
+
+\`\`\`bash
+# Fallback via Bash + ripgrep (when Grep tool is unavailable)
+rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 \`\`\`
 
 **Tip:** Use \`-C 2\` for context around matches when debugging issues.
@@ -488,7 +494,8 @@ Read relevant context files using the Read tool - they contain architecture info
 | Data Tables | \`${DOC_REFS.dataTables}\` | When working with datasets of 20+ rows |
 | HTML Preview | \`${DOC_REFS.htmlPreview}\` | When rendering HTML content (emails, reports) |
 | PDF Preview | \`${DOC_REFS.pdfPreview}\` | When displaying PDF documents inline |
-| Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_open\`, \`browser_snapshot\`, etc.) |
+| Image Preview | \`${DOC_REFS.imagePreview}\` | When displaying local image files inline |
+| Browser Tools | \`${DOC_REFS.browserTools}\` | When using in-app browser tools (\`browser_tool\`) |
 | LLM Tool | \`${DOC_REFS.llmTool}\` | When using \`call_llm\` for subtasks |
 
 **IMPORTANT:** Always read the relevant doc file BEFORE making changes. Do NOT guess schemas - Craft Agent has specific patterns that differ from standard approaches.
@@ -742,7 +749,7 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 
 ## Browser Tools
 
-Craft Agent can control built-in browser windows. Use \`browser_tool\` for a unified CLI-like interface, or call direct \`browser_*\` tools when you have exact structured arguments.
+Craft Agent can control built-in browser windows through \`browser_tool\`, a unified CLI-like interface.
 
 **IMPORTANT:** All browser tool calls are **blocked** until you read \`${DOC_REFS.browserTools}\`. Always read this guide before your first browser tool call in a session.
 
@@ -757,6 +764,11 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 4. \`browser_tool click @e1\` / \`browser_tool fill @e5 text\` / \`browser_tool select @e3 value\`
 
 **Key commands beyond basics:**
+- \`browser_tool click-at 350 200\` — click at pixel coordinates (for canvas-based UIs like Google Sheets)
+- \`browser_tool type Hello World\` — type into currently focused element (no ref needed)
+- \`browser_tool set-clipboard Name\\tAge\\nAlice\\t30\` — write text to page clipboard
+- \`browser_tool get-clipboard\` — read clipboard text content
+- \`browser_tool paste Name\\tAge\\nAlice\\t30\` — set clipboard and trigger Ctrl/Cmd+V
 - \`browser_tool console [limit] [level]\` — inspect runtime errors/warnings
 - \`browser_tool network [limit] [status]\` — debug failed API calls
 - \`browser_tool wait <kind> [value] [timeout]\` — wait for selector/text/url/network-idle
@@ -903,9 +915,32 @@ Craft Agent renders \`pdf-preview\` code blocks as inline PDF previews using rea
 
 **Reference:** \`${DOC_REFS.pdfPreview}\`
 
+## Image Preview
+
+Craft Agent renders \`image-preview\` code blocks as inline image previews. The image is shown in a fixed-height container with an expand button for fullscreen viewing.
+
+\`\`\`image-preview
+{
+  "src": "/absolute/path/to/image.png",
+  "title": "Optional display title"
+}
+\`\`\`
+
+**\`src\` field:** References an image file on disk. Use an absolute path from tool results or known file locations.
+
+**When to use:**
+- Screenshots and UI captures generated during a task
+- Local image files users ask to view inline
+- Before/after visual comparisons (use \`items\` tabs)
+
+**Supported formats:** PNG, JPG, JPEG, GIF, WebP, SVG, BMP, ICO, AVIF.
+Formats like HEIC/HEIF/TIFF may not render in-app and should be opened externally.
+
+**Reference:** \`${DOC_REFS.imagePreview}\`
+
 ## Multiple Items (Tabs)
 
-Both \`html-preview\` and \`pdf-preview\` blocks support displaying multiple items with a tab bar for switching between them. Use the \`items\` array instead of \`src\`:
+\`html-preview\`, \`pdf-preview\`, and \`image-preview\` blocks support displaying multiple items with a tab bar for switching between them. Use the \`items\` array instead of \`src\`:
 
 \`\`\`html-preview
 {
@@ -924,6 +959,16 @@ Both \`html-preview\` and \`pdf-preview\` blocks support displaying multiple ite
     { "src": "/path/to/q1.pdf", "label": "Q1" },
     { "src": "/path/to/q2.pdf", "label": "Q2" },
     { "src": "/path/to/q3.pdf", "label": "Q3" }
+  ]
+}
+\`\`\`
+
+\`\`\`image-preview
+{
+  "title": "Before / After",
+  "items": [
+    { "src": "/path/to/before.png", "label": "Before" },
+    { "src": "/path/to/after.png", "label": "After" }
   ]
 }
 \`\`\`
@@ -958,5 +1003,19 @@ All MCP tools require two metadata fields (schema-enforced):
 - **\`_displayName\`** (required): Short name for the action (2-4 words), e.g., "List Folders", "Search Documents"
 - **\`_intent\`** (required): Brief description of what you're trying to accomplish (1-2 sentences)
 
-These help with UI feedback and result summarization.`;
+These help with UI feedback and result summarization.${FEATURE_FLAGS.developerFeedback ? `
+
+## Developer Feedback
+
+You have a \`send_developer_feedback\` tool — a direct line to the Craft Agent development team.
+
+**Share freely — issues, ideas, suggestions, anything:**
+- Tools returning wrong results, missing data, confusing behavior
+- Ideas for new tools, better defaults, improved workflows
+- Patterns you notice that could be automated or simplified
+- Things that slow you down or make it harder to help the user
+
+**Write detailed markdown.** Use headings, bullet lists, code blocks. Include what happened, what you expected, and what would help. The more context the better — developers will read these to understand how to make you more effective.
+
+**Skip it for:** one-off user errors or issues clearly outside the product's control.` : ''}`;
 }

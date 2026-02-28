@@ -68,11 +68,19 @@ export {
 /**
  * State for a single session's permission mode
  */
+export type PermissionModeChangedBy = 'user' | 'system' | 'restore' | 'automation' | 'unknown';
+
 export interface ModeState {
   /** Session ID */
   sessionId: string;
   /** Current permission mode */
   permissionMode: PermissionMode;
+  /** Monotonic version incremented each time the mode changes */
+  modeVersion: number;
+  /** ISO timestamp for the last mode change */
+  lastChangedAt: string;
+  /** Actor that initiated the last mode change */
+  lastChangedBy: PermissionModeChangedBy;
   /** Callback when mode state changes */
   onStateChange?: (state: ModeState) => void;
 }
@@ -171,6 +179,9 @@ class ModeManager {
       state = {
         sessionId,
         permissionMode: 'ask', // Default to 'ask' until initialized
+        modeVersion: 0,
+        lastChangedAt: new Date().toISOString(),
+        lastChangedBy: 'system',
       };
       this.states.set(sessionId, state);
     }
@@ -178,14 +189,34 @@ class ModeManager {
   }
 
   /**
-   * Set permission mode for a session
+   * Set permission mode for a session.
+   * @returns true when state changed, false when mode was unchanged
    */
-  setPermissionMode(sessionId: string, mode: PermissionMode): void {
+  setPermissionMode(
+    sessionId: string,
+    mode: PermissionMode,
+    metadata?: { changedBy?: PermissionModeChangedBy; changedAt?: string }
+  ): boolean {
     const existing = this.getState(sessionId);
-    const newState = { ...existing, permissionMode: mode };
+
+    // No-op when mode is unchanged (prevents duplicate logs/events)
+    if (existing.permissionMode === mode) {
+      return false;
+    }
+
+    const changedAt = metadata?.changedAt ?? new Date().toISOString();
+    const changedBy = metadata?.changedBy ?? 'unknown';
+
+    const newState: ModeState = {
+      ...existing,
+      permissionMode: mode,
+      modeVersion: existing.modeVersion + 1,
+      lastChangedAt: changedAt,
+      lastChangedBy: changedBy,
+    };
     this.states.set(sessionId, newState);
 
-    debug(`[Mode] Set permission mode to ${mode} for session ${sessionId}`);
+    debug(`[Mode] Set permission mode to ${mode} for session ${sessionId} (changedBy=${changedBy}, modeVersion=${newState.modeVersion})`);
 
     // Notify callbacks (for CraftAgent internal sync)
     const callbacks = this.callbacks.get(sessionId);
@@ -195,6 +226,7 @@ class ModeManager {
 
     // Notify React subscribers (for useSyncExternalStore)
     this.subscribers.get(sessionId)?.forEach(cb => cb());
+    return true;
   }
 
   /**
@@ -252,10 +284,15 @@ export function getPermissionMode(sessionId: string): PermissionMode {
 }
 
 /**
- * Set the permission mode for a session
+ * Set the permission mode for a session.
+ * @returns true when state changed, false when mode was unchanged
  */
-export function setPermissionMode(sessionId: string, mode: PermissionMode): void {
-  modeManager.setPermissionMode(sessionId, mode);
+export function setPermissionMode(
+  sessionId: string,
+  mode: PermissionMode,
+  metadata?: { changedBy?: PermissionModeChangedBy; changedAt?: string }
+): boolean {
+  return modeManager.setPermissionMode(sessionId, mode, metadata);
 }
 
 /**
@@ -276,14 +313,14 @@ export function cyclePermissionMode(
   // If current mode not in enabled list, jump to first enabled mode
   if (currentIndex === -1) {
     const nextMode = modes[0] ?? 'ask';
-    setPermissionMode(sessionId, nextMode);
+    setPermissionMode(sessionId, nextMode, { changedBy: 'user' });
     return nextMode;
   }
 
   const nextIndex = (currentIndex + 1) % modes.length;
   // Safe assertion: nextIndex is always valid due to modulo operation
   const nextMode = modes[nextIndex] as PermissionMode;
-  setPermissionMode(sessionId, nextMode);
+  setPermissionMode(sessionId, nextMode, { changedBy: 'user' });
   return nextMode;
 }
 
@@ -300,6 +337,24 @@ export function subscribeModeChanges(sessionId: string, callback: () => void): (
  */
 export function getModeState(sessionId: string): ModeState {
   return modeManager.getState(sessionId);
+}
+
+/**
+ * Lightweight diagnostics for permission denials and debugging.
+ */
+export function getPermissionModeDiagnostics(sessionId: string): {
+  permissionMode: PermissionMode;
+  modeVersion: number;
+  lastChangedAt: string;
+  lastChangedBy: PermissionModeChangedBy;
+} {
+  const state = modeManager.getState(sessionId);
+  return {
+    permissionMode: state.permissionMode,
+    modeVersion: state.modeVersion,
+    lastChangedAt: state.lastChangedAt,
+    lastChangedBy: state.lastChangedBy,
+  };
 }
 
 /**
@@ -326,7 +381,7 @@ export function initializeModeState(
   if (callbacks) {
     modeManager.registerCallbacks(sessionId, callbacks);
   }
-  modeManager.setPermissionMode(sessionId, mode);
+  modeManager.setPermissionMode(sessionId, mode, { changedBy: 'restore' });
 }
 
 /**

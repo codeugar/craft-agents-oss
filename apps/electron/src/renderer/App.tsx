@@ -1369,8 +1369,10 @@ export default function App() {
     // Bypass link interceptor — opens file directly in system editor.
     // Used by overlay header badges (when already viewing a file, "Open" should launch editor).
     onOpenFileExternal: linkInterceptor.openFileExternal,
-    // Read file contents as UTF-8 string (used by datatable/spreadsheet src field)
+    // Read file contents as UTF-8 string (used by datatable/spreadsheet/html-preview src fields)
     onReadFile: (path: string) => window.electronAPI.readFile(path),
+    // Read file as data URL (used by image-preview blocks)
+    onReadFileDataUrl: (path: string) => window.electronAPI.readFileDataUrl(path),
     // Read file as binary Uint8Array (used by PDF preview blocks)
     onReadFileBinary: (path: string) => window.electronAPI.readFileBinary(path),
     // Reveal a file in the system file manager (Finder on macOS, Explorer on Windows, etc.)

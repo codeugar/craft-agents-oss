@@ -32,6 +32,7 @@ import { handleCredentialPrompt } from './handlers/credential-prompt.ts';
 import { handleUpdatePreferences } from './handlers/update-preferences.ts';
 import { handleTransformData } from './handlers/transform-data.ts';
 import { handleRenderTemplate } from './handlers/render-template.ts';
+import { handleSendDeveloperFeedback } from './handlers/send-developer-feedback.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -126,90 +127,14 @@ export const RenderTemplateSchema = z.object({
   data: z.record(z.string(), z.unknown()).describe('JSON data to render into the template'),
 });
 
-// Browser tool schemas (backend-specific — requires BrowserPaneManager in Electron)
-export const BrowserOpenSchema = z.object({});
-
-export const BrowserNavigateSchema = z.object({
-  url: z.string().describe('URL to navigate to (e.g., "https://example.com" or "example.com")'),
+export const SendDeveloperFeedbackSchema = z.object({
+  message: z.string().describe('Freeform markdown feedback — be detailed, use headings, lists, code blocks. Include what happened, what you expected, what would help, or any ideas/suggestions.'),
 });
 
-export const BrowserClickSchema = z.object({
-  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e1")'),
-  waitFor: z.enum(['none', 'navigation', 'network-idle']).optional().describe('Optional wait mode after click'),
-  timeoutMs: z.number().optional().describe('Optional wait timeout in milliseconds for waitFor modes'),
-});
-
-export const BrowserFillSchema = z.object({
-  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e5")'),
-  value: z.string().describe('Text to type into the element'),
-});
-
-export const BrowserSelectSchema = z.object({
-  ref: z.string().describe('Element ref from browser_snapshot (e.g., "@e3")'),
-  value: z.string().describe('Option value to select'),
-});
-
-export const BrowserScrollSchema = z.object({
-  direction: z.enum(['up', 'down', 'left', 'right']).describe('Scroll direction'),
-  amount: z.number().optional().describe('Scroll amount in pixels (default: 500)'),
-});
-
-export const BrowserEvaluateSchema = z.object({
-  expression: z.string().describe('JavaScript expression to evaluate in the page context'),
-});
-
+// Browser tool schema (single CLI-like tool for all browser actions)
 export const BrowserToolSchema = z.object({
   command: z.string().describe('CLI-like browser command (e.g., "navigate https://example.com", "click @e1", "--help")'),
 });
-
-export const BrowserSnapshotSchema = z.object({});
-export const BrowserScreenshotSchema = z.object({
-  mode: z.enum(['raw', 'agent']).optional().describe('Capture mode. raw=plain screenshot, agent=adds semantic annotations and metadata'),
-  refs: z.array(z.string()).optional().describe('Element refs from browser_snapshot to annotate'),
-  includeLastAction: z.boolean().optional().describe('Include last browser action target when available'),
-  includeMetadata: z.boolean().optional().describe('Include compact metadata overlay and metadata payload in response text'),
-});
-export const BrowserScreenshotRegionSchema = z.object({
-  x: z.number().optional().describe('Region left coordinate in pixels (coordinate mode)'),
-  y: z.number().optional().describe('Region top coordinate in pixels (coordinate mode)'),
-  width: z.number().positive().optional().describe('Region width in pixels (coordinate mode, > 0)'),
-  height: z.number().positive().optional().describe('Region height in pixels (coordinate mode, > 0)'),
-  ref: z.string().min(1).optional().describe('Element ref from browser_snapshot (ref mode)'),
-  selector: z.string().min(1).optional().describe('CSS selector for target element (selector mode)'),
-  padding: z.number().optional().describe('Optional padding around the target in pixels'),
-});
-export const BrowserConsoleSchema = z.object({
-  level: z.enum(['all', 'log', 'info', 'warn', 'error']).optional().describe('Filter by console level. all includes every level.'),
-  limit: z.number().optional().describe('Maximum number of recent entries to return (default: 50)'),
-});
-export const BrowserWindowResizeSchema = z.object({
-  width: z.number().describe('Viewport width in pixels'),
-  height: z.number().describe('Viewport height in pixels'),
-});
-export const BrowserNetworkSchema = z.object({
-  limit: z.number().optional().describe('Maximum number of entries to return (default: 50)'),
-  status: z.enum(['all', 'failed', '2xx', '3xx', '4xx', '5xx']).optional().describe('Status filter for network entries'),
-  method: z.string().optional().describe('Optional HTTP method filter (e.g., GET, POST)'),
-  resourceType: z.string().optional().describe('Optional resource type filter (e.g., xhr, fetch, document)'),
-});
-export const BrowserWaitSchema = z.object({
-  kind: z.enum(['selector', 'text', 'url', 'network-idle']).describe('Condition kind to wait for'),
-  value: z.string().optional().describe('Condition value for selector/text/url waits'),
-  timeoutMs: z.number().optional().describe('Wait timeout in milliseconds (default: 10000)'),
-  pollMs: z.number().optional().describe('Polling interval for selector/text/url waits (default: 100)'),
-  idleMs: z.number().optional().describe('Idle window for network-idle waits (default: 700)'),
-});
-export const BrowserKeySchema = z.object({
-  key: z.string().describe('Key to send (e.g., Enter, Escape, k)'),
-  modifiers: z.array(z.enum(['shift', 'control', 'alt', 'meta'])).optional().describe('Optional modifier keys'),
-});
-export const BrowserDownloadsSchema = z.object({
-  action: z.enum(['list', 'wait']).optional().describe('list returns recent downloads, wait waits for terminal state first'),
-  limit: z.number().optional().describe('Maximum entries for list action (default: 20)'),
-  timeoutMs: z.number().optional().describe('Wait timeout for wait action (default: 10000)'),
-});
-export const BrowserBackSchema = z.object({});
-export const BrowserForwardSchema = z.object({});
 
 export const SpawnSessionSchema = z.object({
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
@@ -336,11 +261,11 @@ The user will see a secure input UI with appropriate fields based on the auth mo
 
   transform_data: `Transform data files using a script and write structured output for datatable/spreadsheet blocks, or extract HTML content for html-preview blocks.
 
-Use this tool when you need to transform large datasets (20+ rows) into structured JSON for display, or extract/decode HTML content for rendering. Write a transform script that reads the input file and produces an output file, then reference it via \`"src"\` in your datatable/spreadsheet/html-preview/pdf-preview block.
+Use this tool when you need to transform large datasets (20+ rows) into structured JSON for display, or extract/decode content for rich previews. Write a transform script that reads the input file and produces an output file, then reference it via \`"src"\` in your datatable/spreadsheet/html-preview/pdf-preview/image-preview block.
 
 **Workflow:**
 1. Call \`transform_data\` with a script that reads input files and writes output
-2. Output a datatable/spreadsheet block with \`"src": "data/output.json"\`, an html-preview block with \`"src": "data/output.html"\`, or a pdf-preview block with \`"src": "data/output.pdf"\`
+2. Output a datatable/spreadsheet block with \`"src": "data/output.json"\`, an html-preview block with \`"src": "data/output.html"\`, a pdf-preview block with \`"src": "data/output.pdf"\`, or an image-preview block with \`"src": "data/output.png"\`
 
 **Script conventions:**
 - Input file paths are passed as command-line arguments (last arg = output file path)
@@ -364,113 +289,9 @@ Use this when a source provides HTML templates for rich rendering of its data (e
 
 Templates use Mustache syntax — the tool handles rendering and writes the output HTML to the session data folder.`,
 
-  browser_open: `Open (or focus) an in-app browser window.
-
-Ensures the session's browser instance is visible and focused.
-Returns the browser instance ID that was opened/focused.`,
-
-  browser_navigate: `Navigate the built-in browser to a URL.
-
-The built-in browser windows run real Chromium content inside the app. Use this to load web pages for inspection, testing, or data extraction.
-
-If the browser UI may be hidden, call \`browser_open\` first.
-
-Returns the final URL and page title after navigation completes.`,
-
-  browser_snapshot: `Get an accessibility tree snapshot of the current browser page.
-
-Returns a structured list of interactive elements (buttons, links, inputs, etc.) and content nodes (headings, paragraphs, images) with ref IDs like @e1, @e2.
-
-Use these refs with browser_click and browser_fill to interact with elements. The snapshot is the primary way to understand page structure — prefer it over screenshots for element interaction.`,
-
-  browser_click: `Click an element in the browser by its ref ID (e.g., @e1).
-
-Get refs from browser_snapshot first. This performs a real mouse click at the element's center coordinates.
-
-Optional wait behavior:
-- waitFor: "none" (default), "navigation", or "network-idle"
-- timeoutMs: maximum wait time for waitFor modes`,
-
-  browser_fill: `Fill a text input or textarea in the browser by its ref ID.
-
-Clears the existing value first, then types the new value character by character. Get refs from browser_snapshot first.`,
-
-  browser_select: `Select an option in a <select> dropdown by its ref ID.
-
-Pass the option's value attribute. Get refs from browser_snapshot first.`,
-
-  browser_screenshot: `Take a screenshot of the current browser page.
-
-Supports optional agent-focused annotations and metadata:
-- mode: "raw" (default) or "agent"
-- refs: specific refs to annotate from browser_snapshot
-- includeLastAction: include last interaction target when available
-- includeMetadata: include compact overlay and metadata payload
-
-Use browser_snapshot instead when you need to interact with elements — screenshots are better for visual verification.`,
-
-  browser_screenshot_region: `Take a screenshot of a specific region or element in the current browser page.
-
-Supports three target modes:
-- Coordinates: x, y, width, height
-- Ref: ref from browser_snapshot (e.g., @e12)
-- Selector: CSS selector (e.g., div[data-testid="chart"]) — resolves to the first visible match (falls back to first match)
-
-Optional padding expands the capture box around the target.
-Returns PNG image content and metadata with the resolved target box.`,
-
-  browser_console: `Get recent console messages from the current browser page.
-
-Use this to inspect page errors/warnings and runtime logs without opening DevTools.
-
-Supports filtering by level and limiting number of entries.`,
-
-  browser_window_resize: `Resize the in-app browser window viewport.
-
-Sets the browser content area size to the requested width and height in pixels.
-Useful before screenshots to capture deterministic layouts.`,
-
-  browser_network: `Get recent network request activity from the current browser page.
-
-Supports filtering by status class, method, and resource type. Useful for debugging failed API calls and understanding what a click/navigation triggered.`,
-
-  browser_wait: `Wait for a browser condition to become true.
-
-Supported kinds:
-- selector: waits for CSS selector to exist
-- text: waits for page text to appear
-- url: waits until URL contains a substring
-- network-idle: waits until in-flight requests settle for an idle window
-
-Use this after click/navigation for reliability.`,
-
-  browser_key: `Send keyboard input to the browser page.
-
-Use this for shortcuts and key-driven flows (Enter, Escape, Cmd+K, etc.).`,
-
-  browser_downloads: `Inspect download activity for the current browser window.
-
-Actions:
-- list (default): return recent download entries
-- wait: wait for a terminal download state before returning`,
-
-  browser_scroll: `Scroll the browser page in a given direction.
-
-Useful for revealing content below the fold before taking a snapshot. Default scroll amount is 500 pixels.`,
-
-  browser_back: `Navigate the browser back to the previous page in history.`,
-
-  browser_forward: `Navigate the browser forward to the next page in history.`,
-
-  browser_evaluate: `Execute JavaScript in the browser page and return the result.
-
-Use this for advanced interactions not covered by other browser tools, like reading computed styles, extracting data from the DOM, or triggering custom events.
-
-The expression is evaluated in the page context. Return values are serialized to JSON.`,
-
   browser_tool: `Run browser actions using a CLI-like command string.
 
-This is a convenience wrapper around browser_* tools with strict validation and actionable feedback.
+All browser interactions use this single tool with strict validation and actionable feedback.
 
 Examples:
 - \`--help\`
@@ -478,11 +299,17 @@ Examples:
 - \`navigate https://example.com\`
 - \`snapshot\`
 - \`click @e12\`
+- \`click-at 350 200\` — click at pixel coordinates (for canvas elements)
 - \`fill @e5 user@example.com\`
+- \`type Hello World\` — type into currently focused element (no ref needed)
 - \`select @e3 optionValue\`
+- \`set-clipboard Name\\tAge\\nAlice\\t30\` — write text to clipboard
+- \`get-clipboard\` — read clipboard text content
+- \`paste Name\\tAge\\nAlice\\t30\` — set clipboard and trigger Ctrl/Cmd+V
 - \`scroll down 800\`
 - \`evaluate document.title\`
 - \`console 50 error\`
+- \`screenshot\`
 - \`screenshot-region 100 200 640 480\`
 - \`screenshot-region --ref @e12 --padding 8\`
 - \`screenshot-region --selector div[data-testid="chart"]\`
@@ -492,8 +319,11 @@ Examples:
 - \`key Enter\`
 - \`key k meta\`
 - \`downloads wait 15000\`
-
-Prefer direct browser_* tools when exact structured arguments are available.`,
+- \`focus [windowId]\` — focus existing browser window (no new window)
+- \`windows\` — list current browser windows and ownership state
+- \`release\` — dismiss the agent control overlay when done
+- \`close\` — close and destroy the browser window
+- \`hide\` — hide the window while preserving state`,
 
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)
@@ -514,6 +344,10 @@ When spawning, the 'prompt' parameter is required.
 
 The spawned session appears in the session list and runs fire-and-forget.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
+
+  send_developer_feedback: `Send freeform feedback to the Craft Agent development team.
+
+Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
 } as const;
 
 // ============================================================
@@ -565,29 +399,63 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'update_user_preferences', description: TOOL_DESCRIPTIONS.update_user_preferences, inputSchema: UpdatePreferencesSchema, executionMode: 'registry', handler: handleUpdatePreferences },
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', handler: handleTransformData },
   { name: 'render_template', description: TOOL_DESCRIPTIONS.render_template, inputSchema: RenderTemplateSchema, executionMode: 'registry', handler: handleRenderTemplate },
+  { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', handler: handleSendDeveloperFeedback },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, executionMode: 'backend', handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', handler: null },
-  // Browser tools (backend-specific — requires BrowserPaneManager in Electron)
-  { name: 'browser_open', description: TOOL_DESCRIPTIONS.browser_open, inputSchema: BrowserOpenSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_navigate', description: TOOL_DESCRIPTIONS.browser_navigate, inputSchema: BrowserNavigateSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_snapshot', description: TOOL_DESCRIPTIONS.browser_snapshot, inputSchema: BrowserSnapshotSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_click', description: TOOL_DESCRIPTIONS.browser_click, inputSchema: BrowserClickSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_fill', description: TOOL_DESCRIPTIONS.browser_fill, inputSchema: BrowserFillSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_select', description: TOOL_DESCRIPTIONS.browser_select, inputSchema: BrowserSelectSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_screenshot', description: TOOL_DESCRIPTIONS.browser_screenshot, inputSchema: BrowserScreenshotSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_screenshot_region', description: TOOL_DESCRIPTIONS.browser_screenshot_region, inputSchema: BrowserScreenshotRegionSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_console', description: TOOL_DESCRIPTIONS.browser_console, inputSchema: BrowserConsoleSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_window_resize', description: TOOL_DESCRIPTIONS.browser_window_resize, inputSchema: BrowserWindowResizeSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_network', description: TOOL_DESCRIPTIONS.browser_network, inputSchema: BrowserNetworkSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_wait', description: TOOL_DESCRIPTIONS.browser_wait, inputSchema: BrowserWaitSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_key', description: TOOL_DESCRIPTIONS.browser_key, inputSchema: BrowserKeySchema, executionMode: 'backend', handler: null },
-  { name: 'browser_downloads', description: TOOL_DESCRIPTIONS.browser_downloads, inputSchema: BrowserDownloadsSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_scroll', description: TOOL_DESCRIPTIONS.browser_scroll, inputSchema: BrowserScrollSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_back', description: TOOL_DESCRIPTIONS.browser_back, inputSchema: BrowserBackSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_forward', description: TOOL_DESCRIPTIONS.browser_forward, inputSchema: BrowserForwardSchema, executionMode: 'backend', handler: null },
-  { name: 'browser_evaluate', description: TOOL_DESCRIPTIONS.browser_evaluate, inputSchema: BrowserEvaluateSchema, executionMode: 'backend', handler: null },
+  // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
+  // Single CLI-like tool that handles all browser actions via command string.
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', handler: null },
 ];
+
+export interface SessionToolFilterOptions {
+  /** Include the experimental send_developer_feedback tool. */
+  includeDeveloperFeedback?: boolean;
+}
+
+/**
+ * Return session tools with optional feature filtering.
+ *
+ * Callers should use this helper instead of filtering ad hoc so tool visibility
+ * stays consistent across Claude, Pi, and session-mcp-server backends.
+ */
+export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
+  const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
+
+  return SESSION_TOOL_DEFS.filter(def => {
+    if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Build a name->definition registry with optional feature filtering.
+ */
+export function getSessionToolRegistry(options?: SessionToolFilterOptions): Map<string, SessionToolDef> {
+  return new Map(getSessionToolDefs(options).map(def => [def.name, def]));
+}
+
+/**
+ * Return session tool names with optional feature filtering.
+ */
+export function getSessionToolNames(options?: SessionToolFilterOptions): Set<string> {
+  return new Set(getSessionToolDefs(options).map(def => def.name));
+}
+
+/**
+ * Return backend-executed tool names with optional feature filtering.
+ */
+export function getSessionBackendToolNames(options?: SessionToolFilterOptions): Set<string> {
+  return new Set(getSessionToolDefs(options).filter(d => d.executionMode === 'backend').map(d => d.name));
+}
+
+/**
+ * Return registry-executed tool names with optional feature filtering.
+ */
+export function getSessionRegistryToolNames(options?: SessionToolFilterOptions): Set<string> {
+  return new Set(getSessionToolDefs(options).filter(d => d.executionMode === 'registry').map(d => d.name));
+}
 
 // ============================================================
 // Derived Lookups
@@ -620,14 +488,20 @@ export interface JsonSchemaToolDef {
 }
 
 /**
- * Convert all session tool definitions to JSON Schema format.
+ * Convert session tool definitions to JSON Schema format.
  *
  * @param opts.prefix - Optional prefix for tool names (e.g., 'mcp__session__' for Pi)
+ * @param opts.includeDeveloperFeedback - Include experimental feedback tool in output
  * @returns Array of tool definitions with JSON Schema inputSchema
  */
-export function getToolDefsAsJsonSchema(opts?: { prefix?: string }): JsonSchemaToolDef[] {
+export function getToolDefsAsJsonSchema(opts?: {
+  prefix?: string;
+  includeDeveloperFeedback?: boolean;
+}): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
-  return SESSION_TOOL_DEFS.map(def => {
+  const defs = getSessionToolDefs({ includeDeveloperFeedback: opts?.includeDeveloperFeedback });
+
+  return defs.map(def => {
     // Explicit `as any` avoids TS2589 ("type instantiation is excessively deep")
     // caused by zodToJsonSchema inferring deep generic chains from union schemas.
     const jsonSchema = zodToJsonSchema(def.inputSchema as any, { $refStrategy: 'none' }) as Record<string, unknown>;

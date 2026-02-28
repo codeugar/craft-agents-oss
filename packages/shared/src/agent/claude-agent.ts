@@ -38,6 +38,7 @@ import {
 import { type AutomationSystem, type SdkAutomationCallbackMatcher } from '../automations/index.ts';
 import {
   getPermissionMode,
+  getPermissionModeDiagnostics,
   setPermissionMode,
   cyclePermissionMode,
   initializeModeState,
@@ -879,6 +880,7 @@ export class ClaudeAgent extends BaseAgent {
               const checkResult = runPreToolUseChecks({
                 toolName: input.tool_name,
                 input: toolInput,
+                sessionId,
                 permissionMode,
                 workspaceRootPath: this.workspaceRootPath,
                 workspaceId: extractWorkspaceSlug(this.workspaceRootPath, this.config.workspace.id),
@@ -923,8 +925,19 @@ export class ClaudeAgent extends BaseAgent {
                     },
                   };
 
-                case 'block':
+                case 'block': {
+                  const diagnostics = getPermissionModeDiagnostics(sessionId);
+                  this.onDebug?.(`__PERMISSION_BLOCK__${JSON.stringify({
+                    sessionId,
+                    toolName: input.tool_name,
+                    effectiveMode: diagnostics.permissionMode,
+                    modeVersion: diagnostics.modeVersion,
+                    changedBy: diagnostics.lastChangedBy,
+                    changedAt: diagnostics.lastChangedAt,
+                    reason: checkResult.reason,
+                  })}`);
                   return blockWithReason(checkResult.reason);
+                }
 
                 case 'source_activation_needed': {
                   const { sourceSlug, sourceExists } = checkResult;

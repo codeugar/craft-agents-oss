@@ -68,12 +68,17 @@ export {
   useCollapsibleMarkdown,
   MarkdownDatatableBlock,
   MarkdownSpreadsheetBlock,
+  MarkdownImageBlock,
+  ImageCardStack,
   type MarkdownProps,
   type RenderMode,
   TiptapMarkdownEditor,
   type TiptapMarkdownEditorProps,
   type MarkdownDatatableBlockProps,
   type MarkdownSpreadsheetBlockProps,
+  type MarkdownImageBlockProps,
+  type ImageCardStackProps,
+  type ImageCardStackItem,
 } from './components/markdown'
 
 // UI primitives
