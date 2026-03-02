@@ -1156,8 +1156,14 @@ export default function App() {
     }
   }, [windowWorkspaceId, handleCreateSession, handleInputChange])
 
-  const handleRespondToPermission = useCallback(async (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
-    const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
+  const handleRespondToPermission = useCallback(async (
+    sessionId: string,
+    requestId: string,
+    allowed: boolean,
+    alwaysAllow: boolean,
+    options?: import('../shared/types').PermissionResponseOptions,
+  ) => {
+    const success = await window.electronAPI.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
 
     if (success) {
       // Remove only the first permission from the queue (the one we just responded to)

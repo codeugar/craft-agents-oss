@@ -232,6 +232,14 @@ export interface PermissionRequest extends BasePermissionRequest {
   sessionId: string
 }
 
+/**
+ * Optional metadata for permission responses.
+ * Used by admin approvals for time-scoped remember windows.
+ */
+export interface PermissionResponseOptions {
+  rememberForMinutes?: number
+}
+
 // ============================================
 // Credential Input Types (Secure Auth UI)
 // ============================================
@@ -969,7 +977,7 @@ export interface ElectronAPI {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
-  respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean): Promise<boolean>
+  respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
 
   // Consolidated session command handler

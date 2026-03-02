@@ -108,7 +108,13 @@ interface ChatDisplayProps {
   /** Pending permission request for this session */
   pendingPermission?: PermissionRequest
   /** Callback to respond to permission request */
-  onRespondToPermission?: (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => void
+  onRespondToPermission?: (
+    sessionId: string,
+    requestId: string,
+    allowed: boolean,
+    alwaysAllow: boolean,
+    options?: import('../../../shared/types').PermissionResponseOptions
+  ) => void
   /** Pending credential request for this session */
   pendingCredential?: CredentialRequest
   /** Callback to respond to credential request */
@@ -1227,14 +1233,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
 
       const adminResponse = response as AdminApprovalResponse
-      // NOTE: Do not map rememberForMinutes to alwaysAllow.
-      // alwaysAllow currently whitelists commands indefinitely in ClaudeAgent.
-      // Keep false until time-scoped remember windows are implemented end-to-end.
       onRespondToPermission(
         pendingPermission.sessionId,
         pendingPermission.requestId,
         adminResponse.approved,
-        false
+        false,
+        { rememberForMinutes: adminResponse.rememberForMinutes }
       )
     } else if (response.type === 'credential' && pendingCredential && onRespondToCredential) {
       const credResponse = response as CredentialResponse

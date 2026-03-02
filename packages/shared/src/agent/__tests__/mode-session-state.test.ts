@@ -3,6 +3,7 @@ import {
   cleanupModeState,
   formatSessionState,
   getPermissionModeDiagnostics,
+  hydratePreviousPermissionMode,
   initializeModeState,
   setPermissionMode,
 } from '../mode-manager.ts';
@@ -63,6 +64,25 @@ describe('mode transition session_state context', () => {
     expect(stateBlock).toContain('permissionMode: explore');
     expect(stateBlock).not.toContain('modeTransition:');
     expect(stateBlock).toContain('modeChangedBy: restore');
+
+    cleanupModeState(sessionId);
+  });
+
+  it('restores modeTransition after rehydrating persisted previous mode', () => {
+    const sessionId = `mode-rehydrate-${Date.now()}`;
+
+    // Simulate restored current mode after app restart.
+    setPermissionMode(sessionId, 'allow-all', { changedBy: 'restore' });
+    hydratePreviousPermissionMode(sessionId, 'safe');
+
+    const diagnostics = getPermissionModeDiagnostics(sessionId);
+    expect(diagnostics.permissionMode).toBe('allow-all');
+    expect(diagnostics.previousPermissionMode).toBe('safe');
+    expect(diagnostics.transitionDisplay).toBe('Explore -> Execute');
+
+    const stateBlock = formatSessionState(sessionId);
+    expect(stateBlock).toContain('permissionMode: execute');
+    expect(stateBlock).toContain('modeTransition: Explore -> Execute');
 
     cleanupModeState(sessionId);
   });

@@ -173,6 +173,23 @@ class ModeManager {
   private subscribers: Map<string, Set<() => void>> = new Map();
 
   /**
+   * Hydrate persisted transition context (previous mode) without mutating current mode/version.
+   * Used on session restore so transition metadata can survive app restarts.
+   */
+  setPreviousPermissionMode(sessionId: string, previousPermissionMode?: PermissionMode): void {
+    const existing = this.getState(sessionId);
+    if (existing.previousPermissionMode === previousPermissionMode) {
+      return;
+    }
+
+    const newState: ModeState = {
+      ...existing,
+      previousPermissionMode,
+    };
+    this.states.set(sessionId, newState);
+  }
+
+  /**
    * Get or create state for a session
    */
   getState(sessionId: string): ModeState {
@@ -342,6 +359,13 @@ export function subscribeModeChanges(sessionId: string, callback: () => void): (
  */
 export function getModeState(sessionId: string): ModeState {
   return modeManager.getState(sessionId);
+}
+
+/**
+ * Hydrate persisted transition context for a session without changing current mode.
+ */
+export function hydratePreviousPermissionMode(sessionId: string, previousPermissionMode?: PermissionMode): void {
+  modeManager.setPreviousPermissionMode(sessionId, previousPermissionMode);
 }
 
 /**

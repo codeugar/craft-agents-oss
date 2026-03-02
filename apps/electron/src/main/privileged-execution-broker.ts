@@ -169,6 +169,10 @@ export class PrivilegedExecutionBroker {
     return { allowed: true }
   }
 
+  auditEvent(event: string, payload: Record<string, unknown>): void {
+    void this.appendAudit({ event, ...payload })
+  }
+
   private async appendAudit(payload: Record<string, unknown>): Promise<void> {
     try {
       await mkdir(dirname(AUDIT_LOG_PATH), { recursive: true })

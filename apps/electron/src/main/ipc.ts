@@ -362,9 +362,19 @@ export function registerIpcHandlers(sessionManager: SessionManager, windowManage
 
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
-  ipcMain.handle(IPC_CHANNELS.RESPOND_TO_PERMISSION, async (_event, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
-    return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
-  })
+  ipcMain.handle(
+    IPC_CHANNELS.RESPOND_TO_PERMISSION,
+    async (
+      _event,
+      sessionId: string,
+      requestId: string,
+      allowed: boolean,
+      alwaysAllow: boolean,
+      options?: import('../shared/types').PermissionResponseOptions,
+    ) => {
+      return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow, options)
+    },
+  )
 
   // Respond to a credential request (secure auth input)
   // Returns true if the response was delivered, false if agent/session is gone

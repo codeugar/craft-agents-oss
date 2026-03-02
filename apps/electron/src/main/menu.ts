@@ -128,7 +128,8 @@ export async function rebuildMenu(): Promise<void> {
           {
             label: 'Reload',
             accelerator: 'CmdOrCtrl+R',
-            click: (_menuItem: Electron.MenuItem, browserWindow?: BrowserWindow | null) => {
+            click: (_menuItem: Electron.MenuItem, window: Electron.BaseWindow | undefined) => {
+              const browserWindow = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow()
               if (!browserWindow) return
               const views = browserWindow.getBrowserViews()
               if (views.length > 0) {
@@ -141,7 +142,8 @@ export async function rebuildMenu(): Promise<void> {
           {
             label: 'Force Reload',
             accelerator: 'CmdOrCtrl+Shift+R',
-            click: (_menuItem: Electron.MenuItem, browserWindow?: BrowserWindow | null) => {
+            click: (_menuItem: Electron.MenuItem, window: Electron.BaseWindow | undefined) => {
+              const browserWindow = window instanceof BrowserWindow ? window : BrowserWindow.getFocusedWindow()
               if (!browserWindow) return
               const views = browserWindow.getBrowserViews()
               if (views.length > 0) {
