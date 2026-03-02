@@ -66,7 +66,7 @@ Sentry.setUser({ id: machineId })
 import { join, delimiter } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
-import { registerIpcHandlers } from './ipc'
+import { registerAllIpcHandlers } from './ipc/index'
 import { initModelRefreshService, getModelRefreshService } from './model-fetchers'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -381,7 +381,7 @@ app.whenReady().then(async () => {
     sessionManager.setBrowserPaneManager(browserPaneManager)
 
     // Register IPC handlers (must happen before window creation)
-    registerIpcHandlers(sessionManager, windowManager, browserPaneManager)
+    registerAllIpcHandlers({ sessionManager, windowManager, browserPaneManager })
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()

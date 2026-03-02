@@ -1,627 +1,329 @@
 // Capture errors in the isolated preload context and forward to Sentry
 import '@sentry/electron/preload'
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment, type LlmConnectionSetup, type TestLlmConnectionParams } from '../shared/types'
+import { IPC_CHANNELS, type ElectronAPI } from '../shared/types'
+import { invoke, send, listen, listenVoid } from './helpers'
 
 const api: ElectronAPI = {
   // Session management
-  getSessions: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSIONS),
-  getUnreadSummary: () => ipcRenderer.invoke(IPC_CHANNELS.GET_UNREAD_SUMMARY),
-  markAllSessionsRead: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.MARK_ALL_SESSIONS_READ, workspaceId),
-  getSessionMessages: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_MESSAGES, sessionId),
-  createSession: (workspaceId: string, options?: import('../shared/types').CreateSessionOptions) => ipcRenderer.invoke(IPC_CHANNELS.CREATE_SESSION, workspaceId, options),
-  deleteSession: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DELETE_SESSION, sessionId),
-  sendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: import('../shared/types').StoredAttachment[], options?: import('../shared/types').SendMessageOptions) => ipcRenderer.invoke(IPC_CHANNELS.SEND_MESSAGE, sessionId, message, attachments, storedAttachments, options),
-  cancelProcessing: (sessionId: string, silent?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.CANCEL_PROCESSING, sessionId, silent),
-  killShell: (sessionId: string, shellId: string) => ipcRenderer.invoke(IPC_CHANNELS.KILL_SHELL, sessionId, shellId),
-  getTaskOutput: (taskId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_TASK_OUTPUT, taskId),
-  respondToPermission: (sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.RESPOND_TO_PERMISSION, sessionId, requestId, allowed, alwaysAllow),
-  respondToCredential: (sessionId: string, requestId: string, response: import('../shared/types').CredentialResponse) =>
-    ipcRenderer.invoke(IPC_CHANNELS.RESPOND_TO_CREDENTIAL, sessionId, requestId, response),
-
-  // Consolidated session command handler
-  sessionCommand: (sessionId: string, command: import('../shared/types').SessionCommand) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_COMMAND, sessionId, command),
-
-  // Pending plan execution (for reload recovery)
-  getPendingPlanExecution: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_PENDING_PLAN_EXECUTION, sessionId),
-  // Permission mode reconciliation
-  getSessionPermissionModeState: (sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_PERMISSION_MODE_STATE, sessionId),
+  getSessions: invoke(IPC_CHANNELS.GET_SESSIONS),
+  getUnreadSummary: invoke(IPC_CHANNELS.GET_UNREAD_SUMMARY),
+  markAllSessionsRead: invoke(IPC_CHANNELS.MARK_ALL_SESSIONS_READ),
+  getSessionMessages: invoke(IPC_CHANNELS.GET_SESSION_MESSAGES),
+  createSession: invoke(IPC_CHANNELS.CREATE_SESSION),
+  deleteSession: invoke(IPC_CHANNELS.DELETE_SESSION),
+  sendMessage: invoke(IPC_CHANNELS.SEND_MESSAGE),
+  cancelProcessing: invoke(IPC_CHANNELS.CANCEL_PROCESSING),
+  killShell: invoke(IPC_CHANNELS.KILL_SHELL),
+  getTaskOutput: invoke(IPC_CHANNELS.GET_TASK_OUTPUT),
+  respondToPermission: invoke(IPC_CHANNELS.RESPOND_TO_PERMISSION),
+  respondToCredential: invoke(IPC_CHANNELS.RESPOND_TO_CREDENTIAL),
+  sessionCommand: invoke(IPC_CHANNELS.SESSION_COMMAND),
+  getPendingPlanExecution: invoke(IPC_CHANNELS.GET_PENDING_PLAN_EXECUTION),
+  getSessionPermissionModeState: invoke(IPC_CHANNELS.GET_SESSION_PERMISSION_MODE_STATE),
 
   // Workspace management
-  getWorkspaces: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WORKSPACES),
-  createWorkspace: (folderPath: string, name: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CREATE_WORKSPACE, folderPath, name),
-  checkWorkspaceSlug: (slug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CHECK_WORKSPACE_SLUG, slug),
+  getWorkspaces: invoke(IPC_CHANNELS.GET_WORKSPACES),
+  createWorkspace: invoke(IPC_CHANNELS.CREATE_WORKSPACE),
+  checkWorkspaceSlug: invoke(IPC_CHANNELS.CHECK_WORKSPACE_SLUG),
 
   // Window management
-  getWindowWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_WORKSPACE),
-  getWindowMode: () => ipcRenderer.invoke(IPC_CHANNELS.GET_WINDOW_MODE),
-  openWorkspace: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_WORKSPACE, workspaceId),
-  openSessionInNewWindow: (workspaceId: string, sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_SESSION_IN_NEW_WINDOW, workspaceId, sessionId),
-  switchWorkspace: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.SWITCH_WORKSPACE, workspaceId),
-  closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.CLOSE_WINDOW),
-  confirmCloseWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CONFIRM_CLOSE),
-  cancelCloseWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CANCEL_CLOSE),
-  onCloseRequested: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, handler)
-  },
-  setTrafficLightsVisible: (visible: boolean) => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS, visible),
+  getWindowWorkspace: invoke(IPC_CHANNELS.GET_WINDOW_WORKSPACE),
+  getWindowMode: invoke(IPC_CHANNELS.GET_WINDOW_MODE),
+  openWorkspace: invoke(IPC_CHANNELS.OPEN_WORKSPACE),
+  openSessionInNewWindow: invoke(IPC_CHANNELS.OPEN_SESSION_IN_NEW_WINDOW),
+  switchWorkspace: invoke(IPC_CHANNELS.SWITCH_WORKSPACE),
+  closeWindow: invoke(IPC_CHANNELS.CLOSE_WINDOW),
+  confirmCloseWindow: invoke(IPC_CHANNELS.WINDOW_CONFIRM_CLOSE),
+  cancelCloseWindow: invoke(IPC_CHANNELS.WINDOW_CANCEL_CLOSE),
+  onCloseRequested: listenVoid(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED),
+  setTrafficLightsVisible: invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS),
 
   // Event listeners
-  onSessionEvent: (callback: (event: SessionEvent) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, sessionEvent: SessionEvent) => {
-      callback(sessionEvent)
-    }
-    ipcRenderer.on(IPC_CHANNELS.SESSION_EVENT, handler)
-    // Return cleanup function
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.SESSION_EVENT, handler)
-    }
-  },
-  onUnreadSummaryChanged: (callback: (summary: import('../shared/types').UnreadSummary) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, summary: import('../shared/types').UnreadSummary) => {
-      callback(summary)
-    }
-    ipcRenderer.on(IPC_CHANNELS.SESSIONS_UNREAD_SUMMARY_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.SESSIONS_UNREAD_SUMMARY_CHANGED, handler)
-    }
-  },
+  onSessionEvent: listen(IPC_CHANNELS.SESSION_EVENT),
+  onUnreadSummaryChanged: listen(IPC_CHANNELS.SESSIONS_UNREAD_SUMMARY_CHANGED),
 
   // File operations
-  readFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.READ_FILE, path),
-  readFileDataUrl: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.READ_FILE_DATA_URL, path),
-  readFileBinary: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.READ_FILE_BINARY, path) as Promise<Uint8Array>,
-  openFileDialog: () => ipcRenderer.invoke(IPC_CHANNELS.OPEN_FILE_DIALOG),
-  readFileAttachment: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.READ_FILE_ATTACHMENT, path),
-  storeAttachment: (sessionId: string, attachment: FileAttachment) => ipcRenderer.invoke(IPC_CHANNELS.STORE_ATTACHMENT, sessionId, attachment),
-  generateThumbnail: (base64: string, mimeType: string) => ipcRenderer.invoke(IPC_CHANNELS.GENERATE_THUMBNAIL, base64, mimeType),
+  readFile: invoke(IPC_CHANNELS.READ_FILE),
+  readFileDataUrl: invoke(IPC_CHANNELS.READ_FILE_DATA_URL),
+  readFileBinary: invoke(IPC_CHANNELS.READ_FILE_BINARY),
+  openFileDialog: invoke(IPC_CHANNELS.OPEN_FILE_DIALOG),
+  readFileAttachment: invoke(IPC_CHANNELS.READ_FILE_ATTACHMENT),
+  storeAttachment: invoke(IPC_CHANNELS.STORE_ATTACHMENT),
+  generateThumbnail: invoke(IPC_CHANNELS.GENERATE_THUMBNAIL),
 
   // Theme
-  getSystemTheme: () => ipcRenderer.invoke(IPC_CHANNELS.GET_SYSTEM_THEME),
-  onSystemThemeChange: (callback: (isDark: boolean) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, isDark: boolean) => {
-      callback(isDark)
-    }
-    ipcRenderer.on(IPC_CHANNELS.SYSTEM_THEME_CHANGED, handler)
-    // Return cleanup function
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.SYSTEM_THEME_CHANGED, handler)
-    }
-  },
+  getSystemTheme: invoke(IPC_CHANNELS.GET_SYSTEM_THEME),
+  onSystemThemeChange: listen(IPC_CHANNELS.SYSTEM_THEME_CHANGED),
 
   // System
   getVersions: () => ({
     node: process.versions.node,
     chrome: process.versions.chrome,
-    electron: process.versions.electron
+    electron: process.versions.electron,
   }),
-  getHomeDir: () => ipcRenderer.invoke(IPC_CHANNELS.GET_HOME_DIR),
-  isDebugMode: () => ipcRenderer.invoke(IPC_CHANNELS.IS_DEBUG_MODE),
+  getHomeDir: invoke(IPC_CHANNELS.GET_HOME_DIR),
+  isDebugMode: invoke(IPC_CHANNELS.IS_DEBUG_MODE),
 
   // Auto-update
-  checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_CHECK),
-  getUpdateInfo: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_GET_INFO),
-  installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_INSTALL),
-  dismissUpdate: (version: string) => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_DISMISS, version),
-  getDismissedUpdateVersion: () => ipcRenderer.invoke(IPC_CHANNELS.UPDATE_GET_DISMISSED),
-  onUpdateAvailable: (callback: (info: import('../shared/types').UpdateInfo) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, info: import('../shared/types').UpdateInfo) => {
-      callback(info)
-    }
-    ipcRenderer.on(IPC_CHANNELS.UPDATE_AVAILABLE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_AVAILABLE, handler)
-  },
-  onUpdateDownloadProgress: (callback: (progress: number) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, progress: number) => {
-      callback(progress)
-    }
-    ipcRenderer.on(IPC_CHANNELS.UPDATE_DOWNLOAD_PROGRESS, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.UPDATE_DOWNLOAD_PROGRESS, handler)
-  },
+  checkForUpdates: invoke(IPC_CHANNELS.UPDATE_CHECK),
+  getUpdateInfo: invoke(IPC_CHANNELS.UPDATE_GET_INFO),
+  installUpdate: invoke(IPC_CHANNELS.UPDATE_INSTALL),
+  dismissUpdate: invoke(IPC_CHANNELS.UPDATE_DISMISS),
+  getDismissedUpdateVersion: invoke(IPC_CHANNELS.UPDATE_GET_DISMISSED),
+  onUpdateAvailable: listen(IPC_CHANNELS.UPDATE_AVAILABLE),
+  onUpdateDownloadProgress: listen(IPC_CHANNELS.UPDATE_DOWNLOAD_PROGRESS),
 
   // Release notes
-  getReleaseNotes: () => ipcRenderer.invoke(IPC_CHANNELS.GET_RELEASE_NOTES) as Promise<string>,
-  getLatestReleaseVersion: () => ipcRenderer.invoke(IPC_CHANNELS.GET_LATEST_RELEASE_VERSION) as Promise<string | undefined>,
+  getReleaseNotes: invoke(IPC_CHANNELS.GET_RELEASE_NOTES),
+  getLatestReleaseVersion: invoke(IPC_CHANNELS.GET_LATEST_RELEASE_VERSION),
 
   // Shell operations
-  openUrl: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_URL, url),
-  openFile: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_FILE, path),
-  showInFolder: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.SHOW_IN_FOLDER, path),
+  openUrl: invoke(IPC_CHANNELS.OPEN_URL),
+  openFile: invoke(IPC_CHANNELS.OPEN_FILE),
+  showInFolder: invoke(IPC_CHANNELS.SHOW_IN_FOLDER),
 
   // Menu event listeners
-  onMenuNewChat: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_NEW_CHAT, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_NEW_CHAT, handler)
-  },
-  onMenuOpenSettings: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_OPEN_SETTINGS, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_OPEN_SETTINGS, handler)
-  },
-  onMenuKeyboardShortcuts: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_KEYBOARD_SHORTCUTS, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_KEYBOARD_SHORTCUTS, handler)
-  },
-  onMenuToggleFocusMode: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_TOGGLE_FOCUS_MODE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_TOGGLE_FOCUS_MODE, handler)
-  },
-  onMenuToggleSidebar: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.MENU_TOGGLE_SIDEBAR, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENU_TOGGLE_SIDEBAR, handler)
-  },
+  onMenuNewChat: listenVoid(IPC_CHANNELS.MENU_NEW_CHAT),
+  onMenuOpenSettings: listenVoid(IPC_CHANNELS.MENU_OPEN_SETTINGS),
+  onMenuKeyboardShortcuts: listenVoid(IPC_CHANNELS.MENU_KEYBOARD_SHORTCUTS),
+  onMenuToggleFocusMode: listenVoid(IPC_CHANNELS.MENU_TOGGLE_FOCUS_MODE),
+  onMenuToggleSidebar: listenVoid(IPC_CHANNELS.MENU_TOGGLE_SIDEBAR),
 
-  // Deep link navigation listener (for external craftagents:// URLs)
-  onDeepLinkNavigate: (callback: (nav: import('../shared/types').DeepLinkNavigation) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, nav: import('../shared/types').DeepLinkNavigation) => {
-      callback(nav)
-    }
-    ipcRenderer.on(IPC_CHANNELS.DEEP_LINK_NAVIGATE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.DEEP_LINK_NAVIGATE, handler)
-  },
+  // Deep link navigation
+  onDeepLinkNavigate: listen(IPC_CHANNELS.DEEP_LINK_NAVIGATE),
 
   // Auth
-  showLogoutConfirmation: () => ipcRenderer.invoke(IPC_CHANNELS.SHOW_LOGOUT_CONFIRMATION),
-  showDeleteSessionConfirmation: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.SHOW_DELETE_SESSION_CONFIRMATION, name),
-  logout: () => ipcRenderer.invoke(IPC_CHANNELS.LOGOUT),
-
-  // Credential health check (startup validation)
-  getCredentialHealth: () => ipcRenderer.invoke(IPC_CHANNELS.CREDENTIAL_HEALTH_CHECK),
+  showLogoutConfirmation: invoke(IPC_CHANNELS.SHOW_LOGOUT_CONFIRMATION),
+  showDeleteSessionConfirmation: invoke(IPC_CHANNELS.SHOW_DELETE_SESSION_CONFIRMATION),
+  logout: invoke(IPC_CHANNELS.LOGOUT),
+  getCredentialHealth: invoke(IPC_CHANNELS.CREDENTIAL_HEALTH_CHECK),
 
   // Onboarding
   getAuthState: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_GET_AUTH_STATE).then(r => r.authState),
   getSetupNeeds: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_GET_AUTH_STATE).then(r => r.setupNeeds),
-  startWorkspaceMcpOAuth: (mcpUrl: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_START_MCP_OAUTH, mcpUrl),
-  // Claude OAuth (two-step flow)
-  startClaudeOAuth: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_START_CLAUDE_OAUTH),
-  exchangeClaudeCode: (code: string, connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_EXCHANGE_CLAUDE_CODE, code, connectionSlug),
-  hasClaudeOAuthState: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_HAS_CLAUDE_OAUTH_STATE),
-  clearClaudeOAuthState: () => ipcRenderer.invoke(IPC_CHANNELS.ONBOARDING_CLEAR_CLAUDE_OAUTH_STATE),
+  startWorkspaceMcpOAuth: invoke(IPC_CHANNELS.ONBOARDING_START_MCP_OAUTH),
+  startClaudeOAuth: invoke(IPC_CHANNELS.ONBOARDING_START_CLAUDE_OAUTH),
+  exchangeClaudeCode: invoke(IPC_CHANNELS.ONBOARDING_EXCHANGE_CLAUDE_CODE),
+  hasClaudeOAuthState: invoke(IPC_CHANNELS.ONBOARDING_HAS_CLAUDE_OAUTH_STATE),
+  clearClaudeOAuthState: invoke(IPC_CHANNELS.ONBOARDING_CLEAR_CLAUDE_OAUTH_STATE),
 
-  // ChatGPT OAuth (for Codex chatgptAuthTokens mode)
-  startChatGptOAuth: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.CHATGPT_START_OAUTH, connectionSlug),
-  cancelChatGptOAuth: () => ipcRenderer.invoke(IPC_CHANNELS.CHATGPT_CANCEL_OAUTH),
-  getChatGptAuthStatus: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.CHATGPT_GET_AUTH_STATUS, connectionSlug),
-  chatGptLogout: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.CHATGPT_LOGOUT, connectionSlug),
+  // ChatGPT OAuth
+  startChatGptOAuth: invoke(IPC_CHANNELS.CHATGPT_START_OAUTH),
+  cancelChatGptOAuth: invoke(IPC_CHANNELS.CHATGPT_CANCEL_OAUTH),
+  getChatGptAuthStatus: invoke(IPC_CHANNELS.CHATGPT_GET_AUTH_STATUS),
+  chatGptLogout: invoke(IPC_CHANNELS.CHATGPT_LOGOUT),
 
   // GitHub Copilot OAuth
-  startCopilotOAuth: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.COPILOT_START_OAUTH, connectionSlug),
-  cancelCopilotOAuth: () => ipcRenderer.invoke(IPC_CHANNELS.COPILOT_CANCEL_OAUTH),
-  getCopilotAuthStatus: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.COPILOT_GET_AUTH_STATUS, connectionSlug),
-  copilotLogout: (connectionSlug: string) => ipcRenderer.invoke(IPC_CHANNELS.COPILOT_LOGOUT, connectionSlug),
-  onCopilotDeviceCode: (callback: (data: { userCode: string; verificationUri: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { userCode: string; verificationUri: string }) => {
-      callback(data)
-    }
-    ipcRenderer.on(IPC_CHANNELS.COPILOT_DEVICE_CODE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.COPILOT_DEVICE_CODE, handler)
-  },
+  startCopilotOAuth: invoke(IPC_CHANNELS.COPILOT_START_OAUTH),
+  cancelCopilotOAuth: invoke(IPC_CHANNELS.COPILOT_CANCEL_OAUTH),
+  getCopilotAuthStatus: invoke(IPC_CHANNELS.COPILOT_GET_AUTH_STATUS),
+  copilotLogout: invoke(IPC_CHANNELS.COPILOT_LOGOUT),
+  onCopilotDeviceCode: listen(IPC_CHANNELS.COPILOT_DEVICE_CODE),
 
   // Settings - API Setup
-  setupLlmConnection: (setup: LlmConnectionSetup) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SETUP_LLM_CONNECTION, setup),
-  testLlmConnectionSetup: (params: TestLlmConnectionParams) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_TEST_LLM_CONNECTION_SETUP, params),
+  setupLlmConnection: invoke(IPC_CHANNELS.SETUP_LLM_CONNECTION),
+  testLlmConnectionSetup: invoke(IPC_CHANNELS.SETTINGS_TEST_LLM_CONNECTION_SETUP),
 
-  // Pi provider discovery (main process only — Pi SDK can't run in renderer)
-  getPiApiKeyProviders: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.PI_GET_API_KEY_PROVIDERS),
-  getPiProviderBaseUrl: (provider: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PI_GET_PROVIDER_BASE_URL, provider),
-  getPiProviderModels: (provider: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PI_GET_PROVIDER_MODELS, provider),
+  // Pi provider discovery
+  getPiApiKeyProviders: invoke(IPC_CHANNELS.PI_GET_API_KEY_PROVIDERS),
+  getPiProviderBaseUrl: invoke(IPC_CHANNELS.PI_GET_PROVIDER_BASE_URL),
+  getPiProviderModels: invoke(IPC_CHANNELS.PI_GET_PROVIDER_MODELS),
 
-  // Session-specific model (overrides global)
-  getSessionModel: (sessionId: string, workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET_MODEL, sessionId, workspaceId),
-  setSessionModel: (sessionId: string, workspaceId: string, model: string | null, connection?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SESSION_SET_MODEL, sessionId, workspaceId, model, connection),
+  // Session-specific model
+  getSessionModel: invoke(IPC_CHANNELS.SESSION_GET_MODEL),
+  setSessionModel: invoke(IPC_CHANNELS.SESSION_SET_MODEL),
 
-  // Workspace Settings (per-workspace configuration)
-  getWorkspaceSettings: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SETTINGS_GET, workspaceId),
-  updateWorkspaceSetting: <K extends string>(workspaceId: string, key: K, value: unknown) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_SETTINGS_UPDATE, workspaceId, key, value),
+  // Workspace Settings
+  getWorkspaceSettings: invoke(IPC_CHANNELS.WORKSPACE_SETTINGS_GET),
+  updateWorkspaceSetting: invoke(IPC_CHANNELS.WORKSPACE_SETTINGS_UPDATE),
 
   // Folder dialog
-  openFolderDialog: () => ipcRenderer.invoke(IPC_CHANNELS.OPEN_FOLDER_DIALOG),
+  openFolderDialog: invoke(IPC_CHANNELS.OPEN_FOLDER_DIALOG),
 
-  // Filesystem search (for @ mention file selection)
-  searchFiles: (basePath: string, query: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.FS_SEARCH, basePath, query),
-  // Debug: send renderer logs to main process log file
-  debugLog: (...args: unknown[]) =>
-    ipcRenderer.send(IPC_CHANNELS.DEBUG_LOG, ...args),
+  // Filesystem search
+  searchFiles: invoke(IPC_CHANNELS.FS_SEARCH),
+
+  // Debug logging (fire-and-forget)
+  debugLog: send(IPC_CHANNELS.DEBUG_LOG),
 
   // User Preferences
-  readPreferences: () => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_READ),
-  writePreferences: (content: string) => ipcRenderer.invoke(IPC_CHANNELS.PREFERENCES_WRITE, content),
+  readPreferences: invoke(IPC_CHANNELS.PREFERENCES_READ),
+  writePreferences: invoke(IPC_CHANNELS.PREFERENCES_WRITE),
 
-  // Session Drafts (persisted input text)
-  getDraft: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET, sessionId),
-  setDraft: (sessionId: string, text: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_SET, sessionId, text),
-  deleteDraft: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_DELETE, sessionId),
-  getAllDrafts: () => ipcRenderer.invoke(IPC_CHANNELS.DRAFTS_GET_ALL),
+  // Session Drafts
+  getDraft: invoke(IPC_CHANNELS.DRAFTS_GET),
+  setDraft: invoke(IPC_CHANNELS.DRAFTS_SET),
+  deleteDraft: invoke(IPC_CHANNELS.DRAFTS_DELETE),
+  getAllDrafts: invoke(IPC_CHANNELS.DRAFTS_GET_ALL),
 
   // Session Info Panel
-  getSessionFiles: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_FILES, sessionId),
-  getSessionNotes: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.GET_SESSION_NOTES, sessionId),
-  setSessionNotes: (sessionId: string, content: string) => ipcRenderer.invoke(IPC_CHANNELS.SET_SESSION_NOTES, sessionId, content),
-  watchSessionFiles: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.WATCH_SESSION_FILES, sessionId),
-  unwatchSessionFiles: () => ipcRenderer.invoke(IPC_CHANNELS.UNWATCH_SESSION_FILES),
-  onSessionFilesChanged: (callback: (sessionId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, sessionId: string) => callback(sessionId)
-    ipcRenderer.on(IPC_CHANNELS.SESSION_FILES_CHANGED, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.SESSION_FILES_CHANGED, handler)
-  },
+  getSessionFiles: invoke(IPC_CHANNELS.GET_SESSION_FILES),
+  getSessionNotes: invoke(IPC_CHANNELS.GET_SESSION_NOTES),
+  setSessionNotes: invoke(IPC_CHANNELS.SET_SESSION_NOTES),
+  watchSessionFiles: invoke(IPC_CHANNELS.WATCH_SESSION_FILES),
+  unwatchSessionFiles: invoke(IPC_CHANNELS.UNWATCH_SESSION_FILES),
+  onSessionFilesChanged: listen(IPC_CHANNELS.SESSION_FILES_CHANGED),
 
   // Sources
-  getSources: (workspaceId: string) => ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET, workspaceId),
-  createSource: (workspaceId: string, config: Partial<import('@craft-agent/shared/sources').FolderSourceConfig>) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_CREATE, workspaceId, config),
-  deleteSource: (workspaceId: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_DELETE, workspaceId, sourceSlug),
-  startSourceOAuth: (workspaceId: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_START_OAUTH, workspaceId, sourceSlug),
-  saveSourceCredentials: (workspaceId: string, sourceSlug: string, credential: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS, workspaceId, sourceSlug, credential),
-  getSourcePermissionsConfig: (workspaceId: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_PERMISSIONS, workspaceId, sourceSlug),
-  getWorkspacePermissionsConfig: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_GET_PERMISSIONS, workspaceId),
-  getDefaultPermissionsConfig: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.DEFAULT_PERMISSIONS_GET),
-  // Default permissions change listener (live updates when default.json changes)
-  onDefaultPermissionsChanged: (callback: () => void) => {
-    const handler = () => callback()
-    ipcRenderer.on(IPC_CHANNELS.DEFAULT_PERMISSIONS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.DEFAULT_PERMISSIONS_CHANGED, handler)
-    }
-  },
-  getMcpTools: (workspaceId: string, sourceSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS, workspaceId, sourceSlug),
+  getSources: invoke(IPC_CHANNELS.SOURCES_GET),
+  createSource: invoke(IPC_CHANNELS.SOURCES_CREATE),
+  deleteSource: invoke(IPC_CHANNELS.SOURCES_DELETE),
+  startSourceOAuth: invoke(IPC_CHANNELS.SOURCES_START_OAUTH),
+  saveSourceCredentials: invoke(IPC_CHANNELS.SOURCES_SAVE_CREDENTIALS),
+  getSourcePermissionsConfig: invoke(IPC_CHANNELS.SOURCES_GET_PERMISSIONS),
+  getWorkspacePermissionsConfig: invoke(IPC_CHANNELS.WORKSPACE_GET_PERMISSIONS),
+  getDefaultPermissionsConfig: invoke(IPC_CHANNELS.DEFAULT_PERMISSIONS_GET),
+  onDefaultPermissionsChanged: listenVoid(IPC_CHANNELS.DEFAULT_PERMISSIONS_CHANGED),
+  getMcpTools: invoke(IPC_CHANNELS.SOURCES_GET_MCP_TOOLS),
 
-  // Session content search (full-text search via ripgrep)
-  searchSessionContent: (workspaceId: string, query: string, searchId?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SESSIONS, workspaceId, query, searchId),
+  // Session content search
+  searchSessionContent: invoke(IPC_CHANNELS.SEARCH_SESSIONS),
 
-  // Status management
-  listStatuses: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STATUSES_LIST, workspaceId),
-  reorderStatuses: (workspaceId: string, orderedIds: string[]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.STATUSES_REORDER, workspaceId, orderedIds),
+  // Statuses
+  listStatuses: invoke(IPC_CHANNELS.STATUSES_LIST),
+  reorderStatuses: invoke(IPC_CHANNELS.STATUSES_REORDER),
 
-  // Generic workspace image loading/saving
-  readWorkspaceImage: (workspaceId: string, relativePath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_READ_IMAGE, workspaceId, relativePath),
-  writeWorkspaceImage: (workspaceId: string, relativePath: string, base64: string, mimeType: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_WRITE_IMAGE, workspaceId, relativePath, base64, mimeType),
+  // Workspace images
+  readWorkspaceImage: invoke(IPC_CHANNELS.WORKSPACE_READ_IMAGE),
+  writeWorkspaceImage: invoke(IPC_CHANNELS.WORKSPACE_WRITE_IMAGE),
 
-  // Sources change listener (live updates when sources are added/removed)
-  onSourcesChanged: (callback: (sources: import('@craft-agent/shared/sources').LoadedSource[]) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, sources: import('@craft-agent/shared/sources').LoadedSource[]) => {
-      callback(sources)
-    }
-    ipcRenderer.on(IPC_CHANNELS.SOURCES_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.SOURCES_CHANGED, handler)
-    }
-  },
+  // Sources change listener
+  onSourcesChanged: listen(IPC_CHANNELS.SOURCES_CHANGED),
 
   // Skills
-  getSkills: (workspaceId: string, workingDirectory?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_GET, workspaceId, workingDirectory),
-  getSkillFiles: (workspaceId: string, skillSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_GET_FILES, workspaceId, skillSlug),
-  deleteSkill: (workspaceId: string, skillSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_DELETE, workspaceId, skillSlug),
-  openSkillInEditor: (workspaceId: string, skillSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_OPEN_EDITOR, workspaceId, skillSlug),
-  openSkillInFinder: (workspaceId: string, skillSlug: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.SKILLS_OPEN_FINDER, workspaceId, skillSlug),
+  getSkills: invoke(IPC_CHANNELS.SKILLS_GET),
+  getSkillFiles: invoke(IPC_CHANNELS.SKILLS_GET_FILES),
+  deleteSkill: invoke(IPC_CHANNELS.SKILLS_DELETE),
+  openSkillInEditor: invoke(IPC_CHANNELS.SKILLS_OPEN_EDITOR),
+  openSkillInFinder: invoke(IPC_CHANNELS.SKILLS_OPEN_FINDER),
+  onSkillsChanged: listen(IPC_CHANNELS.SKILLS_CHANGED),
 
-  // Skills change listener (live updates when skills are added/removed/modified)
-  onSkillsChanged: (callback: (skills: import('@craft-agent/shared/skills').LoadedSkill[]) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, skills: import('@craft-agent/shared/skills').LoadedSkill[]) => {
-      callback(skills)
-    }
-    ipcRenderer.on(IPC_CHANNELS.SKILLS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.SKILLS_CHANGED, handler)
-    }
-  },
+  // Statuses change listener
+  onStatusesChanged: listen(IPC_CHANNELS.STATUSES_CHANGED),
 
-  // Statuses change listener (live updates when statuses config or icon files change)
-  onStatusesChanged: (callback: (workspaceId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string) => {
-      callback(workspaceId)
-    }
-    ipcRenderer.on(IPC_CHANNELS.STATUSES_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.STATUSES_CHANGED, handler)
-    }
-  },
+  // Labels
+  listLabels: invoke(IPC_CHANNELS.LABELS_LIST),
+  createLabel: invoke(IPC_CHANNELS.LABELS_CREATE),
+  deleteLabel: invoke(IPC_CHANNELS.LABELS_DELETE),
+  onLabelsChanged: listen(IPC_CHANNELS.LABELS_CHANGED),
 
-  // Label management
-  listLabels: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LABELS_LIST, workspaceId),
-  createLabel: (workspaceId: string, input: any) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LABELS_CREATE, workspaceId, input),
-  deleteLabel: (workspaceId: string, labelId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LABELS_DELETE, workspaceId, labelId),
+  // LLM connections change listener
+  onLlmConnectionsChanged: listenVoid(IPC_CHANNELS.LLM_CONNECTIONS_CHANGED),
 
-  // Labels change listener (live updates when labels config changes)
-  onLabelsChanged: (callback: (workspaceId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string) => {
-      callback(workspaceId)
-    }
-    ipcRenderer.on(IPC_CHANNELS.LABELS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.LABELS_CHANGED, handler)
-    }
-  },
+  // Views
+  listViews: invoke(IPC_CHANNELS.VIEWS_LIST),
+  saveViews: invoke(IPC_CHANNELS.VIEWS_SAVE),
 
-  // LLM connections change listener (live updates when models are fetched)
-  onLlmConnectionsChanged: (callback: () => void) => {
-    const handler = () => { callback() }
-    ipcRenderer.on(IPC_CHANNELS.LLM_CONNECTIONS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.LLM_CONNECTIONS_CHANGED, handler)
-    }
-  },
+  // Tool icon mappings
+  getToolIconMappings: invoke(IPC_CHANNELS.TOOL_ICONS_GET_MAPPINGS),
 
-  // Views (dynamic, expression-based filters stored in views.json)
-  listViews: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.VIEWS_LIST, workspaceId),
-  saveViews: (workspaceId: string, views: any[]) =>
-    ipcRenderer.invoke(IPC_CHANNELS.VIEWS_SAVE, workspaceId, views),
-
-  // Tool icon mappings (for Appearance settings page)
-  getToolIconMappings: () => ipcRenderer.invoke(IPC_CHANNELS.TOOL_ICONS_GET_MAPPINGS),
-
-  // Theme (app-level default)
-  getAppTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_APP),
-  // Preset themes (app-level)
-  loadPresetThemes: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_PRESETS),
-  loadPresetTheme: (themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_LOAD_PRESET, themeId),
-  getColorTheme: () => ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_COLOR_THEME),
-  setColorTheme: (themeId: string) => ipcRenderer.invoke(IPC_CHANNELS.THEME_SET_COLOR_THEME, themeId),
-  // Workspace-level theme overrides
-  getWorkspaceColorTheme: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_WORKSPACE_COLOR_THEME, workspaceId),
-  setWorkspaceColorTheme: (workspaceId: string, themeId: string | null) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_SET_WORKSPACE_COLOR_THEME, workspaceId, themeId),
-  getAllWorkspaceThemes: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_GET_ALL_WORKSPACE_THEMES),
-
-  // Logo URL resolution (uses Node.js filesystem cache for provider domains)
-  getLogoUrl: (serviceUrl: string, provider?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LOGO_GET_URL, serviceUrl, provider),
-
-  // Theme change listeners (live updates when theme.json files change)
-  onAppThemeChange: (callback: (theme: import('@craft-agent/shared/config').ThemeOverrides | null) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, theme: import('@craft-agent/shared/config').ThemeOverrides | null) => {
-      callback(theme)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_APP_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_APP_CHANGED, handler)
-    }
-  },
-  // Theme preferences sync across windows (mode, colorTheme, font)
-  broadcastThemePreferences: (preferences: { mode: string; colorTheme: string; font: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_BROADCAST_PREFERENCES, preferences),
-  onThemePreferencesChange: (callback: (preferences: { mode: string; colorTheme: string; font: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, preferences: { mode: string; colorTheme: string; font: string }) => {
-      callback(preferences)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_PREFERENCES_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_PREFERENCES_CHANGED, handler)
-    }
-  },
-
-  // Workspace theme sync across windows
-  broadcastWorkspaceThemeChange: (workspaceId: string, themeId: string | null) =>
-    ipcRenderer.invoke(IPC_CHANNELS.THEME_BROADCAST_WORKSPACE_THEME, workspaceId, themeId),
-  onWorkspaceThemeChange: (callback: (data: { workspaceId: string; themeId: string | null }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { workspaceId: string; themeId: string | null }) => {
-      callback(data)
-    }
-    ipcRenderer.on(IPC_CHANNELS.THEME_WORKSPACE_THEME_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.THEME_WORKSPACE_THEME_CHANGED, handler)
-    }
-  },
+  // Theme
+  getAppTheme: invoke(IPC_CHANNELS.THEME_GET_APP),
+  loadPresetThemes: invoke(IPC_CHANNELS.THEME_GET_PRESETS),
+  loadPresetTheme: invoke(IPC_CHANNELS.THEME_LOAD_PRESET),
+  getColorTheme: invoke(IPC_CHANNELS.THEME_GET_COLOR_THEME),
+  setColorTheme: invoke(IPC_CHANNELS.THEME_SET_COLOR_THEME),
+  getWorkspaceColorTheme: invoke(IPC_CHANNELS.THEME_GET_WORKSPACE_COLOR_THEME),
+  setWorkspaceColorTheme: invoke(IPC_CHANNELS.THEME_SET_WORKSPACE_COLOR_THEME),
+  getAllWorkspaceThemes: invoke(IPC_CHANNELS.THEME_GET_ALL_WORKSPACE_THEMES),
+  getLogoUrl: invoke(IPC_CHANNELS.LOGO_GET_URL),
+  onAppThemeChange: listen(IPC_CHANNELS.THEME_APP_CHANGED),
+  broadcastThemePreferences: invoke(IPC_CHANNELS.THEME_BROADCAST_PREFERENCES),
+  onThemePreferencesChange: listen(IPC_CHANNELS.THEME_PREFERENCES_CHANGED),
+  broadcastWorkspaceThemeChange: invoke(IPC_CHANNELS.THEME_BROADCAST_WORKSPACE_THEME),
+  onWorkspaceThemeChange: listen(IPC_CHANNELS.THEME_WORKSPACE_THEME_CHANGED),
 
   // Notifications
-  showNotification: (title: string, body: string, workspaceId: string, sessionId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_SHOW, title, body, workspaceId, sessionId),
-  getNotificationsEnabled: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_GET_ENABLED) as Promise<boolean>,
-  setNotificationsEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_SET_ENABLED, enabled),
+  showNotification: invoke(IPC_CHANNELS.NOTIFICATION_SHOW),
+  getNotificationsEnabled: invoke(IPC_CHANNELS.NOTIFICATION_GET_ENABLED),
+  setNotificationsEnabled: invoke(IPC_CHANNELS.NOTIFICATION_SET_ENABLED),
 
   // Input settings
-  getAutoCapitalisation: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_GET_AUTO_CAPITALISATION) as Promise<boolean>,
-  setAutoCapitalisation: (enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_SET_AUTO_CAPITALISATION, enabled),
-  getSendMessageKey: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_GET_SEND_MESSAGE_KEY) as Promise<'enter' | 'cmd-enter'>,
-  setSendMessageKey: (key: 'enter' | 'cmd-enter') =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_SET_SEND_MESSAGE_KEY, key),
-  getSpellCheck: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_GET_SPELL_CHECK) as Promise<boolean>,
-  setSpellCheck: (enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.INPUT_SET_SPELL_CHECK, enabled),
+  getAutoCapitalisation: invoke(IPC_CHANNELS.INPUT_GET_AUTO_CAPITALISATION),
+  setAutoCapitalisation: invoke(IPC_CHANNELS.INPUT_SET_AUTO_CAPITALISATION),
+  getSendMessageKey: invoke(IPC_CHANNELS.INPUT_GET_SEND_MESSAGE_KEY),
+  setSendMessageKey: invoke(IPC_CHANNELS.INPUT_SET_SEND_MESSAGE_KEY),
+  getSpellCheck: invoke(IPC_CHANNELS.INPUT_GET_SPELL_CHECK),
+  setSpellCheck: invoke(IPC_CHANNELS.INPUT_SET_SPELL_CHECK),
 
   // Power settings
-  getKeepAwakeWhileRunning: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.POWER_GET_KEEP_AWAKE) as Promise<boolean>,
-  setKeepAwakeWhileRunning: (enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.POWER_SET_KEEP_AWAKE, enabled),
+  getKeepAwakeWhileRunning: invoke(IPC_CHANNELS.POWER_GET_KEEP_AWAKE),
+  setKeepAwakeWhileRunning: invoke(IPC_CHANNELS.POWER_SET_KEEP_AWAKE),
 
   // Appearance settings
-  getRichToolDescriptions: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_GET_RICH_TOOL_DESCRIPTIONS) as Promise<boolean>,
-  setRichToolDescriptions: (enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.APPEARANCE_SET_RICH_TOOL_DESCRIPTIONS, enabled),
+  getRichToolDescriptions: invoke(IPC_CHANNELS.APPEARANCE_GET_RICH_TOOL_DESCRIPTIONS),
+  setRichToolDescriptions: invoke(IPC_CHANNELS.APPEARANCE_SET_RICH_TOOL_DESCRIPTIONS),
 
-  refreshBadge: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.BADGE_REFRESH),
-  setDockIconWithBadge: (dataUrl: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.BADGE_SET_ICON, dataUrl),
-  onBadgeDraw: (callback: (data: { count: number; iconDataUrl: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { count: number; iconDataUrl: string }) => {
-      callback(data)
-    }
-    ipcRenderer.on(IPC_CHANNELS.BADGE_DRAW, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.BADGE_DRAW, handler)
-    }
-  },
-  onBadgeDrawWindows: (callback: (data: { count: number }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { count: number }) => {
-      callback(data)
-    }
-    ipcRenderer.on(IPC_CHANNELS.BADGE_DRAW_WINDOWS, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.BADGE_DRAW_WINDOWS, handler)
-    }
-  },
-  getWindowFocusState: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_GET_FOCUS_STATE),
-  onWindowFocusChange: (callback: (isFocused: boolean) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, isFocused: boolean) => {
-      callback(isFocused)
-    }
-    ipcRenderer.on(IPC_CHANNELS.WINDOW_FOCUS_STATE, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_FOCUS_STATE, handler)
-    }
-  },
-  onNotificationNavigate: (callback: (data: { workspaceId: string; sessionId: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { workspaceId: string; sessionId: string }) => {
-      callback(data)
-    }
-    ipcRenderer.on(IPC_CHANNELS.NOTIFICATION_NAVIGATE, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.NOTIFICATION_NAVIGATE, handler)
-    }
-  },
-  getGitBranch: (dirPath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_GIT_BRANCH, dirPath),
+  // Badge
+  refreshBadge: invoke(IPC_CHANNELS.BADGE_REFRESH),
+  setDockIconWithBadge: invoke(IPC_CHANNELS.BADGE_SET_ICON),
+  onBadgeDraw: listen(IPC_CHANNELS.BADGE_DRAW),
+  onBadgeDrawWindows: listen(IPC_CHANNELS.BADGE_DRAW_WINDOWS),
 
-  // Git Bash (Windows)
-  checkGitBash: () => ipcRenderer.invoke(IPC_CHANNELS.GITBASH_CHECK),
-  browseForGitBash: () => ipcRenderer.invoke(IPC_CHANNELS.GITBASH_BROWSE),
-  setGitBashPath: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.GITBASH_SET_PATH, path),
+  // Window focus
+  getWindowFocusState: invoke(IPC_CHANNELS.WINDOW_GET_FOCUS_STATE),
+  onWindowFocusChange: listen(IPC_CHANNELS.WINDOW_FOCUS_STATE),
+  onNotificationNavigate: listen(IPC_CHANNELS.NOTIFICATION_NAVIGATE),
 
-  // Menu actions (for unified Craft menu)
-  menuQuit: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_QUIT),
-  menuNewWindow: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_NEW_WINDOW),
-  menuMinimize: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_MINIMIZE),
-  menuMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_MAXIMIZE),
-  menuZoomIn: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_ZOOM_IN),
-  menuZoomOut: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_ZOOM_OUT),
-  menuZoomReset: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_ZOOM_RESET),
-  menuToggleDevTools: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_TOGGLE_DEVTOOLS),
-  menuUndo: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_UNDO),
-  menuRedo: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_REDO),
-  menuCut: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_CUT),
-  menuCopy: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_COPY),
-  menuPaste: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_PASTE),
-  menuSelectAll: () => ipcRenderer.invoke(IPC_CHANNELS.MENU_SELECT_ALL),
+  // Git
+  getGitBranch: invoke(IPC_CHANNELS.GET_GIT_BRANCH),
+  checkGitBash: invoke(IPC_CHANNELS.GITBASH_CHECK),
+  browseForGitBash: invoke(IPC_CHANNELS.GITBASH_BROWSE),
+  setGitBashPath: invoke(IPC_CHANNELS.GITBASH_SET_PATH),
+
+  // Menu actions
+  menuQuit: invoke(IPC_CHANNELS.MENU_QUIT),
+  menuNewWindow: invoke(IPC_CHANNELS.MENU_NEW_WINDOW),
+  menuMinimize: invoke(IPC_CHANNELS.MENU_MINIMIZE),
+  menuMaximize: invoke(IPC_CHANNELS.MENU_MAXIMIZE),
+  menuZoomIn: invoke(IPC_CHANNELS.MENU_ZOOM_IN),
+  menuZoomOut: invoke(IPC_CHANNELS.MENU_ZOOM_OUT),
+  menuZoomReset: invoke(IPC_CHANNELS.MENU_ZOOM_RESET),
+  menuToggleDevTools: invoke(IPC_CHANNELS.MENU_TOGGLE_DEVTOOLS),
+  menuUndo: invoke(IPC_CHANNELS.MENU_UNDO),
+  menuRedo: invoke(IPC_CHANNELS.MENU_REDO),
+  menuCut: invoke(IPC_CHANNELS.MENU_CUT),
+  menuCopy: invoke(IPC_CHANNELS.MENU_COPY),
+  menuPaste: invoke(IPC_CHANNELS.MENU_PASTE),
+  menuSelectAll: invoke(IPC_CHANNELS.MENU_SELECT_ALL),
 
   // Browser pane management
   browserPane: {
-    create: (input?: string | import('../shared/types').BrowserPaneCreateOptions) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_CREATE, input),
-    destroy: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_DESTROY, id),
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_LIST),
-    navigate: (id: string, url: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_NAVIGATE, id, url),
-    goBack: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_GO_BACK, id),
-    goForward: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_GO_FORWARD, id),
-    reload: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_RELOAD, id),
-    stop: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_STOP, id),
-    focus: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PANE_FOCUS, id),
-    emptyStateLaunch: (payload: import('../shared/types').BrowserEmptyStateLaunchPayload) =>
-      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_EMPTY_STATE_LAUNCH, payload),
-    onStateChanged: (callback: (info: import('../shared/types').BrowserInstanceInfo) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, info: import('../shared/types').BrowserInstanceInfo) => {
-        callback(info)
-      }
-      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED, handler)
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED, handler)
-    },
-    onRemoved: (callback: (id: string) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, id: string) => {
-        callback(id)
-      }
-      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_REMOVED, handler)
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_REMOVED, handler)
-    },
-    onInteracted: (callback: (id: string) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, id: string) => {
-        callback(id)
-      }
-      ipcRenderer.on(IPC_CHANNELS.BROWSER_PANE_INTERACTED, handler)
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.BROWSER_PANE_INTERACTED, handler)
-    },
+    create: invoke(IPC_CHANNELS.BROWSER_PANE_CREATE),
+    destroy: invoke(IPC_CHANNELS.BROWSER_PANE_DESTROY),
+    list: invoke(IPC_CHANNELS.BROWSER_PANE_LIST),
+    navigate: invoke(IPC_CHANNELS.BROWSER_PANE_NAVIGATE),
+    goBack: invoke(IPC_CHANNELS.BROWSER_PANE_GO_BACK),
+    goForward: invoke(IPC_CHANNELS.BROWSER_PANE_GO_FORWARD),
+    reload: invoke(IPC_CHANNELS.BROWSER_PANE_RELOAD),
+    stop: invoke(IPC_CHANNELS.BROWSER_PANE_STOP),
+    focus: invoke(IPC_CHANNELS.BROWSER_PANE_FOCUS),
+    emptyStateLaunch: invoke(IPC_CHANNELS.BROWSER_EMPTY_STATE_LAUNCH),
+    onStateChanged: listen(IPC_CHANNELS.BROWSER_PANE_STATE_CHANGED),
+    onRemoved: listen(IPC_CHANNELS.BROWSER_PANE_REMOVED),
+    onInteracted: listen(IPC_CHANNELS.BROWSER_PANE_INTERACTED),
   },
 
-  // LLM Connections (provider configurations)
-  listLlmConnections: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_LIST),
-  listLlmConnectionsWithStatus: () => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_LIST_WITH_STATUS),
-  getLlmConnection: (slug: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_GET, slug),
-  getLlmConnectionApiKey: (slug: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_GET_API_KEY, slug),
-  saveLlmConnection: (connection: import('../shared/types').LlmConnection) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_SAVE, connection),
-  deleteLlmConnection: (slug: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_DELETE, slug),
-  testLlmConnection: (slug: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_TEST, slug),
-  setDefaultLlmConnection: (slug: string) => ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_SET_DEFAULT, slug),
-  setWorkspaceDefaultLlmConnection: (workspaceId: string, slug: string | null) =>
-    ipcRenderer.invoke(IPC_CHANNELS.LLM_CONNECTION_SET_WORKSPACE_DEFAULT, workspaceId, slug),
+  // LLM Connections
+  listLlmConnections: invoke(IPC_CHANNELS.LLM_CONNECTION_LIST),
+  listLlmConnectionsWithStatus: invoke(IPC_CHANNELS.LLM_CONNECTION_LIST_WITH_STATUS),
+  getLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_GET),
+  getLlmConnectionApiKey: invoke(IPC_CHANNELS.LLM_CONNECTION_GET_API_KEY),
+  saveLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_SAVE),
+  deleteLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_DELETE),
+  testLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_TEST),
+  setDefaultLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_SET_DEFAULT),
+  setWorkspaceDefaultLlmConnection: invoke(IPC_CHANNELS.LLM_CONNECTION_SET_WORKSPACE_DEFAULT),
 
-  // Automation testing (manual trigger from UI)
-  testAutomation: (payload: import('../shared/types').TestAutomationPayload) =>
-    ipcRenderer.invoke(IPC_CHANNELS.TEST_AUTOMATION, payload),
-
-  // Automation state management
-  setAutomationEnabled: (workspaceId: string, eventName: string, matcherIndex: number, enabled: boolean) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATIONS_SET_ENABLED, workspaceId, eventName, matcherIndex, enabled),
-  duplicateAutomation: (workspaceId: string, eventName: string, matcherIndex: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATIONS_DUPLICATE, workspaceId, eventName, matcherIndex),
-  deleteAutomation: (workspaceId: string, eventName: string, matcherIndex: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATIONS_DELETE, workspaceId, eventName, matcherIndex),
-  getAutomationHistory: (workspaceId: string, automationId: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATIONS_GET_HISTORY, workspaceId, automationId, limit),
-  getAutomationLastExecuted: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.AUTOMATIONS_GET_LAST_EXECUTED, workspaceId) as Promise<Record<string, number>>,
-
-  // Automations change listener (live updates when automations.json changes on disk)
-  onAutomationsChanged: (callback: (workspaceId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string) => {
-      callback(workspaceId)
-    }
-    ipcRenderer.on(IPC_CHANNELS.AUTOMATIONS_CHANGED, handler)
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.AUTOMATIONS_CHANGED, handler)
-    }
-  },
+  // Automations
+  testAutomation: invoke(IPC_CHANNELS.TEST_AUTOMATION),
+  setAutomationEnabled: invoke(IPC_CHANNELS.AUTOMATIONS_SET_ENABLED),
+  duplicateAutomation: invoke(IPC_CHANNELS.AUTOMATIONS_DUPLICATE),
+  deleteAutomation: invoke(IPC_CHANNELS.AUTOMATIONS_DELETE),
+  getAutomationHistory: invoke(IPC_CHANNELS.AUTOMATIONS_GET_HISTORY),
+  getAutomationLastExecuted: invoke(IPC_CHANNELS.AUTOMATIONS_GET_LAST_EXECUTED),
+  onAutomationsChanged: listen(IPC_CHANNELS.AUTOMATIONS_CHANGED),
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)

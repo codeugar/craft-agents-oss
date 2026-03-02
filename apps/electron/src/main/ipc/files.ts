@@ -1,0 +1,555 @@
+import { ipcMain, nativeImage, dialog } from 'electron'
+import { readFile, writeFile, unlink, mkdir, readdir } from 'fs/promises'
+import { normalize, isAbsolute, join, sep } from 'path'
+import { homedir, tmpdir } from 'os'
+import { randomUUID } from 'crypto'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment } from '../../shared/types'
+import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
+import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
+import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { ipcLog } from '../logger'
+import { resizeImageForAPI } from '../image-utils'
+import { MarkItDown } from 'markitdown-js'
+import { realpath } from 'fs/promises'
+import type { IpcContext } from './types'
+
+/**
+ * Sanitizes a filename to prevent path traversal and filesystem issues.
+ * Removes dangerous characters and limits length.
+ */
+export function sanitizeFilename(name: string): string {
+  return name
+    // Remove path separators and traversal patterns
+    .replace(/[/\\]/g, '_')
+    // Remove Windows-forbidden characters: < > : " | ? *
+    .replace(/[<>:"|?*]/g, '_')
+    // Remove control characters (ASCII 0-31)
+    .replace(/[\x00-\x1f]/g, '')
+    // Collapse multiple dots (prevent hidden files and extension tricks)
+    .replace(/\.{2,}/g, '.')
+    // Remove leading/trailing dots and spaces (Windows issues)
+    .replace(/^[.\s]+|[.\s]+$/g, '')
+    // Limit length (200 chars is safe for all filesystems)
+    .slice(0, 200)
+    // Fallback if name is empty after sanitization
+    || 'unnamed'
+}
+
+/**
+ * Validates that a file path is within allowed directories to prevent path traversal attacks.
+ * Allowed directories: user's home directory and /tmp
+ */
+export async function validateFilePath(filePath: string): Promise<string> {
+  // Normalize the path to resolve . and .. components
+  let normalizedPath = normalize(filePath)
+
+  // Expand ~ to home directory
+  if (normalizedPath.startsWith('~')) {
+    normalizedPath = normalizedPath.replace(/^~/, homedir())
+  }
+
+  // Must be an absolute path
+  if (!isAbsolute(normalizedPath)) {
+    throw new Error('Only absolute file paths are allowed')
+  }
+
+  // Resolve symlinks to get the real path
+  let realPath: string
+  try {
+    realPath = await realpath(normalizedPath)
+  } catch {
+    // File doesn't exist or can't be resolved - use normalized path
+    realPath = normalizedPath
+  }
+
+  // Define allowed base directories
+  const allowedDirs = [
+    homedir(),      // User's home directory
+    tmpdir(),       // Platform-appropriate temp directory
+  ]
+
+  // Check if the real path is within an allowed directory (cross-platform)
+  const isAllowed = allowedDirs.some(dir => {
+    const normalizedDir = normalize(dir)
+    const normalizedReal = normalize(realPath)
+    return normalizedReal.startsWith(normalizedDir + sep) || normalizedReal === normalizedDir
+  })
+
+  if (!isAllowed) {
+    throw new Error('Access denied: file path is outside allowed directories')
+  }
+
+  // Block sensitive files even within home directory
+  const sensitivePatterns = [
+    /\.ssh\//,
+    /\.gnupg\//,
+    /\.aws\/credentials/,
+    /\.env$/,
+    /\.env\./,
+    /credentials\.json$/,
+    /secrets?\./i,
+    /\.pem$/,
+    /\.key$/,
+  ]
+
+  if (sensitivePatterns.some(pattern => pattern.test(realPath))) {
+    throw new Error('Access denied: cannot read sensitive files')
+  }
+
+  return realPath
+}
+
+export const HANDLED_CHANNELS = [
+  IPC_CHANNELS.READ_FILE,
+  IPC_CHANNELS.READ_FILE_DATA_URL,
+  IPC_CHANNELS.READ_FILE_BINARY,
+  IPC_CHANNELS.OPEN_FILE_DIALOG,
+  IPC_CHANNELS.READ_FILE_ATTACHMENT,
+  IPC_CHANNELS.STORE_ATTACHMENT,
+  IPC_CHANNELS.GENERATE_THUMBNAIL,
+  IPC_CHANNELS.FS_SEARCH,
+] as const
+
+export function registerFilesHandlers({ windowManager }: IpcContext): void {
+  // Read a file (with path validation to prevent traversal attacks)
+  ipcMain.handle(IPC_CHANNELS.READ_FILE, async (_event, path: string) => {
+    try {
+      // Validate and normalize the path
+      const safePath = await validateFilePath(path)
+      const content = await readFile(safePath, 'utf-8')
+      return content
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      // ENOENT is expected for optional config files (e.g. automations.json)
+      if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        ipcLog.debug('readFile: file not found:', path)
+      } else {
+        ipcLog.error('readFile error:', message)
+      }
+      throw new Error(`Failed to read file: ${message}`)
+    }
+  })
+
+  // Read an image file as a data URL for in-app image preview overlays.
+  // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay and markdown image blocks.
+  ipcMain.handle(IPC_CHANNELS.READ_FILE_DATA_URL, async (_event, path: string) => {
+    try {
+      const safePath = await validateFilePath(path)
+      const buffer = await readFile(safePath)
+      const ext = safePath.split('.').pop()?.toLowerCase() ?? ''
+
+      // Map previewable image extensions to MIME types.
+      // HEIC/HEIF/TIFF are intentionally excluded — no Chromium codec, opened externally instead.
+      const mimeMap: Record<string, string> = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        svg: 'image/svg+xml',
+        bmp: 'image/bmp',
+        ico: 'image/x-icon',
+        avif: 'image/avif',
+      }
+      const mime = mimeMap[ext] || 'application/octet-stream'
+      const base64 = buffer.toString('base64')
+      return `data:${mime};base64,${base64}`
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      ipcLog.error('readFileDataUrl error:', message)
+      throw new Error(`Failed to read file as data URL: ${message}`)
+    }
+  })
+
+  // Read a file as raw binary (Uint8Array) for react-pdf.
+  // Returns Uint8Array which IPC automatically converts to ArrayBuffer for the renderer.
+  ipcMain.handle(IPC_CHANNELS.READ_FILE_BINARY, async (_event, path: string) => {
+    try {
+      const safePath = await validateFilePath(path)
+      const buffer = await readFile(safePath)
+      // Return as Uint8Array (serializes to ArrayBuffer over IPC)
+      return new Uint8Array(buffer)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      ipcLog.error('readFileBinary error:', message)
+      throw new Error(`Failed to read file as binary: ${message}`)
+    }
+  })
+
+  // Open native file dialog for selecting files to attach
+  ipcMain.handle(IPC_CHANNELS.OPEN_FILE_DIALOG, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        // Allow all files by default - the agent can figure out how to handle them
+        { name: 'All Files', extensions: ['*'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
+        { name: 'Documents', extensions: ['pdf', 'docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'md', 'rtf'] },
+        { name: 'Code', extensions: ['js', 'ts', 'tsx', 'jsx', 'py', 'json', 'css', 'html', 'xml', 'yaml', 'yml', 'sh', 'sql', 'go', 'rs', 'rb', 'php', 'java', 'c', 'cpp', 'h', 'swift', 'kt'] },
+      ]
+    })
+    return result.canceled ? [] : result.filePaths
+  })
+
+  // Read file and return as FileAttachment with Quick Look thumbnail
+  ipcMain.handle(IPC_CHANNELS.READ_FILE_ATTACHMENT, async (_event, path: string) => {
+    try {
+      // Validate path first to prevent path traversal
+      const safePath = await validateFilePath(path)
+      // Use shared utility that handles file type detection, encoding, etc.
+      const attachment = await readFileAttachment(safePath)
+      if (!attachment) return null
+
+      // Generate Quick Look thumbnail for preview (works for images, PDFs, Office docs on macOS)
+      try {
+        const thumbnail = await nativeImage.createThumbnailFromPath(safePath, { width: 200, height: 200 })
+        if (!thumbnail.isEmpty()) {
+          ;(attachment as { thumbnailBase64?: string }).thumbnailBase64 = thumbnail.toPNG().toString('base64')
+        }
+      } catch (thumbError) {
+        // Thumbnail generation failed - this is ok, we'll show an icon fallback
+        ipcLog.info('Quick Look thumbnail failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
+      }
+
+      return attachment
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      ipcLog.error('readFileAttachment error:', message)
+      return null
+    }
+  })
+
+  // Generate thumbnail from base64 data (for drag-drop files where we don't have a path)
+  ipcMain.handle(IPC_CHANNELS.GENERATE_THUMBNAIL, async (_event, base64: string, mimeType: string): Promise<string | null> => {
+    // Save to temp file, generate thumbnail, clean up
+    const tempDir = tmpdir()
+    const ext = mimeType.split('/')[1] || 'bin'
+    const tempPath = join(tempDir, `craft-thumb-${randomUUID()}.${ext}`)
+
+    try {
+      // Write base64 to temp file
+      const buffer = Buffer.from(base64, 'base64')
+      await writeFile(tempPath, buffer)
+
+      // Generate thumbnail using Quick Look
+      const thumbnail = await nativeImage.createThumbnailFromPath(tempPath, { width: 200, height: 200 })
+
+      // Clean up temp file
+      await unlink(tempPath).catch(() => {})
+
+      if (!thumbnail.isEmpty()) {
+        return thumbnail.toPNG().toString('base64')
+      }
+      return null
+    } catch (error) {
+      // Clean up temp file on error
+      await unlink(tempPath).catch(() => {})
+      ipcLog.info('generateThumbnail failed:', error instanceof Error ? error.message : error)
+      return null
+    }
+  })
+
+  // Store an attachment to disk and generate thumbnail/markdown conversion
+  // This is the core of the persistent file attachment system
+  ipcMain.handle(IPC_CHANNELS.STORE_ATTACHMENT, async (event, sessionId: string, attachment: FileAttachment): Promise<StoredAttachment> => {
+    // Track files we've written for cleanup on error
+    const filesToCleanup: string[] = []
+
+    try {
+      // Reject empty files early
+      if (attachment.size === 0) {
+        throw new Error('Cannot attach empty file')
+      }
+
+      // Get workspace slug from the calling window
+      const workspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+      if (!workspaceId) {
+        throw new Error('Cannot determine workspace for attachment storage')
+      }
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) {
+        throw new Error(`Workspace not found: ${workspaceId}`)
+      }
+      const workspaceRootPath = workspace.rootPath
+
+      // SECURITY: Validate sessionId to prevent path traversal attacks
+      // This must happen before using sessionId in any file path operations
+      validateSessionId(sessionId)
+
+      // Create attachments directory if it doesn't exist
+      const attachmentsDir = getSessionAttachmentsPath(workspaceRootPath, sessionId)
+      await mkdir(attachmentsDir, { recursive: true })
+
+      // Generate unique ID for this attachment
+      const id = randomUUID()
+      const safeName = sanitizeFilename(attachment.name)
+      const storedFileName = `${id}_${safeName}`
+      const storedPath = join(attachmentsDir, storedFileName)
+
+      // Track if image was resized (for return value)
+      let wasResized = false
+      let finalSize = attachment.size
+      let resizedBase64: string | undefined
+
+      // 1. Save the file (with image validation and resizing)
+      if (attachment.base64) {
+        // Images, PDFs, Office files - decode from base64
+        // Type as Buffer (generic) to allow reassignment from nativeImage.toJPEG/toPNG
+        let decoded: Buffer = Buffer.from(attachment.base64, 'base64')
+        // Validate decoded size matches expected (allow small variance for encoding overhead)
+        if (Math.abs(decoded.length - attachment.size) > 100) {
+          throw new Error(`Attachment corrupted: size mismatch (expected ${attachment.size}, got ${decoded.length})`)
+        }
+
+        // For images: validate and resize if needed for Claude API compatibility
+        if (attachment.type === 'image') {
+          // Get image dimensions using nativeImage
+          const image = nativeImage.createFromBuffer(decoded)
+          const imageSize = image.getSize()
+
+          // Validate image for Claude API
+          const validation = validateImageForClaudeAPI(decoded.length, imageSize.width, imageSize.height)
+
+          // Determine if we should resize
+          let shouldResize = validation.needsResize
+          let targetSize = validation.suggestedSize
+
+          if (!validation.valid && validation.errorCode === 'dimension_exceeded') {
+            // Image exceeds 8000px limit - calculate resize to fit within limits
+            const maxDim = IMAGE_LIMITS.MAX_DIMENSION
+            const scale = Math.min(maxDim / imageSize.width, maxDim / imageSize.height)
+            targetSize = {
+              width: Math.floor(imageSize.width * scale),
+              height: Math.floor(imageSize.height * scale),
+            }
+            shouldResize = true
+            ipcLog.info(`Image exceeds ${maxDim}px limit (${imageSize.width}x${imageSize.height}), will resize to ${targetSize.width}x${targetSize.height}`)
+          } else if (!validation.valid && validation.errorCode === 'size_exceeded') {
+            // File >5MB — try resize+compress instead of rejecting
+            shouldResize = true
+            ipcLog.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
+          } else if (!validation.valid) {
+            throw new Error(validation.error)
+          }
+
+          // If resize is needed (either recommended or required), do it now
+          if (shouldResize) {
+            const isPhoto = attachment.mimeType === 'image/jpeg'
+
+            if (targetSize) {
+              // Dimension-exceeded: resize to specific target dimensions
+              ipcLog.info(`Resizing image from ${imageSize.width}x${imageSize.height} to ${targetSize.width}x${targetSize.height}`)
+              try {
+                const resized = image.resize({
+                  width: targetSize.width,
+                  height: targetSize.height,
+                  quality: 'best',
+                })
+
+                decoded = isPhoto ? resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_HIGH) : resized.toPNG()
+                wasResized = true
+                finalSize = decoded.length
+
+                // Re-validate final size after resize
+                if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
+                  decoded = resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_FALLBACK)
+                  finalSize = decoded.length
+                  if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
+                    throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
+                  }
+                }
+              } catch (resizeError) {
+                ipcLog.error('Image resize failed:', resizeError)
+                const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
+                throw new Error(`Image too large (${imageSize.width}x${imageSize.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
+              }
+            } else {
+              // Size-exceeded or optimal resize — use shared utility for full pipeline
+              const result = resizeImageForAPI(decoded, { isPhoto })
+              if (!result) {
+                throw new Error(`Image too large (${(decoded.length / 1024 / 1024).toFixed(1)}MB) and could not be compressed enough. Please use a smaller image.`)
+              }
+              decoded = result.buffer
+              wasResized = true
+              finalSize = decoded.length
+            }
+
+            ipcLog.info(`Image resized: ${attachment.size} -> ${finalSize} bytes (${Math.round((1 - finalSize / attachment.size) * 100)}% reduction)`)
+
+            // Store resized base64 to return to renderer
+            // This is used when sending to Claude API instead of original large base64
+            resizedBase64 = decoded.toString('base64')
+          }
+        }
+
+        await writeFile(storedPath, decoded)
+        filesToCleanup.push(storedPath)
+      } else if (attachment.text) {
+        // Text files - save as UTF-8
+        await writeFile(storedPath, attachment.text, 'utf-8')
+        filesToCleanup.push(storedPath)
+      } else {
+        throw new Error('Attachment has no content (neither base64 nor text)')
+      }
+
+      // 2. Generate thumbnail using native OS APIs (Quick Look on macOS, Shell handlers on Windows)
+      let thumbnailPath: string | undefined
+      let thumbnailBase64: string | undefined
+      const thumbFileName = `${id}_thumb.png`
+      const thumbPath = join(attachmentsDir, thumbFileName)
+      try {
+        const thumbnail = await nativeImage.createThumbnailFromPath(storedPath, { width: 200, height: 200 })
+        if (!thumbnail.isEmpty()) {
+          const pngBuffer = thumbnail.toPNG()
+          await writeFile(thumbPath, pngBuffer)
+          thumbnailPath = thumbPath
+          thumbnailBase64 = pngBuffer.toString('base64')
+          filesToCleanup.push(thumbPath)
+        }
+      } catch (thumbError) {
+        // Thumbnail generation failed - this is ok, we'll show an icon fallback
+        ipcLog.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
+      }
+
+      // 3. Convert Office files to markdown (for sending to Claude)
+      // This is required for Office files - Claude can't read raw Office binary
+      let markdownPath: string | undefined
+      if (attachment.type === 'office') {
+        const mdFileName = `${id}_${safeName}.md`
+        const mdPath = join(attachmentsDir, mdFileName)
+        try {
+          const markitdown = new MarkItDown()
+          const result = await markitdown.convert(storedPath)
+          if (!result || !result.textContent) {
+            throw new Error('Conversion returned empty result')
+          }
+          await writeFile(mdPath, result.textContent, 'utf-8')
+          markdownPath = mdPath
+          filesToCleanup.push(mdPath)
+          ipcLog.info(`Converted Office file to markdown: ${mdPath}`)
+        } catch (convertError) {
+          // Conversion failed - throw so user knows the file can't be processed
+          // Claude can't read raw Office binary, so a failed conversion = unusable file
+          const errorMsg = convertError instanceof Error ? convertError.message : String(convertError)
+          ipcLog.error('Office to markdown conversion failed:', errorMsg)
+          throw new Error(`Failed to convert "${attachment.name}" to readable format: ${errorMsg}`)
+        }
+      }
+
+      // Return StoredAttachment metadata
+      // Include wasResized flag so UI can show notification
+      // Include resizedBase64 so renderer uses resized image for Claude API
+      return {
+        id,
+        type: attachment.type,
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        size: finalSize, // Use final size (may differ if resized)
+        originalSize: wasResized ? attachment.size : undefined, // Track original if resized
+        storedPath,
+        thumbnailPath,
+        thumbnailBase64,
+        markdownPath,
+        wasResized,
+        resizedBase64, // Only set when wasResized=true, used for Claude API
+      }
+    } catch (error) {
+      // Clean up any files we've written before the error
+      if (filesToCleanup.length > 0) {
+        ipcLog.info(`Cleaning up ${filesToCleanup.length} orphaned file(s) after storage error`)
+        await Promise.all(filesToCleanup.map(f => unlink(f).catch(() => {})))
+      }
+
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      ipcLog.error('storeAttachment error:', message)
+      throw new Error(`Failed to store attachment: ${message}`)
+    }
+  })
+
+  // Filesystem search for @ mention file selection.
+  // Parallel BFS walk that skips ignored directories BEFORE entering them,
+  // avoiding reading node_modules/etc. contents entirely. Uses withFileTypes
+  // to get entry types without separate stat calls.
+  ipcMain.handle(IPC_CHANNELS.FS_SEARCH, async (_event, basePath: string, query: string) => {
+    ipcLog.info('[FS_SEARCH] called:', basePath, query)
+    const MAX_RESULTS = 50
+
+    // Directories to never recurse into
+    const SKIP_DIRS = new Set([
+      'node_modules', '.git', '.svn', '.hg', 'dist', 'build',
+      '.next', '.nuxt', '.cache', '__pycache__', 'vendor',
+      '.idea', '.vscode', 'coverage', '.nyc_output', '.turbo', 'out',
+    ])
+
+    const lowerQuery = query.toLowerCase()
+    const results: Array<{ name: string; path: string; type: 'file' | 'directory'; relativePath: string }> = []
+
+    try {
+      // BFS queue: each entry is a relative path prefix ('' for root)
+      let queue = ['']
+
+      while (queue.length > 0 && results.length < MAX_RESULTS) {
+        // Process current level: read all directories in parallel
+        const nextQueue: string[] = []
+
+        const dirResults = await Promise.all(
+          queue.map(async (relDir) => {
+            const absDir = relDir ? join(basePath, relDir) : basePath
+            try {
+              return { relDir, entries: await readdir(absDir, { withFileTypes: true }) }
+            } catch {
+              // Skip dirs we can't read (permissions, broken symlinks, etc.)
+              return { relDir, entries: [] as import('fs').Dirent[] }
+            }
+          })
+        )
+
+        for (const { relDir, entries } of dirResults) {
+          if (results.length >= MAX_RESULTS) break
+
+          for (const entry of entries) {
+            if (results.length >= MAX_RESULTS) break
+
+            const name = entry.name
+            // Skip hidden files/dirs and ignored directories
+            if (name.startsWith('.') || SKIP_DIRS.has(name)) continue
+
+            const relativePath = relDir ? `${relDir}/${name}` : name
+            const isDir = entry.isDirectory()
+
+            // Queue subdirectories for next BFS level
+            if (isDir) {
+              nextQueue.push(relativePath)
+            }
+
+            // Check if name or path matches the query
+            const lowerName = name.toLowerCase()
+            const lowerRelative = relativePath.toLowerCase()
+            if (lowerName.includes(lowerQuery) || lowerRelative.includes(lowerQuery)) {
+              results.push({
+                name,
+                path: join(basePath, relativePath),
+                type: isDir ? 'directory' : 'file',
+                relativePath,
+              })
+            }
+          }
+        }
+
+        queue = nextQueue
+      }
+
+      // Sort: directories first, then by name length (shorter = better match)
+      results.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
+        return a.name.length - b.name.length
+      })
+
+      ipcLog.info('[FS_SEARCH] returning', results.length, 'results')
+      return results
+    } catch (err) {
+      ipcLog.error('[FS_SEARCH] error:', err)
+      return []
+    }
+  })
+}
