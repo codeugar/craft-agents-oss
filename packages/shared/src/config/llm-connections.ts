@@ -212,10 +212,6 @@ function findSmallModel(connection: Pick<LlmConnection, 'models' | 'providerType
 
   const toId = (m: ModelDefinition | string) => typeof m === 'string' ? m : m.id;
 
-  // DEBUG LOG
-  // eslint-disable-next-line no-console
-  console.log(`[findSmallModel] Searching for small model. Provider: ${connection.providerType}`, connection.models.map(toId));
-
   const toSearchStr = (m: ModelDefinition | string) =>
     typeof m === 'string' ? m.toLowerCase() : `${m.id} ${m.name} ${m.shortName}`.toLowerCase();
 
@@ -237,18 +233,12 @@ function findSmallModel(connection: Pick<LlmConnection, 'models' | 'providerType
       return keywords.some(k => searchStr.includes(k));
     });
     if (match) {
-      const id = toId(match);
-      // eslint-disable-next-line no-console
-      console.log(`[findSmallModel] Found match: ${id} using keywords: ${keywords.join(', ')}`);
-      return id;
+      return toId(match);
     }
   }
 
   // Fallback: last model in the list
-  const fallback = toId(connection.models[connection.models.length - 1]!);
-  // eslint-disable-next-line no-console
-  console.log(`[findSmallModel] No keyword match found. Fallback to last model: ${fallback}`);
-  return fallback;
+  return toId(connection.models[connection.models.length - 1]!);
 }
 
 /**
