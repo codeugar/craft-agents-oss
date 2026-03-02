@@ -240,7 +240,8 @@ export function TopBar({
     >
       <div className="flex h-full w-full items-center justify-between gap-2">
       {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
-      <div className="pointer-events-auto titlebar-no-drag flex min-w-0 flex-1 items-center gap-0.5" style={{ paddingLeft: menuLeftPadding }}>
+      {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
+      <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-0.5" style={{ paddingLeft: menuLeftPadding }}>
         <div className="flex items-center gap-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
