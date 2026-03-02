@@ -539,6 +539,30 @@ export class WindowManager {
   }
 
   /**
+   * Send typed IPC message to all windows except a specific sender.
+   * Try-catch per window so the loop continues if a window is closing.
+   */
+  broadcastToAllExcept<K extends keyof BroadcastEventMap>(
+    excludedWebContentsId: number,
+    channel: K,
+    ...args: BroadcastEventMap[K]
+  ): void {
+    for (const managed of this.getAllWindows()) {
+      const targetWindow = managed.window
+      const webContents = targetWindow.webContents
+      if (webContents.id === excludedWebContentsId) continue
+
+      if (!targetWindow.isDestroyed() && !webContents.isDestroyed() && webContents.mainFrame) {
+        try {
+          webContents.send(channel as string, ...args)
+        } catch {
+          // Expected during window closure race
+        }
+      }
+    }
+  }
+
+  /**
    * Send typed IPC message to all windows for a specific workspace.
    * Try-catch per window so the loop continues if a window is closing.
    */

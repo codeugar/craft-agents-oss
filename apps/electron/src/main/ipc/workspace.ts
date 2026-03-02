@@ -325,15 +325,7 @@ export function registerWorkspaceHandlers({ sessionManager, windowManager }: Ipc
   // Broadcast theme preferences to all other windows (for cross-window sync)
   ipcMain.handle(IPC_CHANNELS.theme.BROADCAST_PREFERENCES, async (event, preferences: { mode: string; colorTheme: string; font: string }) => {
     const senderId = event.sender.id
-    // Broadcast to all windows except the sender
-    for (const managed of windowManager.getAllWindows()) {
-      if (!managed.window.isDestroyed() &&
-          !managed.window.webContents.isDestroyed() &&
-          managed.window.webContents.mainFrame &&
-          managed.window.webContents.id !== senderId) {
-        managed.window.webContents.send(IPC_CHANNELS.theme.PREFERENCES_CHANGED, preferences)
-      }
-    }
+    windowManager.broadcastToAllExcept(senderId, IPC_CHANNELS.theme.PREFERENCES_CHANGED, preferences)
   })
 
   // Workspace-level theme overrides
@@ -369,15 +361,7 @@ export function registerWorkspaceHandlers({ sessionManager, windowManager }: Ipc
   // Broadcast workspace theme change to all other windows (for cross-window sync)
   ipcMain.handle(IPC_CHANNELS.theme.BROADCAST_WORKSPACE_THEME, async (event, workspaceId: string, themeId: string | null) => {
     const senderId = event.sender.id
-    // Broadcast to all windows except the sender
-    for (const managed of windowManager.getAllWindows()) {
-      if (!managed.window.isDestroyed() &&
-          !managed.window.webContents.isDestroyed() &&
-          managed.window.webContents.mainFrame &&
-          managed.window.webContents.id !== senderId) {
-        managed.window.webContents.send(IPC_CHANNELS.theme.WORKSPACE_THEME_CHANGED, { workspaceId, themeId })
-      }
-    }
+    windowManager.broadcastToAllExcept(senderId, IPC_CHANNELS.theme.WORKSPACE_THEME_CHANGED, { workspaceId, themeId })
   })
 
   // ============================================================
