@@ -311,9 +311,9 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.WORKSPACE_WRITE_IMAGE, workspaceId, relativePath, base64, mimeType),
 
   // Sources change listener (live updates when sources are added/removed)
-  onSourcesChanged: (callback: (sources: import('@craft-agent/shared/sources').LoadedSource[]) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, sources: import('@craft-agent/shared/sources').LoadedSource[]) => {
-      callback(sources)
+  onSourcesChanged: (callback: (workspaceId: string, sources: import('@craft-agent/shared/sources').LoadedSource[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string, sources: import('@craft-agent/shared/sources').LoadedSource[]) => {
+      callback(workspaceId, sources)
     }
     ipcRenderer.on(IPC_CHANNELS.SOURCES_CHANGED, handler)
     return () => {
@@ -334,9 +334,9 @@ const api: ElectronAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.SKILLS_OPEN_FINDER, workspaceId, skillSlug),
 
   // Skills change listener (live updates when skills are added/removed/modified)
-  onSkillsChanged: (callback: (skills: import('@craft-agent/shared/skills').LoadedSkill[]) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, skills: import('@craft-agent/shared/skills').LoadedSkill[]) => {
-      callback(skills)
+  onSkillsChanged: (callback: (workspaceId: string, skills: import('@craft-agent/shared/skills').LoadedSkill[]) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, workspaceId: string, skills: import('@craft-agent/shared/skills').LoadedSkill[]) => {
+      callback(workspaceId, skills)
     }
     ipcRenderer.on(IPC_CHANNELS.SKILLS_CHANGED, handler)
     return () => {

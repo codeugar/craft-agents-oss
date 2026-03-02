@@ -924,13 +924,13 @@ export class SessionManager {
     const callbacks: ConfigWatcherCallbacks = {
       onSourcesListChange: async (sources: LoadedSource[]) => {
         sessionLog.info(`Sources list changed in ${workspaceRootPath} (${sources.length} sources)`)
-        this.broadcastSourcesChanged(sources)
+        this.broadcastSourcesChanged(workspaceId, sources)
         await this.reloadSourcesForWorkspace(workspaceRootPath)
       },
       onSourceChange: async (slug: string, source: LoadedSource | null) => {
         sessionLog.info(`Source '${slug}' changed:`, source ? 'updated' : 'deleted')
         const sources = loadWorkspaceSources(workspaceRootPath)
-        this.broadcastSourcesChanged(sources)
+        this.broadcastSourcesChanged(workspaceId, sources)
         await this.reloadSourcesForWorkspace(workspaceRootPath)
       },
       onSourceGuideChange: (sourceSlug: string) => {
@@ -938,7 +938,7 @@ export class SessionManager {
         // Broadcast the updated sources list so sidebar picks up guide changes
         // Note: Guide changes don't require session source reload (no server changes)
         const sources = loadWorkspaceSources(workspaceRootPath)
-        this.broadcastSourcesChanged(sources)
+        this.broadcastSourcesChanged(workspaceId, sources)
       },
       onStatusConfigChange: () => {
         sessionLog.info(`Status config changed in ${workspaceId}`)
@@ -988,14 +988,14 @@ export class SessionManager {
       },
       onSkillsListChange: async (skills) => {
         sessionLog.info(`Skills list changed in ${workspaceRootPath} (${skills.length} skills)`)
-        this.broadcastSkillsChanged(skills)
+        this.broadcastSkillsChanged(workspaceId, skills)
       },
       onSkillChange: async (slug, skill) => {
         sessionLog.info(`Skill '${slug}' changed:`, skill ? 'updated' : 'deleted')
         // Broadcast updated list to UI
         const { loadAllSkills } = await import('@craft-agent/shared/skills')
         const skills = loadAllSkills(workspaceRootPath)
-        this.broadcastSkillsChanged(skills)
+        this.broadcastSkillsChanged(workspaceId, skills)
       },
 
       // Session metadata changes (external edits to session.jsonl headers).
@@ -1093,10 +1093,10 @@ export class SessionManager {
   /**
    * Broadcast sources changed event to all windows
    */
-  private broadcastSourcesChanged(sources: LoadedSource[]): void {
+  private broadcastSourcesChanged(workspaceId: string, sources: LoadedSource[]): void {
     if (!this.windowManager) return
 
-    this.windowManager.broadcastToAll(IPC_CHANNELS.SOURCES_CHANGED, sources)
+    this.windowManager.broadcastToAll(IPC_CHANNELS.SOURCES_CHANGED, workspaceId, sources)
   }
 
   /**
@@ -1147,10 +1147,10 @@ export class SessionManager {
   /**
    * Broadcast skills changed event to all windows
    */
-  private broadcastSkillsChanged(skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
+  private broadcastSkillsChanged(workspaceId: string, skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
     if (!this.windowManager) return
     sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.SKILLS_CHANGED, skills)
+    this.windowManager.broadcastToAll(IPC_CHANNELS.SKILLS_CHANGED, workspaceId, skills)
   }
 
   /**

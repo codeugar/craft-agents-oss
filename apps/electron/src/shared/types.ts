@@ -1141,7 +1141,7 @@ export interface ElectronAPI {
   searchSessionContent(workspaceId: string, query: string, searchId?: string): Promise<SessionSearchResult[]>
 
   // Sources change listener (live updates when sources are added/removed)
-  onSourcesChanged(callback: (sources: LoadedSource[]) => void): () => void
+  onSourcesChanged(callback: (workspaceId: string, sources: LoadedSource[]) => void): () => void
 
   // Default permissions change listener (live updates when default.json changes)
   onDefaultPermissionsChanged(callback: () => void): () => void
@@ -1154,7 +1154,7 @@ export interface ElectronAPI {
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>
 
   // Skills change listener (live updates when skills are added/removed/modified)
-  onSkillsChanged(callback: (skills: LoadedSkill[]) => void): () => void
+  onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@craft-agent/shared/statuses').StatusConfig[]>
