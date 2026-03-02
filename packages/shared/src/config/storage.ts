@@ -1391,6 +1391,69 @@ function migrateOpus45ToOpus46(config: StoredConfig): boolean {
 }
 
 /**
+ * Migrate Sonnet 4.5 to Sonnet 4.6 for direct Anthropic connections.
+ * Same pattern as migrateOpus45ToOpus46 — updates stored model IDs and names.
+ */
+function migrateSonnet45ToSonnet46(config: StoredConfig): boolean {
+  if (!config.llmConnections) return false;
+
+  const SONNET_45_ID = 'claude-sonnet-4-5-20250929';
+  const SONNET_46_ID = 'claude-sonnet-4-6';
+
+  let changed = false;
+
+  for (const connection of config.llmConnections) {
+    // Only migrate direct Anthropic connections (not compat/third-party)
+    if (connection.providerType !== 'anthropic') continue;
+
+    // Migrate defaultModel
+    if (connection.defaultModel === SONNET_45_ID) {
+      connection.defaultModel = SONNET_46_ID;
+      changed = true;
+    }
+
+    // Migrate models array
+    if (connection.models && Array.isArray(connection.models)) {
+      for (let i = 0; i < connection.models.length; i++) {
+        const model = connection.models[i];
+        if (typeof model === 'string' && model === SONNET_45_ID) {
+          connection.models[i] = SONNET_46_ID;
+          changed = true;
+        } else if (typeof model === 'object' && model.id === SONNET_45_ID) {
+          model.id = SONNET_46_ID;
+          if (model.name?.includes('4.5')) {
+            model.name = model.name.replace('4.5', '4.6');
+          }
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return changed;
+}
+
+/**
+ * Migrate Sonnet 4.5 to Sonnet 4.6 in workspace default models.
+ */
+function migrateWorkspaceSonnet45ToSonnet46(config: StoredConfig): void {
+  if (!config.workspaces) return;
+
+  const SONNET_45_ID = 'claude-sonnet-4-5-20250929';
+  const SONNET_46_ID = 'claude-sonnet-4-6';
+
+  for (const workspace of config.workspaces) {
+    const wsConfig = loadWorkspaceConfig(workspace.rootPath);
+    if (!wsConfig?.defaults?.model) continue;
+
+    if (wsConfig.defaults.model === SONNET_45_ID) {
+      wsConfig.defaults.model = SONNET_46_ID;
+      saveWorkspaceConfig(workspace.rootPath, wsConfig);
+    }
+  }
+}
+
+/**
  * Migrate Opus 4.5 to Opus 4.6 in workspace default models.
  * Iterates over all workspaces and updates defaults.model if it's Opus 4.5.
  */
@@ -1575,6 +1638,12 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     }
     // Phase 1e: Migrate Opus 4.5 → Opus 4.6 in workspace default models
     migrateWorkspaceOpus45ToOpus46(config);
+    // Phase 1f: Migrate Sonnet 4.5 → Sonnet 4.6 for direct Anthropic connections
+    if (migrateSonnet45ToSonnet46(config)) {
+      needsSave = true;
+    }
+    // Phase 1g: Migrate Sonnet 4.5 → Sonnet 4.6 in workspace default models
+    migrateWorkspaceSonnet45ToSonnet46(config);
 
     if (needsSave) {
       saveConfig(config);
