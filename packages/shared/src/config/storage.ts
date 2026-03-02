@@ -1325,13 +1325,13 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
       }
     }
 
-    if (!connection.defaultModel) {
+    if (!connection.defaultModel && defaultModel) {
       connection.defaultModel = defaultModel;
       changed = true;
     }
 
     // Validate that existing defaultModel is in the models list
-    if (connection.defaultModel && connection.models && Array.isArray(connection.models)) {
+    if (connection.defaultModel && connection.models && Array.isArray(connection.models) && connection.models.length > 0) {
       const modelIds = connection.models.map(m => typeof m === 'string' ? m : m.id);
       if (!modelIds.includes(connection.defaultModel)) {
         // Reset to first available model in the list

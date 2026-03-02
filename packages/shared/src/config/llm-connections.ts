@@ -437,11 +437,7 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType, piA
     return models;
   }
   if (providerType === 'pi_compat') return [];  // Dynamic — user specifies
-  if (providerType === 'anthropic_compat') return [
-    'anthropic/claude-opus-4.6',
-    'anthropic/claude-sonnet-4.5',
-    'anthropic/claude-haiku-4.5',
-  ];
+  if (providerType === 'anthropic_compat') return [];  // Dynamic — user specifies
   // anthropic, bedrock, vertex
   return ANTHROPIC_MODELS;
 }
@@ -457,7 +453,7 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType, piA
 export function getDefaultModelForConnection(providerType: LlmProviderType, piAuthProvider?: string): string {
   const models = getDefaultModelsForConnection(providerType, piAuthProvider);
   const first = models[0];
-  if (!first) return ANTHROPIC_MODELS[0]!.id;
+  if (!first) return '';  // Dynamic provider — no default
   return typeof first === 'string' ? first : first.id;
 }
 
