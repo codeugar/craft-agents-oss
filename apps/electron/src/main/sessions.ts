@@ -1763,19 +1763,7 @@ export class SessionManager {
     if (!this.windowManager) return
 
     // Broadcast to renderers for UI updates (session list dots, etc.)
-    const sentTo = new Set<number>()
-
-    for (const workspace of getWorkspaces()) {
-      const windows = this.windowManager.getAllWindowsForWorkspace(workspace.id)
-      for (const window of windows) {
-        const webContentsId = window.webContents.id
-        if (sentTo.has(webContentsId)) continue
-        if (window.isDestroyed() || window.webContents.isDestroyed() || !window.webContents.mainFrame) continue
-
-        window.webContents.send(IPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED, summary)
-        sentTo.add(webContentsId)
-      }
-    }
+    this.windowManager.broadcastToAll(IPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED, summary)
   }
 
   /**
@@ -5541,20 +5529,7 @@ To view this task's output:
       return
     }
 
-    // Send event to all windows for this workspace
-    for (const window of windows) {
-      // Check mainFrame - it becomes null when render frame is disposed
-      // This prevents Electron's internal error logging before our try-catch
-      if (!window.isDestroyed() &&
-          !window.webContents.isDestroyed() &&
-          window.webContents.mainFrame) {
-        try {
-          window.webContents.send(IPC_CHANNELS.sessions.EVENT, event)
-        } catch {
-          // Silently ignore - expected during window closure race conditions
-        }
-      }
-    }
+    this.windowManager.broadcastToWorkspace(workspaceId!, IPC_CHANNELS.sessions.EVENT, event)
   }
 
   /**

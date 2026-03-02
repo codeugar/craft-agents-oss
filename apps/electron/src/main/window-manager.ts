@@ -244,13 +244,11 @@ export class WindowManager {
           if (target && (target.view || target.action)) {
             // Wait a bit for React to mount and register IPC listeners
             setTimeout(() => {
-              if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-                window.webContents.send(IPC_CHANNELS.deeplink.NAVIGATE, {
-                  view: target.view,
-                  action: target.action,
-                  actionParams: target.actionParams,
-                })
-              }
+              this.sendToWindow(window, IPC_CHANNELS.deeplink.NAVIGATE, {
+                view: target.view,
+                action: target.action,
+                actionParams: target.actionParams,
+              })
             }, 100)
           }
         })
@@ -268,23 +266,16 @@ export class WindowManager {
 
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
-      // Check mainFrame - it becomes null when render frame is disposed
-      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-        window.webContents.send(IPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
-      }
+      this.sendToWindow(window, IPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
     }
     nativeTheme.on('updated', themeHandler)
 
     // Handle focus/blur to broadcast window focus state
     window.on('focus', () => {
-      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-        window.webContents.send(IPC_CHANNELS.window.FOCUS_STATE, true)
-      }
+      this.sendToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, true)
     })
     window.on('blur', () => {
-      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-        window.webContents.send(IPC_CHANNELS.window.FOCUS_STATE, false)
-      }
+      this.sendToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, false)
     })
 
     // Handle window close request (X button, Cmd+W) - intercept to allow modal closing first
@@ -294,7 +285,7 @@ export class WindowManager {
       if (!window.webContents.isDestroyed() && window.webContents.mainFrame) {
         event.preventDefault()
         // Send close request to renderer - it will either close a modal or confirm close
-        window.webContents.send(IPC_CHANNELS.window.CLOSE_REQUESTED)
+        this.sendToWindow(window, IPC_CHANNELS.window.CLOSE_REQUESTED)
 
         // Fallback timeout: if IPC fails (e.g., on Hyprland/Wayland), force close after 3s.
         // Reset timeout on each attempt so active users closing modals aren't interrupted.

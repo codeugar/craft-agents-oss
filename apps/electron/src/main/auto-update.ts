@@ -97,12 +97,7 @@ function broadcastUpdateInfo(): void {
   if (!windowManager) return
 
   const snapshot = { ...updateInfo }
-  const windows = windowManager.getAllWindows()
-  for (const { window } of windows) {
-    if (!window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.update.AVAILABLE, snapshot)
-    }
-  }
+  windowManager.broadcastToAll(IPC_CHANNELS.update.AVAILABLE, snapshot)
 }
 
 /**
@@ -111,12 +106,7 @@ function broadcastUpdateInfo(): void {
 function broadcastDownloadProgress(progress: number): void {
   if (!windowManager) return
 
-  const windows = windowManager.getAllWindows()
-  for (const { window } of windows) {
-    if (!window.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.update.DOWNLOAD_PROGRESS, progress)
-    }
-  }
+  windowManager.broadcastToAll(IPC_CHANNELS.update.DOWNLOAD_PROGRESS, progress)
 }
 
 // ─── Configure electron-updater ───────────────────────────────────────────────

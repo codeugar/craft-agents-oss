@@ -90,7 +90,7 @@ function handleNotificationClick(workspaceId: string, sessionId: string): void {
     window.focus()
 
     // Send navigation event to renderer to open the session
-    window.webContents.send(IPC_CHANNELS.notification.NAVIGATE, {
+    windowManager!.sendToWindow(window, IPC_CHANNELS.notification.NAVIGATE, {
       workspaceId,
       sessionId,
     })

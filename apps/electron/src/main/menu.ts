@@ -1,5 +1,5 @@
 import { Menu, app, shell, BrowserWindow } from 'electron'
-import { IPC_CHANNELS } from '../shared/types'
+import { IPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
 import { EDIT_MENU, VIEW_MENU, WINDOW_MENU } from '../shared/menu-schema'
 import type { MenuItem } from '../shared/menu-schema'
 import type { WindowManager } from './window-manager'
@@ -230,13 +230,16 @@ export async function rebuildMenu(): Promise<void> {
   Menu.setApplicationMenu(menu)
 }
 
+/** Menu channels that are main→renderer push events in BroadcastEventMap */
+type MenuBroadcastChannel = Extract<keyof BroadcastEventMap, `menu:${string}`>
+
 /**
  * Sends an IPC message to the focused renderer window.
  */
-function sendToRenderer(channel: string): void {
+function sendToRenderer(channel: MenuBroadcastChannel): void {
   const win = BrowserWindow.getFocusedWindow()
   if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
-    win.webContents.send(channel)
+    win.webContents.send(channel as string)
   }
 }
 
@@ -258,7 +261,7 @@ function toElectronMenuItem(item: MenuItem): Electron.MenuItemConstructorOptions
       label: item.label,
       accelerator: item.shortcut,
       registerAccelerator: false,  // Action registry handles the keyboard shortcut
-      click: () => sendToRenderer(item.ipcChannel),
+      click: () => sendToRenderer(item.ipcChannel as MenuBroadcastChannel),
     }
   }
 

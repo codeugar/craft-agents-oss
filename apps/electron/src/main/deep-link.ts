@@ -320,9 +320,7 @@ export async function handleDeepLink(
       action: target.action,
       actionParams: target.actionParams,
     }
-    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
-      window.webContents.send(IPC_CHANNELS.deeplink.NAVIGATE, navigation)
-    }
+    windowManager.sendToWindow(window, IPC_CHANNELS.deeplink.NAVIGATE, navigation)
   }
 
   return { success: true, windowId: window.isDestroyed() ? -1 : window.webContents.id }

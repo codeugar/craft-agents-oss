@@ -1,7 +1,7 @@
 import { ipcMain, shell, BrowserWindow } from 'electron'
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions } from '../../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type SessionEvent } from '../../shared/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
@@ -147,18 +147,17 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
       const window = callingWorkspaceId
         ? windowManager.getWindowByWorkspace(callingWorkspaceId)
         : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-      // Check mainFrame - it becomes null when render frame is disposed
-      if (window && !window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-        window.webContents.send(IPC_CHANNELS.sessions.EVENT, {
+      if (window) {
+        windowManager.sendToWindow(window, IPC_CHANNELS.sessions.EVENT, {
           type: 'error',
           sessionId,
           error: err instanceof Error ? err.message : 'Unknown error'
-        })
+        } as SessionEvent)
         // Also send complete event to clear processing state
-        window.webContents.send(IPC_CHANNELS.sessions.EVENT, {
+        windowManager.sendToWindow(window, IPC_CHANNELS.sessions.EVENT, {
           type: 'complete',
           sessionId
-        })
+        } as SessionEvent)
       }
     })
     // Return immediately - streaming results come via SESSION_EVENT
@@ -386,10 +385,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
         }
         fileChangeDebounceTimer = setTimeout(() => {
           // Notify all windows that session files changed
-          const { BrowserWindow } = require('electron')
-          for (const win of BrowserWindow.getAllWindows()) {
-            win.webContents.send(IPC_CHANNELS.sessions.FILES_CHANGED, watchedSessionId)
-          }
+          windowManager.broadcastToAll(IPC_CHANNELS.sessions.FILES_CHANGED, watchedSessionId!)
         }, 100)
       })
     } catch (error) {
