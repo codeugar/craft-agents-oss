@@ -13,8 +13,10 @@ import { readFileSync } from 'fs'
 import { mainLog } from './logger'
 import { IPC_CHANNELS } from '../shared/types'
 import type { WindowManager } from './window-manager'
+import type { EventSink } from '../transport/types'
 
 let windowManager: WindowManager | null = null
+let eventSink: EventSink | null = null
 let baseIconPath: string | null = null
 let baseIconDataUrl: string | null = null
 let currentBadgeCount: number = 0
@@ -25,6 +27,13 @@ let instanceNumber: number | null = null  // Multi-instance dev: instance number
  */
 export function initNotificationService(wm: WindowManager): void {
   windowManager = wm
+}
+
+/**
+ * Set the event sink for notification broadcasts (called after server creation)
+ */
+export function setNotificationEventSink(sink: EventSink): void {
+  eventSink = sink
 }
 
 /**
@@ -90,10 +99,12 @@ function handleNotificationClick(workspaceId: string, sessionId: string): void {
     window.focus()
 
     // Send navigation event to renderer to open the session
-    windowManager!.sendToWindow(window, IPC_CHANNELS.notification.NAVIGATE, {
-      workspaceId,
-      sessionId,
-    })
+    if (eventSink) {
+      eventSink(IPC_CHANNELS.notification.NAVIGATE, { to: 'workspace', workspaceId }, {
+        workspaceId,
+        sessionId,
+      })
+    }
   }
 }
 
@@ -146,10 +157,8 @@ function updateBadgeCountMacOS(count: number): void {
   try {
     if (count > 0) {
       // Draw badge onto icon using the renderer process (Canvas API)
-      // Use windowManager to target only app windows — BrowserWindow.getAllWindows()
-      // includes browser pane windows which have no onBadgeDraw listener
-      if (windowManager && baseIconDataUrl) {
-        windowManager.broadcastToAll(IPC_CHANNELS.badge.DRAW, { count, iconDataUrl: baseIconDataUrl })
+      if (eventSink && baseIconDataUrl) {
+        eventSink(IPC_CHANNELS.badge.DRAW, { to: 'all' }, { count, iconDataUrl: baseIconDataUrl })
       }
     } else {
       // Reset to original icon (no badge)
@@ -171,9 +180,8 @@ function updateBadgeCountWindows(count: number): void {
   try {
     if (count > 0) {
       // Draw overlay icon using the renderer process (Canvas API)
-      // Use windowManager to target only app windows
-      if (windowManager) {
-        windowManager.broadcastToAll(IPC_CHANNELS.badge.DRAW_WINDOWS, { count })
+      if (eventSink) {
+        eventSink(IPC_CHANNELS.badge.DRAW_WINDOWS, { to: 'all' }, { count })
       }
     } else {
       // Clear the overlay on all windows

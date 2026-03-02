@@ -1,11 +1,11 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { dialog, BrowserWindow } from 'electron'
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { ipcLog } from '../logger'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.auth.LOGOUT,
@@ -14,9 +14,9 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.credentials.HEALTH_CHECK,
 ] as const
 
-export function registerAuthHandlers(_ctx: IpcContext): void {
+export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Show logout confirmation dialog
-  ipcMain.handle(IPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async () => {
+  server.handle(IPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async () => {
     const window = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     const result = await dialog.showMessageBox(window, {
       type: 'warning',
@@ -33,7 +33,7 @@ export function registerAuthHandlers(_ctx: IpcContext): void {
   })
 
   // Show delete session confirmation dialog
-  ipcMain.handle(IPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (_event, name: string) => {
+  server.handle(IPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (_ctx, name: string) => {
     const window = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
     const result = await dialog.showMessageBox(window, {
       type: 'warning',
@@ -50,7 +50,7 @@ export function registerAuthHandlers(_ctx: IpcContext): void {
   })
 
   // Logout - clear all credentials and config
-  ipcMain.handle(IPC_CHANNELS.auth.LOGOUT, async () => {
+  server.handle(IPC_CHANNELS.auth.LOGOUT, async () => {
     try {
       const manager = getCredentialManager()
 
@@ -66,16 +66,16 @@ export function registerAuthHandlers(_ctx: IpcContext): void {
         // Ignore if file doesn't exist
       })
 
-      ipcLog.info('Logout complete - cleared all credentials and config')
+      deps.platform.logger.info('Logout complete - cleared all credentials and config')
     } catch (error) {
-      ipcLog.error('Logout error:', error)
+      deps.platform.logger.error('Logout error:', error)
       throw error
     }
   })
 
   // Credential health check - validates credential store is readable and usable
   // Called on app startup to detect corruption, machine migration, or missing credentials
-  ipcMain.handle(IPC_CHANNELS.credentials.HEALTH_CHECK, async () => {
+  server.handle(IPC_CHANNELS.credentials.HEALTH_CHECK, async () => {
     const manager = getCredentialManager()
     return manager.checkHealth()
   })

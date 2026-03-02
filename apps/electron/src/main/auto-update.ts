@@ -27,7 +27,7 @@ import {
 } from '@craft-agent/shared/config'
 import { readJsonFileSync } from '@craft-agent/shared/utils/files'
 import { IPC_CHANNELS, type UpdateInfo } from '../shared/types'
-import type { WindowManager } from './window-manager'
+import type { EventSink } from '../transport/types'
 
 // Platform detection
 const PLATFORM = platform()
@@ -62,7 +62,7 @@ let updateInfo: UpdateInfo = {
   downloadProgress: 0,
 }
 
-let windowManager: WindowManager | null = null
+let eventSink: EventSink | null = null
 
 // Flag to indicate update is in progress — used to prevent force exit during quitAndInstall
 let __isUpdating = false
@@ -76,10 +76,10 @@ export function isUpdating(): boolean {
 }
 
 /**
- * Set the window manager for broadcasting update events to renderer windows
+ * Set the event sink for broadcasting update events to renderer windows
  */
-export function setWindowManager(wm: WindowManager): void {
-  windowManager = wm
+export function setAutoUpdateEventSink(sink: EventSink): void {
+  eventSink = sink
 }
 
 /**
@@ -94,19 +94,19 @@ export function getUpdateInfo(): UpdateInfo {
  * Creates a snapshot to avoid race conditions during broadcast.
  */
 function broadcastUpdateInfo(): void {
-  if (!windowManager) return
+  if (!eventSink) return
 
   const snapshot = { ...updateInfo }
-  windowManager.broadcastToAll(IPC_CHANNELS.update.AVAILABLE, snapshot)
+  eventSink(IPC_CHANNELS.update.AVAILABLE, { to: 'all' }, snapshot)
 }
 
 /**
  * Broadcast download progress to all renderer windows.
  */
 function broadcastDownloadProgress(progress: number): void {
-  if (!windowManager) return
+  if (!eventSink) return
 
-  windowManager.broadcastToAll(IPC_CHANNELS.update.DOWNLOAD_PROGRESS, progress)
+  eventSink(IPC_CHANNELS.update.DOWNLOAD_PROGRESS, { to: 'all' }, progress)
 }
 
 // ─── Configure electron-updater ───────────────────────────────────────────────

@@ -3,8 +3,8 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
-import { app, BrowserWindow } from 'electron'
-import { createHash } from 'crypto'
+import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
+import { createHash, randomUUID } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
 
@@ -66,7 +66,11 @@ Sentry.setUser({ id: machineId })
 import { join, delimiter } from 'path'
 import { existsSync } from 'fs'
 import { SessionManager } from './sessions'
-import { registerAllIpcHandlers } from './ipc/index'
+import { registerAllRpcHandlers } from './ipc/index'
+import type { PlatformServices } from '../runtime/platform'
+import type { HandlerDeps } from './ipc/handler-deps'
+import type { RpcServer } from '../transport/types'
+import { WsRpcServer } from '../transport/server'
 import { initModelRefreshService, getModelRefreshService } from './model-fetchers'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
@@ -88,7 +92,8 @@ import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { registerPiModelResolver } from '@craft-agent/shared/config'
 import { getPiModelsForAuthProvider, getAllPiModels } from '@craft-agent/shared/config'
 import { initNotificationService, initBadgeIcon, initInstanceBadge } from './notifications'
-import { checkForUpdatesOnLaunch, setWindowManager as setAutoUpdateWindowManager, isUpdating } from './auto-update'
+import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating } from './auto-update'
+import type { EventSink } from '../transport/types'
 import { validateGitBashPath } from './git-bash'
 
 // Initialize electron-log for renderer process support
@@ -141,6 +146,7 @@ const DEEPLINK_SCHEME = process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'
 let windowManager: WindowManager | null = null
 let sessionManager: SessionManager | null = null
 let browserPaneManager: BrowserPaneManager | null = null
+let moduleSink: EventSink | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
@@ -171,7 +177,7 @@ app.on('open-url', (event, url) => {
   mainLog.info('Received deeplink:', url)
 
   if (windowManager) {
-    handleDeepLink(url, windowManager).catch(err => {
+    handleDeepLink(url, windowManager, moduleSink ?? undefined).catch(err => {
       mainLog.error('Failed to handle deep link:', err)
     })
   } else {
@@ -191,7 +197,7 @@ if (!gotTheLock) {
     const url = commandLine.find(arg => arg.startsWith(`${DEEPLINK_SCHEME}://`))
     if (url && windowManager) {
       mainLog.info('Received deeplink from second instance:', url)
-      handleDeepLink(url, windowManager).catch(err => {
+      handleDeepLink(url, windowManager, moduleSink ?? undefined).catch(err => {
         mainLog.error('Failed to handle deep link:', err)
       })
     } else if (windowManager) {
@@ -334,7 +340,6 @@ app.whenReady().then(async () => {
 
     // Initialize session manager
     sessionManager = new SessionManager()
-    sessionManager.setWindowManager(windowManager)
 
     // Initialize notification service
     initNotificationService(windowManager)
@@ -380,8 +385,84 @@ app.whenReady().then(async () => {
     browserPaneManager.registerToolbarIpc()
     sessionManager.setBrowserPaneManager(browserPaneManager)
 
-    // Register IPC handlers (must happen before window creation)
-    registerAllIpcHandlers({ sessionManager, windowManager, browserPaneManager })
+    // Build real PlatformServices from Electron APIs
+    const platform: PlatformServices = {
+      appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
+      resourcesPath: process.resourcesPath,
+      isPackaged: app.isPackaged,
+      openExternal: (url) => shell.openExternal(url),
+      openPath: (p) => shell.openPath(p).then(() => {}),
+      showItemInFolder: (p) => shell.showItemInFolder(p),
+      resizeImage: async (buffer, maxSize) => {
+        const img = nativeImage.createFromBuffer(buffer)
+        const resized = img.resize({ width: maxSize, height: maxSize })
+        return resized.toPNG() as unknown as Buffer
+      },
+      logger: log,
+      captureError: (err) => Sentry.captureException(err),
+    }
+
+    // Create WS RPC server (local WebSocket transport)
+    const clientMap = new Map<number, string>()
+    const resolveClientId = (wcId: number) => clientMap.get(wcId)
+    const localToken = randomUUID()
+
+    const wsServer = new WsRpcServer({
+      host: '127.0.0.1',
+      port: 0,
+      requireAuth: true,
+      validateToken: async (t) => t === localToken,
+      serverId: 'local',
+      onClientConnected: ({ clientId, webContentsId }) => {
+        if (webContentsId != null) clientMap.set(webContentsId, clientId)
+      },
+      onClientDisconnected: (clientId) => {
+        for (const [wcId, cId] of clientMap) {
+          if (cId === clientId) { clientMap.delete(wcId); break }
+        }
+      },
+    })
+    await wsServer.listen()
+    const server: RpcServer = wsServer
+    mainLog.info(`WS RPC server listening on 127.0.0.1:${wsServer.port}`)
+
+    // Module-level EventSink — used by deep-link handlers defined before app.whenReady
+    moduleSink = server.push.bind(server)
+
+    // Bootstrap IPC handlers — renderer preload uses sendSync to get WS connection details
+    ipcMain.on('__get-ws-port', (e) => {
+      e.returnValue = wsServer.port
+    })
+    ipcMain.on('__get-ws-token', (e) => {
+      e.returnValue = localToken
+    })
+    ipcMain.on('__get-web-contents-id', (e) => {
+      e.returnValue = e.sender.id
+    })
+    ipcMain.on('__get-workspace-id', (e) => {
+      e.returnValue = windowManager?.getWorkspaceForWindow(e.sender.id) ?? ''
+    })
+
+    const deps: HandlerDeps = {
+      sessionManager,
+      platform,
+      windowManager,
+      browserPaneManager,
+    }
+
+    // Register RPC handlers (must happen before window creation)
+    registerAllRpcHandlers(server, deps)
+
+    // Wire EventSink so SessionManager pushes events via the RPC server
+    sessionManager.setEventSink(server.push.bind(server))
+
+    // Wire EventSink to services that broadcast events to renderers
+    // Must happen BEFORE createInitialWindows() so event handlers use WS from the start
+    windowManager.setRpcEventSink(moduleSink!, resolveClientId)
+    const { setMenuEventSink } = await import('./menu')
+    setMenuEventSink(moduleSink!, resolveClientId)
+    const { setNotificationEventSink } = await import('./notifications')
+    setNotificationEventSink(moduleSink!)
 
     // Create initial windows (restores from saved state or opens first workspace)
     await createInitialWindows()
@@ -429,7 +510,7 @@ app.whenReady().then(async () => {
 
     // Initialize auto-update (check immediately on launch)
     // Skip in dev mode to avoid replacing /Applications app and launching it instead
-    setAutoUpdateWindowManager(windowManager)
+    setAutoUpdateEventSink(moduleSink!)
     if (app.isPackaged) {
       checkForUpdatesOnLaunch().catch(err => {
         mainLog.error('[auto-update] Launch check failed:', err)
@@ -441,7 +522,7 @@ app.whenReady().then(async () => {
     // Process pending deep link from cold start
     if (pendingDeepLink) {
       mainLog.info('Processing pending deep link:', pendingDeepLink)
-      await handleDeepLink(pendingDeepLink, windowManager)
+      await handleDeepLink(pendingDeepLink, windowManager, moduleSink ?? undefined)
       pendingDeepLink = null
     }
 

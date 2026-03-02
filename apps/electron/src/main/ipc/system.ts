@@ -1,4 +1,4 @@
-import { app, ipcMain, nativeTheme, shell, dialog, BrowserWindow } from 'electron'
+import { app, nativeTheme, shell, dialog } from 'electron'
 import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -6,12 +6,13 @@ import { execSync } from 'child_process'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
 import { isUsableGitBashPath, validateGitBashPath } from '../git-bash'
-import { ipcLog } from '../logger'
 import { validateFilePath } from './files'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE,
+  IPC_CHANNELS.system.VERSIONS,
   IPC_CHANNELS.system.HOME_DIR,
   IPC_CHANNELS.system.IS_DEBUG_MODE,
   IPC_CHANNELS.debug.LOG,
@@ -51,35 +52,48 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.menu.SELECT_ALL,
 ] as const
 
-export function registerSystemHandlers({ sessionManager, windowManager }: IpcContext): void {
+export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const { sessionManager } = deps
+  // Shell handler — windowManager is always present in Electron context
+  const windowManager = deps.windowManager!
+
   // Get system theme preference (dark = true, light = false)
-  ipcMain.handle(IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE, () => {
+  server.handle(IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE, async () => {
     return nativeTheme.shouldUseDarkColors
   })
 
+  // Get runtime versions (previously handled locally in preload via process.versions)
+  server.handle(IPC_CHANNELS.system.VERSIONS, async () => {
+    return {
+      node: process.versions.node,
+      chrome: process.versions.chrome,
+      electron: process.versions.electron,
+    }
+  })
+
   // Get user's home directory
-  ipcMain.handle(IPC_CHANNELS.system.HOME_DIR, () => {
+  server.handle(IPC_CHANNELS.system.HOME_DIR, async () => {
     return homedir()
   })
 
   // Check if running in debug mode (from source)
-  ipcMain.handle(IPC_CHANNELS.system.IS_DEBUG_MODE, () => {
+  server.handle(IPC_CHANNELS.system.IS_DEBUG_MODE, async () => {
     return !app.isPackaged
   })
 
   // Release notes
-  ipcMain.handle(IPC_CHANNELS.releaseNotes.GET, () => {
+  server.handle(IPC_CHANNELS.releaseNotes.GET, async () => {
     const { getCombinedReleaseNotes } = require('@craft-agent/shared/release-notes') as typeof import('@craft-agent/shared/release-notes')
     return getCombinedReleaseNotes()
   })
 
-  ipcMain.handle(IPC_CHANNELS.releaseNotes.GET_LATEST_VERSION, () => {
+  server.handle(IPC_CHANNELS.releaseNotes.GET_LATEST_VERSION, async () => {
     const { getLatestReleaseVersion } = require('@craft-agent/shared/release-notes') as typeof import('@craft-agent/shared/release-notes')
     return getLatestReleaseVersion()
   })
 
   // Get git branch for a directory (returns null if not a git repo or git unavailable)
-  ipcMain.handle(IPC_CHANNELS.git.GET_BRANCH, (_event, dirPath: string) => {
+  server.handle(IPC_CHANNELS.git.GET_BRANCH, async (_ctx, dirPath: string) => {
     try {
       const branch = execSync('git rev-parse --abbrev-ref HEAD', {
         cwd: dirPath,
@@ -95,7 +109,7 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
   })
 
   // Git Bash detection and configuration (Windows only)
-  ipcMain.handle(IPC_CHANNELS.gitbash.CHECK, async () => {
+  server.handle(IPC_CHANNELS.gitbash.CHECK, async () => {
     const platform = process.platform as 'win32' | 'darwin' | 'linux'
 
     // Non-Windows platforms don't need Git Bash
@@ -152,8 +166,8 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
     return { found: false, path: null, platform }
   })
 
-  ipcMain.handle(IPC_CHANNELS.gitbash.BROWSE, async (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.gitbash.BROWSE, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (!win) return null
 
     const result = await dialog.showOpenDialog(win, {
@@ -170,7 +184,7 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IPC_CHANNELS.gitbash.SET_PATH, async (_event, bashPath: string) => {
+  server.handle(IPC_CHANNELS.gitbash.SET_PATH, async (_ctx, bashPath: string) => {
     const validation = await validateGitBashPath(bashPath)
     if (!validation.valid) {
       return { success: false, error: validation.error }
@@ -183,42 +197,42 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
   })
 
   // Debug logging from renderer -> main log file (fire-and-forget, no response)
-  ipcMain.on(IPC_CHANNELS.debug.LOG, (_event, ...args: unknown[]) => {
-    ipcLog.info('[renderer]', ...args)
+  server.handle(IPC_CHANNELS.debug.LOG, async (_ctx, ...args: unknown[]) => {
+    deps.platform.logger.info('[renderer]', ...args)
   })
 
   // Auto-update handlers
   // Manual check from UI - don't auto-download (user might be on metered connection)
-  ipcMain.handle(IPC_CHANNELS.update.CHECK, async () => {
+  server.handle(IPC_CHANNELS.update.CHECK, async () => {
     const { checkForUpdates } = await import('../auto-update')
     return checkForUpdates({ autoDownload: false })
   })
 
-  ipcMain.handle(IPC_CHANNELS.update.GET_INFO, async () => {
+  server.handle(IPC_CHANNELS.update.GET_INFO, async () => {
     const { getUpdateInfo } = await import('../auto-update')
     return getUpdateInfo()
   })
 
-  ipcMain.handle(IPC_CHANNELS.update.INSTALL, async () => {
+  server.handle(IPC_CHANNELS.update.INSTALL, async () => {
     const { installUpdate } = await import('../auto-update')
     return installUpdate()
   })
 
   // Dismiss update for this version (persists across restarts)
-  ipcMain.handle(IPC_CHANNELS.update.DISMISS, async (_event, version: string) => {
+  server.handle(IPC_CHANNELS.update.DISMISS, async (_ctx, version: string) => {
     const { setDismissedUpdateVersion } = await import('@craft-agent/shared/config')
     setDismissedUpdateVersion(version)
   })
 
   // Get dismissed version
-  ipcMain.handle(IPC_CHANNELS.update.GET_DISMISSED, async () => {
+  server.handle(IPC_CHANNELS.update.GET_DISMISSED, async () => {
     const { getDismissedUpdateVersion } = await import('@craft-agent/shared/config')
     return getDismissedUpdateVersion()
   })
 
   // Shell operations - open URL in external browser (or handle craftagents:// internally)
-  ipcMain.handle(IPC_CHANNELS.shell.OPEN_URL, async (_event, url: string) => {
-    ipcLog.info('[OPEN_URL] Received request:', url)
+  server.handle(IPC_CHANNELS.shell.OPEN_URL, async (_ctx, url: string) => {
+    deps.platform.logger.info('[OPEN_URL] Received request:', url)
     try {
       // Validate URL format
       const parsed = new URL(url)
@@ -226,10 +240,10 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
       // Handle craftagents:// URLs internally via deep link handler
       // This ensures ?window= params work correctly for "Open in New Window"
       if (parsed.protocol === 'craftagents:') {
-        ipcLog.info('[OPEN_URL] Handling as deep link')
+        deps.platform.logger.info('[OPEN_URL] Handling as deep link')
         const { handleDeepLink } = await import('../deep-link')
-        const result = await handleDeepLink(url, windowManager)
-        ipcLog.info('[OPEN_URL] Deep link result:', result)
+        const result = await handleDeepLink(url, windowManager, server.push.bind(server))
+        deps.platform.logger.info('[OPEN_URL] Deep link result:', result)
         return
       }
 
@@ -240,13 +254,13 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
       await shell.openExternal(url)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('openUrl error:', message)
+      deps.platform.logger.error('openUrl error:', message)
       throw new Error(`Failed to open URL: ${message}`)
     }
   })
 
   // Shell operations - open file in default application
-  ipcMain.handle(IPC_CHANNELS.shell.OPEN_FILE, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.shell.OPEN_FILE, async (_ctx, path: string) => {
     try {
       // Resolve relative paths to absolute before validation
       const absolutePath = resolve(path)
@@ -260,13 +274,13 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('openFile error:', message)
+      deps.platform.logger.error('openFile error:', message)
       throw new Error(`Failed to open file: ${message}`)
     }
   })
 
   // Shell operations - show file in folder (opens Finder/Explorer with file selected)
-  ipcMain.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (_ctx, path: string) => {
     try {
       // Resolve relative paths to absolute before validation
       const absolutePath = resolve(path)
@@ -275,31 +289,31 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
       shell.showItemInFolder(safePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('showInFolder error:', message)
+      deps.platform.logger.error('showInFolder error:', message)
       throw new Error(`Failed to show in folder: ${message}`)
     }
   })
 
   // Menu actions from renderer (for unified Craft menu)
-  ipcMain.handle(IPC_CHANNELS.menu.QUIT, () => {
+  server.handle(IPC_CHANNELS.menu.QUIT, async () => {
     app.quit()
   })
 
   // New Window: create a new window for the current workspace
-  ipcMain.handle(IPC_CHANNELS.menu.NEW_WINDOW, (event) => {
-    const workspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+  server.handle(IPC_CHANNELS.menu.NEW_WINDOW, async (ctx) => {
+    const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
     if (workspaceId) {
       windowManager.createWindow({ workspaceId })
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.MINIMIZE, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.MINIMIZE, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.minimize()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.MAXIMIZE, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.MAXIMIZE, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       if (win.isMaximized()) {
         win.unmaximize()
@@ -309,68 +323,74 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.ZOOM_IN, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.ZOOM_IN, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       const currentZoom = win.webContents.getZoomFactor()
       win.webContents.setZoomFactor(Math.min(currentZoom + 0.1, 3.0))
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.ZOOM_OUT, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.ZOOM_OUT, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       const currentZoom = win.webContents.getZoomFactor()
       win.webContents.setZoomFactor(Math.max(currentZoom - 0.1, 0.5))
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.ZOOM_RESET, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.ZOOM_RESET, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.setZoomFactor(1.0)
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.TOGGLE_DEV_TOOLS, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+  server.handle(IPC_CHANNELS.menu.TOGGLE_DEV_TOOLS, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.toggleDevTools()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.UNDO, (event) => {
-    event.sender.undo()
+  server.handle(IPC_CHANNELS.menu.UNDO, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.undo()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.REDO, (event) => {
-    event.sender.redo()
+  server.handle(IPC_CHANNELS.menu.REDO, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.redo()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.CUT, (event) => {
-    event.sender.cut()
+  server.handle(IPC_CHANNELS.menu.CUT, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.cut()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.COPY, (event) => {
-    event.sender.copy()
+  server.handle(IPC_CHANNELS.menu.COPY, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.copy()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.PASTE, (event) => {
-    event.sender.paste()
+  server.handle(IPC_CHANNELS.menu.PASTE, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.paste()
   })
 
-  ipcMain.handle(IPC_CHANNELS.menu.SELECT_ALL, (event) => {
-    event.sender.selectAll()
+  server.handle(IPC_CHANNELS.menu.SELECT_ALL, async (ctx) => {
+    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
+    win?.webContents.selectAll()
   })
 
   // Notifications
-  ipcMain.handle(IPC_CHANNELS.notification.SHOW, async (_event, title: string, body: string, workspaceId: string, sessionId: string) => {
+  server.handle(IPC_CHANNELS.notification.SHOW, async (_ctx, title: string, body: string, workspaceId: string, sessionId: string) => {
     const { showNotification } = await import('../notifications')
     showNotification(title, body, workspaceId, sessionId)
   })
 
-  ipcMain.handle(IPC_CHANNELS.notification.GET_ENABLED, async () => {
+  server.handle(IPC_CHANNELS.notification.GET_ENABLED, async () => {
     const { getNotificationsEnabled } = await import('@craft-agent/shared/config/storage')
     return getNotificationsEnabled()
   })
 
-  ipcMain.handle(IPC_CHANNELS.notification.SET_ENABLED, async (_event, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.notification.SET_ENABLED, async (_ctx, enabled: boolean) => {
     const { setNotificationsEnabled } = await import('@craft-agent/shared/config/storage')
     setNotificationsEnabled(enabled)
 
@@ -382,19 +402,19 @@ export function registerSystemHandlers({ sessionManager, windowManager }: IpcCon
   })
 
   // Badge and window focus
-  ipcMain.handle(IPC_CHANNELS.badge.REFRESH, async () => {
+  server.handle(IPC_CHANNELS.badge.REFRESH, async () => {
     try {
       await sessionManager.waitForInit()
     } catch { /* continue */ }
     sessionManager.refreshBadge()
   })
 
-  ipcMain.handle(IPC_CHANNELS.badge.SET_ICON, async (_event, dataUrl: string) => {
+  server.handle(IPC_CHANNELS.badge.SET_ICON, async (_ctx, dataUrl: string) => {
     const { setDockIconWithBadge } = await import('../notifications')
     setDockIconWithBadge(dataUrl)
   })
 
-  ipcMain.handle(IPC_CHANNELS.window.GET_FOCUS_STATE, () => {
+  server.handle(IPC_CHANNELS.window.GET_FOCUS_STATE, async () => {
     const { isAnyWindowFocused } = require('../notifications')
     return isAnyWindowFocused()
   })

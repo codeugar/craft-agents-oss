@@ -1,11 +1,11 @@
-import { ipcMain, dialog } from 'electron'
+import { dialog } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { ipcLog } from '../logger'
 import { getWorkspaceOrThrow } from './utils'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.workspace.SETTINGS_GET,
@@ -31,25 +31,25 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.dialog.OPEN_FOLDER,
 ] as const
 
-export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
+export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): void {
   // ============================================================
   // Settings - Model (Session-Specific)
   // ============================================================
 
   // Get session-specific model
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_MODEL, async (_event, sessionId: string, _workspaceId: string): Promise<string | null> => {
-    const session = await sessionManager.getSession(sessionId)
+  server.handle(IPC_CHANNELS.sessions.GET_MODEL, async (_ctx, sessionId: string, _workspaceId: string): Promise<string | null> => {
+    const session = await deps.sessionManager.getSession(sessionId)
     return session?.model ?? null
   })
 
   // Set session-specific model (and optionally connection)
-  ipcMain.handle(IPC_CHANNELS.sessions.SET_MODEL, async (_event, sessionId: string, workspaceId: string, model: string | null, connection?: string) => {
-    await sessionManager.updateSessionModel(sessionId, workspaceId, model, connection)
-    ipcLog.info(`Session ${sessionId} model updated to: ${model}${connection ? ` (connection: ${connection})` : ''}`)
+  server.handle(IPC_CHANNELS.sessions.SET_MODEL, async (_ctx, sessionId: string, workspaceId: string, model: string | null, connection?: string) => {
+    await deps.sessionManager.updateSessionModel(sessionId, workspaceId, model, connection)
+    deps.platform.logger.info(`Session ${sessionId} model updated to: ${model}${connection ? ` (connection: ${connection})` : ''}`)
   })
 
   // Open native folder dialog for selecting working directory
-  ipcMain.handle(IPC_CHANNELS.dialog.OPEN_FOLDER, async () => {
+  server.handle(IPC_CHANNELS.dialog.OPEN_FOLDER, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
       title: 'Select Working Directory',
@@ -62,10 +62,10 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Get workspace settings (model, permission mode, working directory, credential strategy)
-  ipcMain.handle(IPC_CHANNELS.workspace.SETTINGS_GET, async (_event, workspaceId: string) => {
+  server.handle(IPC_CHANNELS.workspace.SETTINGS_GET, async (_ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
-      ipcLog.error(`Workspace not found: ${workspaceId}`)
+      deps.platform.logger.error(`Workspace not found: ${workspaceId}`)
       return null
     }
 
@@ -88,7 +88,7 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
 
   // Update a workspace setting
   // Valid keys: 'name', 'model', 'enabledSourceSlugs', 'permissionMode', 'cyclablePermissionModes', 'thinkingLevel', 'workingDirectory', 'localMcpEnabled', 'defaultLlmConnection'
-  ipcMain.handle(IPC_CHANNELS.workspace.SETTINGS_UPDATE, async (_event, workspaceId: string, key: string, value: unknown) => {
+  server.handle(IPC_CHANNELS.workspace.SETTINGS_UPDATE, async (_ctx, workspaceId: string, key: string, value: unknown) => {
     const workspace = getWorkspaceOrThrow(workspaceId)
 
     // Validate key is a known workspace setting
@@ -126,7 +126,7 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
 
     // Save the config
     saveWorkspaceConfig(workspace.rootPath, config)
-    ipcLog.info(`Workspace setting updated: ${key} = ${JSON.stringify(value)}`)
+    deps.platform.logger.info(`Workspace setting updated: ${key} = ${JSON.stringify(value)}`)
   })
 
   // ============================================================
@@ -134,7 +134,7 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Read user preferences file
-  ipcMain.handle(IPC_CHANNELS.preferences.READ, async () => {
+  server.handle(IPC_CHANNELS.preferences.READ, async () => {
     const path = getPreferencesPath()
     if (!existsSync(path)) {
       return { content: '{}', exists: false, path }
@@ -143,7 +143,7 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   })
 
   // Write user preferences file (validates JSON before saving)
-  ipcMain.handle(IPC_CHANNELS.preferences.WRITE, async (_, content: string) => {
+  server.handle(IPC_CHANNELS.preferences.WRITE, async (_, content: string) => {
     try {
       JSON.parse(content) // Validate JSON
       const path = getPreferencesPath()
@@ -160,22 +160,22 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Get draft text for a session
-  ipcMain.handle(IPC_CHANNELS.drafts.GET, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.drafts.GET, async (_ctx, sessionId: string) => {
     return getSessionDraft(sessionId)
   })
 
   // Set draft text for a session (pass empty string to clear)
-  ipcMain.handle(IPC_CHANNELS.drafts.SET, async (_event, sessionId: string, text: string) => {
+  server.handle(IPC_CHANNELS.drafts.SET, async (_ctx, sessionId: string, text: string) => {
     setSessionDraft(sessionId, text)
   })
 
   // Delete draft for a session
-  ipcMain.handle(IPC_CHANNELS.drafts.DELETE, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.drafts.DELETE, async (_ctx, sessionId: string) => {
     deleteSessionDraft(sessionId)
   })
 
   // Get all drafts (for loading on app start)
-  ipcMain.handle(IPC_CHANNELS.drafts.GET_ALL, async () => {
+  server.handle(IPC_CHANNELS.drafts.GET_ALL, async () => {
     return getAllSessionDrafts()
   })
 
@@ -184,37 +184,37 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Get auto-capitalisation setting
-  ipcMain.handle(IPC_CHANNELS.input.GET_AUTO_CAPITALISATION, async () => {
+  server.handle(IPC_CHANNELS.input.GET_AUTO_CAPITALISATION, async () => {
     const { getAutoCapitalisation } = await import('@craft-agent/shared/config/storage')
     return getAutoCapitalisation()
   })
 
   // Set auto-capitalisation setting
-  ipcMain.handle(IPC_CHANNELS.input.SET_AUTO_CAPITALISATION, async (_event, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.input.SET_AUTO_CAPITALISATION, async (_ctx, enabled: boolean) => {
     const { setAutoCapitalisation } = await import('@craft-agent/shared/config/storage')
     setAutoCapitalisation(enabled)
   })
 
   // Get send message key setting
-  ipcMain.handle(IPC_CHANNELS.input.GET_SEND_MESSAGE_KEY, async () => {
+  server.handle(IPC_CHANNELS.input.GET_SEND_MESSAGE_KEY, async () => {
     const { getSendMessageKey } = await import('@craft-agent/shared/config/storage')
     return getSendMessageKey()
   })
 
   // Set send message key setting
-  ipcMain.handle(IPC_CHANNELS.input.SET_SEND_MESSAGE_KEY, async (_event, key: 'enter' | 'cmd-enter') => {
+  server.handle(IPC_CHANNELS.input.SET_SEND_MESSAGE_KEY, async (_ctx, key: 'enter' | 'cmd-enter') => {
     const { setSendMessageKey } = await import('@craft-agent/shared/config/storage')
     setSendMessageKey(key)
   })
 
   // Get spell check setting
-  ipcMain.handle(IPC_CHANNELS.input.GET_SPELL_CHECK, async () => {
+  server.handle(IPC_CHANNELS.input.GET_SPELL_CHECK, async () => {
     const { getSpellCheck } = await import('@craft-agent/shared/config/storage')
     return getSpellCheck()
   })
 
   // Set spell check setting
-  ipcMain.handle(IPC_CHANNELS.input.SET_SPELL_CHECK, async (_event, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.input.SET_SPELL_CHECK, async (_ctx, enabled: boolean) => {
     const { setSpellCheck } = await import('@craft-agent/shared/config/storage')
     setSpellCheck(enabled)
   })
@@ -224,13 +224,13 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Get keep awake while running setting
-  ipcMain.handle(IPC_CHANNELS.power.GET_KEEP_AWAKE, async () => {
+  server.handle(IPC_CHANNELS.power.GET_KEEP_AWAKE, async () => {
     const { getKeepAwakeWhileRunning } = await import('@craft-agent/shared/config/storage')
     return getKeepAwakeWhileRunning()
   })
 
   // Set keep awake while running setting
-  ipcMain.handle(IPC_CHANNELS.power.SET_KEEP_AWAKE, async (_event, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.power.SET_KEEP_AWAKE, async (_ctx, enabled: boolean) => {
     const { setKeepAwakeWhileRunning } = await import('@craft-agent/shared/config/storage')
     const { setKeepAwakeSetting } = await import('../power-manager')
     // Save to config
@@ -244,13 +244,13 @@ export function registerSettingsHandlers({ sessionManager }: IpcContext): void {
   // ============================================================
 
   // Get rich tool descriptions setting
-  ipcMain.handle(IPC_CHANNELS.appearance.GET_RICH_TOOL_DESCRIPTIONS, async () => {
+  server.handle(IPC_CHANNELS.appearance.GET_RICH_TOOL_DESCRIPTIONS, async () => {
     const { getRichToolDescriptions } = await import('@craft-agent/shared/config/storage')
     return getRichToolDescriptions()
   })
 
   // Set rich tool descriptions setting
-  ipcMain.handle(IPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS, async (_event, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS, async (_ctx, enabled: boolean) => {
     const { setRichToolDescriptions } = await import('@craft-agent/shared/config/storage')
     setRichToolDescriptions(enabled)
   })

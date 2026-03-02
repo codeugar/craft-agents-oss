@@ -1,11 +1,10 @@
-import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { loadWorkspaceSources } from '@craft-agent/shared/sources'
 import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { ipcLog } from '../logger'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.sources.GET,
@@ -19,19 +18,21 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.sources.GET_MCP_TOOLS,
 ] as const
 
-export function registerSourcesHandlers(_ctx: IpcContext): void {
+export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const log = deps.platform.logger
+
   // Get all sources for a workspace
-  ipcMain.handle(IPC_CHANNELS.sources.GET, async (_event, workspaceId: string) => {
+  server.handle(IPC_CHANNELS.sources.GET, async (_ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
-      ipcLog.error(`SOURCES_GET: Workspace not found: ${workspaceId}`)
+      log.error(`SOURCES_GET: Workspace not found: ${workspaceId}`)
       return []
     }
     return loadWorkspaceSources(workspace.rootPath)
   })
 
   // Create a new source
-  ipcMain.handle(IPC_CHANNELS.sources.CREATE, async (_event, workspaceId: string, config: Partial<import('@craft-agent/shared/sources').CreateSourceInput>) => {
+  server.handle(IPC_CHANNELS.sources.CREATE, async (_ctx, workspaceId: string, config: Partial<import('@craft-agent/shared/sources').CreateSourceInput>) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { createSource } = await import('@craft-agent/shared/sources')
@@ -47,7 +48,7 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
   })
 
   // Delete a source
-  ipcMain.handle(IPC_CHANNELS.sources.DELETE, async (_event, workspaceId: string, sourceSlug: string) => {
+  server.handle(IPC_CHANNELS.sources.DELETE, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { deleteSource } = await import('@craft-agent/shared/sources')
@@ -63,7 +64,7 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
   })
 
   // Start OAuth flow for a source
-  ipcMain.handle(IPC_CHANNELS.sources.START_OAUTH, async (_event, workspaceId: string, sourceSlug: string) => {
+  server.handle(IPC_CHANNELS.sources.START_OAUTH, async (_ctx, workspaceId: string, sourceSlug: string) => {
     try {
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) {
@@ -78,8 +79,8 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
 
       const credManager = getSourceCredentialManager()
       const result = await credManager.authenticate(source, {
-        onStatus: (message) => ipcLog.info(`[OAuth] ${source.config.name}: ${message}`),
-        onError: (error) => ipcLog.error(`[OAuth] ${source.config.name} error: ${error}`),
+        onStatus: (message) => log.info(`[OAuth] ${source.config.name}: ${message}`),
+        onError: (error) => log.error(`[OAuth] ${source.config.name} error: ${error}`),
       })
 
       if (!result.success) {
@@ -89,10 +90,10 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
       // Get token to return to caller
       const token = await credManager.getToken(source)
 
-      ipcLog.info(`Source OAuth complete: ${sourceSlug}`)
+      log.info(`Source OAuth complete: ${sourceSlug}`)
       return { success: true, accessToken: token }
     } catch (error) {
-      ipcLog.error(`Source OAuth failed:`, error)
+      log.error(`Source OAuth failed:`, error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'OAuth authentication failed',
@@ -101,7 +102,7 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
   })
 
   // Save credentials for a source (bearer token or API key)
-  ipcMain.handle(IPC_CHANNELS.sources.SAVE_CREDENTIALS, async (_event, workspaceId: string, sourceSlug: string, credential: string) => {
+  server.handle(IPC_CHANNELS.sources.SAVE_CREDENTIALS, async (_ctx, workspaceId: string, sourceSlug: string, credential: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const { loadSource, getSourceCredentialManager } = await import('@craft-agent/shared/sources')
@@ -115,15 +116,14 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
     const credManager = getSourceCredentialManager()
     await credManager.save(source, { value: credential })
 
-    ipcLog.info(`Saved credentials for source: ${sourceSlug}`)
+    log.info(`Saved credentials for source: ${sourceSlug}`)
   })
 
   // Get permissions config for a source (raw format for UI display)
-  ipcMain.handle(IPC_CHANNELS.sources.GET_PERMISSIONS, async (_event, workspaceId: string, sourceSlug: string) => {
+  server.handle(IPC_CHANNELS.sources.GET_PERMISSIONS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) return null
 
-    // Load raw JSON file (not normalized) for UI display
     const { existsSync, readFileSync } = await import('fs')
     const { getSourcePermissionsPath } = await import('@craft-agent/shared/agent')
     const path = getSourcePermissionsPath(workspace.rootPath, sourceSlug)
@@ -134,17 +134,16 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
       const content = readFileSync(path, 'utf-8')
       return safeJsonParse(content)
     } catch (error) {
-      ipcLog.error('Error reading permissions config:', error)
+      log.error('Error reading permissions config:', error)
       return null
     }
   })
 
   // Get permissions config for a workspace (raw format for UI display)
-  ipcMain.handle(IPC_CHANNELS.workspace.GET_PERMISSIONS, async (_event, workspaceId: string) => {
+  server.handle(IPC_CHANNELS.workspace.GET_PERMISSIONS, async (_ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) return null
 
-    // Load raw JSON file (not normalized) for UI display
     const { existsSync, readFileSync } = await import('fs')
     const { getWorkspacePermissionsPath } = await import('@craft-agent/shared/agent')
     const path = getWorkspacePermissionsPath(workspace.rootPath)
@@ -155,14 +154,13 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
       const content = readFileSync(path, 'utf-8')
       return safeJsonParse(content)
     } catch (error) {
-      ipcLog.error('Error reading workspace permissions config:', error)
+      log.error('Error reading workspace permissions config:', error)
       return null
     }
   })
 
   // Get default permissions from ~/.craft-agent/permissions/default.json
-  // Returns raw JSON for UI display (patterns with comments), plus the file path
-  ipcMain.handle(IPC_CHANNELS.permissions.GET_DEFAULTS, async () => {
+  server.handle(IPC_CHANNELS.permissions.GET_DEFAULTS, async () => {
     const { existsSync, readFileSync } = await import('fs')
     const { getAppPermissionsDir } = await import('@craft-agent/shared/agent')
     const { join } = await import('path')
@@ -174,25 +172,23 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
       const content = readFileSync(defaultPath, 'utf-8')
       return { config: safeJsonParse(content), path: defaultPath }
     } catch (error) {
-      ipcLog.error('Error reading default permissions config:', error)
+      log.error('Error reading default permissions config:', error)
       return { config: null, path: defaultPath }
     }
   })
 
   // Get MCP tools for a source with permission status
-  ipcMain.handle(IPC_CHANNELS.sources.GET_MCP_TOOLS, async (_event, workspaceId: string, sourceSlug: string) => {
+  server.handle(IPC_CHANNELS.sources.GET_MCP_TOOLS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) return { success: false, error: 'Workspace not found' }
 
     try {
-      // Load source config
       const sources = await loadWorkspaceSources(workspace.rootPath)
       const source = sources.find(s => s.config.slug === sourceSlug)
       if (!source) return { success: false, error: 'Source not found' }
       if (source.config.type !== 'mcp') return { success: false, error: 'Source is not an MCP server' }
       if (!source.config.mcp) return { success: false, error: 'MCP config not found' }
 
-      // Check connection status
       if (source.config.connectionStatus === 'needs_auth') {
         return { success: false, error: 'Source requires authentication' }
       }
@@ -203,16 +199,14 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
         return { success: false, error: 'Source has not been tested yet' }
       }
 
-      // Create unified MCP client for both stdio and HTTP transports
       const { CraftMcpClient } = await import('@craft-agent/shared/mcp')
       let client: InstanceType<typeof CraftMcpClient>
 
       if (source.config.mcp.transport === 'stdio') {
-        // Stdio transport - spawn local MCP server process
         if (!source.config.mcp.command) {
           return { success: false, error: 'Stdio MCP source is missing required "command" field' }
         }
-        ipcLog.info(`Fetching MCP tools via stdio: ${source.config.mcp.command}`)
+        log.info(`Fetching MCP tools via stdio: ${source.config.mcp.command}`)
         client = new CraftMcpClient({
           transport: 'stdio',
           command: source.config.mcp.command,
@@ -220,7 +214,6 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
           env: source.config.mcp.env,
         })
       } else {
-        // HTTP/SSE transport - connect to remote MCP server
         if (!source.config.mcp.url) {
           return { success: false, error: 'MCP source URL is required for HTTP/SSE transport' }
         }
@@ -235,7 +228,7 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
           accessToken = credential?.value
         }
 
-        ipcLog.info(`Fetching MCP tools from ${source.config.mcp.url}`)
+        log.info(`Fetching MCP tools from ${source.config.mcp.url}`)
         client = new CraftMcpClient({
           transport: 'http',
           url: source.config.mcp.url,
@@ -243,23 +236,18 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
         })
       }
 
-      // Both transports now return full Tool[] with descriptions
       const tools = await client.listTools()
       await client.close()
 
-      // Load permissions patterns
       const { loadSourcePermissionsConfig, permissionsConfigCache } = await import('@craft-agent/shared/agent')
       const permissionsConfig = loadSourcePermissionsConfig(workspace.rootPath, sourceSlug)
 
-      // Get merged permissions config
       const mergedConfig = permissionsConfigCache.getMergedConfig({
         workspaceRootPath: workspace.rootPath,
         activeSourceSlugs: [sourceSlug],
       })
 
-      // Check each tool against permissions patterns
       const toolsWithPermission = tools.map(tool => {
-        // Check if tool matches any allowed pattern
         const allowed = mergedConfig.readOnlyMcpPatterns.some((pattern: RegExp) => pattern.test(tool.name))
         return {
           name: tool.name,
@@ -270,9 +258,8 @@ export function registerSourcesHandlers(_ctx: IpcContext): void {
 
       return { success: true, tools: toolsWithPermission }
     } catch (error) {
-      ipcLog.error('Failed to get MCP tools:', error)
+      log.error('Failed to get MCP tools:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch tools'
-      // Provide more helpful error messages
       if (errorMessage.includes('404')) {
         return { success: false, error: 'MCP server endpoint not found. The server may be offline or the URL may be incorrect.' }
       }

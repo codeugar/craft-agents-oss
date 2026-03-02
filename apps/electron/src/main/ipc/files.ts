@@ -1,4 +1,4 @@
-import { ipcMain, nativeImage, dialog } from 'electron'
+import { nativeImage, dialog } from 'electron'
 import { readFile, writeFile, unlink, mkdir, readdir } from 'fs/promises'
 import { normalize, isAbsolute, join, sep } from 'path'
 import { homedir, tmpdir } from 'os'
@@ -7,11 +7,11 @@ import { IPC_CHANNELS, type FileAttachment, type StoredAttachment } from '../../
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { ipcLog } from '../logger'
 import { resizeImageForAPI } from '../image-utils'
 import { MarkItDown } from 'markitdown-js'
 import { realpath } from 'fs/promises'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 /**
  * Sanitizes a filename to prevent path traversal and filesystem issues.
@@ -110,9 +110,9 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.fs.SEARCH,
 ] as const
 
-export function registerFilesHandlers({ windowManager }: IpcContext): void {
+export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
   // Read a file (with path validation to prevent traversal attacks)
-  ipcMain.handle(IPC_CHANNELS.file.READ, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.file.READ, async (_ctx, path: string) => {
     try {
       // Validate and normalize the path
       const safePath = await validateFilePath(path)
@@ -122,9 +122,9 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
       const message = error instanceof Error ? error.message : 'Unknown error'
       // ENOENT is expected for optional config files (e.g. automations.json)
       if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
-        ipcLog.debug('readFile: file not found:', path)
+        deps.platform.logger.debug('readFile: file not found:', path)
       } else {
-        ipcLog.error('readFile error:', message)
+        deps.platform.logger.error('readFile error:', message)
       }
       throw new Error(`Failed to read file: ${message}`)
     }
@@ -132,7 +132,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
 
   // Read an image file as a data URL for in-app image preview overlays.
   // Returns data:{mime};base64,{content} — used by ImagePreviewOverlay and markdown image blocks.
-  ipcMain.handle(IPC_CHANNELS.file.READ_DATA_URL, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.file.READ_DATA_URL, async (_ctx, path: string) => {
     try {
       const safePath = await validateFilePath(path)
       const buffer = await readFile(safePath)
@@ -156,14 +156,14 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
       return `data:${mime};base64,${base64}`
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('readFileDataUrl error:', message)
+      deps.platform.logger.error('readFileDataUrl error:', message)
       throw new Error(`Failed to read file as data URL: ${message}`)
     }
   })
 
   // Read a file as raw binary (Uint8Array) for react-pdf.
   // Returns Uint8Array which IPC automatically converts to ArrayBuffer for the renderer.
-  ipcMain.handle(IPC_CHANNELS.file.READ_BINARY, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.file.READ_BINARY, async (_ctx, path: string) => {
     try {
       const safePath = await validateFilePath(path)
       const buffer = await readFile(safePath)
@@ -171,13 +171,13 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
       return new Uint8Array(buffer)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('readFileBinary error:', message)
+      deps.platform.logger.error('readFileBinary error:', message)
       throw new Error(`Failed to read file as binary: ${message}`)
     }
   })
 
   // Open native file dialog for selecting files to attach
-  ipcMain.handle(IPC_CHANNELS.file.OPEN_DIALOG, async () => {
+  server.handle(IPC_CHANNELS.file.OPEN_DIALOG, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: [
@@ -192,7 +192,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
   })
 
   // Read file and return as FileAttachment with Quick Look thumbnail
-  ipcMain.handle(IPC_CHANNELS.file.READ_ATTACHMENT, async (_event, path: string) => {
+  server.handle(IPC_CHANNELS.file.READ_ATTACHMENT, async (_ctx, path: string) => {
     try {
       // Validate path first to prevent path traversal
       const safePath = await validateFilePath(path)
@@ -208,19 +208,19 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
         }
       } catch (thumbError) {
         // Thumbnail generation failed - this is ok, we'll show an icon fallback
-        ipcLog.info('Quick Look thumbnail failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
+        deps.platform.logger.info('Quick Look thumbnail failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
       }
 
       return attachment
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('readFileAttachment error:', message)
+      deps.platform.logger.error('readFileAttachment error:', message)
       return null
     }
   })
 
   // Generate thumbnail from base64 data (for drag-drop files where we don't have a path)
-  ipcMain.handle(IPC_CHANNELS.file.GENERATE_THUMBNAIL, async (_event, base64: string, mimeType: string): Promise<string | null> => {
+  server.handle(IPC_CHANNELS.file.GENERATE_THUMBNAIL, async (_ctx, base64: string, mimeType: string): Promise<string | null> => {
     // Save to temp file, generate thumbnail, clean up
     const tempDir = tmpdir()
     const ext = mimeType.split('/')[1] || 'bin'
@@ -244,14 +244,14 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
     } catch (error) {
       // Clean up temp file on error
       await unlink(tempPath).catch(() => {})
-      ipcLog.info('generateThumbnail failed:', error instanceof Error ? error.message : error)
+      deps.platform.logger.info('generateThumbnail failed:', error instanceof Error ? error.message : error)
       return null
     }
   })
 
   // Store an attachment to disk and generate thumbnail/markdown conversion
   // This is the core of the persistent file attachment system
-  ipcMain.handle(IPC_CHANNELS.file.STORE_ATTACHMENT, async (event, sessionId: string, attachment: FileAttachment): Promise<StoredAttachment> => {
+  server.handle(IPC_CHANNELS.file.STORE_ATTACHMENT, async (ctx, sessionId: string, attachment: FileAttachment): Promise<StoredAttachment> => {
     // Track files we've written for cleanup on error
     const filesToCleanup: string[] = []
 
@@ -262,7 +262,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
       }
 
       // Get workspace slug from the calling window
-      const workspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow?.(ctx.webContentsId!)
       if (!workspaceId) {
         throw new Error('Cannot determine workspace for attachment storage')
       }
@@ -323,11 +323,11 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
               height: Math.floor(imageSize.height * scale),
             }
             shouldResize = true
-            ipcLog.info(`Image exceeds ${maxDim}px limit (${imageSize.width}x${imageSize.height}), will resize to ${targetSize.width}x${targetSize.height}`)
+            deps.platform.logger.info(`Image exceeds ${maxDim}px limit (${imageSize.width}x${imageSize.height}), will resize to ${targetSize.width}x${targetSize.height}`)
           } else if (!validation.valid && validation.errorCode === 'size_exceeded') {
             // File >5MB — try resize+compress instead of rejecting
             shouldResize = true
-            ipcLog.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
+            deps.platform.logger.info(`Image exceeds 5MB (${(decoded.length / 1024 / 1024).toFixed(1)}MB), will attempt resize`)
           } else if (!validation.valid) {
             throw new Error(validation.error)
           }
@@ -338,7 +338,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
 
             if (targetSize) {
               // Dimension-exceeded: resize to specific target dimensions
-              ipcLog.info(`Resizing image from ${imageSize.width}x${imageSize.height} to ${targetSize.width}x${targetSize.height}`)
+              deps.platform.logger.info(`Resizing image from ${imageSize.width}x${imageSize.height} to ${targetSize.width}x${targetSize.height}`)
               try {
                 const resized = image.resize({
                   width: targetSize.width,
@@ -359,7 +359,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
                   }
                 }
               } catch (resizeError) {
-                ipcLog.error('Image resize failed:', resizeError)
+                deps.platform.logger.error('Image resize failed:', resizeError)
                 const reason = resizeError instanceof Error ? resizeError.message : String(resizeError)
                 throw new Error(`Image too large (${imageSize.width}x${imageSize.height}) and automatic resize failed: ${reason}. Please manually resize it before attaching.`)
               }
@@ -374,7 +374,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
               finalSize = decoded.length
             }
 
-            ipcLog.info(`Image resized: ${attachment.size} -> ${finalSize} bytes (${Math.round((1 - finalSize / attachment.size) * 100)}% reduction)`)
+            deps.platform.logger.info(`Image resized: ${attachment.size} -> ${finalSize} bytes (${Math.round((1 - finalSize / attachment.size) * 100)}% reduction)`)
 
             // Store resized base64 to return to renderer
             // This is used when sending to Claude API instead of original large base64
@@ -408,7 +408,7 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
         }
       } catch (thumbError) {
         // Thumbnail generation failed - this is ok, we'll show an icon fallback
-        ipcLog.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
+        deps.platform.logger.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
       }
 
       // 3. Convert Office files to markdown (for sending to Claude)
@@ -426,12 +426,12 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
           await writeFile(mdPath, result.textContent, 'utf-8')
           markdownPath = mdPath
           filesToCleanup.push(mdPath)
-          ipcLog.info(`Converted Office file to markdown: ${mdPath}`)
+          deps.platform.logger.info(`Converted Office file to markdown: ${mdPath}`)
         } catch (convertError) {
           // Conversion failed - throw so user knows the file can't be processed
           // Claude can't read raw Office binary, so a failed conversion = unusable file
           const errorMsg = convertError instanceof Error ? convertError.message : String(convertError)
-          ipcLog.error('Office to markdown conversion failed:', errorMsg)
+          deps.platform.logger.error('Office to markdown conversion failed:', errorMsg)
           throw new Error(`Failed to convert "${attachment.name}" to readable format: ${errorMsg}`)
         }
       }
@@ -456,12 +456,12 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
     } catch (error) {
       // Clean up any files we've written before the error
       if (filesToCleanup.length > 0) {
-        ipcLog.info(`Cleaning up ${filesToCleanup.length} orphaned file(s) after storage error`)
+        deps.platform.logger.info(`Cleaning up ${filesToCleanup.length} orphaned file(s) after storage error`)
         await Promise.all(filesToCleanup.map(f => unlink(f).catch(() => {})))
       }
 
       const message = error instanceof Error ? error.message : 'Unknown error'
-      ipcLog.error('storeAttachment error:', message)
+      deps.platform.logger.error('storeAttachment error:', message)
       throw new Error(`Failed to store attachment: ${message}`)
     }
   })
@@ -470,8 +470,8 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
   // Parallel BFS walk that skips ignored directories BEFORE entering them,
   // avoiding reading node_modules/etc. contents entirely. Uses withFileTypes
   // to get entry types without separate stat calls.
-  ipcMain.handle(IPC_CHANNELS.fs.SEARCH, async (_event, basePath: string, query: string) => {
-    ipcLog.info('[FS_SEARCH] called:', basePath, query)
+  server.handle(IPC_CHANNELS.fs.SEARCH, async (_ctx, basePath: string, query: string) => {
+    deps.platform.logger.info('[FS_SEARCH] called:', basePath, query)
     const MAX_RESULTS = 50
 
     // Directories to never recurse into
@@ -545,10 +545,10 @@ export function registerFilesHandlers({ windowManager }: IpcContext): void {
         return a.name.length - b.name.length
       })
 
-      ipcLog.info('[FS_SEARCH] returning', results.length, 'results')
+      deps.platform.logger.info('[FS_SEARCH] returning', results.length, 'results')
       return results
     } catch (err) {
-      ipcLog.error('[FS_SEARCH] error:', err)
+      deps.platform.logger.error('[FS_SEARCH] error:', err)
       return []
     }
   })

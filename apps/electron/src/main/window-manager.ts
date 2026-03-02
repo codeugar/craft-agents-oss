@@ -3,7 +3,7 @@ import { windowLog } from './logger'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
-import { IPC_CHANNELS, type BroadcastEventMap } from '../shared/types'
+import { IPC_CHANNELS } from '../shared/types'
 import type { SavedWindow } from './window-state'
 
 // Vite dev server URL for hot reload
@@ -54,6 +54,35 @@ export class WindowManager {
   private windows: Map<number, ManagedWindow> = new Map()  // webContents.id → ManagedWindow
   private focusedModeWindows: Set<number> = new Set()  // webContents.id of windows in focused mode
   private pendingCloseTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Fallback timeouts for window close
+  private eventSink: ((channel: string, target: import('@craft-agent/shared/protocol').PushTarget, ...args: any[]) => void) | null = null
+  private clientResolver: ((wcId: number) => string | undefined) | null = null
+
+  /**
+   * Set the event sink and client resolver for pushing events via the RPC server
+   * instead of webContents.send. Called after server creation.
+   */
+  setRpcEventSink(
+    sink: (channel: string, target: import('@craft-agent/shared/protocol').PushTarget, ...args: any[]) => void,
+    resolver: (wcId: number) => string | undefined
+  ): void {
+    this.eventSink = sink
+    this.clientResolver = resolver
+  }
+
+  /** Push an event to a specific window via the RPC event sink. Falls back to webContents.send. */
+  private pushToWindow(window: BrowserWindow, channel: string, ...args: any[]): void {
+    if (this.eventSink && this.clientResolver) {
+      const clientId = this.clientResolver(window.webContents.id)
+      if (clientId) {
+        this.eventSink(channel, { to: 'client', clientId }, ...args)
+        return
+      }
+    }
+    // Fallback: direct webContents.send (used before WS handshake completes)
+    if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
+      window.webContents.send(channel, ...args)
+    }
+  }
 
   /**
    * Create a new window for a workspace
@@ -121,14 +150,9 @@ export class WindowManager {
         autoHideMenuBar: true,
       }),
       webPreferences: {
-        preload: join(__dirname, 'preload.cjs'),
+        preload: join(__dirname, 'bootstrap-preload.cjs'),
         contextIsolation: true,
         nodeIntegration: false,
-        // SECURITY NOTE: Sandbox is disabled to allow preload script access to process.versions
-        // for the getVersions() API (returns node/chrome/electron versions).
-        // This is a minimal exposure since contextIsolation is enabled and nodeIntegration
-        // is disabled - the preload only exposes safe, read-only version data via IPC.
-        // If sandbox is re-enabled, process.versions becomes undefined.
         sandbox: false,
         webviewTag: false // Browser integration uses WebContentsView, not <webview>
       }
@@ -168,6 +192,16 @@ export class WindowManager {
           { label: 'Paste', role: 'paste', enabled: params.editFlags.canPaste },
         ]).popup()
       })
+    }
+
+    // Store the window mapping BEFORE loadURL — bootstrap preload uses
+    // __get-workspace-id (via sendSync) which reads this map during eval.
+    const webContentsId = window.webContents.id
+    this.windows.set(webContentsId, { window, workspaceId })
+
+    // Track focused mode state for persistence
+    if (focused) {
+      this.focusedModeWindows.add(webContentsId)
     }
 
     // Load the renderer - use restoreUrl if provided, otherwise build from options
@@ -244,7 +278,7 @@ export class WindowManager {
           if (target && (target.view || target.action)) {
             // Wait a bit for React to mount and register IPC listeners
             setTimeout(() => {
-              this.sendToWindow(window, IPC_CHANNELS.deeplink.NAVIGATE, {
+              this.pushToWindow(window, IPC_CHANNELS.deeplink.NAVIGATE, {
                 view: target.view,
                 action: target.action,
                 actionParams: target.actionParams,
@@ -255,27 +289,18 @@ export class WindowManager {
       })
     }
 
-    // Store the window mapping
-    const webContentsId = window.webContents.id
-    this.windows.set(webContentsId, { window, workspaceId })
-
-    // Track focused mode state for persistence
-    if (focused) {
-      this.focusedModeWindows.add(webContentsId)
-    }
-
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
-      this.sendToWindow(window, IPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
+      this.pushToWindow(window, IPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
     }
     nativeTheme.on('updated', themeHandler)
 
     // Handle focus/blur to broadcast window focus state
     window.on('focus', () => {
-      this.sendToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, true)
+      this.pushToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, true)
     })
     window.on('blur', () => {
-      this.sendToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, false)
+      this.pushToWindow(window, IPC_CHANNELS.window.FOCUS_STATE, false)
     })
 
     // Handle window close request (X button, Cmd+W) - intercept to allow modal closing first
@@ -285,7 +310,7 @@ export class WindowManager {
       if (!window.webContents.isDestroyed() && window.webContents.mainFrame) {
         event.preventDefault()
         // Send close request to renderer - it will either close a modal or confirm close
-        this.sendToWindow(window, IPC_CHANNELS.window.CLOSE_REQUESTED)
+        this.pushToWindow(window, IPC_CHANNELS.window.CLOSE_REQUESTED)
 
         // Fallback timeout: if IPC fails (e.g., on Hyprland/Wayland), force close after 3s.
         // Reset timeout on each attempt so active users closing modals aren't interrupted.
@@ -318,6 +343,14 @@ export class WindowManager {
 
     windowLog.info(`Created window for workspace ${workspaceId} (focused: ${focused})`)
     return window
+  }
+
+  /**
+   * Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId)
+   */
+  getWindowByWebContentsId(wcId: number): BrowserWindow | null {
+    const managed = this.windows.get(wcId)
+    return managed?.window ?? null
   }
 
   /**
@@ -519,85 +552,6 @@ export class WindowManager {
     }
 
     return null
-  }
-
-  /**
-   * Send typed IPC message to all windows (no try-catch — loop breaks on throw)
-   */
-  broadcastToAll<K extends keyof BroadcastEventMap>(
-    channel: K,
-    ...args: BroadcastEventMap[K]
-  ): void {
-    for (const managed of this.getAllWindows()) {
-      // Check mainFrame - it becomes null when render frame is disposed
-      if (!managed.window.isDestroyed() &&
-          !managed.window.webContents.isDestroyed() &&
-          managed.window.webContents.mainFrame) {
-        managed.window.webContents.send(channel as string, ...args)
-      }
-    }
-  }
-
-  /**
-   * Send typed IPC message to all windows except a specific sender.
-   * Try-catch per window so the loop continues if a window is closing.
-   */
-  broadcastToAllExcept<K extends keyof BroadcastEventMap>(
-    excludedWebContentsId: number,
-    channel: K,
-    ...args: BroadcastEventMap[K]
-  ): void {
-    for (const managed of this.getAllWindows()) {
-      const targetWindow = managed.window
-      const webContents = targetWindow.webContents
-      if (webContents.id === excludedWebContentsId) continue
-
-      if (!targetWindow.isDestroyed() && !webContents.isDestroyed() && webContents.mainFrame) {
-        try {
-          webContents.send(channel as string, ...args)
-        } catch {
-          // Expected during window closure race
-        }
-      }
-    }
-  }
-
-  /**
-   * Send typed IPC message to all windows for a specific workspace.
-   * Try-catch per window so the loop continues if a window is closing.
-   */
-  broadcastToWorkspace<K extends keyof BroadcastEventMap>(
-    workspaceId: string,
-    channel: K,
-    ...args: BroadcastEventMap[K]
-  ): void {
-    for (const window of this.getAllWindowsForWorkspace(workspaceId)) {
-      if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-        try {
-          window.webContents.send(channel as string, ...args)
-        } catch {
-          // Expected during window closure race
-        }
-      }
-    }
-  }
-
-  /**
-   * Send typed IPC message to a single window.
-   * Try-catch so callers don't need to handle window closure races.
-   */
-  sendToWindow<K extends keyof BroadcastEventMap>(
-    window: BrowserWindow,
-    channel: K,
-    ...args: BroadcastEventMap[K]
-  ): void {
-    if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
-      try {
-        window.webContents.send(channel as string, ...args)
-      } catch {
-        // Expected during window closure race
-      }
-    }
   }
 
   /**

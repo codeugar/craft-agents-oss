@@ -1,8 +1,7 @@
-import { ipcMain } from 'electron'
 import { IPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload } from '../../shared/types'
 import type { BrowserScreenshotOptions } from '../browser-pane-manager'
-import { ipcLog } from '../logger'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.browserPane.CREATE,
@@ -24,10 +23,11 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.browserPane.SCROLL,
 ] as const
 
-export function registerBrowserHandlers({ browserPaneManager, windowManager }: IpcContext): void {
+export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const { browserPaneManager, platform } = deps
   if (!browserPaneManager) return
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.CREATE, (_event, input?: string | BrowserPaneCreateOptions) => {
+  server.handle(IPC_CHANNELS.browserPane.CREATE, (_ctx, input?: string | BrowserPaneCreateOptions) => {
     if (typeof input === 'string') {
       return browserPaneManager.createInstance(input)
     }
@@ -39,99 +39,99 @@ export function registerBrowserHandlers({ browserPaneManager, windowManager }: I
     return browserPaneManager.createInstance(input?.id, { show: input?.show })
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.DESTROY, (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.DESTROY, (_ctx, id: string) => {
     browserPaneManager.destroyInstance(id)
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.LIST, () => {
+  server.handle(IPC_CHANNELS.browserPane.LIST, () => {
     return browserPaneManager.listInstances()
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.NAVIGATE, async (_event, id: string, url: string) => {
+  server.handle(IPC_CHANNELS.browserPane.NAVIGATE, async (_ctx, id: string, url: string) => {
     try {
       return await browserPaneManager.navigate(id, url)
     } catch (err) {
-      ipcLog.error(`[browser-pane] navigate failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] navigate failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.GO_BACK, async (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.GO_BACK, async (_ctx, id: string) => {
     try {
       return await browserPaneManager.goBack(id)
     } catch (err) {
-      ipcLog.error(`[browser-pane] goBack failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] goBack failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.GO_FORWARD, async (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.GO_FORWARD, async (_ctx, id: string) => {
     try {
       return await browserPaneManager.goForward(id)
     } catch (err) {
-      ipcLog.error(`[browser-pane] goForward failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] goForward failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.RELOAD, (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.RELOAD, (_ctx, id: string) => {
     browserPaneManager.reload(id)
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.STOP, (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.STOP, (_ctx, id: string) => {
     browserPaneManager.stop(id)
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.FOCUS, (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.FOCUS, (_ctx, id: string) => {
     browserPaneManager.focus(id)
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.LAUNCH, async (event, payload: BrowserEmptyStateLaunchPayload) => {
+  server.handle(IPC_CHANNELS.browserPane.LAUNCH, async (ctx, payload: BrowserEmptyStateLaunchPayload) => {
     try {
-      return await browserPaneManager.handleEmptyStateLaunchFromRenderer(event.sender.id, payload)
+      return await browserPaneManager.handleEmptyStateLaunchFromRenderer(ctx.webContentsId!, payload)
     } catch (err) {
-      ipcLog.error('[browser-pane] empty-state launch IPC failed:', err)
+      platform.logger.error('[browser-pane] empty-state launch IPC failed:', err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.SNAPSHOT, async (_event, id: string) => {
+  server.handle(IPC_CHANNELS.browserPane.SNAPSHOT, async (_ctx, id: string) => {
     try {
       return await browserPaneManager.getAccessibilitySnapshot(id)
     } catch (err) {
-      ipcLog.error(`[browser-pane] snapshot failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] snapshot failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.CLICK, async (_event, id: string, ref: string) => {
+  server.handle(IPC_CHANNELS.browserPane.CLICK, async (_ctx, id: string, ref: string) => {
     try {
       return await browserPaneManager.clickElement(id, ref)
     } catch (err) {
-      ipcLog.error(`[browser-pane] click failed for ${id} ref=${ref}:`, err)
+      platform.logger.error(`[browser-pane] click failed for ${id} ref=${ref}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.FILL, async (_event, id: string, ref: string, value: string) => {
+  server.handle(IPC_CHANNELS.browserPane.FILL, async (_ctx, id: string, ref: string, value: string) => {
     try {
       return await browserPaneManager.fillElement(id, ref, value)
     } catch (err) {
-      ipcLog.error(`[browser-pane] fill failed for ${id} ref=${ref}:`, err)
+      platform.logger.error(`[browser-pane] fill failed for ${id} ref=${ref}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.SELECT, async (_event, id: string, ref: string, value: string) => {
+  server.handle(IPC_CHANNELS.browserPane.SELECT, async (_ctx, id: string, ref: string, value: string) => {
     try {
       return await browserPaneManager.selectOption(id, ref, value)
     } catch (err) {
-      ipcLog.error(`[browser-pane] select failed for ${id} ref=${ref}:`, err)
+      platform.logger.error(`[browser-pane] select failed for ${id} ref=${ref}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.SCREENSHOT, async (_event, id: string, options?: BrowserScreenshotOptions) => {
+  server.handle(IPC_CHANNELS.browserPane.SCREENSHOT, async (_ctx, id: string, options?: BrowserScreenshotOptions) => {
     try {
       const result = await browserPaneManager.screenshot(id, options)
       return {
@@ -140,21 +140,21 @@ export function registerBrowserHandlers({ browserPaneManager, windowManager }: I
         metadata: result.metadata,
       }
     } catch (err) {
-      ipcLog.error(`[browser-pane] screenshot failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] screenshot failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.EVALUATE, async (_event, id: string, expression: string) => {
+  server.handle(IPC_CHANNELS.browserPane.EVALUATE, async (_ctx, id: string, expression: string) => {
     try {
       return await browserPaneManager.evaluate(id, expression)
     } catch (err) {
-      ipcLog.error(`[browser-pane] evaluate failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] evaluate failed for ${id}:`, err)
       throw err
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.browserPane.SCROLL, async (_event, id: string, direction: string, amount?: number) => {
+  server.handle(IPC_CHANNELS.browserPane.SCROLL, async (_ctx, id: string, direction: string, amount?: number) => {
     const validDirections = ['up', 'down', 'left', 'right']
     if (!validDirections.includes(direction)) {
       throw new Error(`Invalid scroll direction: ${direction}`)
@@ -162,23 +162,23 @@ export function registerBrowserHandlers({ browserPaneManager, windowManager }: I
     try {
       return await browserPaneManager.scroll(id, direction as 'up' | 'down' | 'left' | 'right', amount)
     } catch (err) {
-      ipcLog.error(`[browser-pane] scroll failed for ${id}:`, err)
+      platform.logger.error(`[browser-pane] scroll failed for ${id}:`, err)
       throw err
     }
   })
 
   // Forward browser state changes to all windows
   browserPaneManager.onStateChange((info) => {
-    windowManager.broadcastToAll(IPC_CHANNELS.browserPane.STATE_CHANGED, info)
+    server.push(IPC_CHANNELS.browserPane.STATE_CHANGED, { to: 'all' }, info)
   })
 
   // Forward browser removals so renderer can immediately drop stale tabs
   browserPaneManager.onRemoved((id) => {
-    windowManager.broadcastToAll(IPC_CHANNELS.browserPane.REMOVED, id)
+    server.push(IPC_CHANNELS.browserPane.REMOVED, { to: 'all' }, id)
   })
 
   // Forward browser interaction/focus events so renderer can align panel focus.
   browserPaneManager.onInteracted((id) => {
-    windowManager.broadcastToAll(IPC_CHANNELS.browserPane.INTERACTED, id)
+    server.push(IPC_CHANNELS.browserPane.INTERACTED, { to: 'all' }, id)
   })
 }

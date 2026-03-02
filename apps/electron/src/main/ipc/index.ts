@@ -1,4 +1,6 @@
-import type { IpcContext } from './types'
+import type { HandlerDeps } from './handler-deps'
+import type { RpcServer } from '../../transport/types'
+
 import { registerLabelsHandlers } from './labels'
 import { registerStatusesHandlers } from './statuses'
 import { registerSkillsHandlers } from './skills'
@@ -14,21 +16,19 @@ import { registerSessionsHandlers } from './sessions'
 import { registerBrowserHandlers } from './browser'
 import { registerOnboardingHandlers } from '../onboarding'
 
-export function registerAllIpcHandlers(ctx: IpcContext): void {
-  registerLabelsHandlers(ctx)
-  registerStatusesHandlers(ctx)
-  registerSkillsHandlers(ctx)
-  registerFilesHandlers(ctx)
-  registerSystemHandlers(ctx)
-  registerAuthHandlers(ctx)
-  registerSettingsHandlers(ctx)
-  registerSourcesHandlers(ctx)
-  registerLlmConnectionsHandlers(ctx)
-  registerAutomationsHandlers(ctx)
-  registerWorkspaceHandlers(ctx)
-  registerSessionsHandlers(ctx)
-  registerBrowserHandlers(ctx)
-
-  // Onboarding handlers (moved from old ipc.ts)
-  registerOnboardingHandlers(ctx.sessionManager)
+export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
+  registerLabelsHandlers(server, deps)
+  registerStatusesHandlers(server, deps)
+  registerSkillsHandlers(server, deps)
+  registerFilesHandlers(server, deps)
+  registerSystemHandlers(server, deps)
+  registerAuthHandlers(server, deps)
+  registerSettingsHandlers(server, deps)
+  registerSourcesHandlers(server, deps)
+  registerLlmConnectionsHandlers(server, deps)
+  registerAutomationsHandlers(server, deps)
+  registerWorkspaceHandlers(server, deps)
+  registerSessionsHandlers(server, deps)
+  registerBrowserHandlers(server, deps)
+  registerOnboardingHandlers(server, deps)
 }

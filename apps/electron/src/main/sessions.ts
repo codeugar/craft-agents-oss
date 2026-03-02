@@ -1,5 +1,6 @@
 import { app, nativeImage } from 'electron'
 import * as Sentry from '@sentry/electron/main'
+import type { EventSink } from '../transport/types'
 import { basename, join, normalize, isAbsolute, sep } from 'path'
 import { existsSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir, realpath } from 'fs/promises'
@@ -21,7 +22,6 @@ import { getLlmConnection, getDefaultLlmConnection } from '@craft-agent/shared/c
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
 import { updateBadgeCount } from './notifications'
 import { InitGate } from './init-gate'
-import type { WindowManager } from './window-manager'
 import {
   getWorkspaces,
   getWorkspaceByNameOrId,
@@ -793,7 +793,6 @@ interface PendingDelta {
 
 export class SessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
-  private windowManager: WindowManager | null = null
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -823,9 +822,10 @@ export class SessionManager {
   }
 
   private browserPaneManager: import('./browser-pane-manager').BrowserPaneManager | null = null
+  private eventSink: EventSink | null = null
 
-  setWindowManager(wm: WindowManager): void {
-    this.windowManager = wm
+  setEventSink(sink: EventSink): void {
+    this.eventSink = sink
   }
 
   setBrowserPaneManager(bpm: import('./browser-pane-manager').BrowserPaneManager): void {
@@ -1090,77 +1090,51 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Broadcast sources changed event to all windows
-   */
   private broadcastSourcesChanged(sources: LoadedSource[]): void {
-    if (!this.windowManager) return
-
-    this.windowManager.broadcastToAll(IPC_CHANNELS.sources.CHANGED, sources)
+    if (!this.eventSink) return
+    this.eventSink(IPC_CHANNELS.sources.CHANGED, { to: 'all' }, sources)
   }
 
-  /**
-   * Broadcast statuses changed event to all windows
-   */
   private broadcastStatusesChanged(workspaceId: string): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info(`Broadcasting statuses changed for ${workspaceId}`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.statuses.CHANGED, workspaceId)
+    this.eventSink(IPC_CHANNELS.statuses.CHANGED, { to: 'all' }, workspaceId)
   }
 
-  /**
-   * Broadcast labels changed event to all windows
-   */
   private broadcastLabelsChanged(workspaceId: string): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info(`Broadcasting labels changed for ${workspaceId}`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.labels.CHANGED, workspaceId)
+    this.eventSink(IPC_CHANNELS.labels.CHANGED, { to: 'all' }, workspaceId)
   }
 
-  /**
-   * Broadcast automations changed event to all windows
-   */
   private broadcastAutomationsChanged(workspaceId: string): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info(`Broadcasting automations changed for ${workspaceId}`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.automations.CHANGED, workspaceId)
+    this.eventSink(IPC_CHANNELS.automations.CHANGED, { to: 'all' }, workspaceId)
   }
 
-  /**
-   * Broadcast app theme changed event to all windows
-   */
   private broadcastAppThemeChanged(theme: import('@craft-agent/shared/config').ThemeOverrides | null): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info(`Broadcasting app theme changed`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.theme.APP_CHANGED, theme)
+    this.eventSink(IPC_CHANNELS.theme.APP_CHANGED, { to: 'all' }, theme)
   }
 
-  /**
-   * Broadcast LLM connections changed event to all windows
-   */
   private broadcastLlmConnectionsChanged(): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info('Broadcasting LLM connections changed')
-    this.windowManager.broadcastToAll(IPC_CHANNELS.llmConnections.CHANGED)
+    this.eventSink(IPC_CHANNELS.llmConnections.CHANGED, { to: 'all' })
   }
 
-  /**
-   * Broadcast skills changed event to all windows
-   */
   private broadcastSkillsChanged(skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.skills.CHANGED, skills)
+    this.eventSink(IPC_CHANNELS.skills.CHANGED, { to: 'all' }, skills)
   }
 
-  /**
-   * Broadcast default permissions changed event to all windows
-   * Triggered when ~/.craft-agent/permissions/default.json changes
-   */
   private broadcastDefaultPermissionsChanged(): void {
-    if (!this.windowManager) return
+    if (!this.eventSink) return
     sessionLog.info('Broadcasting default permissions changed')
-    this.windowManager.broadcastToAll(IPC_CHANNELS.permissions.DEFAULTS_CHANGED, null)
+    this.eventSink(IPC_CHANNELS.permissions.DEFAULTS_CHANGED, { to: 'all' }, null)
   }
 
   /**
@@ -1760,10 +1734,10 @@ export class SessionManager {
     // Update badge directly in main process — no renderer relay needed
     updateBadgeCount(summary.totalUnreadSessions)
 
-    if (!this.windowManager) return
+    if (!this.eventSink) return
 
     // Broadcast to renderers for UI updates (session list dots, etc.)
-    this.windowManager.broadcastToAll(IPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED, summary)
+    this.eventSink(IPC_CHANNELS.sessions.UNREAD_SUMMARY_CHANGED, { to: 'all' }, summary)
   }
 
   /**
@@ -5514,22 +5488,17 @@ To view this task's output:
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
-    if (!this.windowManager) {
-      sessionLog.warn('Cannot send event - no window manager')
+    if (!this.eventSink) {
+      sessionLog.warn('Cannot send event - no event sink')
       return
     }
 
-    // Broadcast to ALL windows for this workspace (main + tab content windows)
-    const windows = workspaceId
-      ? this.windowManager.getAllWindowsForWorkspace(workspaceId)
-      : []
-
-    if (windows.length === 0) {
-      sessionLog.warn(`Cannot send ${event.type} event - no windows for workspace ${workspaceId}`)
+    if (!workspaceId) {
+      sessionLog.warn(`Cannot send ${event.type} event - no workspaceId`)
       return
     }
 
-    this.windowManager.broadcastToWorkspace(workspaceId!, IPC_CHANNELS.sessions.EVENT, event)
+    this.eventSink(IPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)
   }
 
   /**

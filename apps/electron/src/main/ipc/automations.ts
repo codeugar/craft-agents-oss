@@ -1,10 +1,9 @@
-import { ipcMain } from 'electron'
 import { appendFile, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { ipcLog } from '../logger'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 // History file name — matches AUTOMATIONS_HISTORY_FILE from @craft-agent/shared/automations/constants
 const HISTORY_FILE = 'automations-history.jsonl'
@@ -62,8 +61,10 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.automations.GET_LAST_EXECUTED,
 ] as const
 
-export function registerAutomationsHandlers({ sessionManager }: IpcContext): void {
-  ipcMain.handle(IPC_CHANNELS.automations.TEST, async (_event, payload: import('../../shared/types').TestAutomationPayload) => {
+export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const log = deps.platform.logger
+
+  server.handle(IPC_CHANNELS.automations.TEST, async (_ctx, payload: import('../../shared/types').TestAutomationPayload) => {
     const workspace = getWorkspaceByNameOrId(payload.workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
@@ -77,11 +78,7 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
       const references = parsePromptReferences(action.prompt)
 
       try {
-        // Delegate to executePromptAutomation which handles:
-        // - @mention resolution (sources + skills)
-        // - enabledSourceSlugs, llmConnection, model, permissionMode on createSession
-        // - skillSlugs passed to sendMessage
-        const { sessionId } = await sessionManager.executePromptAutomation(
+        const { sessionId } = await deps.sessionManager.executePromptAutomation(
           payload.workspaceId,
           workspace.rootPath,
           action.prompt,
@@ -101,7 +98,7 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
         // Write history entry for test runs
         if (payload.automationId) {
           const entry = { id: payload.automationId, ts: Date.now(), ok: true, sessionId, prompt: action.prompt.slice(0, 200) }
-          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => ipcLog.warn('[Automations] Failed to write history:', e))
+          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => log.warn('[Automations] Failed to write history:', e))
         }
       } catch (err: unknown) {
         results.push({
@@ -114,7 +111,7 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
         // Write failed history entry
         if (payload.automationId) {
           const entry = { id: payload.automationId, ts: Date.now(), ok: false, error: ((err as Error).message ?? '').slice(0, 200), prompt: action.prompt.slice(0, 200) }
-          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => ipcLog.warn('[Automations] Failed to write history:', e))
+          appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => log.warn('[Automations] Failed to write history:', e))
         }
       }
     }
@@ -123,10 +120,9 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
   })
 
   // Automation enabled state management (toggle enabled/disabled in automations.json)
-  ipcMain.handle(IPC_CHANNELS.automations.SET_ENABLED, async (_event, workspaceId: string, eventName: string, matcherIndex: number, enabled: boolean) => {
+  server.handle(IPC_CHANNELS.automations.SET_ENABLED, async (_ctx, workspaceId: string, eventName: string, matcherIndex: number, enabled: boolean) => {
     await withAutomationMatcher(workspaceId, eventName, matcherIndex, (matchers, idx) => {
       if (enabled) {
-        // Remove the enabled field entirely (defaults to true) to keep JSON clean
         delete matchers[idx].enabled
       } else {
         matchers[idx].enabled = false
@@ -134,8 +130,8 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
     })
   })
 
-  // Duplicate an automation matcher (deep-clone, new ID, append " Copy" to name, insert after original)
-  ipcMain.handle(IPC_CHANNELS.automations.DUPLICATE, async (_event, workspaceId: string, eventName: string, matcherIndex: number) => {
+  // Duplicate an automation matcher
+  server.handle(IPC_CHANNELS.automations.DUPLICATE, async (_ctx, workspaceId: string, eventName: string, matcherIndex: number) => {
     await withAutomationMatcher(workspaceId, eventName, matcherIndex, (matchers, idx, _config, genId) => {
       const clone = JSON.parse(JSON.stringify(matchers[idx]))
       clone.id = genId()
@@ -144,8 +140,8 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
     })
   })
 
-  // Delete an automation matcher (remove from array, clean up empty event key)
-  ipcMain.handle(IPC_CHANNELS.automations.DELETE, async (_event, workspaceId: string, eventName: string, matcherIndex: number) => {
+  // Delete an automation matcher
+  server.handle(IPC_CHANNELS.automations.DELETE, async (_ctx, workspaceId: string, eventName: string, matcherIndex: number) => {
     await withAutomationMatcher(workspaceId, eventName, matcherIndex, (matchers, idx, config) => {
       matchers.splice(idx, 1)
       if (matchers.length === 0) {
@@ -156,7 +152,7 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
   })
 
   // Read execution history for a specific automation
-  ipcMain.handle(IPC_CHANNELS.automations.GET_HISTORY, async (_event, workspaceId: string, automationId: string, limit = 20) => {
+  server.handle(IPC_CHANNELS.automations.GET_HISTORY, async (_ctx, workspaceId: string, automationId: string, limit = 20) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
@@ -175,8 +171,8 @@ export function registerAutomationsHandlers({ sessionManager }: IpcContext): voi
     }
   })
 
-  // Return last execution timestamp for all automations (for lastExecutedAt in list)
-  ipcMain.handle(IPC_CHANNELS.automations.GET_LAST_EXECUTED, async (_event, workspaceId: string) => {
+  // Return last execution timestamp for all automations
+  server.handle(IPC_CHANNELS.automations.GET_LAST_EXECUTED, async (_ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 

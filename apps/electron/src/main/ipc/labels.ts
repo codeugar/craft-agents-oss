@@ -1,7 +1,7 @@
-import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import type { IpcContext } from './types'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.labels.LIST,
@@ -9,9 +9,9 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.labels.DELETE,
 ] as const
 
-export function registerLabelsHandlers({ windowManager }: IpcContext): void {
+export function registerLabelsHandlers(server: RpcServer, _deps: HandlerDeps): void {
   // List all labels for a workspace
-  ipcMain.handle(IPC_CHANNELS.labels.LIST, async (_event, workspaceId: string) => {
+  server.handle(IPC_CHANNELS.labels.LIST, async (_ctx, workspaceId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
@@ -20,24 +20,24 @@ export function registerLabelsHandlers({ windowManager }: IpcContext): void {
   })
 
   // Create a new label in a workspace
-  ipcMain.handle(IPC_CHANNELS.labels.CREATE, async (_event, workspaceId: string, input: import('@craft-agent/shared/labels').CreateLabelInput) => {
+  server.handle(IPC_CHANNELS.labels.CREATE, async (_ctx, workspaceId: string, input: import('@craft-agent/shared/labels').CreateLabelInput) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
     const { createLabel } = await import('@craft-agent/shared/labels/crud')
     const label = createLabel(workspace.rootPath, input)
-    windowManager.broadcastToAll(IPC_CHANNELS.labels.CHANGED, workspaceId)
+    server.push(IPC_CHANNELS.labels.CHANGED, { to: 'all' }, workspaceId)
     return label
   })
 
   // Delete a label (and descendants) from a workspace
-  ipcMain.handle(IPC_CHANNELS.labels.DELETE, async (_event, workspaceId: string, labelId: string) => {
+  server.handle(IPC_CHANNELS.labels.DELETE, async (_ctx, workspaceId: string, labelId: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
     const { deleteLabel } = await import('@craft-agent/shared/labels/crud')
     const result = deleteLabel(workspace.rootPath, labelId)
-    windowManager.broadcastToAll(IPC_CHANNELS.labels.CHANGED, workspaceId)
+    server.push(IPC_CHANNELS.labels.CHANGED, { to: 'all' }, workspaceId)
     return result
   })
 }

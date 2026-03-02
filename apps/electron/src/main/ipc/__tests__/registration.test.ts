@@ -1,20 +1,13 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test'
-import type { IpcContext } from '../types'
+import type { RpcServer } from '../../../transport/types'
+import type { HandlerDeps } from '../handler-deps'
 
-type RegistrationKind = 'handle' | 'on'
-
-const registrationCounts = new Map<string, number>()
-const registrations: Array<{ channel: string; kind: RegistrationKind }> = []
-
-function recordRegistration(channel: string, kind: RegistrationKind): void {
-  registrationCounts.set(channel, (registrationCounts.get(channel) ?? 0) + 1)
-  registrations.push({ channel, kind })
-}
+const registeredChannels: string[] = []
 
 mock.module('electron', () => ({
   ipcMain: {
-    handle: (channel: string, _handler: unknown) => recordRegistration(channel, 'handle'),
-    on: (channel: string, _handler: unknown) => recordRegistration(channel, 'on'),
+    handle: () => {},
+    on: () => {},
   },
   // Minimal stubs for symbols imported by IPC domain modules
   app: {
@@ -49,19 +42,30 @@ mock.module('electron', () => ({
   session: {},
 }))
 
-function createMockContext(): IpcContext {
-  const sessionManager = {} as IpcContext['sessionManager']
-  const windowManager = {} as IpcContext['windowManager']
-  const browserPaneManager = {
-    onStateChange: () => {},
-    onRemoved: () => {},
-    onInteracted: () => {},
-  } as unknown as NonNullable<IpcContext['browserPaneManager']>
-
+function createMockServer(): RpcServer {
   return {
-    sessionManager,
-    windowManager,
-    browserPaneManager,
+    handle(channel: string, _handler: unknown) {
+      registeredChannels.push(channel)
+    },
+    push() {},
+  }
+}
+
+function createMockDeps(): HandlerDeps {
+  return {
+    sessionManager: {} as HandlerDeps['sessionManager'],
+    platform: {
+      appRootPath: '',
+      resourcesPath: '',
+      isPackaged: false,
+      logger: console,
+    },
+    windowManager: {} as HandlerDeps['windowManager'],
+    browserPaneManager: {
+      onStateChange: () => {},
+      onRemoved: () => {},
+      onInteracted: () => {},
+    } as unknown as NonNullable<HandlerDeps['browserPaneManager']>,
   }
 }
 
@@ -116,21 +120,18 @@ async function getExpectedChannels(): Promise<Set<string>> {
   ])
 }
 
-describe('IPC handler registration', () => {
+describe('RPC handler registration', () => {
   beforeEach(() => {
-    registrationCounts.clear()
-    registrations.length = 0
+    registeredChannels.length = 0
   })
 
   it('registers all declared handled channels exactly once', async () => {
     const expected = await getExpectedChannels()
-    const { registerAllIpcHandlers } = await import('../index')
+    const { registerAllRpcHandlers } = await import('../index')
 
-    registerAllIpcHandlers(createMockContext())
+    registerAllRpcHandlers(createMockServer(), createMockDeps())
 
-    const appChannels = registrations
-      .map(r => r.channel)
-      .filter(ch => ch.includes(':'))
+    const appChannels = registeredChannels.filter(ch => ch.includes(':'))
     const actual = new Set(appChannels)
 
     const missing = [...expected].filter(ch => !actual.has(ch)).sort()
@@ -139,8 +140,13 @@ describe('IPC handler registration', () => {
     expect(missing).toEqual([])
     expect(unexpected).toEqual([])
 
-    const duplicates = [...registrationCounts.entries()]
-      .filter(([channel, count]) => channel.includes(':') && count > 1)
+    // Check for duplicates
+    const counts = new Map<string, number>()
+    for (const ch of appChannels) {
+      counts.set(ch, (counts.get(ch) ?? 0) + 1)
+    }
+    const duplicates = [...counts.entries()]
+      .filter(([, count]) => count > 1)
       .map(([channel, count]) => `${channel} (${count}x)`)
       .sort()
 
@@ -149,11 +155,11 @@ describe('IPC handler registration', () => {
 
   it('keeps onboarding channels in registration coverage', async () => {
     const { HANDLED_CHANNELS } = await import('../../onboarding')
-    const { registerAllIpcHandlers } = await import('../index')
+    const { registerAllRpcHandlers } = await import('../index')
 
-    registerAllIpcHandlers(createMockContext())
+    registerAllRpcHandlers(createMockServer(), createMockDeps())
 
-    const actual = new Set(registrations.map(r => r.channel))
+    const actual = new Set(registeredChannels)
     const missingOnboarding = HANDLED_CHANNELS.filter(ch => !actual.has(ch))
 
     expect(missingOnboarding).toEqual([])

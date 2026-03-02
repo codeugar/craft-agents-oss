@@ -38,6 +38,7 @@ import type { BrowserWindow } from 'electron'
 import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
 import { IPC_CHANNELS } from '../shared/types'
+import type { EventSink } from '../transport/types'
 
 export interface DeepLinkTarget {
   /** Workspace ID - undefined means use active window */
@@ -233,7 +234,8 @@ function buildDeepLinkWithoutWindowParam(url: string): string {
  */
 export async function handleDeepLink(
   url: string,
-  windowManager: WindowManager
+  windowManager: WindowManager,
+  sink?: EventSink
 ): Promise<DeepLinkResult> {
   const target = parseDeepLink(url)
 
@@ -320,7 +322,10 @@ export async function handleDeepLink(
       action: target.action,
       actionParams: target.actionParams,
     }
-    windowManager.sendToWindow(window, IPC_CHANNELS.deeplink.NAVIGATE, navigation)
+    const wsId = target.workspaceId ?? windowManager.getWorkspaceForWindow(window.webContents.id)
+    if (sink && wsId) {
+      sink(IPC_CHANNELS.deeplink.NAVIGATE, { to: 'workspace', workspaceId: wsId }, navigation)
+    }
   }
 
   return { success: true, windowId: window.isDestroyed() ? -1 : window.webContents.id }

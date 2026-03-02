@@ -1,12 +1,12 @@
-import { ipcMain, shell, BrowserWindow } from 'electron'
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
 import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type SessionEvent } from '../../shared/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import { ipcLog, searchLog } from '../logger'
-import type { IpcContext } from './types'
+import { searchLog } from '../logger'
+import type { RpcServer } from '../../transport/types'
+import type { HandlerDeps } from './handler-deps'
 
 // Session file watcher state - only one session watched at a time
 let sessionFileWatcher: import('fs').FSWatcher | null = null
@@ -81,38 +81,41 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.sessions.UNWATCH_FILES,
 ] as const
 
-export function registerSessionsHandlers({ sessionManager, windowManager }: IpcContext): void {
+export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const { sessionManager, platform } = deps
+  const log = platform.logger
+
   // Get all sessions for the calling window's workspace
   // Waits for initialization to complete so sessions are never returned empty during startup
-  ipcMain.handle(IPC_CHANNELS.sessions.GET, async (event) => {
+  server.handle(IPC_CHANNELS.sessions.GET, async (ctx) => {
     try {
       await sessionManager.waitForInit()
     } catch (error) {
-      ipcLog.error('GET_SESSIONS continuing after initialization failure:', error)
+      log.error('GET_SESSIONS continuing after initialization failure:', error)
     }
     const end = perf.start('ipc.getSessions')
-    const workspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+    const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     const sessions = sessionManager.getSessions(workspaceId ?? undefined)
     end()
     return sessions
   })
 
   // Get unread summary across all workspaces
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_UNREAD_SUMMARY, async () => {
+  server.handle(IPC_CHANNELS.sessions.GET_UNREAD_SUMMARY, async () => {
     try {
       await sessionManager.waitForInit()
     } catch (error) {
-      ipcLog.error('GET_UNREAD_SUMMARY continuing after initialization failure:', error)
+      log.error('GET_UNREAD_SUMMARY continuing after initialization failure:', error)
     }
     return sessionManager.getUnreadSummary()
   })
 
-  ipcMain.handle(IPC_CHANNELS.sessions.MARK_ALL_READ, async (_event, workspaceId: string) => {
+  server.handle(IPC_CHANNELS.sessions.MARK_ALL_READ, async (_ctx, workspaceId: string) => {
     return sessionManager.markAllSessionsRead(workspaceId)
   })
 
   // Get a single session with messages (for lazy loading)
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_MESSAGES, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
     const end = perf.start('ipc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
@@ -120,7 +123,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   })
 
   // Create a new session
-  ipcMain.handle(IPC_CHANNELS.sessions.CREATE, async (_event, workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => {
+  server.handle(IPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => {
     const end = perf.start('ipc.createSession', { workspaceId })
     const session = sessionManager.createSession(workspaceId, options)
     end()
@@ -128,7 +131,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   })
 
   // Delete a session
-  ipcMain.handle(IPC_CHANNELS.sessions.DELETE, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.sessions.DELETE, async (_ctx, sessionId: string) => {
     return sessionManager.deleteSession(sessionId)
   })
 
@@ -136,64 +139,59 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   // Note: We intentionally don't await here - the response is streamed via events.
   // The IPC handler returns immediately, and results come through SESSION_EVENT channel.
   // attachments: FileAttachment[] for Claude (has content), storedAttachments: StoredAttachment[] for persistence (has thumbnailBase64)
-  ipcMain.handle(IPC_CHANNELS.sessions.SEND_MESSAGE, async (event, sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions) => {
-    // Capture the workspace from the calling window for error routing
-    const callingWorkspaceId = windowManager.getWorkspaceForWindow(event.sender.id)
+  server.handle(IPC_CHANNELS.sessions.SEND_MESSAGE, async (ctx, sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions) => {
+    // Capture the caller's clientId for error routing
+    const callerClientId = ctx.clientId
 
     // Start processing in background, errors are sent via event stream
     sessionManager.sendMessage(sessionId, message, attachments, storedAttachments, options).catch(err => {
-      ipcLog.error('Error in sendMessage:', err)
-      // Send error to renderer so user sees it (route to correct window)
-      const window = callingWorkspaceId
-        ? windowManager.getWindowByWorkspace(callingWorkspaceId)
-        : BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-      if (window) {
-        windowManager.sendToWindow(window, IPC_CHANNELS.sessions.EVENT, {
-          type: 'error',
-          sessionId,
-          error: err instanceof Error ? err.message : 'Unknown error'
-        } as SessionEvent)
-        // Also send complete event to clear processing state
-        windowManager.sendToWindow(window, IPC_CHANNELS.sessions.EVENT, {
-          type: 'complete',
-          sessionId
-        } as SessionEvent)
-      }
+      log.error('Error in sendMessage:', err)
+      // Send error to the calling client
+      server.push(IPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
+        type: 'error',
+        sessionId,
+        error: err instanceof Error ? err.message : 'Unknown error'
+      } as SessionEvent)
+      // Also send complete event to clear processing state
+      server.push(IPC_CHANNELS.sessions.EVENT, { to: 'client', clientId: callerClientId }, {
+        type: 'complete',
+        sessionId
+      } as SessionEvent)
     })
     // Return immediately - streaming results come via SESSION_EVENT
     return { started: true }
   })
 
   // Cancel processing
-  ipcMain.handle(IPC_CHANNELS.sessions.CANCEL, async (_event, sessionId: string, silent?: boolean) => {
+  server.handle(IPC_CHANNELS.sessions.CANCEL, async (_ctx, sessionId: string, silent?: boolean) => {
     return sessionManager.cancelProcessing(sessionId, silent)
   })
 
   // Kill background shell
-  ipcMain.handle(IPC_CHANNELS.sessions.KILL_SHELL, async (_event, sessionId: string, shellId: string) => {
+  server.handle(IPC_CHANNELS.sessions.KILL_SHELL, async (_ctx, sessionId: string, shellId: string) => {
     return sessionManager.killShell(sessionId, shellId)
   })
 
   // Get background task output
-  ipcMain.handle(IPC_CHANNELS.tasks.GET_OUTPUT, async (_event, taskId: string) => {
+  server.handle(IPC_CHANNELS.tasks.GET_OUTPUT, async (_ctx, taskId: string) => {
     try {
       const output = await sessionManager.getTaskOutput(taskId)
       return output
     } catch (err) {
-      ipcLog.error('Failed to get task output:', err)
+      log.error('Failed to get task output:', err)
       throw err
     }
   })
 
   // Respond to a permission request (bash command approval)
   // Returns true if the response was delivered, false if agent/session is gone
-  ipcMain.handle(IPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_event, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
+  server.handle(IPC_CHANNELS.sessions.RESPOND_TO_PERMISSION, async (_ctx, sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean) => {
     return sessionManager.respondToPermission(sessionId, requestId, allowed, alwaysAllow)
   })
 
   // Respond to a credential request (secure auth input)
   // Returns true if the response was delivered, false if agent/session is gone
-  ipcMain.handle(IPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_event, sessionId: string, requestId: string, response: import('../../shared/types').CredentialResponse) => {
+  server.handle(IPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_ctx, sessionId: string, requestId: string, response: import('../../shared/types').CredentialResponse) => {
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
@@ -202,8 +200,8 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   // ==========================================================================
 
   // Session commands - consolidated handler for session operations
-  ipcMain.handle(IPC_CHANNELS.sessions.COMMAND, async (
-    _event,
+  server.handle(IPC_CHANNELS.sessions.COMMAND, async (
+    _ctx,
     sessionId: string,
     command: import('../../shared/types').SessionCommand
   ) => {
@@ -244,7 +242,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
       case 'showInFinder': {
         const sessionPath = sessionManager.getSessionPath(sessionId)
         if (sessionPath) {
-          shell.showItemInFolder(sessionPath)
+          deps.platform.showItemInFolder?.(sessionPath)
         }
         return
       }
@@ -262,11 +260,11 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
       case 'startOAuth':
         return sessionManager.startSessionOAuth(sessionId, command.requestId)
       case 'refreshTitle':
-        ipcLog.info(`IPC: refreshTitle received for session ${sessionId}`)
+        log.info(`IPC: refreshTitle received for session ${sessionId}`)
         return sessionManager.refreshTitle(sessionId)
       // Connection selection (locked after first message)
       case 'setConnection':
-        ipcLog.info(`IPC: setConnection received for session ${sessionId}, connection: ${command.connectionSlug}`)
+        log.info(`IPC: setConnection received for session ${sessionId}, connection: ${command.connectionSlug}`)
         return sessionManager.setSessionConnection(sessionId, command.connectionSlug)
       // Pending plan execution (Accept & Compact flow)
       case 'setPendingPlanExecution':
@@ -283,16 +281,16 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   })
 
   // Get pending plan execution state (for reload recovery)
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION, async (
-    _event,
+  server.handle(IPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION, async (
+    _ctx,
     sessionId: string
   ) => {
     return sessionManager.getPendingPlanExecution(sessionId)
   })
 
   // Get authoritative permission mode diagnostics for renderer reconciliation
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE, async (
-    _event,
+  server.handle(IPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE, async (
+    _ctx,
     sessionId: string
   ) => {
     return sessionManager.getSessionPermissionModeState(sessionId)
@@ -303,13 +301,13 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   // ============================================================
 
   // Search session content using ripgrep
-  ipcMain.handle(IPC_CHANNELS.sessions.SEARCH_CONTENT, async (_event, workspaceId: string, query: string, searchId?: string) => {
+  server.handle(IPC_CHANNELS.sessions.SEARCH_CONTENT, async (_ctx, workspaceId: string, query: string, searchId?: string) => {
     const id = searchId || Date.now().toString(36)
     searchLog.info('ipc:request', { searchId: id, query })
 
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
-      ipcLog.warn('SEARCH_SESSIONS: Workspace not found:', workspaceId)
+      log.warn('SEARCH_SESSIONS: Workspace not found:', workspaceId)
       return []
     }
 
@@ -317,7 +315,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
     const { getWorkspaceSessionsPath } = await import('@craft-agent/shared/workspaces')
 
     const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)
-    ipcLog.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
+    log.debug(`SEARCH_SESSIONS: Searching "${query}" in ${sessionsDir}`)
 
     const results = await searchSessions(query, sessionsDir, {
       timeout: 5000,
@@ -342,20 +340,20 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   // ============================================================
 
   // Get files in session directory (recursive tree structure)
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_FILES, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.sessions.GET_FILES, async (_ctx, sessionId: string) => {
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return []
 
     try {
       return await scanSessionDirectory(sessionPath)
     } catch (error) {
-      ipcLog.error('Failed to get session files:', error)
+      log.error('Failed to get session files:', error)
       return []
     }
   })
 
   // Start watching a session directory for file changes
-  ipcMain.handle(IPC_CHANNELS.sessions.WATCH_FILES, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.sessions.WATCH_FILES, async (_ctx, sessionId: string) => {
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return
 
@@ -385,16 +383,16 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
         }
         fileChangeDebounceTimer = setTimeout(() => {
           // Notify all windows that session files changed
-          windowManager.broadcastToAll(IPC_CHANNELS.sessions.FILES_CHANGED, watchedSessionId!)
+          server.push(IPC_CHANNELS.sessions.FILES_CHANGED, { to: 'all' }, watchedSessionId!)
         }, 100)
       })
     } catch (error) {
-      ipcLog.error('Failed to start session file watcher:', error)
+      log.error('Failed to start session file watcher:', error)
     }
   })
 
   // Stop watching session files
-  ipcMain.handle(IPC_CHANNELS.sessions.UNWATCH_FILES, async () => {
+  server.handle(IPC_CHANNELS.sessions.UNWATCH_FILES, async () => {
     if (sessionFileWatcher) {
       sessionFileWatcher.close()
       sessionFileWatcher = null
@@ -409,7 +407,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   })
 
   // Get session notes (reads notes.md from session directory)
-  ipcMain.handle(IPC_CHANNELS.sessions.GET_NOTES, async (_event, sessionId: string) => {
+  server.handle(IPC_CHANNELS.sessions.GET_NOTES, async (_ctx, sessionId: string) => {
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) return ''
 
@@ -424,7 +422,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
   })
 
   // Set session notes (writes to notes.md in session directory)
-  ipcMain.handle(IPC_CHANNELS.sessions.SET_NOTES, async (_event, sessionId: string, content: string) => {
+  server.handle(IPC_CHANNELS.sessions.SET_NOTES, async (_ctx, sessionId: string, content: string) => {
     const sessionPath = sessionManager.getSessionPath(sessionId)
     if (!sessionPath) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -434,7 +432,7 @@ export function registerSessionsHandlers({ sessionManager, windowManager }: IpcC
       const notesPath = join(sessionPath, 'notes.md')
       await writeFile(notesPath, content, 'utf-8')
     } catch (error) {
-      ipcLog.error('Failed to save session notes:', error)
+      log.error('Failed to save session notes:', error)
       throw error
     }
   })

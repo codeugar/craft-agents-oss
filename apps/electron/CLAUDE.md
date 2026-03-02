@@ -392,7 +392,7 @@ apps/electron/
 │   ├── main/              # Electron main process (Node.js)
 │   │   ├── index.ts       # Window creation, app lifecycle, nativeTheme listener
 │   │   ├── ipc/           # Modular IPC handler registration
-│   │   │   ├── index.ts   # registerAllIpcHandlers() composition root
+│   │   │   ├── index.ts   # registerAllRpcHandlers() composition root
 │   │   │   ├── sessions.ts # Session-related IPC handlers
 │   │   │   ├── sources.ts  # Source/permissions IPC handlers
 │   │   │   └── ...         # Other domain handler files
@@ -433,15 +433,15 @@ export const IPC_CHANNELS = {
 }
 
 // 2. Add handler in the relevant domain file (e.g. main/ipc/sources.ts)
-export function registerSourcesHandlers(_ctx: IpcContext): void {
-  ipcMain.handle(IPC_CHANNELS.SOURCES_GET_PERMISSIONS, async (_event, workspaceId: string, sourceSlug: string) => {
+export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(IPC_CHANNELS.SOURCES_GET_PERMISSIONS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const { loadSourcePermissionsConfig } = await import('@craft-agent/shared/agent')
     const workspace = getWorkspaceByNameOrId(workspaceId)
     return loadSourcePermissionsConfig(workspace.rootPath, sourceSlug)
   })
 }
 
-// 3. Ensure the domain registrar is wired in main/ipc/index.ts via registerAllIpcHandlers()
+// 3. Ensure the domain registrar is wired in main/ipc/index.ts via registerAllRpcHandlers()
 
 // 4. Add to preload/index.ts
 contextBridge.exposeInMainWorld('electronAPI', {
