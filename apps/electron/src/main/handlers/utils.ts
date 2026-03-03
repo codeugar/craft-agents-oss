@@ -1,5 +1,5 @@
-import { app } from 'electron'
 import { getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
+import type { PlatformServices } from '../../runtime/platform'
 
 /**
  * Get workspace by ID or name, throwing if not found.
@@ -13,10 +13,10 @@ export function getWorkspaceOrThrow(workspaceId: string): Workspace {
   return workspace
 }
 
-export function buildBackendHostRuntimeContext() {
+export function buildBackendHostRuntimeContext(platform: PlatformServices) {
   return {
-    appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
-    resourcesPath: process.resourcesPath,
-    isPackaged: app.isPackaged,
+    appRootPath: platform.appRootPath,
+    resourcesPath: platform.resourcesPath,
+    isPackaged: platform.isPackaged,
   }
 }

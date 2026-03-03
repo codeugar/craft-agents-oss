@@ -777,7 +777,7 @@ export function NavigationProvider({
 
         case 'oauth':
           if (parsed.id) {
-            await window.electronAPI.startSourceOAuth(workspaceId, parsed.id)
+            await window.electronAPI.performOAuth({ sourceSlug: parsed.id })
           }
           break
 

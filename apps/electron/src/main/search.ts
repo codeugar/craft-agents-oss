@@ -6,13 +6,20 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
-import { app } from 'electron';
 import { existsSync } from 'fs';
 import { resolveBackendHostTooling } from '@craft-agent/shared/agent/backend';
 import { handlerLog, searchLog } from './logger';
+import type { PlatformServices } from '../runtime/platform';
 
 // Track current search process to cancel on new search
 let currentSearchProcess: ChildProcess | null = null;
+
+// Module-level platform ref — set once during init via setSearchPlatform()
+let _platform: PlatformServices | null = null;
+
+export function setSearchPlatform(platform: PlatformServices): void {
+  _platform = platform;
+}
 
 /**
  * Search result for a single match
@@ -60,11 +67,12 @@ export interface SearchOptions {
  * Path discovery is delegated to backend runtime tooling resolvers.
  */
 function getRipgrepPath(): string | undefined {
+  if (!_platform) throw new Error('setSearchPlatform() must be called before search');
   const { ripgrepPath } = resolveBackendHostTooling({
     hostRuntime: {
-      appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
-      resourcesPath: process.resourcesPath,
-      isPackaged: app.isPackaged,
+      appRootPath: _platform.appRootPath,
+      resourcesPath: _platform.resourcesPath,
+      isPackaged: _platform.isPackaged,
     },
   });
   return ripgrepPath;

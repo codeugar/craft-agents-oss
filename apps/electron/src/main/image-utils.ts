@@ -1,4 +1,4 @@
-import { nativeImage } from 'electron'
+import type { ImageProcessor } from '../runtime/platform'
 import { IMAGE_LIMITS } from '@craft-agent/shared/utils'
 
 export interface ImageResizeResult {
@@ -11,9 +11,42 @@ export interface ImageResizeResult {
   format: 'png' | 'jpeg'
 }
 
+let imageProcessor: ImageProcessor
+
+export function setImageProcessor(proc: ImageProcessor) {
+  imageProcessor = proc
+}
+
+/**
+ * Get image dimensions from a buffer.
+ * Returns { width, height } or null if the buffer is not a valid image.
+ */
+export async function getImageSize(buffer: Buffer): Promise<{ width: number; height: number } | null> {
+  try {
+    return await imageProcessor.getMetadata(buffer)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resize an image buffer to fit within maxSize×maxSize, output as PNG.
+ * Returns the resized PNG buffer, or undefined if the input is invalid.
+ */
+export async function resizeIconBuffer(buffer: Buffer, targetSize: number): Promise<Buffer | undefined> {
+  try {
+    return await imageProcessor.process(buffer, {
+      resize: { width: targetSize, height: targetSize },
+      fit: 'inside',
+      format: 'png',
+    })
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Resize and/or compress an image buffer to fit within Claude API limits.
- * Uses Electron's nativeImage.
  *
  * Strategy:
  * 1. If dimensions exceed OPTIMAL_EDGE (1568px), resize down
@@ -24,7 +57,7 @@ export interface ImageResizeResult {
  *
  * @returns Resized image data, or null if image can't be made small enough
  */
-export function resizeImageForAPI(
+export async function resizeImageForAPI(
   buffer: Buffer,
   options?: {
     /** Max output size in bytes. Default: IMAGE_LIMITS.MAX_SIZE (5MB) */
@@ -32,39 +65,61 @@ export function resizeImageForAPI(
     /** Prefer JPEG output (for photos). Default: false */
     isPhoto?: boolean
   },
-): ImageResizeResult | null {
+): Promise<ImageResizeResult | null> {
   const maxSize = options?.maxSizeBytes ?? IMAGE_LIMITS.MAX_SIZE
   const isPhoto = options?.isPhoto ?? false
 
-  const image = nativeImage.createFromBuffer(buffer)
-  if (image.isEmpty()) return null
+  const metadata = await imageProcessor.getMetadata(buffer).catch(() => null)
+  if (!metadata) return null
 
-  const size = image.getSize()
-  const maxEdge = Math.max(size.width, size.height)
+  const maxEdge = Math.max(metadata.width, metadata.height)
 
-  // Step 1: Resize if dimensions are large
-  let resized = image
-  let outWidth = size.width
-  let outHeight = size.height
+  // Step 1: Compute target dimensions if resize needed
+  let outWidth = metadata.width
+  let outHeight = metadata.height
 
   if (maxEdge > IMAGE_LIMITS.OPTIMAL_EDGE) {
     const scale = IMAGE_LIMITS.OPTIMAL_EDGE / maxEdge
-    outWidth = Math.round(size.width * scale)
-    outHeight = Math.round(size.height * scale)
-    resized = image.resize({ width: outWidth, height: outHeight, quality: 'best' })
+    outWidth = Math.round(metadata.width * scale)
+    outHeight = Math.round(metadata.height * scale)
   }
 
+  const needsResize = outWidth !== metadata.width || outHeight !== metadata.height
+
   // Step 2: Encode — try preferred format first
-  let output = isPhoto ? resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_HIGH) : resized.toPNG()
-  let format: 'png' | 'jpeg' = isPhoto ? 'jpeg' : 'png'
+  let output: Buffer
+  let format: 'png' | 'jpeg'
+
+  if (isPhoto) {
+    output = await imageProcessor.process(buffer, {
+      ...(needsResize && { resize: { width: outWidth, height: outHeight } }),
+      format: 'jpeg',
+      quality: IMAGE_LIMITS.JPEG_QUALITY_HIGH,
+    })
+    format = 'jpeg'
+  } else {
+    output = await imageProcessor.process(buffer, {
+      ...(needsResize && { resize: { width: outWidth, height: outHeight } }),
+      format: 'png',
+    })
+    format = 'png'
+  }
 
   // Step 3-4: Fallback to JPEG compression if still too large
   if (output.length > maxSize) {
-    output = resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_HIGH)
+    output = await imageProcessor.process(buffer, {
+      resize: { width: outWidth, height: outHeight },
+      format: 'jpeg',
+      quality: IMAGE_LIMITS.JPEG_QUALITY_HIGH,
+    })
     format = 'jpeg'
   }
   if (output.length > maxSize) {
-    output = resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_FALLBACK)
+    output = await imageProcessor.process(buffer, {
+      resize: { width: outWidth, height: outHeight },
+      format: 'jpeg',
+      quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK,
+    })
   }
 
   // Step 5: Give up

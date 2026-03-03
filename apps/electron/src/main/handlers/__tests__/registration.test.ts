@@ -59,6 +59,7 @@ function createMockDeps(): HandlerDeps {
       appRootPath: '',
       resourcesPath: '',
       isPackaged: false,
+      appVersion: '0.0.0-test',
       logger: console,
     },
     windowManager: {} as HandlerDeps['windowManager'],

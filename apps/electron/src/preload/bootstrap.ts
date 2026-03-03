@@ -19,7 +19,15 @@ import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
 import { createCallbackServer } from '@craft-agent/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@craft-agent/shared/auth/chatgpt-oauth-config'
-import { CLIENT_OPEN_EXTERNAL, LOCAL_CLIENT_CAPABILITIES } from '../transport/capabilities'
+import {
+  CLIENT_OPEN_EXTERNAL,
+  CLIENT_OPEN_PATH,
+  CLIENT_SHOW_IN_FOLDER,
+  CLIENT_CONFIRM_DIALOG,
+  CLIENT_OPEN_FILE_DIALOG,
+  LOCAL_CLIENT_CAPABILITIES,
+} from '../transport/capabilities'
+import type { ConfirmDialogSpec, FileDialogSpec } from '../transport/capabilities'
 
 // Connection details — from env (remote server) or main process (local)
 let wsUrl: string
@@ -51,7 +59,28 @@ const client = new WsRpcClient(wsUrl, {
 })
 
 // Register client-side capability handlers (server can invoke these)
+// shell.openExternal / openPath / showItemInFolder are available in both main and renderer.
+// dialog / BrowserWindow are main-process-only — bridged via ipcRenderer.invoke.
 client.handleCapability(CLIENT_OPEN_EXTERNAL, (url: string) => shell.openExternal(url))
+
+client.handleCapability(CLIENT_OPEN_PATH, async (path: string) => {
+  const error = await shell.openPath(path)
+  return { error: error || undefined }
+})
+
+client.handleCapability(CLIENT_SHOW_IN_FOLDER, (path: string) => {
+  shell.showItemInFolder(path)
+})
+
+client.handleCapability(CLIENT_CONFIRM_DIALOG, async (spec: ConfirmDialogSpec) => {
+  // dialog.showMessageBox is main-process-only — bridge via ipcRenderer
+  return await ipcRenderer.invoke('__dialog:showMessageBox', spec)
+})
+
+client.handleCapability(CLIENT_OPEN_FILE_DIALOG, async (spec: FileDialogSpec) => {
+  // dialog.showOpenDialog is main-process-only — bridge via ipcRenderer
+  return await ipcRenderer.invoke('__dialog:showOpenDialog', spec)
+})
 
 client.connect()
 
@@ -120,6 +149,29 @@ const api = buildClientApi(client, CHANNEL_MAP)
     }
   } finally {
     callbackServer?.close()
+  }
+}
+
+// ── startClaudeOAuth ─────────────────────────────────────────────────────
+// Override the channel-map stub: the server now returns authUrl without opening
+// the browser. We open it locally so it works in remote mode.
+// Claude OAuth is two-step: browser opens → user copies code → pastes in UI.
+;(api as any).startClaudeOAuth = async (): Promise<{
+  success: boolean
+  authUrl?: string
+  error?: string
+}> => {
+  try {
+    const result = await client.invoke('onboarding:startClaudeOAuth')
+    if (result.success && result.authUrl) {
+      await shell.openExternal(result.authUrl)
+    }
+    return result
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Claude OAuth failed',
+    }
   }
 }
 

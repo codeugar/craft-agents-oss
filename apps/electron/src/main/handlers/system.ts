@@ -1,4 +1,3 @@
-import { app, nativeTheme, shell, dialog } from 'electron'
 import { resolve } from 'path'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -9,7 +8,12 @@ import { isUsableGitBashPath, validateGitBashPath } from '../git-bash'
 import { validateFilePath } from './files'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from './handler-deps'
-import { requestClientOpenExternal } from '../../transport/capabilities'
+import {
+  requestClientOpenExternal,
+  requestClientOpenPath,
+  requestClientShowInFolder,
+  requestClientOpenFileDialog,
+} from '../../transport/capabilities'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE,
@@ -55,12 +59,11 @@ export const HANDLED_CHANNELS = [
 
 export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { sessionManager } = deps
-  // Shell handler — windowManager is always present in Electron context
-  const windowManager = deps.windowManager!
+  const windowManager = deps.windowManager
 
   // Get system theme preference (dark = true, light = false)
   server.handle(IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE, async () => {
-    return nativeTheme.shouldUseDarkColors
+    return deps.platform.systemDarkMode?.() ?? false
   })
 
   // Get runtime versions (previously handled locally in preload via process.versions)
@@ -79,7 +82,7 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Check if running in debug mode (from source)
   server.handle(IPC_CHANNELS.system.IS_DEBUG_MODE, async () => {
-    return !app.isPackaged
+    return !deps.platform.isPackaged
   })
 
   // Release notes
@@ -168,10 +171,7 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   server.handle(IPC_CHANNELS.gitbash.BROWSE, async (ctx) => {
-    const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
-    if (!win) return null
-
-    const result = await dialog.showOpenDialog(win, {
+    const result = await requestClientOpenFileDialog(server, ctx.clientId, {
       title: 'Select bash.exe',
       filters: [{ name: 'Executable', extensions: ['exe'] }],
       properties: ['openFile'],
@@ -241,6 +241,7 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
       // Handle craftagents:// URLs internally via deep link handler
       // This ensures ?window= params work correctly for "Open in New Window"
       if (parsed.protocol === 'craftagents:') {
+        if (!windowManager) return  // headless — deep links require GUI windows
         deps.platform.logger.info('[OPEN_URL] Handling as deep link')
         const { handleDeepLink } = await import('../deep-link')
         const result = await handleDeepLink(url, windowManager, server.push.bind(server))
@@ -266,18 +267,17 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     }
   })
 
-  // Shell operations - open file in default application
-  server.handle(IPC_CHANNELS.shell.OPEN_FILE, async (_ctx, path: string) => {
+  // Shell operations - open file in default application (routed to client)
+  server.handle(IPC_CHANNELS.shell.OPEN_FILE, async (ctx, path: string) => {
     try {
       // Resolve relative paths to absolute before validation
       const absolutePath = resolve(path)
       // Validate path is within allowed directories
       const safePath = await validateFilePath(absolutePath)
-      // openPath opens file with default application (e.g., VS Code for .ts files)
-      const result = await shell.openPath(safePath)
-      if (result) {
-        // openPath returns empty string on success, error message on failure
-        throw new Error(result)
+      // Route to client capability — opens file on the user's machine
+      const result = await requestClientOpenPath(server, ctx.clientId, safePath)
+      if (result.error) {
+        throw new Error(result.error)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -286,14 +286,14 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     }
   })
 
-  // Shell operations - show file in folder (opens Finder/Explorer with file selected)
-  server.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (_ctx, path: string) => {
+  // Shell operations - show file in folder (routed to client — opens Finder/Explorer)
+  server.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (ctx, path: string) => {
     try {
       // Resolve relative paths to absolute before validation
       const absolutePath = resolve(path)
       // Validate path is within allowed directories
       const safePath = await validateFilePath(absolutePath)
-      shell.showItemInFolder(safePath)
+      await requestClientShowInFolder(server, ctx.clientId, safePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       deps.platform.logger.error('showInFolder error:', message)
@@ -303,11 +303,12 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
 
   // Menu actions from renderer (for unified Craft menu)
   server.handle(IPC_CHANNELS.menu.QUIT, async () => {
-    app.quit()
+    deps.platform.quit?.()
   })
 
   // New Window: create a new window for the current workspace
   server.handle(IPC_CHANNELS.menu.NEW_WINDOW, async (ctx) => {
+    if (!windowManager) return  // headless — no-op
     const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
     if (workspaceId) {
       windowManager.createWindow({ workspaceId })
@@ -315,11 +316,13 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   server.handle(IPC_CHANNELS.menu.MINIMIZE, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.minimize()
   })
 
   server.handle(IPC_CHANNELS.menu.MAXIMIZE, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       if (win.isMaximized()) {
@@ -331,6 +334,7 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   server.handle(IPC_CHANNELS.menu.ZOOM_IN, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       const currentZoom = win.webContents.getZoomFactor()
@@ -339,6 +343,7 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   server.handle(IPC_CHANNELS.menu.ZOOM_OUT, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     if (win) {
       const currentZoom = win.webContents.getZoomFactor()
@@ -347,41 +352,49 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   })
 
   server.handle(IPC_CHANNELS.menu.ZOOM_RESET, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.setZoomFactor(1.0)
   })
 
   server.handle(IPC_CHANNELS.menu.TOGGLE_DEV_TOOLS, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.toggleDevTools()
   })
 
   server.handle(IPC_CHANNELS.menu.UNDO, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.undo()
   })
 
   server.handle(IPC_CHANNELS.menu.REDO, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.redo()
   })
 
   server.handle(IPC_CHANNELS.menu.CUT, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.cut()
   })
 
   server.handle(IPC_CHANNELS.menu.COPY, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.copy()
   })
 
   server.handle(IPC_CHANNELS.menu.PASTE, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.paste()
   })
 
   server.handle(IPC_CHANNELS.menu.SELECT_ALL, async (ctx) => {
+    if (!windowManager) return
     const win = windowManager.getWindowByWebContentsId(ctx.webContentsId!)
     win?.webContents.selectAll()
   })

@@ -1,4 +1,3 @@
-import { nativeImage, dialog } from 'electron'
 import { readFile, writeFile, unlink, mkdir, readdir } from 'fs/promises'
 import { normalize, isAbsolute, join, sep } from 'path'
 import { homedir, tmpdir } from 'os'
@@ -7,11 +6,12 @@ import { IPC_CHANNELS, type FileAttachment, type StoredAttachment } from '../../
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { resizeImageForAPI } from '../image-utils'
+import { resizeImageForAPI, getImageSize } from '../image-utils'
 import { MarkItDown } from 'markitdown-js'
 import { realpath } from 'fs/promises'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from './handler-deps'
+import { requestClientOpenFileDialog } from '../../transport/capabilities'
 
 /**
  * Sanitizes a filename to prevent path traversal and filesystem issues.
@@ -176,9 +176,9 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
   })
 
-  // Open native file dialog for selecting files to attach
-  server.handle(IPC_CHANNELS.file.OPEN_DIALOG, async () => {
-    const result = await dialog.showOpenDialog({
+  // Open native file dialog for selecting files to attach (routed to client)
+  server.handle(IPC_CHANNELS.file.OPEN_DIALOG, async (ctx) => {
+    const result = await requestClientOpenFileDialog(server, ctx.clientId, {
       properties: ['openFile', 'multiSelections'],
       filters: [
         // Allow all files by default - the agent can figure out how to handle them
@@ -200,15 +200,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       const attachment = await readFileAttachment(safePath)
       if (!attachment) return null
 
-      // Generate Quick Look thumbnail for preview (works for images, PDFs, Office docs on macOS)
+      // Generate thumbnail for image preview
+      // Only works for image formats the processor supports — PDFs/Office files get icon fallback
       try {
-        const thumbnail = await nativeImage.createThumbnailFromPath(safePath, { width: 200, height: 200 })
-        if (!thumbnail.isEmpty()) {
-          ;(attachment as { thumbnailBase64?: string }).thumbnailBase64 = thumbnail.toPNG().toString('base64')
-        }
+        const thumbBuffer = await deps.platform.imageProcessor.process(safePath, {
+          resize: { width: 200, height: 200 },
+          format: 'png',
+        })
+        ;(attachment as { thumbnailBase64?: string }).thumbnailBase64 = thumbBuffer.toString('base64')
       } catch (thumbError) {
-        // Thumbnail generation failed - this is ok, we'll show an icon fallback
-        deps.platform.logger.info('Quick Look thumbnail failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
+        // Thumbnail generation failed (non-image file or corrupt) — icon fallback
+        deps.platform.logger.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
       }
 
       return attachment
@@ -220,30 +222,15 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   // Generate thumbnail from base64 data (for drag-drop files where we don't have a path)
-  server.handle(IPC_CHANNELS.file.GENERATE_THUMBNAIL, async (_ctx, base64: string, mimeType: string): Promise<string | null> => {
-    // Save to temp file, generate thumbnail, clean up
-    const tempDir = tmpdir()
-    const ext = mimeType.split('/')[1] || 'bin'
-    const tempPath = join(tempDir, `craft-thumb-${randomUUID()}.${ext}`)
-
+  server.handle(IPC_CHANNELS.file.GENERATE_THUMBNAIL, async (_ctx, base64: string, _mimeType: string): Promise<string | null> => {
     try {
-      // Write base64 to temp file
       const buffer = Buffer.from(base64, 'base64')
-      await writeFile(tempPath, buffer)
-
-      // Generate thumbnail using Quick Look
-      const thumbnail = await nativeImage.createThumbnailFromPath(tempPath, { width: 200, height: 200 })
-
-      // Clean up temp file
-      await unlink(tempPath).catch(() => {})
-
-      if (!thumbnail.isEmpty()) {
-        return thumbnail.toPNG().toString('base64')
-      }
-      return null
+      const thumbBuffer = await deps.platform.imageProcessor.process(buffer, {
+        resize: { width: 200, height: 200 },
+        format: 'png',
+      })
+      return thumbBuffer.toString('base64')
     } catch (error) {
-      // Clean up temp file on error
-      await unlink(tempPath).catch(() => {})
       deps.platform.logger.info('generateThumbnail failed:', error instanceof Error ? error.message : error)
       return null
     }
@@ -294,7 +281,6 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       // 1. Save the file (with image validation and resizing)
       if (attachment.base64) {
         // Images, PDFs, Office files - decode from base64
-        // Type as Buffer (generic) to allow reassignment from nativeImage.toJPEG/toPNG
         let decoded: Buffer = Buffer.from(attachment.base64, 'base64')
         // Validate decoded size matches expected (allow small variance for encoding overhead)
         if (Math.abs(decoded.length - attachment.size) > 100) {
@@ -303,9 +289,11 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
 
         // For images: validate and resize if needed for Claude API compatibility
         if (attachment.type === 'image') {
-          // Get image dimensions using nativeImage
-          const image = nativeImage.createFromBuffer(decoded)
-          const imageSize = image.getSize()
+          // Get image dimensions
+          const imageSize = await getImageSize(decoded)
+          if (!imageSize) {
+            throw new Error('Could not read image dimensions — file may be corrupt or unsupported')
+          }
 
           // Validate image for Claude API
           const validation = validateImageForClaudeAPI(decoded.length, imageSize.width, imageSize.height)
@@ -340,19 +328,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
               // Dimension-exceeded: resize to specific target dimensions
               deps.platform.logger.info(`Resizing image from ${imageSize.width}x${imageSize.height} to ${targetSize.width}x${targetSize.height}`)
               try {
-                const resized = image.resize({
-                  width: targetSize.width,
-                  height: targetSize.height,
-                  quality: 'best',
+                decoded = await deps.platform.imageProcessor.process(decoded, {
+                  resize: { width: targetSize.width, height: targetSize.height },
+                  format: isPhoto ? 'jpeg' : 'png',
+                  quality: isPhoto ? IMAGE_LIMITS.JPEG_QUALITY_HIGH : undefined,
                 })
-
-                decoded = isPhoto ? resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_HIGH) : resized.toPNG()
                 wasResized = true
                 finalSize = decoded.length
 
                 // Re-validate final size after resize
                 if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
-                  decoded = resized.toJPEG(IMAGE_LIMITS.JPEG_QUALITY_FALLBACK)
+                  decoded = await deps.platform.imageProcessor.process(decoded, { format: 'jpeg', quality: IMAGE_LIMITS.JPEG_QUALITY_FALLBACK })
                   finalSize = decoded.length
                   if (decoded.length > IMAGE_LIMITS.MAX_SIZE) {
                     throw new Error(`Image still too large after resize (${(decoded.length / 1024 / 1024).toFixed(1)}MB). Please use a smaller image.`)
@@ -365,7 +351,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
               }
             } else {
               // Size-exceeded or optimal resize — use shared utility for full pipeline
-              const result = resizeImageForAPI(decoded, { isPhoto })
+              const result = await resizeImageForAPI(decoded, { isPhoto })
               if (!result) {
                 throw new Error(`Image too large (${(decoded.length / 1024 / 1024).toFixed(1)}MB) and could not be compressed enough. Please use a smaller image.`)
               }
@@ -392,22 +378,22 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         throw new Error('Attachment has no content (neither base64 nor text)')
       }
 
-      // 2. Generate thumbnail using native OS APIs (Quick Look on macOS, Shell handlers on Windows)
+      // 2. Generate thumbnail (images only — PDFs/Office get icon fallback)
       let thumbnailPath: string | undefined
       let thumbnailBase64: string | undefined
       const thumbFileName = `${id}_thumb.png`
       const thumbPath = join(attachmentsDir, thumbFileName)
       try {
-        const thumbnail = await nativeImage.createThumbnailFromPath(storedPath, { width: 200, height: 200 })
-        if (!thumbnail.isEmpty()) {
-          const pngBuffer = thumbnail.toPNG()
-          await writeFile(thumbPath, pngBuffer)
-          thumbnailPath = thumbPath
-          thumbnailBase64 = pngBuffer.toString('base64')
-          filesToCleanup.push(thumbPath)
-        }
+        const pngBuffer = await deps.platform.imageProcessor.process(storedPath, {
+          resize: { width: 200, height: 200 },
+          format: 'png',
+        })
+        await writeFile(thumbPath, pngBuffer)
+        thumbnailPath = thumbPath
+        thumbnailBase64 = pngBuffer.toString('base64')
+        filesToCleanup.push(thumbPath)
       } catch (thumbError) {
-        // Thumbnail generation failed - this is ok, we'll show an icon fallback
+        // Thumbnail generation failed (non-image or corrupt) — icon fallback
         deps.platform.logger.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
       }
 

@@ -3,7 +3,7 @@
 import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
-import { app, BrowserWindow, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
 import { createHash, randomUUID } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
@@ -72,6 +72,10 @@ import type { HandlerDeps } from './handlers/handler-deps'
 import type { RpcServer } from '../transport/types'
 import { WsRpcServer } from '../transport/server'
 import { initModelRefreshService, getModelRefreshService } from './model-fetchers'
+import { setFetcherPlatform } from './model-fetchers/runtime'
+import { setSessionPlatform } from './sessions'
+import { setSearchPlatform } from './search'
+import { setImageProcessor } from './image-utils'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
@@ -278,6 +282,9 @@ async function createInitialWindows(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // Export packaged state as env var so logger.ts (and headless Bun) don't need 'electron'
+  process.env.CRAFT_IS_PACKAGED = app.isPackaged ? 'true' : 'false'
+
   // Register bundled assets root so all seeding functions can find their files
   // (docs, permissions, themes, tool-icons resolve via getBundledAssetsDir)
   setBundledAssetsRoot(__dirname)
@@ -402,17 +409,54 @@ app.whenReady().then(async () => {
       appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
       resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged,
+      appVersion: app.getVersion(),
       openExternal: (url) => shell.openExternal(url),
       openPath: (p) => shell.openPath(p).then(() => {}),
       showItemInFolder: (p) => shell.showItemInFolder(p),
-      resizeImage: async (buffer, maxSize) => {
-        const img = nativeImage.createFromBuffer(buffer)
-        const resized = img.resize({ width: maxSize, height: maxSize })
-        return resized.toPNG() as unknown as Buffer
+      quit: () => app.quit(),
+      systemDarkMode: () => nativeTheme.shouldUseDarkColors,
+      imageProcessor: {
+        async getMetadata(buffer) {
+          const img = nativeImage.createFromBuffer(buffer)
+          if (img.isEmpty()) return null
+          const { width, height } = img.getSize()
+          return (width && height) ? { width, height } : null
+        },
+        async process(input, opts = {}) {
+          const img = typeof input === 'string'
+            ? nativeImage.createFromPath(input)
+            : nativeImage.createFromBuffer(input)
+          if (img.isEmpty()) throw new Error('Invalid image input')
+
+          let result = img
+          if (opts.resize) {
+            const { width: tw, height: th } = opts.resize
+            const fit = opts.fit ?? 'inside'
+            if (fit === 'inside') {
+              const { width: sw, height: sh } = result.getSize()
+              const scale = Math.min(tw / sw, th / sh, 1)
+              result = result.resize({
+                width: Math.round(sw * scale),
+                height: Math.round(sh * scale),
+              })
+            } else {
+              result = result.resize({ width: tw, height: th })
+            }
+          }
+          return (opts.format === 'jpeg')
+            ? result.toJPEG(opts.quality ?? 90)
+            : result.toPNG()
+        },
       },
       logger: log,
       captureError: (err) => Sentry.captureException(err),
     }
+
+    // Inject platform into subsystems that can't receive it through HandlerDeps
+    setFetcherPlatform(platform)
+    setSessionPlatform(platform)
+    setSearchPlatform(platform)
+    setImageProcessor(platform.imageProcessor)
 
     // Bootstrap IPC handlers — preload uses sendSync for window-local details
     ipcMain.on('__get-web-contents-id', (e) => {
@@ -420,6 +464,23 @@ app.whenReady().then(async () => {
     })
     ipcMain.on('__get-workspace-id', (e) => {
       e.returnValue = windowManager?.getWorkspaceForWindow(e.sender.id) ?? ''
+    })
+
+    // Dialog bridge — preload capability handlers use ipcRenderer.invoke to
+    // call main-process-only dialog APIs (dialog, BrowserWindow).
+    ipcMain.handle('__dialog:showMessageBox', async (event, spec) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+        || BrowserWindow.getFocusedWindow()
+        || BrowserWindow.getAllWindows()[0]
+      const result = await dialog.showMessageBox(win, spec)
+      return { response: result.response }
+    })
+    ipcMain.handle('__dialog:showOpenDialog', async (event, spec) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+        || BrowserWindow.getFocusedWindow()
+        || BrowserWindow.getAllWindows()[0]
+      const result = await dialog.showOpenDialog(win, spec)
+      return { canceled: result.canceled, filePaths: result.filePaths }
     })
 
     // When CRAFT_SERVER_URL is set, this Electron instance is a thin client —

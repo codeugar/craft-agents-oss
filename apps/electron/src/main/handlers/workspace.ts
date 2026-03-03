@@ -1,4 +1,3 @@
-import { nativeImage } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -41,8 +40,7 @@ export const HANDLED_CHANNELS = [
 
 export function registerWorkspaceHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { sessionManager } = deps
-  // Shell handler — windowManager is always present in Electron context
-  const windowManager = deps.windowManager!
+  const windowManager = deps.windowManager
 
   // Get workspaces
   server.handle(IPC_CHANNELS.workspaces.GET, async () => {
@@ -73,7 +71,7 @@ export function registerWorkspaceHandlers(server: RpcServer, deps: HandlerDeps):
 
   // Get workspace ID for the calling window
   server.handle(IPC_CHANNELS.window.GET_WORKSPACE, (ctx) => {
-    const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
+    const workspaceId = ctx.workspaceId ?? windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     // Set up ConfigWatcher for live updates (labels, statuses, sources, themes)
     if (workspaceId) {
       const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -86,11 +84,13 @@ export function registerWorkspaceHandlers(server: RpcServer, deps: HandlerDeps):
 
   // Open workspace in new window (or focus existing)
   server.handle(IPC_CHANNELS.window.OPEN_WORKSPACE, async (_ctx, workspaceId: string) => {
+    if (!windowManager) return
     windowManager.focusOrCreateWindow(workspaceId)
   })
 
   // Open a session in a new window
   server.handle(IPC_CHANNELS.window.OPEN_SESSION_IN_NEW_WINDOW, async (_ctx, workspaceId: string, sessionId: string) => {
+    if (!windowManager) return
     // Build deep link for session navigation
     const deepLink = `craftagents://allSessions/session/${sessionId}`
     windowManager.createWindow({
@@ -107,56 +107,63 @@ export function registerWorkspaceHandlers(server: RpcServer, deps: HandlerDeps):
 
   // Close the calling window (triggers close event which may be intercepted)
   server.handle(IPC_CHANNELS.window.CLOSE, (ctx) => {
+    if (!windowManager) return
     windowManager.closeWindow(ctx.webContentsId!)
   })
 
   // Confirm close - force close the window (bypasses interception).
   // Called by renderer when it has no modals to close and wants to proceed.
   server.handle(IPC_CHANNELS.window.CONFIRM_CLOSE, (ctx) => {
+    if (!windowManager) return
     windowManager.forceCloseWindow(ctx.webContentsId!)
   })
 
   // Cancel close - renderer handled the request (closed a modal/panel).
   // Clears the fallback timeout so the window stays open.
   server.handle(IPC_CHANNELS.window.CANCEL_CLOSE, (ctx) => {
+    if (!windowManager) return
     windowManager.cancelPendingClose(ctx.webContentsId!)
   })
 
   // Show/hide macOS traffic light buttons (for fullscreen overlays)
   server.handle(IPC_CHANNELS.window.SET_TRAFFIC_LIGHTS, (ctx, visible: boolean) => {
+    if (!windowManager) return
     windowManager.setTrafficLightsVisible(ctx.webContentsId!, visible)
   })
 
   // Switch workspace in current window (in-window switching)
   server.handle(IPC_CHANNELS.window.SWITCH_WORKSPACE, async (ctx, workspaceId: string) => {
-    const wcId = ctx.webContentsId!
     const end = perf.start('ipc.switchWorkspace', { workspaceId })
 
-    // Get the old workspace ID before updating
-    const oldWorkspaceId = windowManager.getWorkspaceForWindow(wcId)
-
-    // Update the window's workspace mapping
-    const updated = windowManager.updateWindowWorkspace(wcId, workspaceId)
-
-    // If update failed, the window may have been re-created (e.g., after refresh)
-    // Try to register it
-    if (!updated) {
-      const win = windowManager.getWindowByWebContentsId(wcId)
-      if (win) {
-        windowManager.registerWindow(win, workspaceId)
-        deps.platform.logger.info(`Re-registered window ${wcId} for workspace ${workspaceId}`)
-      }
-    }
-
-    // Keep WS push routing in sync
+    // Keep WS push routing in sync (works for both GUI and headless)
     server.updateClientWorkspace?.(ctx.clientId, workspaceId)
 
-    // Clear activeViewingSession for old workspace if no other windows are viewing it
-    // This ensures read/unread state is correct after workspace switch
-    if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
-      const otherWindows = windowManager.getAllWindowsForWorkspace(oldWorkspaceId)
-      if (otherWindows.length === 0) {
-        sessionManager.clearActiveViewingSession(oldWorkspaceId)
+    if (windowManager) {
+      const wcId = ctx.webContentsId!
+
+      // Get the old workspace ID before updating
+      const oldWorkspaceId = windowManager.getWorkspaceForWindow(wcId)
+
+      // Update the window's workspace mapping
+      const updated = windowManager.updateWindowWorkspace(wcId, workspaceId)
+
+      // If update failed, the window may have been re-created (e.g., after refresh)
+      // Try to register it
+      if (!updated) {
+        const win = windowManager.getWindowByWebContentsId(wcId)
+        if (win) {
+          windowManager.registerWindow(win, workspaceId)
+          deps.platform.logger.info(`Re-registered window ${wcId} for workspace ${workspaceId}`)
+        }
+      }
+
+      // Clear activeViewingSession for old workspace if no other windows are viewing it
+      // This ensures read/unread state is correct after workspace switch
+      if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
+        const otherWindows = windowManager.getAllWindowsForWorkspace(oldWorkspaceId)
+        if (otherWindows.length === 0) {
+          sessionManager.clearActiveViewingSession(oldWorkspaceId)
+        }
       }
     }
 
@@ -281,19 +288,18 @@ export function registerWorkspaceHandlers(server: RpcServer, deps: HandlerDeps):
       return
     }
 
-    // For raster images, resize to max 256x256 using nativeImage
-    const image = nativeImage.createFromBuffer(buffer)
-    const size = image.getSize()
+    // For raster images, resize to max 256x256
+    const metadata = await deps.platform.imageProcessor.getMetadata(buffer)
+    const width = metadata?.width ?? 0
+    const height = metadata?.height ?? 0
 
     // Only resize if larger than 256px
-    if (size.width > 256 || size.height > 256) {
-      const ratio = Math.min(256 / size.width, 256 / size.height)
-      const newWidth = Math.round(size.width * ratio)
-      const newHeight = Math.round(size.height * ratio)
-      const resized = image.resize({ width: newWidth, height: newHeight, quality: 'best' })
-
-      // Write as PNG for consistency
-      writeFileSync(absolutePath, resized.toPNG())
+    if (width > 256 || height > 256) {
+      const resized = await deps.platform.imageProcessor.process(buffer, {
+        resize: { width: 256, height: 256 },
+        format: 'png',
+      })
+      writeFileSync(absolutePath, resized)
     } else {
       // Small enough, write as-is
       writeFileSync(absolutePath, buffer)

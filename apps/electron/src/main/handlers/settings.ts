@@ -1,4 +1,3 @@
-import { dialog } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { IPC_CHANNELS } from '../../shared/types'
@@ -6,6 +5,7 @@ import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraf
 import { getWorkspaceOrThrow } from './utils'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from './handler-deps'
+import { requestClientOpenFileDialog } from '../../transport/capabilities'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.workspace.SETTINGS_GET,
@@ -48,9 +48,9 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     deps.platform.logger.info(`Session ${sessionId} model updated to: ${model}${connection ? ` (connection: ${connection})` : ''}`)
   })
 
-  // Open native folder dialog for selecting working directory
-  server.handle(IPC_CHANNELS.dialog.OPEN_FOLDER, async () => {
-    const result = await dialog.showOpenDialog({
+  // Open native folder dialog for selecting working directory (routed to client)
+  server.handle(IPC_CHANNELS.dialog.OPEN_FOLDER, async (ctx) => {
+    const result = await requestClientOpenFileDialog(server, ctx.clientId, {
       properties: ['openDirectory', 'createDirectory'],
       title: 'Select Working Directory',
     })

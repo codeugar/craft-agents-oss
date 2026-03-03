@@ -4,10 +4,10 @@
  * Provider-agnostic wrapper that delegates model discovery to backend drivers.
  */
 
-import { app } from 'electron'
 import type { ModelFetcher, ModelFetchResult, ModelFetcherCredentials } from '@craft-agent/shared/config'
 import type { LlmConnection } from '@craft-agent/shared/config'
 import { fetchBackendModels } from '@craft-agent/shared/agent/backend'
+import { getHostRuntime } from './runtime'
 
 export class PiModelFetcher implements ModelFetcher {
   /** No periodic refresh — SDK models are static, updated on app upgrade */
@@ -23,11 +23,7 @@ export class PiModelFetcher implements ModelFetcher {
       connection,
       credentials,
       timeoutMs: isCopilot ? 30_000 : 15_000,
-      hostRuntime: {
-        appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
-        resourcesPath: process.resourcesPath,
-        isPackaged: app.isPackaged,
-      },
+      hostRuntime: getHostRuntime(),
     })
   }
 }

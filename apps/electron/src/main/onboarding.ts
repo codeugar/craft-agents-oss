@@ -5,7 +5,7 @@
  */
 import { getAuthState, getSetupNeeds } from '@craft-agent/shared/auth'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
-import { CraftOAuth, startClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState } from '@craft-agent/shared/auth'
+import { prepareClaudeOAuth, exchangeClaudeCode, hasValidOAuthState, clearOAuthState, prepareMcpOAuth } from '@craft-agent/shared/auth'
 import { validateMcpConnection } from '@craft-agent/shared/mcp'
 import { IPC_CHANNELS } from '../shared/types'
 import type { RpcServer } from '../transport/types'
@@ -60,46 +60,48 @@ export function registerOnboardingHandlers(server: RpcServer, deps: HandlerDeps)
     }
   })
 
-  // Start MCP server OAuth
-  server.handle(IPC_CHANNELS.onboarding.START_MCP_OAUTH, async (_ctx, mcpUrl: string) => {
+  // Prepare MCP server OAuth (server-side only — no browser open).
+  // Returns authUrl for the client to open locally.
+  // NOTE: Currently unused in renderer. If re-enabled, needs client-side
+  // orchestration (callback server + browser open) like performOAuth().
+  server.handle(IPC_CHANNELS.onboarding.START_MCP_OAUTH, async (_ctx, mcpUrl: string, callbackPort?: number) => {
     log.info('[Onboarding:Main] ONBOARDING_START_MCP_OAUTH received')
     try {
-      const oauth = new CraftOAuth(
-        { mcpUrl },
-        {
-          onStatus: (msg) => log.info('[Onboarding:Main] MCP OAuth status:', msg),
-          onError: (err) => log.error('[Onboarding:Main] MCP OAuth error:', err),
-        }
-      )
-
-      const { tokens, clientId } = await oauth.authenticate()
-      log.info('[Onboarding:Main] MCP OAuth completed successfully')
+      if (!callbackPort) {
+        throw new Error('callbackPort is required — client must run a local callback server')
+      }
+      const prepared = await prepareMcpOAuth(mcpUrl, callbackPort)
+      log.info('[Onboarding:Main] MCP OAuth prepared, returning authUrl to client')
 
       return {
         success: true,
-        clientId,
+        authUrl: prepared.authUrl,
+        state: prepared.state,
+        codeVerifier: prepared.codeVerifier,
+        tokenEndpoint: prepared.tokenEndpoint,
+        clientId: prepared.clientId,
+        redirectUri: prepared.redirectUri,
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      log.error('[Onboarding:Main] MCP OAuth failed:', message)
+      log.error('[Onboarding:Main] MCP OAuth prepare failed:', message)
       return { success: false, error: message }
     }
   })
 
-  // Start Claude OAuth flow (opens browser, returns URL)
+  // Prepare Claude OAuth flow (server-side only — no browser open).
+  // Returns authUrl for the client to open locally via shell.openExternal.
   server.handle(IPC_CHANNELS.onboarding.START_CLAUDE_OAUTH, async () => {
     try {
-      log.info('[Onboarding] Starting Claude OAuth flow...')
+      log.info('[Onboarding] Preparing Claude OAuth flow...')
 
-      const authUrl = await startClaudeOAuth((status) => {
-        log.info('[Onboarding] Claude OAuth status:', status)
-      })
+      const authUrl = prepareClaudeOAuth()
 
-      log.info('[Onboarding] Claude OAuth URL generated, browser opened')
+      log.info('[Onboarding] Claude OAuth URL generated (client will open browser)')
       return { success: true, authUrl }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      log.error('[Onboarding] Start Claude OAuth error:', message)
+      log.error('[Onboarding] Prepare Claude OAuth error:', message)
       return { success: false, error: message }
     }
   })

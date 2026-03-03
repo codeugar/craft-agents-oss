@@ -63,38 +63,12 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     }
   })
 
-  // Start OAuth flow for a source
-  server.handle(IPC_CHANNELS.sources.START_OAUTH, async (_ctx, workspaceId: string, sourceSlug: string) => {
-    try {
-      const workspace = getWorkspaceByNameOrId(workspaceId)
-      if (!workspace) {
-        return { success: false, error: `Workspace not found: ${workspaceId}` }
-      }
-      const { loadSource, getSourceCredentialManager } = await import('@craft-agent/shared/sources')
-
-      const source = loadSource(workspace.rootPath, sourceSlug)
-      if (!source || source.config.type !== 'mcp' || !source.config.mcp?.url) {
-        return { success: false, error: 'Source not found or not an MCP source' }
-      }
-
-      const credManager = getSourceCredentialManager()
-      const result = await credManager.authenticate(source, {
-        onStatus: (message) => log.info(`[OAuth] ${source.config.name}: ${message}`),
-        onError: (error) => log.error(`[OAuth] ${source.config.name} error: ${error}`),
-      })
-
-      if (!result.success) {
-        return { success: false, error: result.error }
-      }
-
-      log.info(`Source OAuth complete: ${sourceSlug}`)
-      return { success: true }
-    } catch (error) {
-      log.error(`Source OAuth failed:`, error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'OAuth authentication failed',
-      }
+  // Start OAuth flow for a source (DEPRECATED — use oauth:start + performOAuth client-side)
+  // Kept for backward compatibility with old IPC preload; WS clients use performOAuth().
+  server.handle(IPC_CHANNELS.sources.START_OAUTH, async () => {
+    return {
+      success: false,
+      error: 'Deprecated: use the client-side performOAuth() flow (oauth:start + oauth:complete) instead',
     }
   })
 

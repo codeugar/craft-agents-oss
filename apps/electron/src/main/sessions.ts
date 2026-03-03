@@ -1,6 +1,6 @@
-import { app, nativeImage } from 'electron'
 import * as Sentry from '@sentry/electron/main'
 import type { EventSink } from '../transport/types'
+import type { PlatformServices } from '../runtime/platform'
 import { basename, join, normalize, isAbsolute, sep } from 'path'
 import { existsSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir, realpath } from 'fs/promises'
@@ -66,7 +66,7 @@ import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/intercep
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type Message, type SessionEvent, type FileAttachment, type StoredAttachment, type SendMessageOptions, type UnreadSummary, IPC_CHANNELS, generateMessageId } from '../shared/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrl, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, type LoadedSkill } from '@craft-agent/shared/skills'
 import type { ToolDisplayMeta } from '@craft-agent/core/types'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -81,15 +81,23 @@ import { AutomationSystem, AUTOMATIONS_HISTORY_FILE, type AutomationSystemMetada
 import { sanitizeForTitle } from './title-sanitizer'
 import { shouldActivateBrowserOverlay, normalizeBrowserToolName } from './browser-tool-detection'
 import { rollbackFailedBranchCreation } from './session-branch-cleanup'
-import { resizeImageForAPI } from './image-utils'
+import { resizeImageForAPI, resizeIconBuffer } from './image-utils'
 import { releaseBrowserOwnershipOnForcedStop } from './session-browser-release'
 export { sanitizeForTitle }
 
+// Module-level platform ref — set once during init via setSessionPlatform()
+let _platform: PlatformServices | null = null
+
+export function setSessionPlatform(platform: PlatformServices): void {
+  _platform = platform
+}
+
 function buildBackendHostRuntimeContext(): BackendHostRuntimeContext {
+  if (!_platform) throw new Error('setSessionPlatform() must be called before session creation')
   return {
-    appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
-    resourcesPath: process.resourcesPath,
-    isPackaged: app.isPackaged,
+    appRootPath: _platform.appRootPath,
+    resourcesPath: _platform.resourcesPath,
+    isPackaged: _platform.isPackaged,
   }
 }
 
@@ -330,18 +338,10 @@ async function applyBridgeUpdates(
  * @param workspaceRootPath - Path to workspace for loading skills/sources
  * @param sources - Loaded sources for the workspace
  */
-/** Resize a raster icon buffer to targetSize×targetSize PNG using Electron's nativeImage. */
-function resizeIconBuffer(buffer: Buffer, targetSize: number): Buffer | undefined {
-  const image = nativeImage.createFromBuffer(buffer)
-  if (image.isEmpty()) return undefined
-  const resized = image.resize({ width: targetSize, height: targetSize, quality: 'best' })
-  return resized.toPNG()
-}
-
 const BROWSER_TOOL_ICON_FILENAME = 'chrome.svg'
 let browserToolIconDataUrlCache: string | null | undefined
 
-function getBrowserToolIconDataUrl(): string | undefined {
+async function getBrowserToolIconDataUrl(): Promise<string | undefined> {
   // Cache miss sentinel: undefined means "not computed yet"
   if (browserToolIconDataUrlCache !== undefined) {
     return browserToolIconDataUrlCache ?? undefined
@@ -358,7 +358,7 @@ function getBrowserToolIconDataUrl(): string | undefined {
 
     for (const iconPath of iconCandidates) {
       if (!existsSync(iconPath)) continue
-      const encoded = encodeIconToDataUrl(iconPath, { resize: resizeIconBuffer })
+      const encoded = await encodeIconToDataUrlAsync(iconPath, { resize: resizeIconBuffer })
       if (encoded) {
         browserToolIconDataUrlCache = encoded
         return encoded
@@ -373,12 +373,12 @@ function getBrowserToolIconDataUrl(): string | undefined {
   return browserToolIconDataUrlCache ?? undefined
 }
 
-function resolveToolDisplayMeta(
+async function resolveToolDisplayMeta(
   toolName: string,
   toolInput: Record<string, unknown> | undefined,
   workspaceRootPath: string,
   sources: LoadedSource[]
-): ToolDisplayMeta | undefined {
+): Promise<ToolDisplayMeta | undefined> {
   // Check if it's an MCP tool (format: mcp__<serverSlug>__<toolName>)
   if (toolName.startsWith('mcp__')) {
     const parts = toolName.split('__')
@@ -418,7 +418,7 @@ function resolveToolDisplayMeta(
           const normalizedBrowserTool = normalizeBrowserToolName(toolSlug)
           return {
             displayName,
-            iconDataUrl: normalizedBrowserTool ? getBrowserToolIconDataUrl() : undefined,
+            iconDataUrl: normalizedBrowserTool ? await getBrowserToolIconDataUrl() : undefined,
             category: 'native' as const,
           }
         }
@@ -437,7 +437,7 @@ function resolveToolDisplayMeta(
       if (source) {
         // Try file-based icon first, fall back to emoji icon from config
         const iconDataUrl = source.iconPath
-          ? encodeIconToDataUrl(source.iconPath, { resize: resizeIconBuffer })
+          ? await encodeIconToDataUrlAsync(source.iconPath, { resize: resizeIconBuffer })
           : getEmojiIcon(source.config.icon)
         return {
           displayName: source.config.name,
@@ -465,7 +465,7 @@ function resolveToolDisplayMeta(
           if (skill) {
             // Try file-based icon first, fall back to emoji icon from metadata
             const iconDataUrl = skill.iconPath
-              ? encodeIconToDataUrl(skill.iconPath, { resize: resizeIconBuffer })
+              ? await encodeIconToDataUrlAsync(skill.iconPath, { resize: resizeIconBuffer })
               : getEmojiIcon(skill.metadata.icon)
             return {
               displayName: skill.metadata.name,
@@ -512,7 +512,7 @@ function resolveToolDisplayMeta(
 
     return {
       displayName: browserDisplayName,
-      iconDataUrl: getBrowserToolIconDataUrl(),
+      iconDataUrl: await getBrowserToolIconDataUrl(),
       category: 'native' as const,
     }
   }
@@ -2258,7 +2258,7 @@ export class SessionManager {
         onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
           try {
             const buffer = await readFile(filePath)
-            const result = resizeImageForAPI(buffer, { maxSizeBytes })
+            const result = await resizeImageForAPI(buffer, { maxSizeBytes })
             if (!result) return null
 
             // Write to session tmp directory (cleaned up with session)
@@ -4213,7 +4213,7 @@ export class SessionManager {
         }
 
         // Process the event first
-        this.processEvent(managed, event)
+        await this.processEvent(managed, event)
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
         // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
@@ -5010,7 +5010,7 @@ To view this task's output:
     }
   }
 
-  private processEvent(managed: ManagedSession, event: AgentEvent): void {
+  private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
@@ -5073,7 +5073,7 @@ To view this task's output:
         let toolDisplayMeta: ToolDisplayMeta | undefined
         if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
           const allSources = loadAllSources(workspaceRootPath)
-          toolDisplayMeta = resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
+          toolDisplayMeta = await resolveToolDisplayMeta(event.toolName, formattedToolInput, workspaceRootPath, allSources)
         }
 
         // Check if a message with this toolUseId already exists FIRST
@@ -5219,7 +5219,7 @@ To view this task's output:
           sessionLog.info(`RESULT WITHOUT START: toolUseId=${event.toolUseId}, toolName=${toolName} (creating message from result)`)
           const fallbackWorkspaceRootPath = managed.workspace.rootPath
           const fallbackSources = loadAllSources(fallbackWorkspaceRootPath)
-          const fallbackToolDisplayMeta = resolveToolDisplayMeta(toolName, undefined, fallbackWorkspaceRootPath, fallbackSources)
+          const fallbackToolDisplayMeta = await resolveToolDisplayMeta(toolName, undefined, fallbackWorkspaceRootPath, fallbackSources)
 
           const toolMessage: Message = {
             id: generateMessageId(),

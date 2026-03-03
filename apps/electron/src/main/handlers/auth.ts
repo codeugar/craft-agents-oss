@@ -1,4 +1,3 @@
-import { dialog, BrowserWindow } from 'electron'
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -6,6 +5,7 @@ import { IPC_CHANNELS } from '../../shared/types'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '../../transport/types'
 import type { HandlerDeps } from './handler-deps'
+import { requestClientConfirmDialog } from '../../transport/capabilities'
 
 export const HANDLED_CHANNELS = [
   IPC_CHANNELS.auth.LOGOUT,
@@ -15,10 +15,9 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void {
-  // Show logout confirmation dialog
-  server.handle(IPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async () => {
-    const window = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-    const result = await dialog.showMessageBox(window, {
+  // Show logout confirmation dialog (routed to client)
+  server.handle(IPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async (ctx) => {
+    const result = await requestClientConfirmDialog(server, ctx.clientId, {
       type: 'warning',
       buttons: ['Cancel', 'Log Out'],
       defaultId: 0,
@@ -26,16 +25,15 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
       title: 'Log Out',
       message: 'Are you sure you want to log out?',
       detail: 'All conversations will be deleted. This action cannot be undone.',
-    } as Electron.MessageBoxOptions)
+    })
     // result.response is the index of the clicked button
     // 0 = Cancel, 1 = Log Out
     return result.response === 1
   })
 
-  // Show delete session confirmation dialog
-  server.handle(IPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (_ctx, name: string) => {
-    const window = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
-    const result = await dialog.showMessageBox(window, {
+  // Show delete session confirmation dialog (routed to client)
+  server.handle(IPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (ctx, name: string) => {
+    const result = await requestClientConfirmDialog(server, ctx.clientId, {
       type: 'warning',
       buttons: ['Cancel', 'Delete'],
       defaultId: 0,
@@ -43,7 +41,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
       title: 'Delete Conversation',
       message: `Are you sure you want to delete: "${name}"?`,
       detail: 'This action cannot be undone.',
-    } as Electron.MessageBoxOptions)
+    })
     // result.response is the index of the clicked button
     // 0 = Cancel, 1 = Delete
     return result.response === 1

@@ -192,7 +192,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         model: testModel,
         baseUrl,
         timeoutMs: 20000,
-        hostRuntime: buildBackendHostRuntimeContext(),
+        hostRuntime: buildBackendHostRuntimeContext(deps.platform),
         connection: resolveSetupTestConnectionHint({ provider, baseUrl, piAuthProvider }),
       })
 
@@ -348,7 +348,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     try {
       const result = await validateStoredBackendConnection({
         slug,
-        hostRuntime: buildBackendHostRuntimeContext(),
+        hostRuntime: buildBackendHostRuntimeContext(deps.platform),
       })
 
       if (!result.success) {

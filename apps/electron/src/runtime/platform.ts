@@ -13,19 +13,49 @@ export interface Logger {
   debug(...args: unknown[]): void
 }
 
+export interface ImageProcessor {
+  /** Get image dimensions. Returns null if buffer is not a valid image. */
+  getMetadata(buffer: Buffer): Promise<{ width: number; height: number } | null>
+
+  /**
+   * Process an image: resize and/or re-encode.
+   * @param input - Buffer or file path
+   * @param opts.resize - target dimensions (default: no resize)
+   * @param opts.fit - 'inside' to maintain aspect ratio (default: 'inside')
+   * @param opts.format - output format (default: 'png')
+   * @param opts.quality - JPEG quality 0-100 (default: 90)
+   */
+  process(
+    input: Buffer | string,
+    opts?: {
+      resize?: { width: number; height: number }
+      fit?: 'inside' | 'cover' | 'fill'
+      format?: 'png' | 'jpeg'
+      quality?: number
+    },
+  ): Promise<Buffer>
+}
+
 export interface PlatformServices {
   // -- Path resolution --
   appRootPath: string
   resourcesPath: string
   isPackaged: boolean
 
-  // -- Image processing (nativeImage on Electron, sharp on Node) --
-  resizeImage?(buffer: Buffer, maxSize: number): Promise<Buffer>
+  // -- App metadata --
+  appVersion: string
+
+  // -- Image processing (nativeImage on Electron, sharp on headless) --
+  imageProcessor: ImageProcessor
 
   // -- OS integration (no-ops on headless) --
   openPath?(path: string): Promise<void>
   openExternal?(url: string): Promise<void>
   showItemInFolder?(path: string): void
+
+  // -- App lifecycle (no-ops on headless) --
+  quit?(): void
+  systemDarkMode?(): boolean
 
   // -- Observability --
   logger: Logger
