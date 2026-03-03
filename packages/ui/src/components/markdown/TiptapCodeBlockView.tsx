@@ -17,7 +17,7 @@ import { MarkdownLatexBlock } from './MarkdownLatexBlock'
  * so ProseMirror manages the text and Shiki decorations apply.
  */
 function TiptapCodeBlockView({ node }: { node: { attrs: { language?: string }; textContent: string } }) {
-  const language = node.attrs.language
+  const language = node.attrs.language?.toLowerCase()
 
   if (language === 'mermaid') {
     return (
@@ -27,7 +27,7 @@ function TiptapCodeBlockView({ node }: { node: { attrs: { language?: string }; t
     )
   }
 
-  if (language === 'latex' || language === 'math') {
+  if (language === 'latex' || language === 'math' || language === 'tex' || language === 'katex') {
     return (
       <NodeViewWrapper contentEditable={false} className="tiptap-latex-block">
         <MarkdownLatexBlock code={node.textContent} />
@@ -49,6 +49,36 @@ function TiptapCodeBlockView({ node }: { node: { attrs: { language?: string }; t
  * Regular code blocks get Shiki syntax highlighting via decorations.
  */
 export const tiptapCodeBlock = CodeBlockShiki.extend({
+  // Official @tiptap/markdown integration for fenced code blocks.
+  // Without this, markdown parsing in official mode can drop code fences.
+  markdownTokenName: 'code',
+
+  parseMarkdown: (token: { type?: string; lang?: string; text?: string }, _helpers: unknown) => ({
+    type: 'codeBlock',
+    attrs: {
+      language: token.lang ?? null,
+    },
+    content: token.text
+      ? [
+          {
+            type: 'text',
+            text: token.text,
+          },
+        ]
+      : [],
+  }),
+
+  renderMarkdown: (
+    node: { attrs?: { language?: string | null }; content?: unknown[]; textContent?: string },
+    helpers: { renderChildren: (content: unknown[]) => string }
+  ) => {
+    const language = node.attrs?.language ?? ''
+    const code = node.textContent ?? helpers.renderChildren(node.content ?? [])
+    const langPart = language ? String(language) : ''
+
+    return `\`\`\`${langPart}\n${code}\n\`\`\``
+  },
+
   addNodeView() {
     return ReactNodeViewRenderer(TiptapCodeBlockView)
   },

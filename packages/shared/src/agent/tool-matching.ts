@@ -362,7 +362,7 @@ export function serializeResult(value: unknown): string {
 export function isToolResultError(result: unknown): boolean {
   if (typeof result === 'string') {
     // Check for common error patterns
-    return result.startsWith('Error:') || result.startsWith('error:');
+    return /^\s*(\[ERROR\]|Error:|error:)/.test(result);
   }
   if (result && typeof result === 'object') {
     // Check for error flag in result object

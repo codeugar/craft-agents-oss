@@ -119,7 +119,19 @@ if (isDebugMode) {
   const bundledUvExists = existsSync(uvBinary)
   const fallbackUv = bundledUvExists ? null : 'uv'
 
+  // Runtime resolver hints for shared session tools
+  process.env.CRAFT_IS_PACKAGED = app.isPackaged ? '1' : '0'
+  process.env.CRAFT_RESOURCES_BASE = resourcesBase
+  process.env.CRAFT_APP_ROOT = app.isPackaged ? app.getAppPath() : process.cwd()
+
   process.env.CRAFT_UV = bundledUvExists ? uvBinary : (fallbackUv ?? uvBinary)
+
+  // Bun runtime (packaged builds should prefer bundled runtime over PATH)
+  const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
+  if (existsSync(bunBinary)) {
+    process.env.CRAFT_BUN = bunBinary
+  }
+
   process.env.CRAFT_SCRIPTS = scriptsDir
   // Prepend both generic wrappers dir and platform uv dir:
   // - binDir exposes wrapper commands (pdf-tool, docx-tool, ...)

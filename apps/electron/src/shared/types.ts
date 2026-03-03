@@ -964,6 +964,12 @@ export interface TestAutomationResult {
   actions: TestAutomationActionResult[]
 }
 
+export type WindowCloseRequestSource = 'keyboard-shortcut' | 'window-button' | 'unknown'
+
+export interface WindowCloseRequest {
+  source: WindowCloseRequestSource
+}
+
 // Type-safe IPC API exposed to renderer
 export interface ElectronAPI {
   // Session management
@@ -1003,8 +1009,8 @@ export interface ElectronAPI {
   confirmCloseWindow(): Promise<void>
   /** Cancel a pending close request (renderer handled it by closing a modal/panel). */
   cancelCloseWindow(): Promise<void>
-  /** Listen for close requests (X button, Cmd+W). Returns cleanup function. */
-  onCloseRequested(callback: () => void): () => void
+  /** Listen for close requests and receive source metadata. Returns cleanup function. */
+  onCloseRequested(callback: (request: WindowCloseRequest) => void): () => void
   /** Show/hide macOS traffic light buttons (for fullscreen overlays) */
   setTrafficLightsVisible(visible: boolean): Promise<void>
 

@@ -3,7 +3,7 @@ import { windowLog } from './logger'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
-import { IPC_CHANNELS } from '../shared/types'
+import { IPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 
 // Vite dev server URL for hot reload
@@ -54,6 +54,8 @@ export class WindowManager {
   private windows: Map<number, ManagedWindow> = new Map()  // webContents.id → ManagedWindow
   private focusedModeWindows: Set<number> = new Set()  // webContents.id of windows in focused mode
   private pendingCloseTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Fallback timeouts for window close
+  private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
+  private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
 
   /**
@@ -288,8 +290,32 @@ export class WindowManager {
       }
     })
 
-    // Handle window close request (X button, Cmd+W) - intercept to allow modal closing first
-    // The renderer can respond via WINDOW_CONFIRM_CLOSE to actually close the window
+    // Detect Cmd/Ctrl+W before close events so renderer can distinguish close source.
+    // Intent is short-lived to avoid stale classification.
+    window.webContents.on('before-input-event', (_event, input) => {
+      if (!input || input.type !== 'keyDown') return
+      const key = input.key?.toLowerCase?.()
+      if (key !== 'w') return
+
+      const isCloseShortcut = process.platform === 'darwin'
+        ? !!input.meta
+        : !!input.control
+
+      if (!isCloseShortcut) return
+
+      const wcId = window.webContents.id
+      this.keyboardCloseIntents.add(wcId)
+      const existingTimeout = this.keyboardCloseIntentTimeouts.get(wcId)
+      if (existingTimeout) clearTimeout(existingTimeout)
+
+      this.keyboardCloseIntentTimeouts.set(wcId, setTimeout(() => {
+        this.keyboardCloseIntentTimeouts.delete(wcId)
+        this.keyboardCloseIntents.delete(wcId)
+      }, 500))
+    })
+
+    // Handle window close request (traffic-light button, menu close, Cmd/Ctrl+W)
+    // and send source metadata so renderer can decide layered dismiss vs direct close.
     window.on('close', (event) => {
       // During app quit, bypass layered close behavior and allow native close flow.
       // This preserves expected Cmd+Q semantics (quit app instead of closing overlays/panels first).
@@ -300,12 +326,24 @@ export class WindowManager {
       // Check if renderer is ready (mainFrame exists) - if not, allow close directly
       if (!window.webContents.isDestroyed() && window.webContents.mainFrame) {
         event.preventDefault()
-        // Send close request to renderer - it will either close a modal or confirm close
-        window.webContents.send(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED)
+
+        const wcId = window.webContents.id
+        let source: WindowCloseRequestSource = 'window-button'
+        if (this.keyboardCloseIntents.has(wcId)) {
+          source = 'keyboard-shortcut'
+          this.keyboardCloseIntents.delete(wcId)
+          const keyboardIntentTimeout = this.keyboardCloseIntentTimeouts.get(wcId)
+          if (keyboardIntentTimeout) {
+            clearTimeout(keyboardIntentTimeout)
+            this.keyboardCloseIntentTimeouts.delete(wcId)
+          }
+        }
+
+        // Send close request to renderer - it will either close a modal/panel or confirm close.
+        window.webContents.send(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, { source })
 
         // Fallback timeout: if IPC fails (e.g., on Hyprland/Wayland), force close after 3s.
         // Reset timeout on each attempt so active users closing modals aren't interrupted.
-        const wcId = window.webContents.id
         const existingTimeout = this.pendingCloseTimeouts.get(wcId)
         if (existingTimeout) clearTimeout(existingTimeout)
 
@@ -325,6 +363,14 @@ export class WindowManager {
         clearTimeout(timeout)
         this.pendingCloseTimeouts.delete(webContentsId)
       }
+
+      // Clean up short-lived keyboard-close intent tracking.
+      const keyboardIntentTimeout = this.keyboardCloseIntentTimeouts.get(webContentsId)
+      if (keyboardIntentTimeout) {
+        clearTimeout(keyboardIntentTimeout)
+        this.keyboardCloseIntentTimeouts.delete(webContentsId)
+      }
+      this.keyboardCloseIntents.delete(webContentsId)
 
       nativeTheme.removeListener('updated', themeHandler)
       this.windows.delete(webContentsId)

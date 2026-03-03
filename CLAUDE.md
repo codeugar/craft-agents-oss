@@ -379,7 +379,7 @@ Three-level permission system (SHIFT+TAB cycles):
 | `'ask'` | Ask to Edit | Prompts for bash commands (default) |
 | `'allow-all'` | Execute | Auto-approves all commands |
 
-**In Explore mode blocked:** `api_*`, Bash, Write, Edit, MCP write tools
+**In Explore mode blocked:** `api_*` mutations, Write/Edit tools, MCP write tools, and non-allowlisted Bash commands (read-only allowlisted Bash remains permitted).
 
 ### Theme System (`packages/shared/src/config/theme.ts`)
 

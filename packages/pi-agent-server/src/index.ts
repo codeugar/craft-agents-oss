@@ -51,9 +51,9 @@ import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../sh
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
-import { webSearchTool } from './tools/web-search.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
-import { createGoogleSearchTool } from './tools/google-search.ts';
+import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
+import { createSearchTool } from './tools/search/create-search-tool.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -347,15 +347,23 @@ async function ensureSession(): Promise<AgentSession> {
   piModelRegistry = modelRegistry;
 
   // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
-  // When the provider is Google, replace DuckDuckGo web_search with a Google Search
-  // grounding tool that makes a separate Gemini API call with { googleSearch: {} }.
-  // (The main session can't combine googleSearch with function calling in one request.)
-  const isGoogleProvider = initConfig.piAuth?.provider === 'google';
-  const googleApiKey = initConfig.piAuth?.credential?.type === 'api_key'
-    ? initConfig.piAuth.credential.key : undefined;
-  const searchTool = isGoogleProvider && googleApiKey
-    ? createGoogleSearchTool(googleApiKey)
-    : webSearchTool;
+  // Search provider is selected based on the user's LLM connection:
+  //   - OpenAI/OpenRouter → Responses API built-in web_search
+  //   - ChatGPT Plus (openai-codex) → ChatGPT backend responses endpoint
+  //   - Google → Gemini API with googleSearch grounding
+  //   - Others → DuckDuckGo fallback
+  //
+  // IMPORTANT: resolve dynamically on each search call so token_update refreshes
+  // are used without recreating the session.
+  const searchProvider = {
+    get name() {
+      return resolveSearchProvider(initConfig?.piAuth).name;
+    },
+    async search(query: string, count: number) {
+      return resolveSearchProvider(initConfig?.piAuth).search(query, count);
+    },
+  };
+  const searchTool = createSearchTool(searchProvider);
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
   );
@@ -1213,6 +1221,9 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       if (moduleAuthStorage) {
         const { provider, credential } = msg.piAuth;
         moduleAuthStorage.set(provider, credential);
+        if (initConfig) {
+          initConfig.piAuth = msg.piAuth;
+        }
         debugLog(`Updated ${credential.type} credential for provider: ${provider}`);
       } else {
         debugLog('token_update received but no authStorage initialized');

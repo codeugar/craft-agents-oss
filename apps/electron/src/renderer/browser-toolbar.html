@@ -16,10 +16,7 @@
   </script>
   <style>
     /* Prevent any flash of unstyled content */
-    html, body { margin: 0; padding: 0; overflow: hidden; height: 48px; background: #fafafb; }
-    @media (prefers-color-scheme: dark) {
-      html, body { background: #2b292e; }
-    }
+    html, body { margin: 0; padding: 0; min-height: 48px; overflow: visible; background: transparent; }
     /* Interactive elements must not be draggable within the titlebar-drag-region */
     button, input { -webkit-app-region: no-drag; app-region: no-drag; }
   </style>

@@ -1,7 +1,7 @@
 // Capture errors in the isolated preload context and forward to Sentry
 import '@sentry/electron/preload'
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment, type LlmConnectionSetup, type TestLlmConnectionParams } from '../shared/types'
+import { IPC_CHANNELS, type SessionEvent, type ElectronAPI, type FileAttachment, type LlmConnectionSetup, type TestLlmConnectionParams, type WindowCloseRequest } from '../shared/types'
 
 const api: ElectronAPI = {
   // Session management
@@ -47,8 +47,10 @@ const api: ElectronAPI = {
   closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.CLOSE_WINDOW),
   confirmCloseWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CONFIRM_CLOSE),
   cancelCloseWindow: () => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_CANCEL_CLOSE),
-  onCloseRequested: (callback: () => void) => {
-    const handler = () => callback()
+  onCloseRequested: (callback: (request: WindowCloseRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request?: WindowCloseRequest) => {
+      callback(request ?? { source: 'unknown' })
+    }
     ipcRenderer.on(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, handler)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_CLOSE_REQUESTED, handler)
   },

@@ -894,7 +894,7 @@ function PlannerBoard() {
                         'planner-sortable-item w-full rounded-[8px] px-3 py-2 text-left select-none',
                         selectedTaskId === task.id
                           ? 'planner-sortable-item--selected bg-background'
-                          : 'bg-transparent shadow-none hover:bg-transparent'
+                          : 'bg-background shadow-none'
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -922,7 +922,7 @@ function PlannerBoard() {
             <div className="p-5 text-sm text-foreground/50">Select a task to inspect details.</div>
           ) : (
             <ScrollArea className="flex-1">
-              <div className="px-6 py-5">
+              <div className="w-full max-w-[720px] mx-auto px-6 pt-8 pb-5">
                 {/* Editable title */}
                 <div
                   key={selectedTask.id + '-title'}
@@ -959,6 +959,7 @@ function PlannerBoard() {
                   content={selectedTask.notes}
                   onUpdate={(md) => updateTaskNotes(selectedTask.id, md)}
                   placeholder="Add notes..."
+                  markdownEngine="official"
                   className="text-sm leading-relaxed text-foreground/75"
                 />
 

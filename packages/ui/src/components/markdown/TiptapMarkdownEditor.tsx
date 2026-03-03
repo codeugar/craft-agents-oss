@@ -2,26 +2,105 @@ import * as React from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
-import { Markdown, type MarkdownStorage } from 'tiptap-markdown'
+import { Mathematics } from '@tiptap/extension-mathematics'
+import { Markdown as OfficialMarkdown } from '@tiptap/markdown'
+import { Markdown as LegacyMarkdown } from 'tiptap-markdown'
 import { tiptapCodeBlock } from './TiptapCodeBlockView'
 import { cn } from '../../lib/utils'
 import 'katex/dist/katex.min.css'
 import './tiptap-editor.css'
 
-function getMarkdown(editor: { storage: { markdown?: MarkdownStorage } }): string {
-  return editor.storage.markdown?.getMarkdown() ?? ''
+export type MarkdownEngine = 'legacy' | 'official'
+
+function getLegacyMarkdown(editor: { storage: { markdown?: { getMarkdown?: () => string } } }): string {
+  return editor.storage.markdown?.getMarkdown?.() ?? ''
+}
+
+function getOfficialMarkdown(editor: { getMarkdown?: () => string }): string {
+  return editor.getMarkdown?.() ?? ''
+}
+
+function forceShikiDecorations(editor: any) {
+  try {
+    if (editor?.isDestroyed) return
+    const tr = editor.view?.state.tr.setMeta('shikiPluginForceDecoration', true)
+    if (tr) {
+      editor.view?.dispatch(tr)
+    }
+  } catch {
+    // Best-effort refresh only.
+  }
+}
+
+function scheduleShikiRefresh(editor: any) {
+  forceShikiDecorations(editor)
+
+  for (const delay of [80, 220, 450]) {
+    setTimeout(() => {
+      forceShikiDecorations(editor)
+    }, delay)
+  }
+}
+
+const INLINE_DOUBLE_DOLLAR_REGEX = /\$\$([^\n]+?)\$\$/g
+// Currency marker used during official parse to avoid accidental math tokenization.
+const CURRENCY_MARKER = '¤'
+const CURRENCY_RANGE_REGEX = /\$(\d[\dA-Za-z.,]*\s*[–-]\s*)\$(\d[\dA-Za-z.,]*)/g
+const CURRENCY_AMOUNT_REGEX = /\$(\d[\dA-Za-z.,]*)/g
+
+/**
+ * Normalize markdown for official TipTap parser:
+ * - Keep product policy: users write math with $$...$$
+ * - Convert same-line $$...$$ to inline $...$ (TipTap inline math)
+ * - Escape currency-like dollars ($100, $2M...) so they don't become inline math nodes
+ */
+export function preprocessMarkdownForOfficial(markdown: string): string {
+  let index = 0
+  const placeholders = new Map<string, string>()
+
+  const withPlaceholders = markdown.replace(INLINE_DOUBLE_DOLLAR_REGEX, (_, latex: string) => {
+    const key = `@@CA_INLINE_MATH_${index++}@@`
+    placeholders.set(key, latex)
+    return key
+  })
+
+  const rangeProtected = withPlaceholders.replace(
+    CURRENCY_RANGE_REGEX,
+    (_match, left: string, right: string) => `${CURRENCY_MARKER}${left}${CURRENCY_MARKER}${right}`
+  )
+
+  const amountProtected = rangeProtected.replace(
+    CURRENCY_AMOUNT_REGEX,
+    (_match, amount: string) => `${CURRENCY_MARKER}${amount}`
+  )
+
+  return amountProtected.replace(/@@CA_INLINE_MATH_\d+@@/g, (key) => {
+    const latex = placeholders.get(key) ?? ''
+    return `$${latex}$`
+  })
+}
+
+/** Undo parser-safety escaping in serialized markdown. */
+export function postprocessMarkdownFromOfficial(markdown: string): string {
+  return markdown.replaceAll(CURRENCY_MARKER, '$')
 }
 
 export interface TiptapMarkdownEditorProps {
   /** Markdown string content */
   content: string
-  /** Called when content changes (debounced on blur or cmd+s) */
+  /** Called when content changes */
   onUpdate?: (markdown: string) => void
   /** Placeholder text when empty */
   placeholder?: string
   className?: string
   /** Whether the editor is editable */
   editable?: boolean
+  /**
+   * Migration flag for markdown engine foundations.
+   * - `legacy`: tiptap-markdown (default for safe rollout)
+   * - `official`: @tiptap/markdown + mathematics extension
+   */
+  markdownEngine?: MarkdownEngine
 }
 
 export function TiptapMarkdownEditor({
@@ -30,12 +109,15 @@ export function TiptapMarkdownEditor({
   placeholder = 'Write something...',
   className,
   editable = true,
+  markdownEngine = 'legacy',
 }: TiptapMarkdownEditorProps) {
   const onUpdateRef = React.useRef(onUpdate)
   onUpdateRef.current = onUpdate
 
-  const editor = useEditor({
-    extensions: [
+  const useOfficialMarkdown = markdownEngine === 'official'
+
+  const extensions = React.useMemo(() => {
+    const base = [
       StarterKit.configure({
         codeBlock: false,
         heading: { levels: [1, 2, 3] },
@@ -44,24 +126,61 @@ export function TiptapMarkdownEditor({
         themes: { light: 'github-light', dark: 'github-dark' },
       }),
       Placeholder.configure({ placeholder }),
-      Markdown.configure({
+    ]
+
+    if (useOfficialMarkdown) {
+      return [
+        ...base,
+        Mathematics.configure({
+          katexOptions: {
+            throwOnError: false,
+            strict: false,
+          },
+        }),
+        OfficialMarkdown.configure({
+          markedOptions: {
+            gfm: true,
+          },
+        }),
+      ]
+    }
+
+    return [
+      ...base,
+      LegacyMarkdown.configure({
         html: false,
         transformPastedText: true,
         transformCopiedText: true,
       }),
-    ],
-    content,
+    ]
+  }, [placeholder, useOfficialMarkdown])
+
+  const initialContent = useOfficialMarkdown
+    ? preprocessMarkdownForOfficial(content)
+    : content
+
+  const editor = useEditor({
+    extensions,
+    content: initialContent,
+    ...(useOfficialMarkdown ? { contentType: 'markdown' as const } : {}),
     editable,
     editorProps: {
       attributes: {
         class: 'tiptap-prose outline-none',
       },
     },
+    onCreate: ({ editor }) => {
+      queueMicrotask(() => {
+        scheduleShikiRefresh(editor)
+      })
+    },
     onUpdate: ({ editor }) => {
-      const md = getMarkdown(editor)
+      const md = useOfficialMarkdown
+        ? postprocessMarkdownFromOfficial(getOfficialMarkdown(editor as { getMarkdown?: () => string }))
+        : getLegacyMarkdown(editor as { storage: { markdown?: { getMarkdown?: () => string } } })
       onUpdateRef.current?.(md)
     },
-  }, [])
+  }, [useOfficialMarkdown, extensions])
 
   // Sync editable prop
   React.useEffect(() => {
@@ -76,12 +195,27 @@ export function TiptapMarkdownEditor({
   React.useEffect(() => {
     if (editor && content !== prevContentRef.current) {
       prevContentRef.current = content
-      const currentMd = getMarkdown(editor)
+
+      const currentMd = useOfficialMarkdown
+        ? postprocessMarkdownFromOfficial(getOfficialMarkdown(editor as { getMarkdown?: () => string }))
+        : getLegacyMarkdown(editor as { storage: { markdown?: { getMarkdown?: () => string } } })
+
       if (currentMd !== content) {
-        editor.commands.setContent(content)
+        if (useOfficialMarkdown) {
+          const normalized = preprocessMarkdownForOfficial(content)
+          editor.commands.setContent(normalized, { contentType: 'markdown' } as never)
+        } else {
+          editor.commands.setContent(content)
+        }
+
+        queueMicrotask(() => {
+          if (!editor.isDestroyed) {
+            scheduleShikiRefresh(editor)
+          }
+        })
       }
     }
-  }, [editor, content])
+  }, [editor, content, useOfficialMarkdown])
 
   return (
     <div className={cn('tiptap-editor', className)}>

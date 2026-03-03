@@ -67,6 +67,7 @@ function createMockFns(): BrowserPaneFns {
         agentControlActive: true,
       },
     ]),
+    detectChallenge: async () => ({ detected: false, provider: 'none', signals: [] }),
   }
 }
 
@@ -134,6 +135,24 @@ describe('createBrowserTools', () => {
       const result = await executeTool(tools, 'browser_tool', { command: 'navigate example.com' })
       expect(result.content[0].text).toContain('Navigated to')
       expect(result.content[0].text).toContain('When you are done using the browser')
+    })
+
+    it('releases control when navigate lands on a security challenge', async () => {
+      let releaseCalls = 0
+      mockFns.detectChallenge = async () => ({
+        detected: true,
+        provider: 'cloudflare',
+        signals: ['title:just-a-moment'],
+      })
+      mockFns.releaseControl = async (_instanceId?: string) => {
+        releaseCalls += 1
+        return { action: 'released' as const, resolvedInstanceId: 'browser-1', affectedIds: ['browser-1'] }
+      }
+
+      const result = await executeTool(tools, 'browser_tool', { command: 'navigate example.com' })
+      expect(releaseCalls).toBe(1)
+      expect(result.content[0].text).toContain('Security verification detected (cloudflare).')
+      expect(result.content[0].text).not.toContain('When you are done using the browser')
     })
 
     it('routes open command in background by default', async () => {
@@ -249,6 +268,54 @@ describe('createBrowserTools', () => {
       expect(text).toContain('(focused)')
     })
 
+    it('treats near-zero actionable snapshot as challenge state and attaches screenshot', async () => {
+      let releaseCalls = 0
+      mockFns.snapshot = async () => ({
+        url: 'https://protected.example.com',
+        title: 'Protected',
+        nodes: [
+          { ref: '@e1', role: 'staticText', name: 'Checking your browser before accessing' },
+        ],
+      })
+      mockFns.detectChallenge = async () => ({
+        detected: true,
+        provider: 'cloudflare',
+        signals: ['text:checking-browser'],
+      })
+      mockFns.releaseControl = async (_instanceId?: string) => {
+        releaseCalls += 1
+        return { action: 'released' as const, resolvedInstanceId: 'browser-1', affectedIds: ['browser-1'] }
+      }
+
+      const result = await executeTool(tools, 'browser_tool', { command: 'snapshot' })
+      expect(releaseCalls).toBe(1)
+      expect(result.content[0].text).toContain('Security verification detected (cloudflare).')
+      expect(result.content[0].text).toContain('Detected only 0 actionable element(s) out of 1 accessibility nodes.')
+      expect(result.content[1].type).toBe('image')
+      expect((result.content[1] as any).mimeType).toBe('image/jpeg')
+      expect(result.content[0].text).not.toContain('When you are done using the browser')
+    })
+
+    it('still reports challenge when screenshot capture fails or is empty', async () => {
+      mockFns.snapshot = async () => ({
+        url: 'https://protected.example.com',
+        title: 'Protected',
+        nodes: [],
+      })
+      mockFns.detectChallenge = async () => ({
+        detected: true,
+        provider: 'cloudflare',
+        signals: ['title:just-a-moment'],
+      })
+      mockFns.screenshot = async () => ({ imageBuffer: Buffer.alloc(0), imageFormat: 'png' as const })
+
+      const result = await executeTool(tools, 'browser_tool', { command: 'snapshot' })
+      expect(result.content[0].text).toContain('Security verification detected (cloudflare).')
+      expect(result.content[0].text).toContain('Detected only 0 actionable element(s) out of 0 accessibility nodes.')
+      expect(result.content.some((item: any) => item.type === 'image')).toBe(false)
+      expect(result.content[0].text).not.toContain('When you are done using the browser')
+    })
+
     it('routes find command and returns matching refs', async () => {
       const result = await executeTool(tools, 'browser_tool', { command: 'find click button' })
       const text = result.content[0].text
@@ -273,6 +340,25 @@ describe('createBrowserTools', () => {
     it('routes click with wait arguments', async () => {
       const result = await executeTool(tools, 'browser_tool', { command: 'click @e1 network-idle 5000' })
       expect(result.content[0].text).toContain('waitFor=network-idle')
+    })
+
+    it('detects security challenge after click even when URL does not change', async () => {
+      let releaseCalls = 0
+      mockFns.detectChallenge = async () => ({
+        detected: true,
+        provider: 'cloudflare',
+        signals: ['dom:challenge-form'],
+      })
+      mockFns.releaseControl = async (_instanceId?: string) => {
+        releaseCalls += 1
+        return { action: 'released' as const, resolvedInstanceId: 'browser-1', affectedIds: ['browser-1'] }
+      }
+
+      const result = await executeTool(tools, 'browser_tool', { command: 'click @e1' })
+      expect(releaseCalls).toBe(1)
+      expect(result.content[0].text).toContain('security challenge detected (cloudflare)')
+      expect(result.content[0].text).toContain('URL changed: false')
+      expect(result.content[0].text).not.toContain('When you are done using the browser')
     })
 
     it('routes click-at command with coordinates', async () => {

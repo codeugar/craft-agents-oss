@@ -1579,6 +1579,7 @@ export default function App() {
           getDraft={getDraft}
           onAutoDeleteEmptySession={handleAutoDeleteEmptySession}
           isReady={appState === 'ready'}
+          isSessionsReady={sessionsLoaded}
         >
           {/* Handle window close requests (X button, Cmd+W) - close modal first if open */}
           <WindowCloseHandler />

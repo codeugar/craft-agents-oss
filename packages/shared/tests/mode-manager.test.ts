@@ -1226,6 +1226,36 @@ describe('getBashRejectionReason with pattern metadata', () => {
     });
   });
 
+  describe('parse_error messaging', () => {
+    it('should include tokenizer bug hint for known doubleQuoting parser crashes', () => {
+      const message = formatBashRejectionMessage(
+        {
+          type: 'parse_error',
+          error: "TypeError: Cannot read properties of undefined (reading 'doubleQuoting')",
+        },
+        testConfig
+      );
+
+      expect(message).toContain('known bash-parser tokenizer bug');
+      expect(message).toContain('single quotes for regex/text arguments');
+      expect(message).toContain('`rg -n "a|b|$|c" ...`');
+      expect(message).toContain('SHIFT+TAB');
+    });
+
+    it('should not include tokenizer bug hint for unrelated parse errors', () => {
+      const message = formatBashRejectionMessage(
+        {
+          type: 'parse_error',
+          error: 'Unexpected EOF while parsing command',
+        },
+        testConfig
+      );
+
+      expect(message).not.toContain('known bash-parser tokenizer bug');
+      expect(message).toContain('could not parse command safely');
+    });
+  });
+
   describe('mismatch analysis with incr-regex', () => {
     it('should include mismatch analysis for git command with flags', () => {
       const reason = getBashRejectionReason('git -C /path status', testConfig);

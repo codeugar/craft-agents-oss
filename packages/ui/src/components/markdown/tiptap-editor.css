@@ -180,6 +180,13 @@
 }
 
 /* ── Mermaid blocks ── */
+/* Mermaid node views are wrapped by `.node-codeBlock.shiki` from CodeBlockShiki.
+   In light mode that wrapper can carry a white background, so force transparency
+   only when the wrapper contains a Mermaid block. */
+.tiptap-editor .tiptap-prose .node-codeBlock.shiki:has(.tiptap-mermaid-block) {
+  background: transparent !important;
+}
+
 .tiptap-editor .tiptap-mermaid-block {
   margin: 0.5rem 0;
   border-radius: 0.5rem;

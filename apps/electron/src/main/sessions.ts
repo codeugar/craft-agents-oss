@@ -2755,6 +2755,10 @@ export class SessionManager {
             listWindows: async () => {
               return bpm.listInstances()
             },
+            detectChallenge: async () => {
+              const instanceId = resolveSessionBrowserInstance('browser_detect_challenge')
+              return bpm.detectSecurityChallenge(instanceId)
+            },
           } satisfies BrowserPaneFns,
         })
       }
@@ -5319,6 +5323,9 @@ To view this task's output:
             `\n\n[Truncated for storage: ${rawFormattedResult.length.toLocaleString()} chars total]`
           : rawFormattedResult
 
+        // Some backends omit explicit isError but still prefix with [ERROR].
+        const inferredError = event.isError === true || /^\s*(\[ERROR\]|Error:|error:)/.test(formattedResult)
+
         // Update existing tool message (created on tool_start) instead of creating new one
         const existingToolMsg = managed.messages.find(m => m.toolUseId === event.toolUseId)
         // Track if already completed to avoid sending duplicate events
@@ -5332,8 +5339,8 @@ To view this task's output:
         if (existingToolMsg) {
           existingToolMsg.content = formattedResult
           existingToolMsg.toolResult = formattedResult
-          existingToolMsg.toolStatus = 'completed'
-          existingToolMsg.isError = event.isError
+          existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
+          existingToolMsg.isError = inferredError
           // If message doesn't have parent set, use event's parentToolUseId
           if (!existingToolMsg.parentToolUseId && event.parentToolUseId) {
             existingToolMsg.parentToolUseId = event.parentToolUseId
@@ -5356,10 +5363,10 @@ To view this task's output:
             toolName: toolName,
             toolUseId: event.toolUseId,
             toolResult: formattedResult,
-            toolStatus: 'completed',
+            toolStatus: inferredError ? 'error' : 'completed',
             toolDisplayMeta: fallbackToolDisplayMeta,
             parentToolUseId,
-            isError: event.isError,
+            isError: inferredError,
           }
           managed.messages.push(toolMessage)
         }
@@ -5378,7 +5385,7 @@ To view this task's output:
             result: formattedResult,
             turnId: event.turnId,
             parentToolUseId,
-            isError: event.isError,
+            isError: inferredError,
             timestamp: toolResultTimestamp,
           }, workspaceId)
         }
