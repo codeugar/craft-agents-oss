@@ -8,9 +8,13 @@ import type { PlatformServices } from '../runtime/platform'
 
 interface ModelRefreshServiceLike {
   startAll(): void
+  stopAll?(): void
 }
 
 export interface HeadlessServerBootstrapOptions<TSessionManager, THandlerDeps> {
+  serverToken?: string
+  rpcHost?: string
+  rpcPort?: number
   bundledAssetsRoot?: string
   platformFactory?: () => PlatformServices
   applyPlatformToSubsystems?: (platform: PlatformServices) => void
@@ -24,6 +28,7 @@ export interface HeadlessServerBootstrapOptions<TSessionManager, THandlerDeps> {
   initializeSessionManager: (sessionManager: TSessionManager) => Promise<void>
   setSessionEventSink: (sessionManager: TSessionManager, sink: EventSink) => void
   initModelRefreshService: () => ModelRefreshServiceLike
+  cleanupSessionManager?: (sessionManager: TSessionManager) => Promise<void> | void
   cleanupClientResources?: (clientId: string) => void
   serverId?: string
 }
@@ -62,9 +67,9 @@ function ensureGlobalConfigExists(platform: PlatformServices): void {
 export async function startHeadlessServer<TSessionManager, THandlerDeps>(
   options: HeadlessServerBootstrapOptions<TSessionManager, THandlerDeps>,
 ): Promise<HeadlessServerInstance<TSessionManager>> {
-  const serverToken = process.env.CRAFT_SERVER_TOKEN
+  const serverToken = options.serverToken ?? process.env.CRAFT_SERVER_TOKEN
   if (!serverToken) {
-    throw new Error('CRAFT_SERVER_TOKEN is required. Generate one with: uuidgen or openssl rand -hex 32')
+    throw new Error('Server token is required. Pass options.serverToken or set CRAFT_SERVER_TOKEN.')
   }
 
   const platform = options.platformFactory?.() ?? createHeadlessPlatform()
@@ -82,8 +87,12 @@ export async function startHeadlessServer<TSessionManager, THandlerDeps>(
   const modelRefreshService = options.initModelRefreshService()
   const sessionManager = options.createSessionManager()
 
-  const rpcHost = process.env.CRAFT_RPC_HOST ?? '0.0.0.0'
-  const rpcPort = parseInt(process.env.CRAFT_RPC_PORT ?? '9100', 10)
+  const rpcHost = options.rpcHost ?? process.env.CRAFT_RPC_HOST ?? '127.0.0.1'
+  const rpcPortRaw = options.rpcPort ?? parseInt(process.env.CRAFT_RPC_PORT ?? '9100', 10)
+  if (!Number.isFinite(rpcPortRaw) || rpcPortRaw < 0 || rpcPortRaw > 65535) {
+    throw new Error(`Invalid RPC port: ${rpcPortRaw}`)
+  }
+  const rpcPort = Math.trunc(rpcPortRaw)
 
   const wsServer = new WsRpcServer({
     host: rpcHost,
@@ -116,10 +125,36 @@ export async function startHeadlessServer<TSessionManager, THandlerDeps>(
 
   platform.logger.info(`Craft Agent headless server listening on ${rpcHost}:${wsServer.port}`)
 
+  let stopped = false
   const stop = async (): Promise<void> => {
+    if (stopped) return
+    stopped = true
+
     platform.logger.info('Shutting down...')
-    wsServer.close()
-    oauthFlowStore.dispose()
+
+    try {
+      modelRefreshService.stopAll?.()
+    } catch (error) {
+      platform.logger.error('[headless] Failed to stop model refresh service:', error)
+    }
+
+    try {
+      await options.cleanupSessionManager?.(sessionManager)
+    } catch (error) {
+      platform.logger.error('[headless] Failed to clean up session manager:', error)
+    }
+
+    try {
+      wsServer.close()
+    } catch (error) {
+      platform.logger.error('[headless] Failed to close WS server:', error)
+    }
+
+    try {
+      oauthFlowStore.dispose()
+    } catch (error) {
+      platform.logger.error('[headless] Failed to dispose OAuth flow store:', error)
+    }
   }
 
   return {

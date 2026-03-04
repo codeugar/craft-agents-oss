@@ -5,9 +5,9 @@
 
 import { join } from 'node:path'
 import { startHeadlessServer } from '@craft-agent/server-core/bootstrap'
-import { registerAllRpcHandlers } from '../main/handlers/index'
+import { registerCoreRpcHandlers } from '../main/handlers/index'
 import { cleanupSessionFileWatchForClient } from '../main/handlers/sessions'
-import { SessionManager, setSessionPlatform } from '../main/sessions'
+import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '../main/sessions'
 import { initModelRefreshService } from '../main/model-fetchers'
 import { setFetcherPlatform } from '../main/model-fetchers/runtime'
 import { setSearchPlatform } from '../main/search'
@@ -23,6 +23,13 @@ const instance = await (async (): Promise<{ host: string; port: number; token: s
       applyPlatformToSubsystems: (platform) => {
         setFetcherPlatform(platform)
         setSessionPlatform(platform)
+        setSessionRuntimeHooks({
+          updateBadgeCount: () => {},
+          captureException: (error) => {
+            const err = error instanceof Error ? error : new Error(String(error))
+            platform.captureError?.(err)
+          },
+        })
         setSearchPlatform(platform)
         setImageProcessor(platform.imageProcessor)
       },
@@ -48,12 +55,19 @@ const instance = await (async (): Promise<{ host: string; port: number; token: s
         // browserPaneManager: undefined — headless, no browser automation
         oauthFlowStore,
       }),
-      registerAllRpcHandlers,
+      registerAllRpcHandlers: registerCoreRpcHandlers,
       setSessionEventSink: (sessionManager, sink) => {
         sessionManager.setEventSink(sink)
       },
       initializeSessionManager: async (sessionManager) => {
         await sessionManager.initialize()
+      },
+      cleanupSessionManager: async (sessionManager) => {
+        try {
+          await sessionManager.flushAllSessions()
+        } finally {
+          sessionManager.cleanup()
+        }
       },
       cleanupClientResources: cleanupSessionFileWatchForClient,
     })

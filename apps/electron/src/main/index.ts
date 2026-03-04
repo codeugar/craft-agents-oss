@@ -65,7 +65,7 @@ Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
 import { existsSync } from 'fs'
-import { SessionManager } from './sessions'
+import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from './sessions'
 import { registerAllRpcHandlers } from './handlers/index'
 import { cleanupSessionFileWatchForClient } from './handlers/sessions'
 import type { PlatformServices } from '../runtime/platform'
@@ -74,7 +74,6 @@ import type { RpcServer } from '../transport/types'
 import { WsRpcServer } from '../transport/server'
 import { initModelRefreshService, getModelRefreshService } from './model-fetchers'
 import { setFetcherPlatform } from './model-fetchers/runtime'
-import { setSessionPlatform } from './sessions'
 import { setSearchPlatform } from './search'
 import { setImageProcessor } from './image-utils'
 import { createApplicationMenu } from './menu'
@@ -97,7 +96,7 @@ import log, { isDebugMode, mainLog, getLogFilePath } from './logger'
 import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { registerPiModelResolver } from '@craft-agent/shared/config'
 import { getPiModelsForAuthProvider, getAllPiModels } from '@craft-agent/shared/config'
-import { initNotificationService, initBadgeIcon, initInstanceBadge } from './notifications'
+import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeCount } from './notifications'
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating } from './auto-update'
 import type { EventSink } from '../transport/types'
 import { validateGitBashPath } from './git-bash'
@@ -469,6 +468,17 @@ app.whenReady().then(async () => {
     // Inject platform into subsystems that can't receive it through HandlerDeps
     setFetcherPlatform(platform)
     setSessionPlatform(platform)
+    setSessionRuntimeHooks({
+      updateBadgeCount,
+      captureException: (error, context) => {
+        Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
+          tags: {
+            ...(context?.errorSource ? { errorSource: context.errorSource } : {}),
+            ...(context?.sessionId ? { sessionId: context.sessionId } : {}),
+          },
+        })
+      },
+    })
     setSearchPlatform(platform)
     setImageProcessor(platform.imageProcessor)
 

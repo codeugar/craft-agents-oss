@@ -15,17 +15,12 @@ import {
   requestClientOpenFileDialog,
 } from '../../transport/capabilities'
 
-export const HANDLED_CHANNELS = [
+export const CORE_HANDLED_CHANNELS = [
   IPC_CHANNELS.theme.GET_SYSTEM_PREFERENCE,
   IPC_CHANNELS.system.VERSIONS,
   IPC_CHANNELS.system.HOME_DIR,
   IPC_CHANNELS.system.IS_DEBUG_MODE,
   IPC_CHANNELS.debug.LOG,
-  IPC_CHANNELS.update.CHECK,
-  IPC_CHANNELS.update.GET_INFO,
-  IPC_CHANNELS.update.INSTALL,
-  IPC_CHANNELS.update.DISMISS,
-  IPC_CHANNELS.update.GET_DISMISSED,
   IPC_CHANNELS.shell.OPEN_URL,
   IPC_CHANNELS.shell.OPEN_FILE,
   IPC_CHANNELS.shell.SHOW_IN_FOLDER,
@@ -35,6 +30,14 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.gitbash.CHECK,
   IPC_CHANNELS.gitbash.BROWSE,
   IPC_CHANNELS.gitbash.SET_PATH,
+] as const
+
+export const GUI_HANDLED_CHANNELS = [
+  IPC_CHANNELS.update.CHECK,
+  IPC_CHANNELS.update.GET_INFO,
+  IPC_CHANNELS.update.INSTALL,
+  IPC_CHANNELS.update.DISMISS,
+  IPC_CHANNELS.update.GET_DISMISSED,
   IPC_CHANNELS.badge.REFRESH,
   IPC_CHANNELS.badge.SET_ICON,
   IPC_CHANNELS.window.GET_FOCUS_STATE,
@@ -57,8 +60,12 @@ export const HANDLED_CHANNELS = [
   IPC_CHANNELS.menu.SELECT_ALL,
 ] as const
 
-export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): void {
-  const { sessionManager } = deps
+export const HANDLED_CHANNELS = [
+  ...CORE_HANDLED_CHANNELS,
+  ...GUI_HANDLED_CHANNELS,
+] as const
+
+export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps): void {
   const windowManager = deps.windowManager
 
   // Get system theme preference (dark = true, light = false)
@@ -102,12 +109,11 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
       const branch = execSync('git rev-parse --abbrev-ref HEAD', {
         cwd: dirPath,
         encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],  // Suppress stderr output
-        timeout: 5000,  // 5 second timeout
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
       }).trim()
       return branch || null
     } catch {
-      // Not a git repo, git not installed, or other error
       return null
     }
   })
@@ -116,12 +122,10 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(IPC_CHANNELS.gitbash.CHECK, async () => {
     const platform = process.platform as 'win32' | 'darwin' | 'linux'
 
-    // Non-Windows platforms don't need Git Bash
     if (platform !== 'win32') {
       return { found: true, path: null, platform }
     }
 
-    // Check common Git Bash installation paths
     const commonPaths = [
       'C:\\Program Files\\Git\\bin\\bash.exe',
       'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
@@ -129,16 +133,13 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
       join(process.env.PROGRAMFILES || '', 'Git', 'bin', 'bash.exe'),
     ]
 
-    // Check if we have a persisted path from a previous session
     const persistedPath = getGitBashPath()
     if (persistedPath) {
       if (await isUsableGitBashPath(persistedPath)) {
         process.env.CLAUDE_CODE_GIT_BASH_PATH = persistedPath.trim()
         return { found: true, path: persistedPath, platform }
-      } else {
-        // Persisted path no longer valid, clear stale config and fall through to detection
-        clearGitBashPath()
       }
+      clearGitBashPath()
     }
 
     for (const bashPath of commonPaths) {
@@ -149,7 +150,6 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
       }
     }
 
-    // Try to find via 'where' command
     try {
       const result = execSync('where bash', {
         encoding: 'utf-8',
@@ -191,7 +191,6 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
       return { success: false, error: validation.error }
     }
 
-    // Persist to config and set env var so SDK subprocess can find Git Bash
     setGitBashPath(validation.path)
     process.env.CLAUDE_CODE_GIT_BASH_PATH = validation.path
     return { success: true }
@@ -202,8 +201,70 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     deps.platform.logger.info('[renderer]', ...args)
   })
 
+  // Shell operations - open URL in external browser (or handle craftagents:// internally)
+  server.handle(IPC_CHANNELS.shell.OPEN_URL, async (ctx, url: string) => {
+    deps.platform.logger.info('[OPEN_URL] Received request:', url)
+    try {
+      const parsed = new URL(url)
+
+      // Handle craftagents:// URLs internally via deep link handler (GUI only)
+      if (parsed.protocol === 'craftagents:') {
+        if (!windowManager) return
+        deps.platform.logger.info('[OPEN_URL] Handling as deep link')
+        const { handleDeepLink } = await import('../deep-link')
+        const resolver = (wcId: number) => windowManager.getClientIdForWindow(wcId)
+        const result = await handleDeepLink(url, windowManager, server.push.bind(server), resolver, ctx.clientId)
+        deps.platform.logger.info('[OPEN_URL] Deep link result:', result)
+        return
+      }
+
+      if (!['http:', 'https:', 'mailto:', 'craftdocs:'].includes(parsed.protocol)) {
+        throw new Error('Only http, https, mailto, craftdocs URLs are allowed')
+      }
+
+      const result = await requestClientOpenExternal(server, ctx.clientId, url)
+      if (!result.opened) {
+        deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${result.error}`)
+        throw new Error(`Cannot open URL on client: ${result.error}`)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      deps.platform.logger.error('openUrl error:', message)
+      throw new Error(`Failed to open URL: ${message}`)
+    }
+  })
+
+  server.handle(IPC_CHANNELS.shell.OPEN_FILE, async (ctx, path: string) => {
+    try {
+      const absolutePath = resolve(path)
+      const safePath = await validateFilePath(absolutePath)
+      const result = await requestClientOpenPath(server, ctx.clientId, safePath)
+      if (result.error) throw new Error(result.error)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      deps.platform.logger.error('openFile error:', message)
+      throw new Error(`Failed to open file: ${message}`)
+    }
+  })
+
+  server.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (ctx, path: string) => {
+    try {
+      const absolutePath = resolve(path)
+      const safePath = await validateFilePath(absolutePath)
+      await requestClientShowInFolder(server, ctx.clientId, safePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      deps.platform.logger.error('showInFolder error:', message)
+      throw new Error(`Failed to show in folder: ${message}`)
+    }
+  })
+}
+
+export function registerSystemGuiHandlers(server: RpcServer, deps: HandlerDeps): void {
+  const { sessionManager } = deps
+  const windowManager = deps.windowManager
+
   // Auto-update handlers
-  // Manual check from UI - don't auto-download (user might be on metered connection)
   server.handle(IPC_CHANNELS.update.CHECK, async () => {
     const { checkForUpdates } = await import('../auto-update')
     return checkForUpdates({ autoDownload: false })
@@ -219,87 +280,14 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     return installUpdate()
   })
 
-  // Dismiss update for this version (persists across restarts)
   server.handle(IPC_CHANNELS.update.DISMISS, async (_ctx, version: string) => {
     const { setDismissedUpdateVersion } = await import('@craft-agent/shared/config')
     setDismissedUpdateVersion(version)
   })
 
-  // Get dismissed version
   server.handle(IPC_CHANNELS.update.GET_DISMISSED, async () => {
     const { getDismissedUpdateVersion } = await import('@craft-agent/shared/config')
     return getDismissedUpdateVersion()
-  })
-
-  // Shell operations - open URL in external browser (or handle craftagents:// internally)
-  server.handle(IPC_CHANNELS.shell.OPEN_URL, async (ctx, url: string) => {
-    deps.platform.logger.info('[OPEN_URL] Received request:', url)
-    try {
-      // Validate URL format
-      const parsed = new URL(url)
-
-      // Handle craftagents:// URLs internally via deep link handler
-      // This ensures ?window= params work correctly for "Open in New Window"
-      if (parsed.protocol === 'craftagents:') {
-        if (!windowManager) return  // headless — deep links require GUI windows
-        deps.platform.logger.info('[OPEN_URL] Handling as deep link')
-        const { handleDeepLink } = await import('../deep-link')
-        const resolver = (wcId: number) => windowManager.getClientIdForWindow(wcId)
-        const result = await handleDeepLink(url, windowManager, server.push.bind(server), resolver, ctx.clientId)
-        deps.platform.logger.info('[OPEN_URL] Deep link result:', result)
-        return
-      }
-
-      // External URLs - open in default browser
-      if (!['http:', 'https:', 'mailto:', 'craftdocs:'].includes(parsed.protocol)) {
-        throw new Error('Only http, https, mailto, craftdocs URLs are allowed')
-      }
-
-      // Route through client capability so browser opens on the user's machine (not the server)
-      const result = await requestClientOpenExternal(server, ctx.clientId, url)
-      if (!result.opened) {
-        deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${result.error}`)
-        throw new Error(`Cannot open URL on client: ${result.error}`)
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      deps.platform.logger.error('openUrl error:', message)
-      throw new Error(`Failed to open URL: ${message}`)
-    }
-  })
-
-  // Shell operations - open file in default application (routed to client)
-  server.handle(IPC_CHANNELS.shell.OPEN_FILE, async (ctx, path: string) => {
-    try {
-      // Resolve relative paths to absolute before validation
-      const absolutePath = resolve(path)
-      // Validate path is within allowed directories
-      const safePath = await validateFilePath(absolutePath)
-      // Route to client capability — opens file on the user's machine
-      const result = await requestClientOpenPath(server, ctx.clientId, safePath)
-      if (result.error) {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      deps.platform.logger.error('openFile error:', message)
-      throw new Error(`Failed to open file: ${message}`)
-    }
-  })
-
-  // Shell operations - show file in folder (routed to client — opens Finder/Explorer)
-  server.handle(IPC_CHANNELS.shell.SHOW_IN_FOLDER, async (ctx, path: string) => {
-    try {
-      // Resolve relative paths to absolute before validation
-      const absolutePath = resolve(path)
-      // Validate path is within allowed directories
-      const safePath = await validateFilePath(absolutePath)
-      await requestClientShowInFolder(server, ctx.clientId, safePath)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      deps.platform.logger.error('showInFolder error:', message)
-      throw new Error(`Failed to show in folder: ${message}`)
-    }
   })
 
   // Menu actions from renderer (for unified Craft menu)
@@ -307,9 +295,8 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     deps.platform.quit?.()
   })
 
-  // New Window: create a new window for the current workspace
   server.handle(IPC_CHANNELS.menu.NEW_WINDOW, async (ctx) => {
-    if (!windowManager) return  // headless — no-op
+    if (!windowManager) return
     const workspaceId = ctx.workspaceId ?? windowManager.getWorkspaceForWindow(ctx.webContentsId!)
     if (workspaceId) {
       windowManager.createWindow({ workspaceId })
@@ -415,7 +402,6 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     const { setNotificationsEnabled } = await import('@craft-agent/shared/config/storage')
     setNotificationsEnabled(enabled)
 
-    // If enabling, trigger a notification to request macOS permission
     if (enabled) {
       const { showNotification } = await import('../notifications')
       showNotification('Notifications enabled', 'You will be notified when tasks complete.', '', '')
@@ -426,7 +412,9 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
   server.handle(IPC_CHANNELS.badge.REFRESH, async () => {
     try {
       await sessionManager.waitForInit()
-    } catch { /* continue */ }
+    } catch {
+      // continue
+    }
     sessionManager.refreshBadge()
   })
 
@@ -439,4 +427,9 @@ export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): vo
     const { isAnyWindowFocused } = require('../notifications')
     return isAnyWindowFocused()
   })
+}
+
+export function registerSystemHandlers(server: RpcServer, deps: HandlerDeps): void {
+  registerSystemCoreHandlers(server, deps)
+  registerSystemGuiHandlers(server, deps)
 }

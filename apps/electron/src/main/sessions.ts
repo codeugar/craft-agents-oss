@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/electron/main'
 import type { EventSink } from '../transport/types'
 import type { PlatformServices } from '../runtime/platform'
 import { basename, join, normalize, isAbsolute, sep } from 'path'
@@ -21,7 +20,6 @@ import {
 import { getLlmConnection, getDefaultLlmConnection } from '@craft-agent/shared/config'
 import { sessionLog, isDebugMode, getLogFilePath } from './logger'
 import { PrivilegedExecutionBroker } from './privileged-execution-broker'
-import { updateBadgeCount } from './notifications'
 import { InitGate } from './init-gate'
 import {
   getWorkspaces,
@@ -90,6 +88,37 @@ let _platform: PlatformServices | null = null
 
 export function setSessionPlatform(platform: PlatformServices): void {
   _platform = platform
+}
+
+interface SessionRuntimeHooks {
+  updateBadgeCount: (count: number) => void
+  captureException: (error: unknown, context?: { errorSource?: string; sessionId?: string }) => void
+}
+
+const defaultSessionRuntimeHooks: SessionRuntimeHooks = {
+  updateBadgeCount: () => {},
+  captureException: (error, context) => {
+    const err = error instanceof Error ? error : new Error(String(error))
+    if (_platform?.captureError) {
+      _platform.captureError(err)
+      return
+    }
+    sessionLog.error('[runtime-hooks] captureException fallback:', {
+      errorSource: context?.errorSource,
+      sessionId: context?.sessionId,
+      message: err.message,
+      stack: err.stack,
+    })
+  },
+}
+
+let sessionRuntimeHooks: SessionRuntimeHooks = defaultSessionRuntimeHooks
+
+export function setSessionRuntimeHooks(hooks: Partial<SessionRuntimeHooks>): void {
+  sessionRuntimeHooks = {
+    ...sessionRuntimeHooks,
+    ...hooks,
+  }
 }
 
 function buildBackendHostRuntimeContext(): BackendHostRuntimeContext {
@@ -1718,7 +1747,7 @@ export class SessionManager {
    */
   refreshBadge(): void {
     const summary = this.getUnreadSummary()
-    updateBadgeCount(summary.totalUnreadSessions)
+    sessionRuntimeHooks.updateBadgeCount(summary.totalUnreadSessions)
   }
 
   /**
@@ -1727,8 +1756,8 @@ export class SessionManager {
   private emitUnreadSummaryChanged(): void {
     const summary = this.getUnreadSummary()
 
-    // Update badge directly in main process — no renderer relay needed
-    updateBadgeCount(summary.totalUnreadSessions)
+    // Update badge via runtime hook — host decides whether/how to render badges
+    sessionRuntimeHooks.updateBadgeCount(summary.totalUnreadSessions)
 
     if (!this.eventSink) return
 
@@ -4347,10 +4376,8 @@ export class SessionManager {
         sessionLog.error('Error message:', error instanceof Error ? error.message : String(error))
         sessionLog.error('Error stack:', error instanceof Error ? error.stack : 'No stack')
 
-        // Report chat/SDK errors to Sentry for crash tracking
-        Sentry.captureException(error, {
-          tags: { errorSource: 'chat', sessionId },
-        })
+        // Report chat/SDK errors via runtime hooks (Electron can forward to Sentry)
+        sessionRuntimeHooks.captureException(error, { errorSource: 'chat', sessionId })
 
         sendSpan.mark('chat.error')
         sendSpan.setMetadata('error', error instanceof Error ? error.message : String(error))
@@ -4594,10 +4621,8 @@ export class SessionManager {
         next.messageId
       ).catch(err => {
         sessionLog.error('Error processing queued message:', err)
-        // Report queued message failures to Sentry — these indicate SDK/chat pipeline errors
-        Sentry.captureException(err, {
-          tags: { errorSource: 'chat-queue', sessionId },
-        })
+        // Report queued message failures via runtime hooks
+        sessionRuntimeHooks.captureException(err, { errorSource: 'chat-queue', sessionId })
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -5444,10 +5469,8 @@ To view this task's output:
             } catch (retryError) {
               managed.authRetryInProgress = false
               sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
-              // Report auth retry failures to Sentry — indicates credential/SDK issues
-              Sentry.captureException(retryError, {
-                tags: { errorSource: 'auth-retry', sessionId },
-              })
+              // Report auth retry failures via runtime hooks
+              sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
               // Show the original error to the user since retry failed
               const failedMessage: Message = {
                 id: generateMessageId(),

@@ -5,7 +5,7 @@ import { registerLabelsHandlers } from './labels'
 import { registerStatusesHandlers } from './statuses'
 import { registerSkillsHandlers } from './skills'
 import { registerFilesHandlers } from './files'
-import { registerSystemHandlers } from './system'
+import { registerSystemCoreHandlers, registerSystemGuiHandlers } from './system'
 import { registerAuthHandlers } from './auth'
 import { registerSettingsHandlers } from './settings'
 import { registerSourcesHandlers } from './sources'
@@ -17,12 +17,12 @@ import { registerBrowserHandlers } from './browser'
 import { registerOAuthHandlers } from './oauth'
 import { registerOnboardingHandlers } from '../onboarding'
 
-export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
+export function registerCoreRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
   registerLabelsHandlers(server, deps)
   registerStatusesHandlers(server, deps)
   registerSkillsHandlers(server, deps)
   registerFilesHandlers(server, deps)
-  registerSystemHandlers(server, deps)
+  registerSystemCoreHandlers(server, deps)
   registerAuthHandlers(server, deps)
   registerSettingsHandlers(server, deps)
   registerSourcesHandlers(server, deps)
@@ -30,7 +30,16 @@ export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps): vo
   registerAutomationsHandlers(server, deps)
   registerWorkspaceHandlers(server, deps)
   registerSessionsHandlers(server, deps)
-  registerBrowserHandlers(server, deps)
   registerOAuthHandlers(server, deps)
   registerOnboardingHandlers(server, deps)
+}
+
+export function registerGuiRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
+  registerSystemGuiHandlers(server, deps)
+  registerBrowserHandlers(server, deps)
+}
+
+export function registerAllRpcHandlers(server: RpcServer, deps: HandlerDeps): void {
+  registerCoreRpcHandlers(server, deps)
+  registerGuiRpcHandlers(server, deps)
 }
