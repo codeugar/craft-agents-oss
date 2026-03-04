@@ -64,10 +64,9 @@ import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/intercep
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import type { Message, StoredAttachment } from '@craft-agent/core/types'
+import type { Message, StoredAttachment, ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, type LoadedSkill } from '@craft-agent/shared/skills'
-import type { ToolDisplayMeta } from '@craft-agent/core/types'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
@@ -102,6 +101,8 @@ interface SessionRuntimeHooks {
 
 const defaultSessionRuntimeHooks: SessionRuntimeHooks = {
   updateBadgeCount: () => {},
+  onSessionStarted: () => {},
+  onSessionStopped: () => {},
   captureException: (error, context) => {
     const err = error instanceof Error ? error : new Error(String(error))
     if (_platform?.captureError) {
@@ -115,8 +116,6 @@ const defaultSessionRuntimeHooks: SessionRuntimeHooks = {
       stack: err.stack,
     })
   },
-  onSessionStarted: () => {},
-  onSessionStopped: () => {},
 }
 
 let sessionRuntimeHooks: SessionRuntimeHooks = defaultSessionRuntimeHooks

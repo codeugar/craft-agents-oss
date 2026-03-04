@@ -477,8 +477,11 @@ app.whenReady().then(async () => {
     if (!isClientOnly) {
       setFetcherPlatform(platform)
       setSessionPlatform(platform)
+      const { onSessionStarted, onSessionStopped } = await import('./power-manager')
       setSessionRuntimeHooks({
         updateBadgeCount,
+        onSessionStarted,
+        onSessionStopped,
         captureException: (error, context) => {
           Sentry.captureException(error instanceof Error ? error : new Error(String(error)), {
             tags: {
