@@ -18,7 +18,7 @@ import {
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
 import { getLlmConnection, getDefaultLlmConnection } from '@craft-agent/shared/config'
-import { PrivilegedExecutionBroker } from './privileged-execution-broker'
+import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { InitGate } from '@craft-agent/server-core/domain'
 import {
   getWorkspaces,
@@ -76,7 +76,7 @@ import { AutomationSystem, AUTOMATIONS_HISTORY_FILE, type AutomationSystemMetada
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
-import { resizeImageForAPI, resizeIconBuffer } from './image-utils'
+import { resizeImageForAPI, resizeIconBuffer } from '@craft-agent/server-core/services'
 export { sanitizeForTitle }
 
 // Module-level platform ref — set once during init via setSessionPlatform()

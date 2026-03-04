@@ -73,8 +73,7 @@ import type { HandlerDeps } from './handlers/handler-deps'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import { WsRpcServer } from '../transport/server'
 import { initModelRefreshService, getModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
-import { setSearchPlatform } from './search'
-import { setImageProcessor } from './image-utils'
+import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
 import { createApplicationMenu } from './menu'
 import { WindowManager } from './window-manager'
 import { loadWindowState, saveWindowState } from './window-state'
@@ -98,7 +97,7 @@ import { getPiModelsForAuthProvider, getAllPiModels } from '@craft-agent/shared/
 import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeCount } from './notifications'
 import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating } from './auto-update'
 import type { EventSink } from '@craft-agent/server-core/transport'
-import { validateGitBashPath } from './git-bash'
+import { validateGitBashPath } from '@craft-agent/server-core/services'
 
 // Initialize electron-log for renderer process support
 log.initialize()

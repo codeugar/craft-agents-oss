@@ -6,7 +6,7 @@ import { IPC_CHANNELS, type FileAttachment, type StoredAttachment } from '../../
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { resizeImageForAPI, getImageSize } from '../image-utils'
+import { resizeImageForAPI, getImageSize } from '@craft-agent/server-core/services'
 import { MarkItDown } from 'markitdown-js'
 import { realpath } from 'fs/promises'
 import type { RpcServer } from '@craft-agent/server-core/transport'

@@ -12,7 +12,8 @@
     "./handlers": "./src/handlers/index.ts",
     "./bootstrap": "./src/bootstrap/index.ts",
     "./model-fetchers": "./src/model-fetchers/index.ts",
-    "./domain": "./src/domain/index.ts"
+    "./domain": "./src/domain/index.ts",
+    "./services": "./src/services/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

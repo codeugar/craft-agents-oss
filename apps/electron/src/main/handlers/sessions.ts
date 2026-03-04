@@ -329,7 +329,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       return []
     }
 
-    const { searchSessions } = await import('../search')
+    const { searchSessions } = await import('@craft-agent/server-core/services')
     const { getWorkspaceSessionsPath } = await import('@craft-agent/shared/workspaces')
 
     const sessionsDir = getWorkspaceSessionsPath(workspace.rootPath)

@@ -9,8 +9,7 @@ import { registerCoreRpcHandlers } from '../main/handlers/index'
 import { cleanupSessionFileWatchForClient } from '../main/handlers/sessions'
 import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '../main/sessions'
 import { initModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
-import { setSearchPlatform } from '../main/search'
-import { setImageProcessor } from '../main/image-utils'
+import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
 import type { HandlerDeps } from '../main/handlers/handler-deps'
 
 const bundledAssetsRoot = join(import.meta.dir, '..', '..')
