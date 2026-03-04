@@ -222,10 +222,27 @@
         "@types/node": "^22.0.0",
       },
     },
+    "packages/server": {
+      "name": "@craft-agent/server",
+      "version": "0.6.0",
+      "bin": {
+        "craft-server": "src/index.ts",
+      },
+      "dependencies": {
+        "@craft-agent/core": "workspace:*",
+        "@craft-agent/server-core": "workspace:*",
+        "@craft-agent/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "^5.8.2",
+      },
+    },
     "packages/server-core": {
       "name": "@craft-agent/server-core",
       "version": "0.6.0",
       "dependencies": {
+        "@craft-agent/core": "workspace:*",
         "@craft-agent/shared": "workspace:*",
         "sharp": "0.34.5",
         "ws": "^8.19.0",
@@ -515,6 +532,8 @@
     "@craft-agent/marketing": ["@craft-agent/marketing@workspace:apps/marketing"],
 
     "@craft-agent/pi-agent-server": ["@craft-agent/pi-agent-server@workspace:packages/pi-agent-server"],
+
+    "@craft-agent/server": ["@craft-agent/server@workspace:packages/server"],
 
     "@craft-agent/server-core": ["@craft-agent/server-core@workspace:packages/server-core"],
 
@@ -3468,6 +3487,8 @@
 
     "@craft-agent/pi-agent-server/@types/node": ["@types/node@22.19.6", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-qm+G8HuG6hOHQigsi7VGuLjUVu6TtBo/F05zvX04Mw2uCg9Dv0Qxy3Qw7j41SidlTcl5D/5yg0SEZqOB+EqZnQ=="],
 
+    "@craft-agent/server/@types/node": ["@types/node@22.19.6", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-qm+G8HuG6hOHQigsi7VGuLjUVu6TtBo/F05zvX04Mw2uCg9Dv0Qxy3Qw7j41SidlTcl5D/5yg0SEZqOB+EqZnQ=="],
+
     "@craft-agent/server-core/@types/node": ["@types/node@22.19.6", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-qm+G8HuG6hOHQigsi7VGuLjUVu6TtBo/F05zvX04Mw2uCg9Dv0Qxy3Qw7j41SidlTcl5D/5yg0SEZqOB+EqZnQ=="],
 
     "@craft-agent/session-mcp-server/@types/node": ["@types/node@22.19.6", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-qm+G8HuG6hOHQigsi7VGuLjUVu6TtBo/F05zvX04Mw2uCg9Dv0Qxy3Qw7j41SidlTcl5D/5yg0SEZqOB+EqZnQ=="],
@@ -3943,6 +3964,8 @@
     "@craft-agent/pi-agent-server/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
     "@craft-agent/server-core/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+
+    "@craft-agent/server/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
     "@craft-agent/session-mcp-server/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
