@@ -119,7 +119,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { PanelHeader } from "./PanelHeader"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
-import { PANEL_GAP, PANEL_EDGE_INSET, RADIUS_EDGE, RADIUS_INNER } from "./panel-constants"
+import {
+  PANEL_GAP,
+  PANEL_EDGE_INSET,
+  PANEL_SASH_HALF_HIT_WIDTH,
+  PANEL_SASH_HIT_WIDTH,
+  PANEL_SASH_LINE_WIDTH,
+  PANEL_STACK_VERTICAL_OVERFLOW,
+  RADIUS_EDGE,
+  RADIUS_INNER,
+} from "./panel-constants"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
@@ -3180,15 +3189,23 @@ function AppShellContent({
             }
           }}
           onMouseLeave={() => { if (!isResizing) setSidebarHandleY(null) }}
-          className="absolute top-0 w-3 h-full cursor-col-resize z-panel flex justify-center"
+          className="absolute cursor-col-resize z-panel flex justify-center"
           style={{
-            left: isSidebarVisible ? sidebarWidth - 3 : -6,
+            width: PANEL_SASH_HIT_WIDTH,
+            top: PANEL_STACK_VERTICAL_OVERFLOW,
+            bottom: PANEL_STACK_VERTICAL_OVERFLOW,
+            left: isSidebarVisible
+              ? sidebarWidth + (PANEL_GAP / 2) - PANEL_SASH_HALF_HIT_WIDTH
+              : -PANEL_GAP,
             transition: isResizing === 'sidebar' ? undefined : 'left 0.15s ease-out',
           }}
         >
           <div
-            className="w-0.5 h-full"
-            style={getResizeGradientStyle(sidebarHandleY)}
+            className="h-full"
+            style={{
+              ...getResizeGradientStyle(sidebarHandleY, resizeHandleRef.current?.clientHeight ?? null),
+              width: PANEL_SASH_LINE_WIDTH,
+            }}
           />
         </div>
         )}
@@ -3205,15 +3222,25 @@ function AppShellContent({
             }
           }}
           onMouseLeave={() => { if (isResizing !== 'session-list') setSessionListHandleY(null) }}
-          className="absolute top-0 w-3 h-full cursor-col-resize z-panel flex justify-center"
+          className="absolute cursor-col-resize z-panel flex justify-center"
           style={{
-            left: (isSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) + sessionListWidth - 2,
+            width: PANEL_SASH_HIT_WIDTH,
+            top: PANEL_STACK_VERTICAL_OVERFLOW,
+            bottom: PANEL_STACK_VERTICAL_OVERFLOW,
+            left:
+              (isSidebarVisible ? sidebarWidth + PANEL_GAP : PANEL_EDGE_INSET) +
+              sessionListWidth +
+              (PANEL_GAP / 2) -
+              PANEL_SASH_HALF_HIT_WIDTH,
             transition: isResizing === 'session-list' ? undefined : 'left 0.15s ease-out',
           }}
         >
           <div
-            className="w-0.5 h-full"
-            style={getResizeGradientStyle(sessionListHandleY)}
+            className="h-full"
+            style={{
+              ...getResizeGradientStyle(sessionListHandleY, sessionListHandleRef.current?.clientHeight ?? null),
+              width: PANEL_SASH_LINE_WIDTH,
+            }}
           />
         </div>
         )}
