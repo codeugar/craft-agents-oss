@@ -1,7 +1,7 @@
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import { IPC_CHANNELS } from '../../shared/types'
+import { IPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from './handler-deps'

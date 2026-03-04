@@ -1,4 +1,4 @@
-import { IPC_CHANNELS, type LlmConnectionSetup } from '../../shared/types'
+import { IPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
 import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import {
@@ -182,7 +182,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
   // Unified connection test — uses the agent factory to spawn a real agent subprocess
   // and validate credentials via runMiniCompletion(). Same code path as actual chat.
-  server.handle(IPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('../../shared/types').TestLlmConnectionParams): Promise<import('../../shared/types').TestLlmConnectionResult> => {
+  server.handle(IPC_CHANNELS.settings.TEST_LLM_CONNECTION_SETUP, async (_ctx, params: import('@craft-agent/shared/protocol').TestLlmConnectionParams): Promise<import('@craft-agent/shared/protocol').TestLlmConnectionResult> => {
     const { provider, apiKey, baseUrl, model, piAuthProvider } = params
     const trimmedKey = apiKey?.trim()
 

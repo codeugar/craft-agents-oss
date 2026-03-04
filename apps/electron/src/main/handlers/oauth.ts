@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { IPC_CHANNELS } from '../../shared/types'
+import { IPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { loadSource, loadWorkspaceSources, getSourceCredentialManager } from '@craft-agent/shared/sources'
 import { createPendingFlow } from '@craft-agent/shared/auth'

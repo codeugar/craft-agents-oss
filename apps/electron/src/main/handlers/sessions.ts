@@ -1,6 +1,7 @@
 import { readFile, writeFile, stat } from 'fs/promises'
 import { join } from 'path'
-import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMessageOptions, type SessionEvent } from '../../shared/types'
+import { IPC_CHANNELS, type FileAttachment, type SendMessageOptions, type SessionEvent } from '@craft-agent/shared/protocol'
+import type { StoredAttachment } from '@craft-agent/core/types'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
@@ -36,10 +37,10 @@ export function cleanupSessionFileWatchForClient(clientId: string): void {
 // Recursive directory scanner for session files
 // Filters out internal files (session.jsonl) and hidden files (. prefix)
 // Returns only non-empty directories
-async function scanSessionDirectory(dirPath: string): Promise<import('../../shared/types').SessionFile[]> {
+async function scanSessionDirectory(dirPath: string): Promise<import('@craft-agent/shared/protocol').SessionFile[]> {
   const { readdir, stat } = await import('fs/promises')
   const entries = await readdir(dirPath, { withFileTypes: true })
-  const files: import('../../shared/types').SessionFile[] = []
+  const files: import('@craft-agent/shared/protocol').SessionFile[] = []
 
   for (const entry of entries) {
     // Skip internal and hidden files
@@ -143,7 +144,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   })
 
   // Create a new session
-  server.handle(IPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => {
+  server.handle(IPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@craft-agent/shared/protocol').CreateSessionOptions) => {
     const end = perf.start('ipc.createSession', { workspaceId })
     const session = sessionManager.createSession(workspaceId, options)
     end()
@@ -211,7 +212,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Respond to a credential request (secure auth input)
   // Returns true if the response was delivered, false if agent/session is gone
-  server.handle(IPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_ctx, sessionId: string, requestId: string, response: import('../../shared/types').CredentialResponse) => {
+  server.handle(IPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL, async (_ctx, sessionId: string, requestId: string, response: import('@craft-agent/shared/protocol').CredentialResponse) => {
     return sessionManager.respondToCredential(sessionId, requestId, response)
   })
 
@@ -223,7 +224,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(IPC_CHANNELS.sessions.COMMAND, async (
     _ctx,
     sessionId: string,
-    command: import('../../shared/types').SessionCommand
+    command: import('@craft-agent/shared/protocol').SessionCommand
   ) => {
     switch (command.type) {
       case 'flag':

@@ -1,6 +1,6 @@
 import { appendFile, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { IPC_CHANNELS } from '../../shared/types'
+import { IPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
@@ -64,11 +64,11 @@ export const HANDLED_CHANNELS = [
 export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const log = deps.platform.logger
 
-  server.handle(IPC_CHANNELS.automations.TEST, async (_ctx, payload: import('../../shared/types').TestAutomationPayload) => {
+  server.handle(IPC_CHANNELS.automations.TEST, async (_ctx, payload: import('@craft-agent/shared/protocol').TestAutomationPayload) => {
     const workspace = getWorkspaceByNameOrId(payload.workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const results: import('../../shared/types').TestAutomationActionResult[] = []
+    const results: import('@craft-agent/shared/protocol').TestAutomationActionResult[] = []
     const { parsePromptReferences } = await import('@craft-agent/shared/automations')
 
     for (const action of payload.actions) {
@@ -116,7 +116,7 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
       }
     }
 
-    return { actions: results } satisfies import('../../shared/types').TestAutomationResult
+    return { actions: results } satisfies import('@craft-agent/shared/protocol').TestAutomationResult
   })
 
   // Automation enabled state management (toggle enabled/disabled in automations.json)
