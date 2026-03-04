@@ -12,7 +12,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "cd packages/shared && bun run tsc --noEmit",
-    "typecheck:all": "cd packages/core && bun run tsc --noEmit && cd ../shared && bun run tsc --noEmit && cd ../server-core && bun run tsc --noEmit && cd ../session-tools-core && bun run tsc --noEmit",
+    "typecheck:all": "cd packages/core && bun run tsc --noEmit && cd ../shared && bun run tsc --noEmit && cd ../server-core && bun run tsc --noEmit && cd ../server && bun run tsc --noEmit && cd ../session-tools-core && bun run tsc --noEmit",
+    "server:start": "bun run apps/electron/src/server/index.ts",
     "typecheck:electron": "cd apps/electron && bun run typecheck",
     "test:shared:llm-connections": "cd packages/shared && bun test tests/llm-connections.test.ts",
     "test:shared:models-pi": "cd packages/shared && bun test tests/models-pi.test.ts",
