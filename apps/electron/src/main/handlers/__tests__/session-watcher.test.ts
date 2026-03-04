@@ -74,6 +74,7 @@ function createTestHarness(sessionPaths: Map<string, string>) {
       resourcesPath: '',
       isPackaged: false,
       appVersion: '0.0.0-test',
+      isDebugMode: true,
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
       imageProcessor: { getMetadata: async () => null, process: async () => Buffer.from('') },
     } as unknown as HandlerDeps['platform'],

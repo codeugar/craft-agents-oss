@@ -7,7 +7,7 @@
 import type { ModelFetcher, ModelFetchResult, ModelFetcherCredentials } from '@craft-agent/shared/config'
 import type { LlmConnection } from '@craft-agent/shared/config'
 import { fetchBackendModels } from '@craft-agent/shared/agent/backend'
-import { handlerLog } from '../logger'
+import { handlerLog } from './runtime'
 import { getHostRuntime } from './runtime'
 
 const ANTHROPIC_TIMEOUT_MS = 30_000

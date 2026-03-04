@@ -20,7 +20,7 @@ import {
   getModelsForProviderType,
 } from '@craft-agent/shared/config'
 import { MODEL_FETCHERS } from './registry'
-import { handlerLog } from '../logger'
+import { handlerLog } from './runtime'
 
 // ============================================================
 // Types

@@ -59,5 +59,27 @@ export interface PlatformServices {
 
   // -- Observability --
   logger: Logger
+  isDebugMode: boolean
+  getLogFilePath?(): string | undefined
   captureError?(error: Error): void
+}
+
+// ── Logger helpers ──────────────────────────────────────────────────────────
+
+/** Console-based Logger for use before platform initialization. */
+export const CONSOLE_LOGGER: Logger = {
+  info: (...args: unknown[]) => console.log(...args),
+  warn: (...args: unknown[]) => console.warn(...args),
+  error: (...args: unknown[]) => console.error(...args),
+  debug: (...args: unknown[]) => console.debug(...args),
+}
+
+/** Create a Logger that prefixes every message with [scope]. */
+export function createScopedLogger(base: Logger, scope: string): Logger {
+  return {
+    info: (...args: unknown[]) => base.info(`[${scope}]`, ...args),
+    warn: (...args: unknown[]) => base.warn(`[${scope}]`, ...args),
+    error: (...args: unknown[]) => base.error(`[${scope}]`, ...args),
+    debug: (...args: unknown[]) => base.debug(`[${scope}]`, ...args),
+  }
 }

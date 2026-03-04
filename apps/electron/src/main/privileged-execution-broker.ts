@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-import { sessionLog } from './logger'
+import type { Logger } from '../runtime/platform'
 
 export interface PrivilegedExecutionRequest {
   requestId: string
@@ -32,6 +32,8 @@ const AUDIT_LOG_PATH = join(homedir(), '.craft-agent', 'logs', 'privileged-actio
  */
 export class PrivilegedExecutionBroker {
   private pending = new Map<string, PendingPrivilegedRequest>()
+
+  constructor(private logger: Logger) {}
 
   createRequest(input: {
     requestId: string
@@ -178,7 +180,7 @@ export class PrivilegedExecutionBroker {
       await mkdir(dirname(AUDIT_LOG_PATH), { recursive: true })
       await appendFile(AUDIT_LOG_PATH, `${JSON.stringify({ timestamp: new Date().toISOString(), ...payload })}\n`, 'utf8')
     } catch (error) {
-      sessionLog.warn('[PrivilegedExecutionBroker] Failed to write audit log:', error)
+      this.logger.warn('[PrivilegedExecutionBroker] Failed to write audit log:', error)
     }
   }
 }

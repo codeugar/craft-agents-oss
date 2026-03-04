@@ -8,8 +8,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
 import { resolveBackendHostTooling } from '@craft-agent/shared/agent/backend';
-import { handlerLog, searchLog } from './logger';
-import type { PlatformServices } from '../runtime/platform';
+import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '../runtime/platform';
 
 // Track current search process to cancel on new search
 let currentSearchProcess: ChildProcess | null = null;
@@ -17,8 +16,14 @@ let currentSearchProcess: ChildProcess | null = null;
 // Module-level platform ref — set once during init via setSearchPlatform()
 let _platform: PlatformServices | null = null;
 
+// Scoped loggers — upgraded from console fallback when setSearchPlatform() is called
+let handlerLog: Logger = createScopedLogger(CONSOLE_LOGGER, 'handler');
+let searchLog: Logger = createScopedLogger(CONSOLE_LOGGER, 'search');
+
 export function setSearchPlatform(platform: PlatformServices): void {
   _platform = platform;
+  handlerLog = createScopedLogger(platform.logger, 'handler');
+  searchLog = createScopedLogger(platform.logger, 'search');
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { EventSink } from '../transport/types'
-import type { PlatformServices } from '../runtime/platform'
+import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '../runtime/platform'
 import { basename, join, normalize, isAbsolute, sep } from 'path'
 import { existsSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir, realpath } from 'fs/promises'
@@ -18,7 +18,6 @@ import {
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
 import { getLlmConnection, getDefaultLlmConnection } from '@craft-agent/shared/config'
-import { sessionLog, isDebugMode, getLogFilePath } from './logger'
 import { PrivilegedExecutionBroker } from './privileged-execution-broker'
 import { InitGate } from './init-gate'
 import {
@@ -86,8 +85,13 @@ export { sanitizeForTitle }
 // Module-level platform ref — set once during init via setSessionPlatform()
 let _platform: PlatformServices | null = null
 
+// Scoped logger — upgraded from console fallback when setSessionPlatform() is called.
+// Named `sessionLog` so all ~30 existing call sites remain unchanged.
+let sessionLog: Logger = createScopedLogger(CONSOLE_LOGGER, 'session')
+
 export function setSessionPlatform(platform: PlatformServices): void {
   _platform = platform
+  sessionLog = createScopedLogger(platform.logger, 'session')
 }
 
 interface SessionRuntimeHooks {
@@ -843,7 +847,7 @@ export class SessionManager {
     commandHash?: string
   }> = new Map()
   // Privileged approval binding + audit logger
-  private privilegedExecutionBroker = new PrivilegedExecutionBroker()
+  private privilegedExecutionBroker = new PrivilegedExecutionBroker(sessionLog)
   // Session-local admin remember windows (exact command hash binding)
   private adminRememberApprovals: Map<string, {
     createdAt: number
@@ -2282,7 +2286,7 @@ export class SessionManager {
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
         systemPromptPreset: managed.systemPromptPreset,
-        debugMode: isDebugMode ? { enabled: true, logFilePath: getLogFilePath() } : undefined,
+        debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
         onImageResize: async (filePath: string, maxSizeBytes: number): Promise<string | null> => {
           try {

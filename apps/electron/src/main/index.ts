@@ -462,6 +462,8 @@ app.whenReady().then(async () => {
         },
       },
       logger: log,
+      isDebugMode,
+      getLogFilePath,
       captureError: (err) => Sentry.captureException(err),
     }
 

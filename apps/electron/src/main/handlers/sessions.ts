@@ -4,7 +4,6 @@ import { IPC_CHANNELS, type FileAttachment, type StoredAttachment, type SendMess
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { perf } from '@craft-agent/shared/utils'
 import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
-import { searchLog } from '../logger'
 import { pushTyped, type RpcServer } from '../../transport/types'
 import type { HandlerDeps } from './handler-deps'
 
@@ -322,7 +321,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
   // Search session content using ripgrep
   server.handle(IPC_CHANNELS.sessions.SEARCH_CONTENT, async (_ctx, workspaceId: string, query: string, searchId?: string) => {
     const id = searchId || Date.now().toString(36)
-    searchLog.info('ipc:request', { searchId: id, query })
+    log.info('[search]','ipc:request', { searchId: id, query })
 
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) {
@@ -350,7 +349,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     )
     const filteredResults = results.filter(r => !hiddenSessionIds.has(r.sessionId))
 
-    searchLog.info('ipc:response', { searchId: id, resultCount: filteredResults.length, totalFound: results.length })
+    log.info('[search]','ipc:response', { searchId: id, resultCount: filteredResults.length, totalFound: results.length })
     return filteredResults
   })
 

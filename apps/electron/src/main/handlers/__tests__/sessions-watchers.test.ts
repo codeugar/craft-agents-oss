@@ -56,6 +56,7 @@ describe('sessions file watchers', () => {
         resourcesPath: '',
         isPackaged: false,
         appVersion: '0.0.0-test',
+        isDebugMode: true,
         imageProcessor: {
           getMetadata: async () => null,
           process: async () => Buffer.from(''),

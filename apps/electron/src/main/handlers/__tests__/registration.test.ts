@@ -60,6 +60,7 @@ function createMockDeps(): HandlerDeps {
       resourcesPath: '',
       isPackaged: false,
       appVersion: '0.0.0-test',
+      isDebugMode: true,
       logger: console,
       imageProcessor: {
         getMetadata: async () => null,

@@ -3,12 +3,17 @@
  * Avoids circular imports (index.ts → registry.ts → fetchers → index.ts).
  * Must be initialized via setFetcherPlatform() before any model fetching.
  */
-import type { PlatformServices } from '../../runtime/platform'
+import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '../../runtime/platform'
 
 let _platform: PlatformServices | null = null
 
+// Scoped logger — upgraded from console fallback when setFetcherPlatform() is called.
+// ES module live binding: importers of `handlerLog` see the updated value automatically.
+export let handlerLog: Logger = createScopedLogger(CONSOLE_LOGGER, 'handler')
+
 export function setFetcherPlatform(platform: PlatformServices): void {
   _platform = platform
+  handlerLog = createScopedLogger(platform.logger, 'handler')
 }
 
 export function getHostRuntime() {

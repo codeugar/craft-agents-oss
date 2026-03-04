@@ -43,6 +43,7 @@ function createConsoleLogger(): Logger {
  */
 export function createHeadlessPlatform(): PlatformServices {
   const logger = createConsoleLogger()
+  const isDebugMode = process.env.CRAFT_DEBUG === 'true' || process.env.CRAFT_IS_PACKAGED !== 'true'
 
   return {
     appRootPath: process.env.CRAFT_APP_ROOT || process.cwd(),
@@ -74,6 +75,7 @@ export function createHeadlessPlatform(): PlatformServices {
     },
 
     logger,
+    isDebugMode,
 
     captureError: (err) => {
       logger.error('[captureError]', err.message, err.stack)
