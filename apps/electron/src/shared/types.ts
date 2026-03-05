@@ -534,8 +534,6 @@ export type SessionEvent =
 
 // Options for sendMessage
 export interface SendMessageOptions {
-  /** Enable ultrathink mode for extended reasoning */
-  ultrathinkEnabled?: boolean
   /** Skill slugs to activate for this message (from @mentions) */
   skillSlugs?: string[]
   /** Content badges for inline display (sources, skills with embedded icons) */

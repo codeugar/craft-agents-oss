@@ -54,7 +54,6 @@ import { Spinner, LoadingIndicator } from "@/components/ui/loading-indicator"
 // Full loading indicator with label
 <LoadingIndicator label="Loading..." />
 <LoadingIndicator label="Thinking..." showElapsed />  // With elapsed time
-<LoadingIndicator ultrathink />                       // Gradient animation
 ```
 
 The spinner is based on [SpinKit Grid](https://github.com/tobiasahlin/SpinKit):

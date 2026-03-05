@@ -62,7 +62,6 @@ export function storedToMessage(stored: StoredMessage): Message {
     errorDetails: stored.errorDetails,
     errorOriginal: stored.errorOriginal,
     errorCanRetry: stored.errorCanRetry,
-    ultrathink: stored.ultrathink,
     planPath: stored.planPath,
     // Auth-request fields
     authRequestId: stored.authRequestId,

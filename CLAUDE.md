@@ -34,7 +34,7 @@ bun run electron:dev         # Hot reload dev mode
 bun run electron:start       # Build & run Electron
 bun run viewer:dev           # Web viewer at http://localhost:5174
 bun run validate:dev         # High-signal validation suite for dev/PR
-bun run typecheck:all        # Type check core/shared/session-tools-core
+bun run typecheck:all        # Type check core/shared/session-tools-core + electron + ui
 bun run test:doc-tools       # Smoke tests for bundled document CLIs (pdf/xlsx/docx/pptx/img/ical/doc-diff/markitdown)
 ```
 

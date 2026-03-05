@@ -125,9 +125,6 @@ interface ChatDisplayProps {
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   // Advanced options
-  /** Enable ultrathink mode for extended reasoning */
-  ultrathinkEnabled?: boolean
-  onUltrathinkChange?: (enabled: boolean) => void
   /** Current permission mode */
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
@@ -394,8 +391,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   thinkingLevel = 'think',
   onThinkingLevelChange,
   // Advanced options
-  ultrathinkEnabled = false,
-  onUltrathinkChange,
   permissionMode = 'ask',
   onPermissionModeChange,
   enabledModes,
@@ -1622,8 +1617,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             {/* Active option badges and tasks - positioned above input */}
             {!compactMode && (
             <ActiveOptionBadges
-              ultrathinkEnabled={ultrathinkEnabled}
-              onUltrathinkChange={onUltrathinkChange}
               permissionMode={permissionMode}
               onPermissionModeChange={onPermissionModeChange}
               tasks={backgroundTasks}
@@ -1659,8 +1652,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onModelChange={onModelChange}
               thinkingLevel={thinkingLevel}
               onThinkingLevelChange={onThinkingLevelChange}
-              ultrathinkEnabled={ultrathinkEnabled}
-              onUltrathinkChange={onUltrathinkChange}
               permissionMode={permissionMode}
               onPermissionModeChange={onPermissionModeChange}
               enabledModes={enabledModes}
@@ -1942,7 +1933,6 @@ function MessageBubble({
         badges={message.badges}
         isPending={message.isPending}
         isQueued={message.isQueued}
-        ultrathink={message.ultrathink}
         onUrlClick={onOpenUrl}
         onFileClick={onOpenFile}
         compactMode={compactMode}
