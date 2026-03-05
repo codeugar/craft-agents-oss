@@ -336,6 +336,14 @@ function createAuthenticatedRegistry(): {
     authStorage.set(provider, credential);
     debugLog(`Injected ${credential.type} credential for provider: ${provider}`);
   } else if (initConfig?.apiKey) {
+    const hasCustomEndpoint = !!initConfig.baseUrl?.trim();
+    if (hasCustomEndpoint) {
+      throw new Error(
+        'Custom endpoint in Craft Agents Backend mode requires explicit provider selection. ' +
+        'Use a provider preset in Pi API key mode, or use Anthropic API key mode for arbitrary compatible endpoints.'
+      );
+    }
+
     authStorage.set('anthropic', { type: 'api_key', key: initConfig.apiKey });
     debugLog('Injected API key into auth storage (legacy fallback)');
   }
