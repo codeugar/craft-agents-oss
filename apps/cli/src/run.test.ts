@@ -330,7 +330,7 @@ describe('run command', () => {
     expect(args.workspaceDir).toBeUndefined()
   })
 
-  it('workspace:create is called when workspaceDir is set', async () => {
+  it('workspace:create returns ID used directly (no workspaces:get needed)', async () => {
     const { CliRpcClient } = await import('./client.ts')
 
     const client = new CliRpcClient(mockWsServer!.url, {
@@ -339,11 +339,25 @@ describe('run command', () => {
     })
     await client.connect()
 
-    // Simulate the workspace bootstrap path from cmdRun
-    await client.invoke('workspaces:create', '/tmp/ws', 'ci-workspace')
-    await client.invoke('workspaces:get')
+    // Simulate the workspace bootstrap path from cmdRun:
+    // workspaces:create returns { id }, which is used directly
+    const ws = (await client.invoke('workspaces:create', '/tmp/ws', 'ci-workspace')) as { id: string }
+    expect(ws.id).toBe('ws-1')
 
-    expect(mockWsServer!.invokedChannels[0]).toBe('workspaces:create')
+    // Then switchWorkspace is called with the returned ID
+    await client.invoke('window:switchWorkspace', ws.id)
+
+    // Session is created with the bootstrapped workspace ID
+    await client.invoke('sessions:create', ws.id, {
+      permissionMode: 'allow-all',
+      enabledSourceSlugs: ['craft-public'],
+    })
+
+    expect(mockWsServer!.invokedChannels).toEqual([
+      'workspaces:create',
+      'window:switchWorkspace',
+      'sessions:create',
+    ])
     expect(mockWsServer!.invokeArgs['workspaces:create']![0]).toEqual(['/tmp/ws', 'ci-workspace'])
 
     client.destroy()

@@ -460,9 +460,11 @@ async function cmdRun(args: CliArgs): Promise<void> {
     await client.connect()
 
     // Bootstrap workspace from directory if specified
+    let bootstrappedWorkspaceId: string | undefined
     if (args.workspaceDir) {
       const absPath = resolve(args.workspaceDir)
-      await client.invoke('workspaces:create', absPath, 'ci-workspace')
+      const ws = (await client.invoke('workspaces:create', absPath, 'ci-workspace')) as { id: string }
+      bootstrappedWorkspaceId = ws.id
       process.stderr.write(`Workspace registered: ${absPath}\n`)
     }
 
@@ -488,7 +490,11 @@ async function cmdRun(args: CliArgs): Promise<void> {
       }
     }
 
-    const workspaceId = await resolveWorkspace(client, args.workspace)
+    const workspaceId = bootstrappedWorkspaceId
+      ?? await resolveWorkspace(client, args.workspace)
+    if (bootstrappedWorkspaceId) {
+      await client.invoke('window:switchWorkspace', bootstrappedWorkspaceId).catch(() => {})
+    }
     if (!workspaceId) {
       err('No workspace found on server')
       process.exit(1)
