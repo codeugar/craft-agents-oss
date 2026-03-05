@@ -1,0 +1,115 @@
+---
+title: CLI Reference
+description: Complete command reference for the Craft Agents CLI client
+---
+
+# CLI Reference
+
+The `craft-cli` is a terminal client that connects to a running Craft Agent headless server over WebSocket. It provides commands for listing resources, managing sessions, sending messages with real-time streaming, and validating server health.
+
+## Connection Options
+
+| Flag | Env Variable | Default | Description |
+|------|-------------|---------|-------------|
+| `--url <ws[s]://...>` | `CRAFT_SERVER_URL` | — | Server WebSocket URL |
+| `--token <secret>` | `CRAFT_SERVER_TOKEN` | — | Authentication token |
+| `--workspace <id>` | — | auto-detect | Workspace ID |
+| `--timeout <ms>` | — | `10000` | Request timeout |
+| `--tls-ca <path>` | `CRAFT_TLS_CA` | — | Custom CA cert (self-signed TLS) |
+| `--json` | — | `false` | JSON output for scripting |
+| `--send-timeout <ms>` | — | `300000` | Timeout for `send` command |
+
+Flags override environment variables. If `--workspace` is omitted, the first available workspace is used automatically.
+
+## Commands
+
+### Info & Health
+
+| Command | Channel | Description |
+|---------|---------|-------------|
+| `ping` | handshake only | Verify connectivity — prints clientId and latency |
+| `health` | `credentials:healthCheck` | Check credential store health |
+| `versions` | `system:versions` | Show server runtime versions |
+
+### Resource Listing
+
+| Command | Channel | Description |
+|---------|---------|-------------|
+| `workspaces` | `workspaces:get` | List all workspaces (id, name, path) |
+| `sessions` | `sessions:get` | List sessions (id, name, preview, status) |
+| `connections` | `LLM_Connection:list` | List LLM connections |
+| `sources` | `sources:get` | List configured sources |
+
+### Session Operations
+
+| Command | Channel | Description |
+|---------|---------|-------------|
+| `session create [--name <n>] [--mode <m>]` | `sessions:create` | Create a new session |
+| `session messages <id>` | `sessions:getMessages` | Print message history |
+| `session delete <id>` | `sessions:delete` | Delete a session |
+| `cancel <id>` | `sessions:cancel` | Cancel in-progress processing |
+
+### Send Message (Streaming)
+
+```bash
+craft-cli send <session-id> <message>
+echo "Summarize this" | craft-cli send <session-id>
+```
+
+The `send` command subscribes to `session:event` and streams the AI response to stdout in real time:
+
+| Event Type | Output |
+|------------|--------|
+| `text_delta` | Text appended inline |
+| `tool_start` | `[tool: name — intent]` marker |
+| `tool_result` | Tool output (truncated to 200 chars) |
+| `error` | Error to stderr, exit code 1 |
+| `complete` | Newline, exit code 0 |
+| `interrupted` | `[interrupted]`, exit code 130 |
+
+### Raw RPC
+
+```bash
+craft-cli invoke <channel> [json-args...]   # Send any RPC channel
+craft-cli listen <channel>                   # Subscribe to push events
+```
+
+`invoke` sends a request to any channel and prints the response. `listen` subscribes to a push channel and prints events as they arrive (Ctrl+C to stop).
+
+### Validate Server
+
+```bash
+craft-cli --validate-server
+```
+
+Runs a 12-step integration test covering the full server lifecycle:
+
+1. Connect + handshake
+2. `credentials:healthCheck`
+3. `system:versions`
+4. `system:homeDir`
+5. `workspaces:get`
+6. `sessions:get`
+7. `LLM_Connection:list`
+8. `sources:get`
+9. `sessions:create` (temporary session)
+10. `sessions:getMessages`
+11. `sessions:delete` (cleanup)
+12. Disconnect
+
+Creates a temporary `__cli-validate-*` session and cleans it up. Continues on failure and reports a summary.
+
+Use `--json` for machine-readable output:
+
+```bash
+craft-cli --validate-server --json | jq '.results[] | select(.status == "FAIL")'
+```
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Connection timeout | Server not running | Verify server URL and that it's started |
+| `AUTH_FAILED` | Wrong token | Check `CRAFT_SERVER_TOKEN` matches |
+| `PROTOCOL_VERSION_UNSUPPORTED` | Version mismatch | Update CLI and server |
+| WebSocket error | Network/TLS issue | Use `--tls-ca` for self-signed certs |

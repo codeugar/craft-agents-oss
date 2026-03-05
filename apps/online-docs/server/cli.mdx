@@ -1,0 +1,144 @@
+---
+title: CLI Client
+description: Use the Craft Agents CLI to interact with the server from your terminal
+---
+
+# CLI Client
+
+The `craft-cli` is a terminal client for the Craft Agent headless server. It connects over WebSocket and lets you manage sessions, send messages with real-time streaming, and validate server health — all from the command line.
+
+## Quick Start
+
+### 1. Start the server
+
+```bash
+CRAFT_SERVER_TOKEN=$(openssl rand -hex 32) bun run packages/server/src/index.ts
+```
+
+### 2. Set connection details
+
+```bash
+export CRAFT_SERVER_URL=ws://127.0.0.1:9100
+export CRAFT_SERVER_TOKEN=<your-token>
+```
+
+### 3. Verify the connection
+
+```bash
+craft-cli ping
+# Connected: clientId=a1b2c3d4 latency=12ms
+```
+
+### 4. Start working
+
+```bash
+# List sessions
+craft-cli sessions
+
+# Send a message and stream the response
+craft-cli send <session-id> "What files changed in the last commit?"
+```
+
+## Common Workflows
+
+### Validate a Server Deployment
+
+After deploying or updating the server, run the built-in validation:
+
+```bash
+craft-cli --validate-server
+```
+
+This exercises 12 steps covering connectivity, credential health, workspace listing, session lifecycle, and cleanup. Use `--json` for CI-friendly output:
+
+```bash
+craft-cli --validate-server --json | jq '.failed'
+# 0 = all good
+```
+
+### Manage Sessions
+
+```bash
+# Create a session
+craft-cli session create --name "Code Review" --mode safe
+
+# List sessions
+craft-cli sessions
+
+# Send a message and stream the AI response
+craft-cli send <id> "Review the changes in src/auth/"
+
+# Cancel if needed
+craft-cli cancel <id>
+
+# Clean up
+craft-cli session delete <id>
+```
+
+### Stream AI Responses
+
+The `send` command connects to the session event stream and writes the AI response to stdout in real time:
+
+```bash
+craft-cli send abc-123 "Explain the authentication flow"
+```
+
+You can also pipe input:
+
+```bash
+cat error.log | craft-cli send abc-123 "What's causing these errors?"
+git diff HEAD~1 | craft-cli send abc-123 "Review this diff"
+```
+
+### Scripting with JSON Output
+
+Every command supports `--json` for machine-readable output:
+
+```bash
+# Get all workspace IDs
+craft-cli --json workspaces | jq -r '.[].id'
+
+# Count sessions
+craft-cli --json sessions | jq length
+
+# Create a session and capture the ID
+SESSION=$(craft-cli --json session create --name "CI" | jq -r '.id')
+```
+
+### CI/CD Integration
+
+Use the CLI to automate tasks in your pipeline:
+
+```bash
+#!/bin/bash
+set -e
+
+# Validate server is healthy
+craft-cli --validate-server --json | jq -e '.failed == 0'
+
+# Create a session for this CI run
+SESSION=$(craft-cli --json session create --name "CI-${CI_BUILD_ID}" | jq -r '.id')
+
+# Run the task
+craft-cli send "$SESSION" "Run the test suite and report any failures"
+
+# Clean up
+craft-cli session delete "$SESSION"
+```
+
+## Raw RPC Access
+
+For channels not wrapped as named commands, use the `invoke` escape hatch:
+
+```bash
+# Call any RPC channel directly
+craft-cli invoke system:homeDir
+craft-cli invoke sessions:get '"workspace-123"'
+
+# Subscribe to events
+craft-cli listen session:event
+```
+
+## Connection Options
+
+See the full [CLI Reference](/reference/cli) for all flags, environment variables, and troubleshooting.

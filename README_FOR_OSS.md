@@ -241,11 +241,83 @@ docker run -d \
   craft-agents-server
 ```
 
+## CLI Client
+
+A terminal client that connects to a running Craft Agent server over WebSocket (`ws://` or `wss://`). Use it for scripting, CI/CD pipelines, server validation, or when you prefer the command line.
+
+### Installation
+
+```bash
+# From the monorepo (requires Bun)
+bun run apps/cli/src/index.ts --help
+
+# Or add to your PATH
+alias craft-cli="bun run $(pwd)/apps/cli/src/index.ts"
+```
+
+### Connection
+
+The CLI reads connection details from flags or environment variables:
+
+```bash
+# Via environment (set once)
+export CRAFT_SERVER_URL=ws://127.0.0.1:9100
+export CRAFT_SERVER_TOKEN=<your-token>
+
+# Or via flags
+craft-cli --url ws://127.0.0.1:9100 --token <token> ping
+```
+
+For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificates.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `ping` | Verify connectivity (clientId + latency) |
+| `health` | Check credential store health |
+| `versions` | Show server runtime versions |
+| `workspaces` | List workspaces |
+| `sessions` | List sessions in workspace |
+| `connections` | List LLM connections |
+| `sources` | List configured sources |
+| `session create` | Create a session (`--name`, `--mode`) |
+| `session messages <id>` | Print session message history |
+| `session delete <id>` | Delete a session |
+| `send <id> <message>` | Send message and stream AI response |
+| `cancel <id>` | Cancel in-progress processing |
+| `invoke <channel> [args]` | Raw RPC call with JSON args |
+| `listen <channel>` | Subscribe to push events (Ctrl+C to stop) |
+| `--validate-server` | Multi-step server integration test |
+
+### Examples
+
+```bash
+# Quick connectivity check
+craft-cli ping
+
+# List sessions (human-readable)
+craft-cli sessions
+
+# Send a message and stream the AI response
+craft-cli send abc-123 "What files are in the current directory?"
+
+# Pipe input
+echo "Summarize this" | craft-cli send abc-123
+
+# JSON output for scripting
+craft-cli --json workspaces | jq '.[].name'
+
+# Validate the server is working correctly
+craft-cli --validate-server
+```
+
 ## Architecture
 
 ```
 craft-agent/
 ├── apps/
+│   ├── cli/                   # Terminal client (CLI)
 │   └── electron/              # Desktop GUI (primary)
 │       └── src/
 │           ├── main/          # Electron main process
