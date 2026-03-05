@@ -65,9 +65,9 @@ Sentry.setUser({ id: machineId })
 
 import { join, delimiter } from 'path'
 import { existsSync } from 'fs'
-import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from './sessions'
+import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@craft-agent/server-core/sessions'
 import { registerAllRpcHandlers } from './handlers/index'
-import { cleanupSessionFileWatchForClient } from './handlers/sessions'
+import { cleanupSessionFileWatchForClient } from '@craft-agent/server-core/handlers/rpc'
 import type { PlatformServices } from '../runtime/platform'
 import type { HandlerDeps } from './handlers/handler-deps'
 import type { RpcServer } from '@craft-agent/server-core/transport'

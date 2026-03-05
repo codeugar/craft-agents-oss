@@ -357,6 +357,7 @@ export class WsRpcServer implements RpcServer {
           type: 'handshake_ack',
           protocolVersion: PROTOCOL_VERSION,
           clientId,
+          registeredChannels: [...this.handlers.keys()],
         }
         this.safeSend(ws, serializeEnvelope(ack))
 

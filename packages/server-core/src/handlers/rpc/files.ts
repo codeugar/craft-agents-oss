@@ -166,7 +166,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
 
       // Get workspace slug from the calling window
-      const workspaceId = ctx.workspaceId ?? (deps.windowManager as any)?.getWorkspaceForWindow?.(ctx.webContentsId!)
+      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
       if (!workspaceId) {
         throw new Error('Cannot determine workspace for attachment storage')
       }

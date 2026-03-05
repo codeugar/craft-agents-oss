@@ -115,7 +115,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
       log.error('GET_SESSIONS continuing after initialization failure:', error)
     }
     const end = perf.start('ipc.getSessions')
-    const workspaceId = ctx.workspaceId ?? (deps.windowManager as any)?.getWorkspaceForWindow(ctx.webContentsId!)
+    const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     const sessions = sessionManager.getSessions(workspaceId ?? undefined)
     end()
     return sessions

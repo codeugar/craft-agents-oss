@@ -85,56 +85,66 @@ function createMockDeps(): HandlerDeps {
 }
 
 async function getExpectedChannels(): Promise<Set<string>> {
+  // Core handler channels (now in server-core)
   const [
     auth,
     automations,
-    browser,
     files,
     labels,
     llm,
     oauth,
     sessions,
-    settings,
+    coreSettings,
     skills,
     sources,
     statuses,
-    system,
-    workspace,
+    coreSystem,
+    coreWorkspace,
     onboarding,
   ] = await Promise.all([
-    import('../auth'),
-    import('../automations'),
+    import('@craft-agent/server-core/handlers/rpc/auth'),
+    import('@craft-agent/server-core/handlers/rpc/automations'),
+    import('@craft-agent/server-core/handlers/rpc/files'),
+    import('@craft-agent/server-core/handlers/rpc/labels'),
+    import('@craft-agent/server-core/handlers/rpc/llm-connections'),
+    import('@craft-agent/server-core/handlers/rpc/oauth'),
+    import('@craft-agent/server-core/handlers/rpc/sessions'),
+    import('@craft-agent/server-core/handlers/rpc/settings'),
+    import('@craft-agent/server-core/handlers/rpc/skills'),
+    import('@craft-agent/server-core/handlers/rpc/sources'),
+    import('@craft-agent/server-core/handlers/rpc/statuses'),
+    import('@craft-agent/server-core/handlers/rpc/system'),
+    import('@craft-agent/server-core/handlers/rpc/workspace'),
+    import('@craft-agent/server-core/handlers/rpc/onboarding'),
+  ])
+
+  // GUI handler channels (remain in electron)
+  const [browser, guiSystem, guiWorkspace, guiSettings] = await Promise.all([
     import('../browser'),
-    import('../files'),
-    import('../labels'),
-    import('../llm-connections'),
-    import('../oauth'),
-    import('../sessions'),
-    import('../settings'),
-    import('../skills'),
-    import('../sources'),
-    import('../statuses'),
     import('../system'),
     import('../workspace'),
-    import('../../onboarding'),
+    import('../settings'),
   ])
 
   return new Set([
     ...auth.HANDLED_CHANNELS,
     ...automations.HANDLED_CHANNELS,
-    ...browser.HANDLED_CHANNELS,
     ...files.HANDLED_CHANNELS,
     ...labels.HANDLED_CHANNELS,
     ...llm.HANDLED_CHANNELS,
     ...oauth.HANDLED_CHANNELS,
     ...sessions.HANDLED_CHANNELS,
-    ...settings.HANDLED_CHANNELS,
+    ...coreSettings.HANDLED_CHANNELS,
     ...skills.HANDLED_CHANNELS,
     ...sources.HANDLED_CHANNELS,
     ...statuses.HANDLED_CHANNELS,
-    ...system.HANDLED_CHANNELS,
-    ...workspace.HANDLED_CHANNELS,
+    ...coreSystem.CORE_HANDLED_CHANNELS,
+    ...coreWorkspace.CORE_HANDLED_CHANNELS,
     ...onboarding.HANDLED_CHANNELS,
+    ...browser.HANDLED_CHANNELS,
+    ...guiSystem.GUI_HANDLED_CHANNELS,
+    ...guiWorkspace.GUI_HANDLED_CHANNELS,
+    ...guiSettings.GUI_HANDLED_CHANNELS,
   ])
 }
 
@@ -172,7 +182,7 @@ describe('RPC handler registration', () => {
   })
 
   it('keeps onboarding channels in registration coverage', async () => {
-    const { HANDLED_CHANNELS } = await import('../../onboarding')
+    const { HANDLED_CHANNELS } = await import('@craft-agent/server-core/handlers/rpc/onboarding')
     const { registerAllRpcHandlers } = await import('../index')
 
     registerAllRpcHandlers(createMockServer(), createMockDeps())

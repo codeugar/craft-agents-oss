@@ -279,6 +279,9 @@ export interface ElectronAPI {
   onTransportConnectionStateChanged(callback: (state: TransportConnectionState) => void): () => void
   reconnectTransport(): Promise<void>
 
+  /** Check whether the server registered a handler for a given RPC channel. */
+  isChannelAvailable(channel: string): boolean
+
   // Auto-update
   checkForUpdates(): Promise<UpdateInfo>
   getUpdateInfo(): Promise<UpdateInfo>

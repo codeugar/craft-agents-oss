@@ -5,7 +5,7 @@
  */
 
 import type { HandlerDeps as BaseHandlerDeps } from '@craft-agent/server-core/handlers'
-import type { SessionManager } from '../sessions'
+import type { SessionManager } from '@craft-agent/server-core/sessions'
 import type { WindowManager } from '../window-manager'
 import type { BrowserPaneManager } from '../browser-pane-manager'
 import type { OAuthFlowStore } from '@craft-agent/shared/auth'

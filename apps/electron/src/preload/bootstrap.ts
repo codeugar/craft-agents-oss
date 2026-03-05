@@ -101,7 +101,7 @@ client.connect()
 
 // Build the full ElectronAPI proxy — identical shape to the IPC preload.
 // Methods return promises (via client.invoke), listeners return unsubscribe fns.
-const api = buildClientApi(client, CHANNEL_MAP)
+const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
 
 function formatTransportReason(state: TransportConnectionState): string {
   const err = state.lastError

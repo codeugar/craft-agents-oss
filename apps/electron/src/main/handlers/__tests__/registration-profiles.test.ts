@@ -84,6 +84,7 @@ function createMockDeps(): HandlerDeps {
 }
 
 async function getExpectedCoreChannels(): Promise<Set<string>> {
+  // Core handler channels (now in server-core)
   const [
     auth,
     automations,
@@ -100,20 +101,20 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     workspace,
     onboarding,
   ] = await Promise.all([
-    import('../auth'),
-    import('../automations'),
-    import('../files'),
-    import('../labels'),
-    import('../llm-connections'),
-    import('../oauth'),
-    import('../sessions'),
-    import('../settings'),
-    import('../skills'),
-    import('../sources'),
-    import('../statuses'),
-    import('../system'),
-    import('../workspace'),
-    import('../../onboarding'),
+    import('@craft-agent/server-core/handlers/rpc/auth'),
+    import('@craft-agent/server-core/handlers/rpc/automations'),
+    import('@craft-agent/server-core/handlers/rpc/files'),
+    import('@craft-agent/server-core/handlers/rpc/labels'),
+    import('@craft-agent/server-core/handlers/rpc/llm-connections'),
+    import('@craft-agent/server-core/handlers/rpc/oauth'),
+    import('@craft-agent/server-core/handlers/rpc/sessions'),
+    import('@craft-agent/server-core/handlers/rpc/settings'),
+    import('@craft-agent/server-core/handlers/rpc/skills'),
+    import('@craft-agent/server-core/handlers/rpc/sources'),
+    import('@craft-agent/server-core/handlers/rpc/statuses'),
+    import('@craft-agent/server-core/handlers/rpc/system'),
+    import('@craft-agent/server-core/handlers/rpc/workspace'),
+    import('@craft-agent/server-core/handlers/rpc/onboarding'),
   ])
 
   return new Set([
@@ -124,7 +125,7 @@ async function getExpectedCoreChannels(): Promise<Set<string>> {
     ...llm.HANDLED_CHANNELS,
     ...oauth.HANDLED_CHANNELS,
     ...sessions.HANDLED_CHANNELS,
-    ...settings.CORE_HANDLED_CHANNELS,
+    ...settings.HANDLED_CHANNELS,
     ...skills.HANDLED_CHANNELS,
     ...sources.HANDLED_CHANNELS,
     ...statuses.HANDLED_CHANNELS,

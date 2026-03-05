@@ -42,6 +42,8 @@ export interface MessageEnvelope {
   webContentsId?: number
   /** Client capabilities advertised on handshake. */
   clientCapabilities?: string[]
+  /** Server-registered channels, sent in handshake_ack. Clients use this to avoid calling unavailable channels. */
+  registeredChannels?: string[]
 }
 
 export interface WireError {

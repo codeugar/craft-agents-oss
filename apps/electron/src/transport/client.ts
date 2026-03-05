@@ -116,6 +116,7 @@ export class WsRpcClient implements RpcClient {
   private resolveReady: (() => void) | null = null
   private rejectReady: ((error: Error) => void) | null = null
   private connectionState: TransportConnectionState
+  private serverChannels: Set<string> | null = null
 
   private readonly url: string
   private readonly workspaceId: string | undefined
@@ -199,6 +200,16 @@ export class WsRpcClient implements RpcClient {
 
   handleCapability(channel: string, handler: (...args: any[]) => Promise<any> | any): void {
     this.capabilityHandlers.set(channel, handler)
+  }
+
+  /**
+   * Check whether the server registered a handler for a given channel.
+   * Returns true if the server advertised the channel in handshake_ack,
+   * or if the server didn't advertise channels at all (backwards compat).
+   */
+  isChannelAvailable(channel: string): boolean {
+    if (!this.serverChannels) return true // server didn't advertise — assume available
+    return this.serverChannels.has(channel)
   }
 
   getConnectionState(): TransportConnectionState {
@@ -376,6 +387,9 @@ export class WsRpcClient implements RpcClient {
     switch (envelope.type) {
       case 'handshake_ack':
         this.clientId = envelope.clientId ?? null
+        this.serverChannels = envelope.registeredChannels
+          ? new Set(envelope.registeredChannels)
+          : null
         this.connected = true
         this.reconnectAttempt = 0
         this.connectError = null

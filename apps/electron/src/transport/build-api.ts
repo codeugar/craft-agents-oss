@@ -22,7 +22,11 @@ export type ChannelMap = Record<string, ChannelMapEntry>
 // Proxy builder
 // ---------------------------------------------------------------------------
 
-export function buildClientApi(client: RpcClient, channelMap: ChannelMap): ElectronAPI {
+export function buildClientApi(
+  client: RpcClient,
+  channelMap: ChannelMap,
+  isChannelAvailable?: (channel: string) => boolean,
+): ElectronAPI {
   const api: Record<string, any> = {}
   const nested: Record<string, Record<string, any>> = {}
 
@@ -53,6 +57,9 @@ export function buildClientApi(client: RpcClient, channelMap: ChannelMap): Elect
   for (const [ns, methods] of Object.entries(nested)) {
     api[ns] = methods
   }
+
+  // Expose channel availability check for GUI-aware code
+  api.isChannelAvailable = isChannelAvailable ?? (() => true)
 
   return api as ElectronAPI
 }

@@ -61,7 +61,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
 
   // Get workspace ID for the calling window
   server.handle(RPC_CHANNELS.window.GET_WORKSPACE, (ctx) => {
-    const workspaceId = ctx.workspaceId ?? (windowManager as any)?.getWorkspaceForWindow(ctx.webContentsId!)
+    const workspaceId = ctx.workspaceId ?? windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     // Set up ConfigWatcher for live updates (labels, statuses, sources, themes)
     if (workspaceId) {
       const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -85,20 +85,20 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
     server.updateClientWorkspace?.(ctx.clientId, workspaceId)
 
     if (windowManager) {
-      const wcId = (ctx as any).webContentsId!
+      const wcId = ctx.webContentsId!
 
       // Get the old workspace ID before updating
-      const oldWorkspaceId = (windowManager as any).getWorkspaceForWindow(wcId)
+      const oldWorkspaceId = windowManager.getWorkspaceForWindow(wcId)
 
       // Update the window's workspace mapping
-      const updated = (windowManager as any).updateWindowWorkspace(wcId, workspaceId)
+      const updated = windowManager.updateWindowWorkspace(wcId, workspaceId)
 
       // If update failed, the window may have been re-created (e.g., after refresh)
       // Try to register it
       if (!updated) {
-        const win = (windowManager as any).getWindowByWebContentsId(wcId)
+        const win = windowManager.getWindowByWebContentsId(wcId)
         if (win) {
-          (windowManager as any).registerWindow(win, workspaceId)
+          windowManager.registerWindow(win, workspaceId)
           deps.platform.logger.info(`Re-registered window ${wcId} for workspace ${workspaceId}`)
         }
       }
@@ -106,7 +106,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
       // Clear activeViewingSession for old workspace if no other windows are viewing it
       // This ensures read/unread state is correct after workspace switch
       if (oldWorkspaceId && oldWorkspaceId !== workspaceId) {
-        const otherWindows = (windowManager as any).getAllWindowsForWorkspace(oldWorkspaceId)
+        const otherWindows = windowManager.getAllWindowsForWorkspace(oldWorkspaceId)
         if (otherWindows.length === 0) {
           sessionManager.clearActiveViewingSession(oldWorkspaceId)
         }
