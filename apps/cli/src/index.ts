@@ -957,13 +957,16 @@ export async function runValidation(client: CliRpcClient, jsonMode: boolean): Pr
     const plainLen = num.length + 1 + step.name.length
 
     // Spinner + live event printer
+    // Spinner keeps running until the agent produces real output (text_delta/tool_start).
+    // Early events (user_message, connection_changed, usage_update) are buffered or ignored
+    // so the spinner stays visible while the agent is thinking.
     let spinner: { stop(): void } | undefined
     if (!jsonMode) {
       let headerPrinted = false
       let accText = ''
       let textFlushed = false
+      let bufferedPrompt = ''
 
-      // Start spinner — replaced by events or result line
       if (_useColor) {
         spinner = createSpinner(`${c.cyan(num)} ${step.name}`)
       }
@@ -977,13 +980,19 @@ export async function runValidation(client: CliRpcClient, jsonMode: boolean): Pr
         textFlushed = true
       }
 
-      ctx.onEvent = (ev) => {
-        if (!headerPrinted) {
-          spinner?.stop()
-          process.stdout.write(`${c.cyan(num)} ${step.name}\n`)
-          headerPrinted = true
+      const ensureHeader = () => {
+        if (headerPrinted) return
+        spinner?.stop()
+        process.stdout.write(`${c.cyan(num)} ${step.name}\n`)
+        if (bufferedPrompt) {
+          process.stdout.write(`    ${c.dim('→')} ${c.blue(`"${bufferedPrompt}"`)}\n`)
         }
+        headerPrinted = true
+      }
+
+      ctx.onEvent = (ev) => {
         switch (ev.type) {
+          // Buffer prompt — shown when agent starts responding
           case 'user_message': {
             const msg = ev.message as any
             let text = ''
@@ -993,20 +1002,22 @@ export async function runValidation(client: CliRpcClient, jsonMode: boolean): Pr
               text = msg.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ')
             }
             const clean = text.replace(/\n/g, ' ').trim()
-            const display = clean.length > 100 ? clean.slice(0, 100) + '…' : clean
-            if (display) {
-              process.stdout.write(`    ${c.dim('→')} ${c.blue(`"${display}"`)}\n`)
-            }
+            bufferedPrompt = clean.length > 100 ? clean.slice(0, 100) + '…' : clean
             break
           }
+          // Agent text — stop spinner, show header + prompt + text
           case 'text_delta':
+            ensureHeader()
             accText += String(ev.delta ?? '')
             if (!textFlushed && accText.length > 40) flushText()
             break
           case 'text_complete':
+            ensureHeader()
             flushText()
             break
+          // Tool use — stop spinner, show header + prompt + tool
           case 'tool_start': {
+            ensureHeader()
             flushText()
             const name = String(ev.toolName ?? '?')
             const intent = ev.toolIntent ? ` — "${ev.toolIntent}"` : ''
@@ -1015,6 +1026,7 @@ export async function runValidation(client: CliRpcClient, jsonMode: boolean): Pr
             textFlushed = false
             break
           }
+          // Ignore internal events (connection_changed, usage_update, etc.)
         }
       }
     } else {

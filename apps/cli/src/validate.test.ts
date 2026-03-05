@@ -300,7 +300,7 @@ describe('runValidation', () => {
       expect(code).toBe(1)
       const output = out.chunks.join('')
       expect(output).toContain('sessions:delete')
-      expect(output).toContain('cleaned up')
+      expect(output).toContain('deleted session:')
     } finally {
       out.restore()
       err.restore()
@@ -375,7 +375,7 @@ describe('runValidation', () => {
 
       const del = result.results.find((r: any) => r.step === 'sources:delete')
       expect(del.status).toBe('OK')
-      expect(del.detail).toBe('cleaned up')
+      expect(del.detail).toContain('deleted source:')
     } finally {
       out.restore()
     }
@@ -403,7 +403,7 @@ describe('runValidation', () => {
 
       const del = result.results.find((r: any) => r.step === 'skills:delete')
       expect(del.status).toBe('OK')
-      expect(del.detail).toBe('cleaned up')
+      expect(del.detail).toContain('deleted skill:')
     } finally {
       out.restore()
     }
