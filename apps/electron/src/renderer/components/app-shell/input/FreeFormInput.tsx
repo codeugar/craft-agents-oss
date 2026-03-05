@@ -81,6 +81,10 @@ function formatTokenCount(tokens: number): string {
   return tokens.toString()
 }
 
+function stripPiPrefixForDisplay(value: string): string {
+  return value.startsWith('pi/') ? value.slice(3) : value
+}
+
 /** Platform-specific modifier key for keyboard shortcuts */
 const cmdKey = isMac ? '⌘' : 'Ctrl'
 
@@ -302,9 +306,9 @@ export function FreeFormInput({
     )
     if (!model) {
       // Fallback: use helper function to format unknown model IDs nicely
-      return getModelDisplayName(modelToDisplay)
+      return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
     }
-    return typeof model === 'string' ? model : model.name
+    return typeof model === 'string' ? stripPiPrefixForDisplay(model) : model.name
   }, [availableModels, currentModel, connectionDefaultModel])
 
   // Group connections by provider type for hierarchical dropdown
@@ -1584,7 +1588,7 @@ Model
                   className="flex items-center justify-between px-2 py-2 rounded-lg"
                 >
                   <div className="text-left">
-                    <div className="font-medium text-sm">{connectionDefaultModel}</div>
+                    <div className="font-medium text-sm">{stripPiPrefixForDisplay(connectionDefaultModel)}</div>
                     <div className="text-xs text-muted-foreground">Connection default</div>
                   </div>
                   <Check className="h-3 w-3 text-foreground shrink-0 ml-3" />
@@ -1625,7 +1629,7 @@ Model
                               {/* Show models for this connection - use provider-specific models as fallback */}
                               {(conn.models || ANTHROPIC_MODELS).map((model) => {
                                 const modelId = typeof model === 'string' ? model : model.id
-                                const modelName = typeof model === 'string' ? getModelShortName(model) : model.name
+                                const modelName = typeof model === 'string' ? stripPiPrefixForDisplay(getModelShortName(model)) : model.name
                                 const isSelectedModel = isCurrentConnection && currentModel === modelId
                                 return (
                                   <StyledDropdownMenuItem
@@ -1672,7 +1676,7 @@ Model
                   {/* Model options based on effective connection's provider type */}
                   {availableModels.map((model) => {
                     const modelId = typeof model === 'string' ? model : model.id
-                    const modelName = typeof model === 'string' ? getModelShortName(model) : model.name
+                    const modelName = typeof model === 'string' ? stripPiPrefixForDisplay(getModelShortName(model)) : model.name
                     const isSelected = currentModel === modelId
                     const description = typeof model !== 'string' && 'description' in model ? (model.description as string) : ''
                     return (

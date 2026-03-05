@@ -70,6 +70,7 @@ export interface LlmConnectionSetup {
   defaultModel?: string | null  // Custom model override (null to clear)
   models?: string[] | null  // Optional model list for compat providers
   piAuthProvider?: string   // Pi auth provider (e.g. 'anthropic', 'google', 'openai') — for pi_api_key flow
+  modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
 }
 
 /**
