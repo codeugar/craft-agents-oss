@@ -14,17 +14,69 @@ import { z } from 'zod';
 // ============================================================
 
 /**
- * Available permission modes
- * - 'safe': Read-only, blocks writes, never prompts (green)
- * - 'ask': Prompts for dangerous operations (amber)
- * - 'allow-all': Everything allowed, no prompts (violet)
+ * Available permission modes (internal storage keys).
+ *
+ * UI-facing canonical names are:
+ * - explore  -> safe
+ * - ask      -> ask
+ * - execute  -> allow-all
  */
 export type PermissionMode = 'safe' | 'ask' | 'allow-all';
+
+/**
+ * Canonical mode names used in user-facing/session-state surfaces.
+ */
+export type PermissionModeCanonical = 'explore' | 'ask' | 'execute';
 
 /**
  * Order of modes for cycling with SHIFT+TAB
  */
 export const PERMISSION_MODE_ORDER: PermissionMode[] = ['safe', 'ask', 'allow-all'];
+
+/**
+ * Internal -> canonical mapping.
+ */
+export const PERMISSION_MODE_TO_CANONICAL: Record<PermissionMode, PermissionModeCanonical> = {
+  safe: 'explore',
+  ask: 'ask',
+  'allow-all': 'execute',
+};
+
+/**
+ * Canonical -> internal mapping.
+ */
+export const CANONICAL_TO_PERMISSION_MODE: Record<PermissionModeCanonical, PermissionMode> = {
+  explore: 'safe',
+  ask: 'ask',
+  execute: 'allow-all',
+};
+
+/**
+ * Convert internal mode key to canonical user-facing mode name.
+ */
+export function toCanonicalPermissionMode(mode: PermissionMode): PermissionModeCanonical {
+  return PERMISSION_MODE_TO_CANONICAL[mode];
+}
+
+/**
+ * Parse user-facing mode names into internal mode keys.
+ *
+ * Accepts canonical values (explore/ask/execute) and legacy aliases
+ * (safe/allow-all, ask-to-edit) for backward compatibility.
+ */
+export function parsePermissionMode(mode: string): PermissionMode | null {
+  const normalized = mode.trim().toLowerCase();
+
+  if (normalized === 'safe') return 'safe';
+  if (normalized === 'ask') return 'ask';
+  if (normalized === 'allow-all') return 'allow-all';
+
+  if (normalized === 'explore') return 'safe';
+  if (normalized === 'execute') return 'allow-all';
+  if (normalized === 'ask-to-edit' || normalized === 'ask_to_edit' || normalized === 'ask to edit') return 'ask';
+
+  return null;
+}
 
 // ============================================================
 // Permissions Config Types (Browser-safe Zod schemas)
@@ -186,7 +238,7 @@ export const SAFE_MODE_CONFIG: ModeConfig = {
   readOnlyBashPatterns: [],
   readOnlyMcpPatterns: [],
   allowedApiEndpoints: [],
-  displayName: 'Safe Mode',
+  displayName: 'Explore',
   shortcutHint: 'SHIFT+TAB',
 };
 

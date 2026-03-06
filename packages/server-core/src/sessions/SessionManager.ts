@@ -714,10 +714,16 @@ interface ManagedSession {
   // Whether this session is hidden from session list (e.g., mini edit sessions)
   hidden?: boolean
   branchFromMessageId?: string
-  // Parent session's SDK session ID (for SDK-level fork via resume + forkSession)
+  // Branch context strategy:
+  // - sdk-fork: provider-level fork from parent SDK session
+  // - seeded-fresh-session: fresh backend session seeded with transcript up to branch cutoff
+  branchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
+  // Parent session's SDK session ID (used only when branchContextStrategy === 'sdk-fork')
   branchFromSdkSessionId?: string
-  // Parent session's storage path (for Pi SDK fork — locating parent Pi session files)
+  // Parent session's storage path (used only when branchContextStrategy === 'sdk-fork')
   branchFromSessionPath?: string
+  // One-shot flag for seeded branch mode - set true after first turn seed injection.
+  branchSeedApplied?: boolean
   // Token refresh manager for OAuth token refresh with rate limiting
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by automations
@@ -744,7 +750,8 @@ function createManagedSession(
   overrides?: Partial<ManagedSession>,
 ): ManagedSession {
   const s = source as Record<string, unknown>
-  return {
+
+  const managed = {
     // Spread all session-like fields from source (id, name, permissionMode, labels, model, etc.)
     // This ensures new persistent fields automatically flow through without manual copying.
     ...Object.fromEntries(
@@ -768,6 +775,19 @@ function createManagedSession(
     // Caller overrides (permissionMode defaults, thinkingLevel, messagesLoaded, etc.)
     ...overrides,
   } as ManagedSession
+
+  if (managed.branchFromMessageId && !managed.branchContextStrategy) {
+    managed.branchContextStrategy = managed.branchFromSdkSessionId
+      ? 'sdk-fork'
+      : 'seeded-fresh-session'
+  }
+
+  if (managed.branchContextStrategy === 'seeded-fresh-session' && managed.branchSeedApplied === undefined) {
+    // If an SDK session ID already exists, first turn has already happened.
+    managed.branchSeedApplied = !!managed.sdkSessionId
+  }
+
+  return managed
 }
 
 /**
@@ -1915,6 +1935,7 @@ export class SessionManager implements ISessionManager {
       sourceMessageId: string
       sourceSession: StoredSession
       branchIdx: number
+      branchContextStrategy: 'sdk-fork' | 'seeded-fresh-session'
       branchFromSdkSessionId?: string
       branchFromSessionPath?: string
     } | undefined
@@ -1993,14 +2014,24 @@ export class SessionManager implements ISessionManager {
         throw new Error(`Invalid branch request: message ${options.branchFromMessageId} not found in source session`)
       }
 
-      const branchFromSdkSessionId = sourceManaged?.sdkSessionId || sourceSession.sdkSessionId
-      const branchFromSessionPath = getSessionStoragePath(workspaceRootPath, options.branchFromSessionId)
+      const experimentalStrictFork = process.env.CRAFT_EXPERIMENTAL_STRICT_BRANCH_FORK === '1'
+      const branchContextStrategy: 'sdk-fork' | 'seeded-fresh-session' = experimentalStrictFork
+        ? 'sdk-fork'
+        : 'seeded-fresh-session'
+
+      const branchFromSdkSessionId = branchContextStrategy === 'sdk-fork'
+        ? (sourceManaged?.sdkSessionId || sourceSession.sdkSessionId)
+        : undefined
+      const branchFromSessionPath = branchContextStrategy === 'sdk-fork'
+        ? getSessionStoragePath(workspaceRootPath, options.branchFromSessionId)
+        : undefined
 
       validatedBranch = {
         sourceSessionId: options.branchFromSessionId,
         sourceMessageId: options.branchFromMessageId,
         sourceSession,
         branchIdx,
+        branchContextStrategy,
         branchFromSdkSessionId,
         branchFromSessionPath,
       }
@@ -2009,6 +2040,7 @@ export class SessionManager implements ISessionManager {
         workspaceId,
         branchFromSessionId: validatedBranch.sourceSessionId,
         branchFromMessageId: validatedBranch.sourceMessageId,
+        branchContextStrategy: validatedBranch.branchContextStrategy,
         branchFromSdkSessionId: !!validatedBranch.branchFromSdkSessionId,
         copiedMessageCount: validatedBranch.branchIdx + 1,
       })
@@ -2034,8 +2066,13 @@ export class SessionManager implements ISessionManager {
 
       branchedStored.messages = validatedBranch.sourceSession.messages.slice(0, validatedBranch.branchIdx + 1)
       branchedStored.branchFromMessageId = validatedBranch.sourceMessageId
-      branchedStored.branchFromSdkSessionId = validatedBranch.branchFromSdkSessionId
-      branchedStored.branchFromSessionPath = validatedBranch.branchFromSessionPath
+      if (validatedBranch.branchContextStrategy === 'sdk-fork') {
+        branchedStored.branchFromSdkSessionId = validatedBranch.branchFromSdkSessionId
+        branchedStored.branchFromSessionPath = validatedBranch.branchFromSessionPath
+      } else {
+        delete branchedStored.branchFromSdkSessionId
+        delete branchedStored.branchFromSessionPath
+      }
       await saveStoredSession(branchedStored)
     }
 
@@ -2060,8 +2097,10 @@ export class SessionManager implements ISessionManager {
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
       branchFromMessageId: validatedBranch?.sourceMessageId,
+      branchContextStrategy: validatedBranch?.branchContextStrategy,
       branchFromSdkSessionId: validatedBranch?.branchFromSdkSessionId,
       branchFromSessionPath: validatedBranch?.branchFromSessionPath,
+      branchSeedApplied: validatedBranch ? validatedBranch.branchContextStrategy === 'sdk-fork' : undefined,
       messagesLoaded: !isBranch,  // Branched sessions: lazy-load messages from JSONL
     })
 
@@ -2070,34 +2109,38 @@ export class SessionManager implements ISessionManager {
     if (isBranch) {
       await this.ensureMessagesLoaded(managed)
 
-      // Enforce branch correctness at creation time.
-      // A branch is only valid if backend context can be established now,
-      // not deferred to the first user message.
-      try {
-        await this.getOrCreateAgent(managed)
-        await managed.agent!.ensureBranchReady()
-      } catch (error) {
-        sessionLog.warn('Branch creation failed during backend preflight handshake', {
-          workspaceId,
-          sessionId: storedSession.id,
-          branchFromSessionId: validatedBranch?.sourceSessionId,
-          branchFromMessageId: validatedBranch?.sourceMessageId,
-          error: error instanceof Error ? error.message : String(error),
-        })
+      const requiresBranchPreflight = managed.branchContextStrategy === 'sdk-fork'
+      if (requiresBranchPreflight) {
+        // Enforce branch correctness at creation time.
+        // A branch is only valid if backend context can be established now,
+        // not deferred to the first user message.
+        try {
+          await this.getOrCreateAgent(managed)
+          await managed.agent!.ensureBranchReady()
+        } catch (error) {
+          sessionLog.warn('Branch creation failed during backend preflight handshake', {
+            workspaceId,
+            sessionId: storedSession.id,
+            branchFromSessionId: validatedBranch?.sourceSessionId,
+            branchFromMessageId: validatedBranch?.sourceMessageId,
+            branchContextStrategy: managed.branchContextStrategy,
+            error: error instanceof Error ? error.message : String(error),
+          })
 
-        await rollbackFailedBranchCreation({
-          managed,
-          workspaceRootPath,
-          sessionId: storedSession.id,
-          deleteFromRuntimeSessions: (id) => {
-            this.sessions.delete(id)
-          },
-          deleteStoredSession,
-        })
+          await rollbackFailedBranchCreation({
+            managed,
+            workspaceRootPath,
+            sessionId: storedSession.id,
+            deleteFromRuntimeSessions: (id) => {
+              this.sessions.delete(id)
+            },
+            deleteStoredSession,
+          })
 
-        throw new Error(
-          `Could not create branch: ${error instanceof Error ? error.message : String(error)}`
-        )
+          throw new Error(
+            `Could not create branch: ${error instanceof Error ? error.message : String(error)}`
+          )
+        }
       }
     }
 
@@ -2208,7 +2251,9 @@ export class SessionManager implements ISessionManager {
       }
 
       // Per-session env overrides
-      const envOverrides: Record<string, string> = {}
+      const envOverrides: Record<string, string> = {
+        CRAFT_WORKSPACE_PATH: managed.workspace.rootPath,
+      }
       managed.envOverrides = envOverrides
 
       // ============================================================
@@ -2219,8 +2264,8 @@ export class SessionManager implements ISessionManager {
         id: managed.id,
         workspaceRootPath: managed.workspace.rootPath,
         sdkSessionId: managed.sdkSessionId,
-        branchFromSdkSessionId: managed.branchFromSdkSessionId,
-        branchFromSessionPath: managed.branchFromSessionPath,
+        branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
+        branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
         branchFromMessageId: managed.branchFromMessageId,
         createdAt: managed.lastMessageAt,
         lastUsedAt: managed.lastMessageAt,
@@ -2255,6 +2300,30 @@ export class SessionManager implements ISessionManager {
         }))
       }
 
+      const getBranchSeedMessages = () => {
+        if (managed.branchContextStrategy !== 'seeded-fresh-session') return []
+        if (managed.branchSeedApplied) return []
+
+        const seedMessages = managed.messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .filter(m => !m.isIntermediate)
+
+        return seedMessages.map(m => ({
+          type: m.role as 'user' | 'assistant',
+          content: m.content,
+        }))
+      }
+
+      const markBranchSeedApplied = () => {
+        if (managed.branchContextStrategy !== 'seeded-fresh-session') return
+        if (managed.branchSeedApplied) return
+        managed.branchSeedApplied = true
+        sessionLog.info('Branch seed context applied', {
+          sessionId: managed.id,
+          strategy: managed.branchContextStrategy,
+        })
+      }
+
       // ============================================================
       // Construct backend via factory
       // ============================================================
@@ -2270,6 +2339,8 @@ export class SessionManager implements ISessionManager {
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         getRecoveryMessages,
+        getBranchSeedMessages,
+        markBranchSeedApplied,
         mcpPool: managed.mcpPool,
         poolServerUrl,
         envOverrides,
@@ -5858,7 +5929,7 @@ To view this task's output:
     workspaceRootPath: string,
     prompt: string,
     labels?: string[],
-    permissionMode?: 'safe' | 'ask' | 'allow-all',
+    permissionMode?: PermissionMode,
     mentions?: string[],
     llmConnection?: string,
     model?: string,

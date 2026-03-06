@@ -9,12 +9,11 @@ import {
   XCircle,
   Circle,
   MessageCircleDashed,
-  ExternalLink,
+  FileText,
   ArrowUpRight,
   Ban,
   Copy,
   Check,
-  X,
   Maximize2,
   CircleCheck,
   ListTodo,
@@ -22,13 +21,18 @@ import {
   FilePenLine,
   GitBranch,
   CornerDownRight,
-  MessageCircleMore,
 } from 'lucide-react'
 import * as ReactDOM from 'react-dom'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { resolveTextAnnotations } from '../markdown/annotation-resolver'
 import { Spinner } from '../ui/LoadingIndicator'
+import {
+  Island,
+  IslandContentView,
+  IslandFollowUpContentView,
+  type IslandActiveViewSize,
+} from '../ui'
 import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
@@ -289,6 +293,12 @@ export interface TurnCardProps {
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
+  /** Callback to remove a persisted annotation from a response message */
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  /** Callback to update a persisted annotation */
+  onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
+  /** Input send key behavior used by follow-up editor */
+  sendMessageKey?: 'enter' | 'cmd-enter'
 }
 
 // ============================================================================
@@ -1332,6 +1342,12 @@ export interface ResponseCardProps {
   onBranch?: (options?: { newPanel?: boolean }) => void
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
+  /** Callback to remove persisted annotation */
+  onRemoveAnnotation?: (messageId: string, annotationId: string) => void
+  /** Callback to update persisted annotation */
+  onUpdateAnnotation?: (messageId: string, annotationId: string, patch: Partial<AnnotationV1>) => void
+  /** Input send key behavior used by follow-up editor */
+  sendMessageKey?: 'enter' | 'cmd-enter'
 }
 
 interface BranchDropdownProps {
@@ -1379,8 +1395,17 @@ const MAX_HEIGHT = 540
 
 const ANNOTATION_PREFIX_SUFFIX_WINDOW = 24
 const SELECTION_MENU_VIEWPORT_PADDING = 12
-const SELECTION_MENU_HALF_WIDTH_ESTIMATE = 96
+const SELECTION_MENU_DEFAULT_WIDTH_ESTIMATE = 192
 const SELECTION_POINTER_MAX_AGE_MS = 1500
+
+type SelectionMenuView = 'compact' | 'confirm-follow-up'
+
+type ActiveAnnotationDetail = {
+  annotationId: string
+  index: number
+  anchorX: number
+  anchorY: number
+}
 
 type PendingTextAnnotationSelection = {
   start: number
@@ -1390,6 +1415,22 @@ type PendingTextAnnotationSelection = {
   suffix: string
   anchorX: number
   anchorY: number
+}
+
+type AnnotationOverlayRect = {
+  id: string
+  left: number
+  top: number
+  width: number
+  height: number
+  color: string
+}
+
+type AnnotationOverlayChip = {
+  id: string
+  index: number
+  left: number
+  top: number
 }
 
 function hasExistingTextRangeAnnotation(
@@ -1406,12 +1447,12 @@ function hasExistingTextRangeAnnotation(
   })
 }
 
-function createTextSelectionAnnotation(
+function createSelectionPreviewAnnotation(
   messageId: string,
   selection: Omit<PendingTextAnnotationSelection, 'anchorX' | 'anchorY'>,
 ): AnnotationV1 {
   return {
-    id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: '__pending-selection-preview__',
     schemaVersion: 1,
     createdAt: Date.now(),
     intent: 'highlight',
@@ -1431,21 +1472,83 @@ function createTextSelectionAnnotation(
         },
       ],
     },
-    style: { color: 'yellow', opacity: 0.35 },
+    style: { color: 'yellow' },
+    meta: {
+      ephemeral: true,
+      source: 'follow-up-selection-preview',
+    },
   }
+}
+
+function createTextSelectionAnnotation(
+  messageId: string,
+  selection: Omit<PendingTextAnnotationSelection, 'anchorX' | 'anchorY'>,
+  followUpNote?: string,
+): AnnotationV1 {
+  const note = followUpNote?.trim() ?? ''
+  const hasNote = note.length > 0
+
+  return {
+    id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    schemaVersion: 1,
+    createdAt: Date.now(),
+    intent: hasNote ? 'comment' : 'highlight',
+    body: hasNote
+      ? [{ type: 'highlight' }, { type: 'note', text: note, format: 'plain' }]
+      : [{ type: 'highlight' }],
+    target: {
+      source: {
+        sessionId: '',
+        messageId,
+      },
+      selectors: [
+        { type: 'text-position', start: selection.start, end: selection.end },
+        {
+          type: 'text-quote',
+          exact: selection.selectedText,
+          prefix: selection.prefix,
+          suffix: selection.suffix,
+        },
+      ],
+    },
+    style: { color: 'yellow' },
+    ...(hasNote
+      ? {
+          meta: {
+            followUp: {
+              text: note,
+              createdAt: Date.now(),
+            },
+          },
+        }
+      : {}),
+  }
+}
+
+function clampSelectionMenuAnchorX(anchorX: number, islandWidth: number): number {
+  const safeWidth = Math.max(1, islandWidth)
+  const halfWidth = safeWidth / 2
+  const minX = SELECTION_MENU_VIEWPORT_PADDING + halfWidth
+  const maxX = window.innerWidth - SELECTION_MENU_VIEWPORT_PADDING - halfWidth
+
+  if (maxX < minX) {
+    return window.innerWidth / 2
+  }
+
+  return Math.min(Math.max(anchorX, minX), maxX)
 }
 
 function annotationColorToCss(color?: string): string {
   switch (color) {
     case 'green':
-      return 'rgba(74, 222, 128, 0.35)'
+      return 'rgba(74, 222, 128, 0.10)'
     case 'blue':
-      return 'rgba(96, 165, 250, 0.35)'
+      return 'rgba(96, 165, 250, 0.10)'
     case 'pink':
-      return 'rgba(244, 114, 182, 0.35)'
+      return 'rgba(244, 114, 182, 0.10)'
     case 'yellow':
     default:
-      return 'rgba(250, 204, 21, 0.35)'
+      return 'color-mix(in srgb, var(--info) 10%, transparent)'
   }
 }
 
@@ -1456,12 +1559,26 @@ function collectTextSegments(root: HTMLElement): Array<{ node: Text; start: numb
   let current = walker.nextNode()
   while (current) {
     const node = current as Text
+    const parent = node.parentElement
+
+    // Ignore synthetic annotation overlay/index content in text/offset math.
+    if (parent?.closest('[data-ca-annotation-overlay]') || parent?.closest('[data-ca-annotation-index]')) {
+      current = walker.nextNode()
+      continue
+    }
+
     const len = node.nodeValue?.length ?? 0
     segments.push({ node, start: cursor, end: cursor + len })
     cursor += len
     current = walker.nextNode()
   }
   return segments
+}
+
+function getCanonicalText(root: HTMLElement): string {
+  return collectTextSegments(root)
+    .map(segment => segment.node.nodeValue || '')
+    .join('')
 }
 
 function resolveNodeOffset(root: HTMLElement, targetNode: Node, nodeOffset: number): number | null {
@@ -1473,56 +1590,266 @@ function resolveNodeOffset(root: HTMLElement, targetNode: Node, nodeOffset: numb
   }
 
   // Fallback: range boundaries may land on element nodes (common with reverse drags).
-  // In that case, derive character offset by measuring text length from root start.
+  // In that case, derive character offset by measuring canonical text length
+  // from root start to the boundary, excluding synthetic annotation index badges.
   try {
     const probe = document.createRange()
     probe.selectNodeContents(root)
     probe.setEnd(targetNode, nodeOffset)
-    return probe.toString().length
+
+    const fragment = probe.cloneContents()
+    fragment.querySelectorAll('[data-ca-annotation-index]').forEach(node => node.remove())
+    return (fragment.textContent || '').length
   } catch {
     return null
   }
 }
 
+function resolveRangeFromOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  if (end <= start) return null
+
+  const segments = collectTextSegments(root)
+  if (segments.length === 0) return null
+
+  let startNode: Text | null = null
+  let startOffset = 0
+  let endNode: Text | null = null
+  let endOffset = 0
+
+  for (const segment of segments) {
+    const segmentLength = segment.end - segment.start
+
+    if (!startNode && start >= segment.start && start <= segment.end) {
+      startNode = segment.node
+      startOffset = Math.min(Math.max(0, start - segment.start), segmentLength)
+    }
+
+    if (!endNode && end >= segment.start && end <= segment.end) {
+      endNode = segment.node
+      endOffset = Math.min(Math.max(0, end - segment.start), segmentLength)
+    }
+
+    if (startNode && endNode) break
+  }
+
+  if (!startNode || !endNode) return null
+
+  const range = document.createRange()
+  range.setStart(startNode, startOffset)
+  range.setEnd(endNode, endOffset)
+  return range
+}
+
+function getClientRectsForOffsets(root: HTMLElement, start: number, end: number): DOMRect[] {
+  if (end <= start) return []
+
+  const segments = collectTextSegments(root)
+  const rects: DOMRect[] = []
+
+  for (const segment of segments) {
+    if (segment.end <= start || segment.start >= end) continue
+
+    const localStart = Math.max(start, segment.start) - segment.start
+    const localEnd = Math.min(end, segment.end) - segment.start
+    if (localEnd <= localStart) continue
+
+    const segmentRange = document.createRange()
+    segmentRange.setStart(segment.node, localStart)
+    segmentRange.setEnd(segment.node, localEnd)
+
+    rects.push(...Array.from(segmentRange.getClientRects()))
+  }
+
+  return rects.filter((rect) => rect.width > 0 && rect.height > 0)
+}
+
+function consolidateRectsByLine(rects: AnnotationOverlayRect[]): AnnotationOverlayRect[] {
+  if (rects.length <= 1) return rects
+
+  const sorted = rects.slice().sort((a, b) => (Math.abs(a.top - b.top) <= 2 ? a.left - b.left : a.top - b.top))
+  const rows: Array<{ top: number; rects: AnnotationOverlayRect[] }> = []
+
+  for (const rect of sorted) {
+    const row = rows.find(candidate => Math.abs(candidate.top - rect.top) <= 2)
+    if (row) {
+      row.rects.push(rect)
+    } else {
+      rows.push({ top: rect.top, rects: [rect] })
+    }
+  }
+
+  const consolidated: AnnotationOverlayRect[] = []
+  for (const row of rows) {
+    const rowRects = row.rects.slice().sort((a, b) => a.left - b.left)
+    const first = rowRects[0]
+    const last = rowRects[rowRects.length - 1]
+    if (!first || !last) continue
+
+    const top = Math.min(...rowRects.map(rect => rect.top))
+    const height = Math.max(...rowRects.map(rect => rect.height))
+    consolidated.push({
+      id: first.id,
+      color: first.color,
+      left: first.left,
+      top,
+      width: (last.left + last.width) - first.left,
+      height,
+    })
+  }
+
+  return consolidated
+}
+
 function clearAnnotationMarks(root: HTMLElement): void {
+  const annotatedInlineCodeNodes = root.querySelectorAll<HTMLElement>('code[data-ca-annotation-inline-code="true"]')
+  annotatedInlineCodeNodes.forEach((codeNode) => {
+    codeNode.removeAttribute('data-ca-annotation-inline-code')
+    codeNode.style.backgroundColor = ''
+    codeNode.style.boxShadow = ''
+  })
+
   const marks = root.querySelectorAll('span[data-ca-annotation-id]')
   marks.forEach(mark => {
     const parent = mark.parentNode
     if (!parent) return
+
+    const badge = mark.querySelector('[data-ca-annotation-index]')
+    if (badge) badge.remove()
+
     parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
     parent.normalize()
   })
+}
+
+function createAnnotationIndexBadge(index: number): HTMLSpanElement {
+  const chip = document.createElement('span')
+  chip.setAttribute('data-ca-annotation-index', String(index))
+  chip.textContent = String(index)
+  chip.style.position = 'absolute'
+  chip.style.top = '-7px'
+  chip.style.right = '-7px'
+  chip.style.minWidth = '16px'
+  chip.style.height = '15px'
+  chip.style.padding = '0 3px'
+  chip.style.borderRadius = '9999px'
+  chip.style.backgroundColor = 'var(--info)'
+  chip.style.color = 'rgba(15, 23, 42, 0.95)'
+  chip.style.fontSize = '10px'
+  chip.style.fontWeight = '600'
+  chip.style.lineHeight = '15px'
+  chip.style.textAlign = 'center'
+  chip.classList.add('shadow-tinted')
+  chip.style.setProperty('--shadow-color', 'var(--info-rgb)')
+  chip.style.pointerEvents = 'none'
+  chip.style.userSelect = 'none'
+  return chip
 }
 
 function applyTextHighlightRange(
   root: HTMLElement,
   range: { start: number; end: number },
   annotation: AnnotationV1,
+  annotationIndex?: number,
 ): void {
   if (range.end <= range.start) return
 
-  const segments = collectTextSegments(root)
-  for (const segment of segments) {
-    if (segment.end <= range.start || segment.start >= range.end) continue
+  // Avoid visually highlighting trailing/leading hard newlines.
+  // Those can produce extra apparent blank lines at line boundaries.
+  const fullText = getCanonicalText(root)
+  let displayStart = range.start
+  let displayEnd = range.end
+  while (displayStart < displayEnd && /[\n\r]/.test(fullText[displayStart] ?? '')) displayStart += 1
+  while (displayEnd > displayStart && /[\n\r]/.test(fullText[displayEnd - 1] ?? '')) displayEnd -= 1
+  if (displayEnd <= displayStart) return
 
-    const localStart = Math.max(range.start, segment.start) - segment.start
-    const localEnd = Math.min(range.end, segment.end) - segment.start
+  const segments = collectTextSegments(root)
+  const createdMarks: HTMLSpanElement[] = []
+
+  for (const segment of segments) {
+    if (segment.end <= displayStart || segment.start >= displayEnd) continue
+
+    const localStart = Math.max(displayStart, segment.start) - segment.start
+    const localEnd = Math.min(displayEnd, segment.end) - segment.start
     if (localEnd <= localStart) continue
 
     const source = segment.node
     const after = source.splitText(localEnd)
     const selected = source.splitText(localStart)
 
+    const inlineCodeParent = selected.parentElement?.closest<HTMLElement>('code')
+    if (inlineCodeParent) {
+      inlineCodeParent.setAttribute('data-ca-annotation-inline-code', 'true')
+      inlineCodeParent.style.backgroundColor = annotationColorToCss(annotation.style?.color)
+      inlineCodeParent.style.boxShadow = 'none'
+    }
+
     const mark = document.createElement('span')
     mark.setAttribute('data-ca-annotation-id', annotation.id)
     mark.style.backgroundColor = annotationColorToCss(annotation.style?.color)
-    mark.style.borderRadius = '2px'
-    mark.style.padding = '0 1px'
+    mark.style.borderRadius = '0'
+    mark.style.padding = '0'
+    mark.style.margin = '0'
+    mark.style.position = 'relative'
     selected.parentNode?.replaceChild(mark, selected)
     mark.appendChild(selected)
+    createdMarks.push(mark)
 
     // Keep reference alive for TS and clarity
     void after
+  }
+
+  if (createdMarks.length > 0) {
+    type RowBucket = { top: number; marks: HTMLSpanElement[] }
+    const rows: RowBucket[] = []
+
+    for (const mark of createdMarks) {
+      const rect = mark.getBoundingClientRect()
+      const row = rows.find(candidate => Math.abs(candidate.top - rect.top) <= 2)
+      if (row) {
+        row.marks.push(mark)
+      } else {
+        rows.push({ top: rect.top, marks: [mark] })
+      }
+    }
+
+    for (const row of rows) {
+      const rowMarks = row.marks
+      const first = rowMarks[0]
+      const last = rowMarks[rowMarks.length - 1]
+      if (!first || !last) continue
+
+      first.style.borderTopLeftRadius = '6px'
+      first.style.borderBottomLeftRadius = '6px'
+      last.style.borderTopRightRadius = '6px'
+      last.style.borderBottomRightRadius = '6px'
+    }
+  }
+
+  if (annotationIndex != null && createdMarks.length > 0) {
+    // Prefer placing the index badge on non-code marks, then choose the top-right-most
+    // mark on the first visible row for stable placement.
+    const nonCodeMarks = createdMarks.filter(mark => !mark.closest('code'))
+    const badgePool = nonCodeMarks.length > 0 ? nonCodeMarks : createdMarks
+
+    const preferredInitial = badgePool[0]
+    if (!preferredInitial) return
+
+    let preferredMark = preferredInitial
+    let preferredRect = preferredMark.getBoundingClientRect()
+
+    for (const mark of badgePool.slice(1)) {
+      const rect = mark.getBoundingClientRect()
+      const isHigherRow = rect.top < preferredRect.top - 1
+      const sameRow = Math.abs(rect.top - preferredRect.top) <= 2
+      const isMoreRight = rect.right > preferredRect.right
+
+      if (isHigherRow || (sameRow && isMoreRight)) {
+        preferredMark = mark
+        preferredRect = rect
+      }
+    }
+
+    preferredMark.appendChild(createAnnotationIndexBadge(annotationIndex))
   }
 }
 
@@ -1551,7 +1878,12 @@ function applyBlockAnnotationMarker(root: HTMLElement, annotation: AnnotationV1)
   if (!target) return
 
   target.setAttribute('data-ca-block-annotated', 'true')
-  target.style.boxShadow = `inset 3px 0 0 ${annotationColorToCss(annotation.style?.color)}`
+  const markerColor = annotationColorToCss(annotation.style?.color)
+  target.style.boxShadow = [
+    `inset 3px 0 0 ${markerColor}`,
+    `inset 0 1px 0 ${markerColor}`,
+    `inset 0 -1px 0 ${markerColor}`,
+  ].join(', ')
   target.style.borderRadius = '6px'
 }
 
@@ -1588,6 +1920,9 @@ export function ResponseCard({
   compactMode = false,
   onBranch,
   onAddAnnotation,
+  onRemoveAnnotation,
+  onUpdateAnnotation,
+  sendMessageKey = 'enter',
 }: ResponseCardProps) {
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(text)
@@ -1598,9 +1933,17 @@ export function ResponseCard({
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Dark mode detection - scroll fade only shown in dark mode
   const [isDarkMode, setIsDarkMode] = useState(false)
-  // Pending text selection waiting for explicit Comment action
+  // Pending text selection waiting for explicit follow-up action
   const [pendingSelection, setPendingSelection] = useState<PendingTextAnnotationSelection | null>(null)
+  const [selectionMenuView, setSelectionMenuView] = useState<SelectionMenuView>('compact')
+  const [followUpDraft, setFollowUpDraft] = useState('')
+  const [activeAnnotationDetail, setActiveAnnotationDetail] = useState<ActiveAnnotationDetail | null>(null)
+  const [activeSelectionMenuSize, setActiveSelectionMenuSize] = useState<IslandActiveViewSize | null>(null)
+  const [selectionMenuRenderAnchor, setSelectionMenuRenderAnchor] = useState<{ x: number; y: number } | null>(null)
+  const [isSelectionMenuVisible, setIsSelectionMenuVisible] = useState(false)
+  const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
+  const contentLayerRef = useRef<HTMLDivElement>(null)
   const selectionMenuRef = useRef<HTMLDivElement>(null)
   const lastPointerRef = useRef<{ x: number; y: number; ts: number } | null>(null)
   const selectionStartedInContentRef = useRef(false)
@@ -1618,6 +1961,14 @@ export function ResponseCard({
     return () => observer.disconnect()
   }, [])
 
+  const closeSelectionMenu = useCallback(() => {
+    setPendingSelection(null)
+    setSelectionMenuView('compact')
+    setFollowUpDraft('')
+    setActiveAnnotationDetail(null)
+    setActiveSelectionMenuSize(null)
+  }, [])
+
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(text)
@@ -1628,81 +1979,187 @@ export function ResponseCard({
     }
   }, [text])
 
-  useEffect(() => {
-    const root = contentRef.current
-    if (!root) return
+  const renderedAnnotations = useMemo(() => {
+    const persisted = annotations ?? []
 
-    clearAnnotationMarks(root)
-    clearBlockAnnotationMarkers(root)
-
-    if (!annotations?.length) return
-
-    // Apply from end to start to keep text offsets stable while wrapping nodes.
-    const fullText = root.textContent || ''
-    const resolution = resolveTextAnnotations(fullText, annotations)
-    const resolved = resolution.resolved
-      .slice()
-      .sort((a, b) => b.range.start - a.range.start)
-
-    for (const item of resolved) {
-      applyTextHighlightRange(root, item.range, item.annotation)
+    if (!pendingSelection || selectionMenuView !== 'confirm-follow-up' || !messageId) {
+      return persisted
     }
 
-    for (const annotation of annotations) {
-      applyBlockAnnotationMarker(root, annotation)
+    if (hasExistingTextRangeAnnotation(persisted, pendingSelection.start, pendingSelection.end)) {
+      return persisted
     }
 
-    if (process.env.NODE_ENV !== 'production' && resolution.unresolved.length > 0) {
-      console.debug('[annotations] unresolved annotations', {
-        count: resolution.unresolved.length,
-        ids: resolution.unresolved.map(item => item.annotation.id),
-        reasons: resolution.unresolved.map(item => item.reason),
-      })
-    }
-  }, [annotations, text, displayedText, isStreaming])
+    return [
+      ...persisted,
+      createSelectionPreviewAnnotation(messageId, pendingSelection),
+    ]
+  }, [annotations, pendingSelection, selectionMenuView, messageId])
+
+  const activeAnnotation = useMemo(() => {
+    if (!activeAnnotationDetail) return null
+    return (annotations ?? []).find(annotation => annotation.id === activeAnnotationDetail.annotationId) ?? null
+  }, [annotations, activeAnnotationDetail])
 
   useEffect(() => {
-    if (variant !== 'response' || isStreaming || !onAddAnnotation || !messageId) {
-      setPendingSelection(null)
+    if (!activeAnnotationDetail) return
+    if (!activeAnnotation) {
+      closeSelectionMenu()
     }
-  }, [variant, isStreaming, onAddAnnotation, messageId])
+  }, [activeAnnotationDetail, activeAnnotation, closeSelectionMenu])
 
   useEffect(() => {
-    if (!pendingSelection) return
+    const root = contentLayerRef.current
+    if (!root) {
+      setAnnotationOverlay({ rects: [], chips: [] })
+      return
+    }
+
+    const recomputeOverlay = () => {
+      clearAnnotationMarks(root)
+      clearBlockAnnotationMarkers(root)
+
+      if (!renderedAnnotations.length) {
+        setAnnotationOverlay({ rects: [], chips: [] })
+        return
+      }
+
+      const fullText = getCanonicalText(root)
+      const resolution = resolveTextAnnotations(fullText, renderedAnnotations)
+      const annotationIndexById = new Map((annotations ?? []).map((annotation, idx) => [annotation.id, idx + 1]))
+      const rootRect = root.getBoundingClientRect()
+
+      const rects: AnnotationOverlayRect[] = []
+      const chips: AnnotationOverlayChip[] = []
+
+      for (const item of resolution.resolved) {
+        const rawRects = getClientRectsForOffsets(root, item.range.start, item.range.end)
+          .map(rect => ({
+            id: item.annotation.id,
+            left: rect.left - rootRect.left,
+            top: rect.top - rootRect.top,
+            width: rect.width,
+            height: rect.height,
+            color: annotationColorToCss(item.annotation.style?.color),
+          }))
+
+        const lineRects = consolidateRectsByLine(rawRects)
+        rects.push(...lineRects)
+
+        const annotationIndex = annotationIndexById.get(item.annotation.id)
+        if (annotationIndex != null && lineRects.length > 0) {
+          const minTop = Math.min(...lineRects.map(rect => rect.top))
+          const topRowRects = lineRects.filter(rect => Math.abs(rect.top - minTop) <= 2)
+          const anchorRect = topRowRects.reduce((best, rect) => {
+            const bestRight = best.left + best.width
+            const rectRight = rect.left + rect.width
+            return rectRight > bestRight ? rect : best
+          })
+
+          chips.push({
+            id: item.annotation.id,
+            index: annotationIndex,
+            left: anchorRect.left + anchorRect.width,
+            top: anchorRect.top,
+          })
+        }
+      }
+
+      for (const annotation of renderedAnnotations) {
+        applyBlockAnnotationMarker(root, annotation)
+      }
+
+      setAnnotationOverlay({ rects, chips })
+
+      if (process.env.NODE_ENV !== 'production' && resolution.unresolved.length > 0) {
+        console.debug('[annotations] unresolved annotations', {
+          count: resolution.unresolved.length,
+          ids: resolution.unresolved.map(item => item.annotation.id),
+          reasons: resolution.unresolved.map(item => item.reason),
+        })
+      }
+    }
+
+    recomputeOverlay()
+    window.addEventListener('resize', recomputeOverlay)
+    return () => {
+      window.removeEventListener('resize', recomputeOverlay)
+    }
+  }, [annotations, renderedAnnotations, text, displayedText, isStreaming])
+
+  useEffect(() => {
+    if (variant !== 'response' || isStreaming || !messageId) {
+      closeSelectionMenu()
+    }
+  }, [variant, isStreaming, messageId, closeSelectionMenu])
+
+  useEffect(() => {
+    if (!pendingSelection && !activeAnnotationDetail) return
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null
       if (!target) return
       if (selectionMenuRef.current?.contains(target)) return
-      setPendingSelection(null)
+      closeSelectionMenu()
     }
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPendingSelection(null)
+      if (event.key !== 'Escape') return
+
+      if (selectionMenuView !== 'compact') {
+        event.preventDefault()
+        setSelectionMenuView('compact')
+        setFollowUpDraft('')
+        setActiveAnnotationDetail(null)
+        return
       }
+
+      closeSelectionMenu()
     }
 
-    const handleScroll = () => {
-      setPendingSelection(null)
+    const handleScroll = (event: Event) => {
+      const target = event.target as Node | null
+
+      // Never auto-dismiss while in expanded island views.
+      if (selectionMenuView !== 'compact') {
+        return
+      }
+
+      // Ignore scroll events originating from inside the island.
+      if (target && selectionMenuRef.current?.contains(target)) {
+        return
+      }
+
+      closeSelectionMenu()
     }
 
     const handleSelectionChange = () => {
-      const root = contentRef.current
+      const root = contentLayerRef.current
       if (!root) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
       const selection = window.getSelection()
+      // Keep the island open if selection was programmatically cleared by a render update.
+      // This happens during streaming/DOM reconciliation and should not dismiss follow-up UI.
       if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        setPendingSelection(null)
         return
       }
 
       const range = selection.getRangeAt(0)
-      if (!root.contains(range.commonAncestorContainer)) {
-        setPendingSelection(null)
+      const common = range.commonAncestorContainer
+      const commonElement = common.nodeType === Node.ELEMENT_NODE
+        ? common as Element
+        : common.parentElement
+
+      // Selecting text inside the island (e.g. follow-up textarea) should not close it.
+      if (commonElement && selectionMenuRef.current?.contains(commonElement)) {
+        return
+      }
+
+      if (!root.contains(common)) {
+        closeSelectionMenu()
       }
     }
 
@@ -1717,21 +2174,138 @@ export function ResponseCard({
       window.removeEventListener('scroll', handleScroll, true)
       document.removeEventListener('selectionchange', handleSelectionChange)
     }
-  }, [pendingSelection])
+  }, [pendingSelection, activeAnnotationDetail, closeSelectionMenu, selectionMenuView])
 
-  const handleConfirmAnnotation = useCallback(() => {
-    if (!onAddAnnotation || !messageId || !pendingSelection) return
-
-    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end)) {
-      setPendingSelection(null)
+  const handleSelectionMenuMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('textarea, input, [contenteditable="true"], [role="textbox"]')) {
       return
     }
 
-    const annotation = createTextSelectionAnnotation(messageId, pendingSelection)
-    onAddAnnotation(messageId, annotation)
-    setPendingSelection(null)
+    event.preventDefault()
+  }, [])
+
+  const handleOpenFollowUpView = useCallback(() => {
+    if (!pendingSelection) return
+
+    // Native browser selection steals typing focus from the follow-up textarea.
+    // Keep semantic selection in pendingSelection and clear only the DOM selection.
     window.getSelection()?.removeAllRanges()
-  }, [onAddAnnotation, messageId, pendingSelection, annotations])
+    setActiveAnnotationDetail(null)
+    setSelectionMenuView('confirm-follow-up')
+  }, [pendingSelection])
+
+  const handleSubmitFollowUp = useCallback((note: string) => {
+    const normalizedNote = note.trim()
+
+    if (!messageId) return
+
+    if (activeAnnotationDetail) {
+      if (!onUpdateAnnotation || !activeAnnotation) {
+        closeSelectionMenu()
+        return
+      }
+
+      const existingOtherBodies = activeAnnotation.body.filter(body => body.type !== 'highlight' && body.type !== 'note')
+      const nextBody: AnnotationV1['body'] = [
+        { type: 'highlight' },
+        ...(normalizedNote.length > 0 ? [{ type: 'note', text: normalizedNote, format: 'plain' } as const] : []),
+        ...existingOtherBodies,
+      ]
+
+      const nextMeta = { ...(activeAnnotation.meta ?? {}) }
+      delete nextMeta.followUp
+
+      onUpdateAnnotation(messageId, activeAnnotationDetail.annotationId, {
+        body: nextBody,
+        intent: normalizedNote.length > 0 ? 'comment' : 'highlight',
+        updatedAt: Date.now(),
+        meta: normalizedNote.length > 0
+          ? {
+              ...nextMeta,
+              followUp: {
+                text: normalizedNote,
+                updatedAt: Date.now(),
+              },
+            }
+          : (Object.keys(nextMeta).length > 0 ? nextMeta : undefined),
+      })
+
+      closeSelectionMenu()
+      return
+    }
+
+    if (!onAddAnnotation || !pendingSelection) return
+
+    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end)) {
+      closeSelectionMenu()
+      return
+    }
+
+    const annotation = createTextSelectionAnnotation(messageId, pendingSelection, normalizedNote)
+    onAddAnnotation(messageId, annotation)
+    closeSelectionMenu()
+    window.getSelection()?.removeAllRanges()
+  }, [
+    messageId,
+    activeAnnotationDetail,
+    activeAnnotation,
+    onUpdateAnnotation,
+    onAddAnnotation,
+    pendingSelection,
+    annotations,
+    closeSelectionMenu,
+  ])
+
+  const handleCancelFollowUp = useCallback(() => {
+    setFollowUpDraft('')
+
+    if (!pendingSelection) {
+      closeSelectionMenu()
+      return
+    }
+
+    setSelectionMenuView('compact')
+    setActiveAnnotationDetail(null)
+
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      const root = contentLayerRef.current
+      if (!root) return
+
+      const range = resolveRangeFromOffsets(root, pendingSelection.start, pendingSelection.end)
+      if (!range) return
+
+      const selection = window.getSelection()
+      if (!selection) return
+
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+  }, [pendingSelection, closeSelectionMenu])
+
+  const handleOpenAnnotationDetail = useCallback((annotationId: string, index: number, anchorX: number, anchorY: number) => {
+    const annotation = (annotations ?? []).find(item => item.id === annotationId)
+    const noteBody = annotation?.body.find(body => body.type === 'note') as Extract<
+      AnnotationV1['body'][number],
+      { type: 'note' }
+    > | undefined
+
+    setPendingSelection(null)
+    setFollowUpDraft(noteBody?.text ?? '')
+    setActiveAnnotationDetail({ annotationId, index, anchorX, anchorY })
+    setSelectionMenuView('confirm-follow-up')
+  }, [annotations])
+
+  const handleDeleteActiveAnnotation = useCallback(() => {
+    if (!onRemoveAnnotation || !messageId || !activeAnnotationDetail) return
+
+    onRemoveAnnotation(messageId, activeAnnotationDetail.annotationId)
+    closeSelectionMenu()
+  }, [onRemoveAnnotation, messageId, activeAnnotationDetail, closeSelectionMenu])
 
   const handleSelectionPointerDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     selectionStartedInContentRef.current = true
@@ -1743,41 +2317,41 @@ export function ResponseCard({
   }, [])
 
   const showSelectionMenuFromCurrentSelection = useCallback(() => {
-    const root = contentRef.current
+    const root = contentLayerRef.current
     if (!root) return
 
     requestAnimationFrame(() => {
       const selection = window.getSelection()
       if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
       const range = selection.getRangeAt(0)
       if (!root.contains(range.commonAncestorContainer)) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
       const start = resolveNodeOffset(root, range.startContainer, range.startOffset)
       const end = resolveNodeOffset(root, range.endContainer, range.endOffset)
       if (start == null || end == null || end <= start) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
       const selectedText = range.toString()
       if (!selectedText || !/\S/.test(selectedText)) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
       if (hasExistingTextRangeAnnotation(annotations, start, end)) {
-        setPendingSelection(null)
+        closeSelectionMenu()
         return
       }
 
-      const fullText = root.textContent || ''
+      const fullText = getCanonicalText(root)
       const prefix = fullText.slice(Math.max(0, start - ANNOTATION_PREFIX_SUFFIX_WINDOW), start)
       const suffix = fullText.slice(end, end + ANNOTATION_PREFIX_SUFFIX_WINDOW)
 
@@ -1823,17 +2397,14 @@ export function ResponseCard({
         anchorRect = range.getBoundingClientRect()
       }
 
-      const anchorXRaw = (pointerX != null && pointerX >= anchorRect.left && pointerX <= anchorRect.right)
+      const anchorX = (pointerX != null && pointerX >= anchorRect.left && pointerX <= anchorRect.right)
         ? pointerX
         : anchorRect.left + (anchorRect.width / 2)
-
-      const minX = SELECTION_MENU_VIEWPORT_PADDING + SELECTION_MENU_HALF_WIDTH_ESTIMATE
-      const maxX = window.innerWidth - SELECTION_MENU_VIEWPORT_PADDING - SELECTION_MENU_HALF_WIDTH_ESTIMATE
-      const anchorX = maxX >= minX
-        ? Math.min(Math.max(anchorXRaw, minX), maxX)
-        : window.innerWidth / 2
       const anchorY = anchorRect.top - 8
 
+      setSelectionMenuView('compact')
+      setFollowUpDraft('')
+      setActiveSelectionMenuSize(null)
       setPendingSelection({
         start,
         end,
@@ -1844,12 +2415,18 @@ export function ResponseCard({
         anchorY,
       })
     })
-  }, [annotations])
+  }, [annotations, closeSelectionMenu])
 
   const handleTextSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!onAddAnnotation || !messageId || variant !== 'response' || isStreaming) return
-    const root = contentRef.current
+    const root = contentLayerRef.current
     if (!root) return
+
+    const targetElement = event.target instanceof Element ? event.target : null
+    if (targetElement?.closest('[data-ca-annotation-index]')) {
+      selectionStartedInContentRef.current = false
+      return
+    }
 
     // Mouseup location reflects the user's final intent for popup anchoring.
     lastPointerRef.current = {
@@ -1899,20 +2476,20 @@ export function ResponseCard({
                   },
                 ],
               },
-              style: { color: 'yellow', opacity: 0.35 },
+              style: { color: 'yellow' },
             }
             onAddAnnotation(messageId, annotation)
           }
         }
       }
       selectionStartedInContentRef.current = false
-      setPendingSelection(null)
+      closeSelectionMenu()
       return
     }
 
     selectionStartedInContentRef.current = false
     showSelectionMenuFromCurrentSelection()
-  }, [onAddAnnotation, messageId, variant, isStreaming, annotations, showSelectionMenuFromCurrentSelection])
+  }, [onAddAnnotation, messageId, variant, isStreaming, annotations, showSelectionMenuFromCurrentSelection, closeSelectionMenu])
 
   useEffect(() => {
     if (!onAddAnnotation || !messageId || variant !== 'response' || isStreaming) return
@@ -1928,7 +2505,7 @@ export function ResponseCard({
         ts: Date.now(),
       }
 
-      const root = contentRef.current
+      const root = contentLayerRef.current
       if (!root) return
 
       const target = event.target as Node | null
@@ -1946,47 +2523,195 @@ export function ResponseCard({
     }
   }, [onAddAnnotation, messageId, variant, isStreaming, showSelectionMenuFromCurrentSelection])
 
-  const selectionMenu = pendingSelection
+  const activeMenuAnchor = useMemo(() => {
+    if (pendingSelection) {
+      return { x: pendingSelection.anchorX, y: pendingSelection.anchorY }
+    }
+
+    if (activeAnnotationDetail) {
+      return { x: activeAnnotationDetail.anchorX, y: activeAnnotationDetail.anchorY }
+    }
+
+    return null
+  }, [pendingSelection, activeAnnotationDetail])
+
+  useEffect(() => {
+    if (activeMenuAnchor) {
+      setSelectionMenuRenderAnchor(activeMenuAnchor)
+      setIsSelectionMenuVisible(false)
+
+      if (typeof window === 'undefined') {
+        setIsSelectionMenuVisible(true)
+        return
+      }
+
+      let raf1 = 0
+      let raf2 = 0
+
+      raf1 = window.requestAnimationFrame(() => {
+        raf2 = window.requestAnimationFrame(() => {
+          setIsSelectionMenuVisible(true)
+        })
+      })
+
+      return () => {
+        window.cancelAnimationFrame(raf1)
+        window.cancelAnimationFrame(raf2)
+      }
+    }
+
+    if (selectionMenuRenderAnchor) {
+      setIsSelectionMenuVisible(false)
+    }
+  }, [activeMenuAnchor])
+
+  const handleSelectionMenuExitComplete = useCallback(() => {
+    if (activeMenuAnchor) return
+    setSelectionMenuRenderAnchor(null)
+    setActiveSelectionMenuSize(null)
+  }, [activeMenuAnchor])
+
+  const selectionMenuMorphTarget = useMemo(() => {
+    if (!selectionMenuRenderAnchor) return null
+
+    return {
+      x: selectionMenuRenderAnchor.x,
+      y: Math.max(36, selectionMenuRenderAnchor.y),
+      width: 24,
+      height: 24,
+    }
+  }, [selectionMenuRenderAnchor])
+
+  const selectionMenuAnchorX = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return 0
+    }
+
+    if (!selectionMenuRenderAnchor) {
+      return window.innerWidth / 2
+    }
+
+    const activeWidth = activeSelectionMenuSize?.width ?? SELECTION_MENU_DEFAULT_WIDTH_ESTIMATE
+    return clampSelectionMenuAnchorX(selectionMenuRenderAnchor.x, activeWidth)
+  }, [selectionMenuRenderAnchor, activeSelectionMenuSize])
+
+  const selectionMenu = selectionMenuRenderAnchor
     ? ReactDOM.createPortal(
         <div
           ref={selectionMenuRef}
           className="fixed z-50"
           style={{
-            left: pendingSelection.anchorX,
-            top: Math.max(36, pendingSelection.anchorY),
+            left: selectionMenuAnchorX,
+            top: Math.max(36, selectionMenuRenderAnchor.y),
             transform: 'translate(-50%, -100%)',
           }}
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={handleSelectionMenuMouseDown}
         >
-          <div className="flex items-center gap-1 rounded-[8px] bg-background p-1 shadow-strong">
-            <button
-              type="button"
-              onClick={handleConfirmAnnotation}
-              className={cn(
-                "h-[30px] px-2.5 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5",
-                "text-foreground/85 hover:text-foreground hover:bg-foreground/5",
-                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              )}
-            >
-              <CornerDownRight className="h-3.5 w-3.5" />
-              <span>Follow up</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPendingSelection(null)}
-              className={cn(
-                "h-[30px] px-2.5 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5",
-                "text-foreground/85 hover:text-foreground hover:bg-foreground/5",
-                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              )}
-            >
-              <MessageCircleMore className="h-3.5 w-3.5" />
-              <span>Ask inline</span>
-            </button>
-          </div>
+          <Island
+            activeViewId={selectionMenuView}
+            radius={12}
+            className="border-border/40 bg-background/75 backdrop-blur-xl backdrop-saturate-150 shadow-strong"
+            onActiveViewSizeChange={setActiveSelectionMenuSize}
+            isVisible={isSelectionMenuVisible}
+            onExitComplete={handleSelectionMenuExitComplete}
+          >
+            <IslandContentView id="compact" anchorX="center" anchorY="bottom" morphFrom={selectionMenuMorphTarget}>
+              <div className="p-1 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleOpenFollowUpView}
+                  className={cn(
+                    "h-[30px] px-2.5 rounded-[8px] text-[13px] font-medium inline-flex items-center gap-1.5",
+                    "text-foreground/85 hover:text-foreground hover:bg-foreground/5",
+                    "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  )}
+                >
+                  <CornerDownRight className="h-3.5 w-3.5" />
+                  <span>Follow up</span>
+                </button>
+              </div>
+            </IslandContentView>
+
+            <IslandFollowUpContentView
+              id="confirm-follow-up"
+              value={followUpDraft}
+              onValueChange={setFollowUpDraft}
+              onCancel={handleCancelFollowUp}
+              onSubmit={handleSubmitFollowUp}
+              onDelete={activeAnnotationDetail ? handleDeleteActiveAnnotation : undefined}
+              title={activeAnnotationDetail
+                ? `Annotation ${activeAnnotationDetail.index ? `#${activeAnnotationDetail.index}` : ''}`
+                : 'Follow up'}
+              submitLabel={activeAnnotationDetail ? 'Save' : 'Continue'}
+              placeholder="Add comments the agent should consider in the next turn…"
+              maxInputHeight={320}
+              sendMessageKey={sendMessageKey}
+              morphFrom={selectionMenuMorphTarget}
+              lockScroll
+            />
+
+          </Island>
         </div>,
         document.body,
       )
+    : null
+
+  const annotationOverlayLayer = (annotationOverlay.rects.length > 0 || annotationOverlay.chips.length > 0)
+    ? (
+      <div data-ca-annotation-overlay className="pointer-events-none absolute inset-0 z-[2]">
+        {annotationOverlay.rects.map((rect, idx) => (
+          <div
+            key={`rect-${rect.id}-${idx}`}
+            className="absolute shadow-tinted"
+            style={{
+              left: rect.left - 4,
+              top: rect.top - 1,
+              width: rect.width + 8,
+              height: rect.height + 2,
+              backgroundColor: rect.color,
+              borderRadius: '4px',
+              ['--shadow-color' as string]: 'var(--info-rgb)',
+              ['--shadow-border-opacity' as string]: '0.14',
+              ['--shadow-blur-opacity' as string]: '0.10',
+            }}
+          />
+        ))}
+        {annotationOverlay.chips.map((chip) => (
+          <button
+            key={`chip-${chip.id}`}
+            type="button"
+            data-ca-annotation-index={String(chip.index)}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect()
+              handleOpenAnnotationDetail(chip.id, chip.index, rect.left + rect.width / 2, rect.top - 8)
+            }}
+            className="absolute shadow-tinted pointer-events-auto cursor-pointer hover:bg-foreground/10 focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            style={{
+              left: chip.left,
+              top: chip.top,
+              transform: 'translate(-2px, -8px)',
+              minWidth: '16px',
+              height: '15px',
+              padding: '0 3px',
+              borderRadius: '4px',
+              backgroundColor: 'color-mix(in srgb, var(--info) 30%, var(--background))',
+              color: 'rgba(15, 23, 42, 0.95)',
+              fontSize: '10px',
+              fontWeight: '600',
+              lineHeight: '15px',
+              textAlign: 'center',
+              userSelect: 'none',
+              position: 'absolute',
+              ['--shadow-color' as string]: 'var(--info-rgb)',
+              ['--shadow-border-opacity' as string]: '0.14',
+              ['--shadow-blur-opacity' as string]: '0.10',
+            }}
+          >
+            {chip.index}
+          </button>
+        ))}
+      </div>
+    )
     : null
 
   // Throttle content updates during streaming for performance
@@ -2078,13 +2803,16 @@ export function ResponseCard({
               }),
             }}
           >
-            <Markdown
-              mode="minimal"
-              onUrlClick={onOpenUrl}
-              onFileClick={onOpenFile}
-            >
-              {text}
-            </Markdown>
+            <div ref={contentLayerRef} className="relative">
+              <Markdown
+                mode="minimal"
+                onUrlClick={onOpenUrl}
+                onFileClick={onOpenFile}
+              >
+                {text}
+              </Markdown>
+              {annotationOverlayLayer}
+            </div>
           </div>
 
           {/* Footer with actions - hidden in compact mode */}
@@ -2124,8 +2852,8 @@ export function ResponseCard({
                       "focus:outline-none focus-visible:underline"
                     )}
                   >
-                    <ExternalLink className={SIZE_CONFIG.iconSize} />
-                    <span>View as Markdown</span>
+                    <FileText className={SIZE_CONFIG.iconSize} />
+                    <span>Markdown</span>
                   </button>
                 )}
               </div>
@@ -2188,13 +2916,16 @@ export function ResponseCard({
             }),
           }}
         >
-          <Markdown
-            mode="minimal"
-            onUrlClick={onOpenUrl}
-            onFileClick={onOpenFile}
-          >
-            {displayedText}
-          </Markdown>
+          <div ref={contentLayerRef} className="relative">
+            <Markdown
+              mode="minimal"
+              onUrlClick={onOpenUrl}
+              onFileClick={onOpenFile}
+            >
+              {displayedText}
+            </Markdown>
+            {annotationOverlayLayer}
+          </div>
         </div>
 
         {/* Footer - hidden in compact mode */}
@@ -2333,6 +3064,9 @@ export const TurnCard = React.memo(function TurnCard({
   compactMode = false,
   onBranch,
   onAddAnnotation,
+  onRemoveAnnotation,
+  onUpdateAnnotation,
+  sendMessageKey = 'enter',
 }: TurnCardProps) {
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -2684,6 +3418,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse && index === planActivities.length - 1}
             compactMode={compactMode}
             onBranch={onBranch ? (options?: { newPanel?: boolean }) => onBranch(planActivity.id, options) : undefined}
+            sendMessageKey={sendMessageKey}
           />
         </div>
       ))}
@@ -2710,11 +3445,14 @@ export const TurnCard = React.memo(function TurnCard({
                 messageId={response.messageId}
                 annotations={response.annotations}
                 onAddAnnotation={onAddAnnotation}
+                onRemoveAnnotation={onRemoveAnnotation}
+                onUpdateAnnotation={onUpdateAnnotation}
                 onAccept={onAcceptPlan}
                 onAcceptWithCompact={onAcceptPlanWithCompact}
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+                sendMessageKey={sendMessageKey}
               />
             </motion.div>
           )}
@@ -2734,11 +3472,14 @@ export const TurnCard = React.memo(function TurnCard({
             messageId={response.messageId}
             annotations={response.annotations}
             onAddAnnotation={onAddAnnotation}
+            onRemoveAnnotation={onRemoveAnnotation}
+            onUpdateAnnotation={onUpdateAnnotation}
             onAccept={onAcceptPlan}
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+            sendMessageKey={sendMessageKey}
           />
         </div>
       )}

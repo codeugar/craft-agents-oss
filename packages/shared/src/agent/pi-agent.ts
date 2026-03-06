@@ -79,7 +79,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 // Session storage (plans folder path)
-import { getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
+import { getSessionDataPath, getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
 
 // Error typing
 import { parseError, type AgentError } from './errors.ts';
@@ -882,15 +882,19 @@ export class PiAgent extends BaseAgent {
     const plansFolderPath = sessionId
       ? getSessionPlansPath(rootPath, sessionId)
       : undefined;
+    const dataFolderPath = sessionId
+      ? getSessionDataPath(rootPath, sessionId)
+      : undefined;
 
     const checkResult = runPreToolUseChecks({
       toolName,
       input,
       sessionId,
       permissionMode: this.permissionManager.getPermissionMode(),
-      workspaceRootPath: this.workingDirectory,
+      workspaceRootPath: rootPath,
       workspaceId: workspaceSlug,
       plansFolderPath,
+      dataFolderPath,
       workingDirectory: this.config.session?.workingDirectory,
       activeSourceSlugs: Array.from(this.sourceManager.getActiveSlugs()),
       allSourceSlugs: this.sourceManager.getAllSources().map(s => s.config.slug),
@@ -959,9 +963,10 @@ export class PiAgent extends BaseAgent {
           input,
           sessionId,
           permissionMode: this.permissionManager.getPermissionMode(),
-          workspaceRootPath: this.workingDirectory,
+          workspaceRootPath: rootPath,
           workspaceId: workspaceSlug,
           plansFolderPath,
+          dataFolderPath,
           workingDirectory: this.config.session?.workingDirectory,
           activeSourceSlugs: Array.from(this.sourceManager.getActiveSlugs()),
           allSourceSlugs: this.sourceManager.getAllSources().map(s => s.config.slug),

@@ -18,6 +18,7 @@ import { CONFIG_DIR } from './paths.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import { parsePermissionMode, PERMISSION_MODE_ORDER } from '../agent/mode-types.ts';
 import { type ConfigDefaults } from './config-defaults-schema.ts';
 import { isValidThemeFile } from './validators.ts';
 
@@ -110,10 +111,36 @@ function syncConfigDefaults(): void {
  * This file is synced from bundled assets on every launch.
  */
 export function loadConfigDefaults(): ConfigDefaults {
-  if (existsSync(CONFIG_DEFAULTS_FILE)) {
-    return readJsonFileSync<ConfigDefaults>(CONFIG_DEFAULTS_FILE);
+  if (!existsSync(CONFIG_DEFAULTS_FILE)) {
+    throw new Error('config-defaults.json not found at ' + CONFIG_DEFAULTS_FILE + '. Ensure ensureConfigDir() was called at startup.');
   }
-  throw new Error('config-defaults.json not found at ' + CONFIG_DEFAULTS_FILE + '. Ensure ensureConfigDir() was called at startup.');
+
+  const defaults = readJsonFileSync<ConfigDefaults>(CONFIG_DEFAULTS_FILE);
+
+  const parsedPermissionMode =
+    typeof defaults.workspaceDefaults?.permissionMode === 'string'
+      ? parsePermissionMode(defaults.workspaceDefaults.permissionMode)
+      : null;
+  defaults.workspaceDefaults.permissionMode = parsedPermissionMode ?? 'ask';
+
+  const rawCyclable = Array.isArray(defaults.workspaceDefaults?.cyclablePermissionModes)
+    ? defaults.workspaceDefaults.cyclablePermissionModes
+    : [];
+
+  const normalizedCyclable: PermissionMode[] = [];
+  for (const mode of rawCyclable) {
+    if (typeof mode !== 'string') continue;
+    const parsed = parsePermissionMode(mode);
+    if (!parsed) continue;
+    if (!normalizedCyclable.includes(parsed)) {
+      normalizedCyclable.push(parsed);
+    }
+  }
+
+  defaults.workspaceDefaults.cyclablePermissionModes =
+    normalizedCyclable.length >= 2 ? normalizedCyclable : [...PERMISSION_MODE_ORDER];
+
+  return defaults;
 }
 
 /**

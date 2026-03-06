@@ -449,8 +449,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   isFocusedPanelRef.current = isFocusedPanel
   // Skip smooth scroll briefly after session switch (instant scroll already happened)
   const skipSmoothScrollUntilRef = React.useRef(0)
+  // Track message commit boundaries so we can auto-scroll when a new user message
+  // actually lands in state (important when attachments delay optimistic insertion).
+  const prevLastMessageIdRef = React.useRef<string | null>(null)
+  const prevMessageCountRef = React.useRef(0)
+  const prevSessionIdForCommitScrollRef = React.useRef<string | null>(null)
   const internalTextareaRef = React.useRef<RichTextInputHandle>(null)
   const textareaRef = externalTextareaRef || internalTextareaRef
+  const [sendMessageKey, setSendMessageKey] = useState<'enter' | 'cmd-enter'>('enter')
 
   // Navigation for session branching
   const { navigate, navigateToSession } = useNavigation()
@@ -520,6 +526,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       textareaRef.current?.focus()
     }
   }, [session?.id, isFocused, isSearchModeActive, isFocusedPanel])
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadSendMessageKey = async () => {
+      if (!window.electronAPI) return
+
+      try {
+        const key = await window.electronAPI.getSendMessageKey()
+        if (!isMounted) return
+        setSendMessageKey(key ?? 'enter')
+      } catch (error) {
+        console.error('Failed to load send message key for follow-up view:', error)
+      }
+    }
+
+    loadSendMessageKey()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   // Reset match state when session or search query changes
   useEffect(() => {
@@ -1091,6 +1119,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Ref to track total turn count for scroll handler
   const totalTurnCountRef = React.useRef(0)
 
+  // Latest message metadata (for commit-time auto-scroll)
+  const messageCount = session?.messages.length ?? 0
+  const lastMessage = messageCount > 0 ? session?.messages[messageCount - 1] : undefined
+  const lastMessageId = lastMessage?.id
+  const lastMessageRole = lastMessage?.role
+
   // Track scroll position to toggle sticky-bottom behavior
   // - User scrolls up → unstick (stop auto-scrolling)
   // - User scrolls back to bottom → re-stick (resume auto-scrolling)
@@ -1180,6 +1214,42 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       if (debounceTimer) clearTimeout(debounceTimer)
     }
   }, [session?.id])
+
+  // Commit-time auto-scroll for new user messages.
+  // This complements submit-time scrolling and covers cases where attachments delay
+  // optimistic message insertion (e.g., thumbnail generation/resizing).
+  React.useEffect(() => {
+    const currentSessionId = session?.id ?? null
+
+    // Reset baseline on session switch; defer to ScrollOnMount/session-switch logic.
+    if (prevSessionIdForCommitScrollRef.current !== currentSessionId) {
+      prevSessionIdForCommitScrollRef.current = currentSessionId
+      prevLastMessageIdRef.current = lastMessageId ?? null
+      prevMessageCountRef.current = messageCount
+      return
+    }
+
+    const previousCount = prevMessageCountRef.current
+    const previousLastId = prevLastMessageIdRef.current
+    const messageActuallyChanged = !!lastMessageId && lastMessageId !== previousLastId
+    const countIncreased = messageCount > previousCount
+
+    // Update baselines before early returns to keep refs consistent.
+    prevLastMessageIdRef.current = lastMessageId ?? null
+    prevMessageCountRef.current = messageCount
+
+    if (!messageActuallyChanged || !countIncreased) return
+    if (lastMessageRole !== 'user') return
+
+    // Sending a message should always re-stick to bottom.
+    isStickToBottomRef.current = true
+
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isFocusedPanelRef.current ? 'smooth' : 'instant',
+      })
+    })
+  }, [session?.id, messageCount, lastMessageId, lastMessageRole])
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
@@ -1478,6 +1548,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         onOpenUrl={onOpenUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}
+                        sendMessageKey={sendMessageKey}
                         onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return
                           try {
@@ -1515,6 +1586,35 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             })
                           } catch (error) {
                             toast.error('Could not save highlight', {
+                              description: error instanceof Error ? error.message : 'Unknown error',
+                            })
+                          }
+                        }}
+                        onRemoveAnnotation={async (messageId, annotationId) => {
+                          if (!session) return
+                          try {
+                            await window.electronAPI.sessionCommand(session.id, {
+                              type: 'removeAnnotation',
+                              messageId,
+                              annotationId,
+                            })
+                          } catch (error) {
+                            toast.error('Could not remove highlight', {
+                              description: error instanceof Error ? error.message : 'Unknown error',
+                            })
+                          }
+                        }}
+                        onUpdateAnnotation={async (messageId, annotationId, patch) => {
+                          if (!session) return
+                          try {
+                            await window.electronAPI.sessionCommand(session.id, {
+                              type: 'updateAnnotation',
+                              messageId,
+                              annotationId,
+                              patch,
+                            })
+                          } catch (error) {
+                            toast.error('Could not update highlight', {
                               description: error instanceof Error ? error.message : 'Unknown error',
                             })
                           }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 
 const workspaceRootPath = '/tmp/ws-rollback'
 const workspace = {
@@ -10,6 +10,10 @@ const workspace = {
 let idCounter = 0
 const storedById = new Map<string, any>()
 const deletedIds: string[] = []
+
+// Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
+const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
+const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
 
 mock.module('electron', () => ({
   app: {
@@ -114,14 +118,11 @@ mock.module('@craft-agent/shared/workspaces', () => ({
 }))
 
 mock.module('@craft-agent/shared/agent', () => ({
+  ...actualSharedAgentModule,
   setPermissionMode: () => {},
   getPermissionModeDiagnostics: () => ({ mode: 'ask', source: 'test' }),
   unregisterSessionScopedToolCallbacks: () => {},
   mergeSessionScopedToolCallbacks: () => {},
-  AbortReason: {
-    USER_REQUEST: 'user_request',
-  },
-  // Targeted stubs: prevent SyntaxError in tests that import these from the barrel
   hydratePreviousPermissionMode: () => {},
   initializeModeState: () => {},
   cleanupModeState: () => {},
@@ -129,9 +130,11 @@ mock.module('@craft-agent/shared/agent', () => ({
   registerSessionScopedToolCallbacks: () => {},
   cleanupSessionScopedTools: () => {},
   getSessionScopedTools: () => [],
+  normalizeCanonicalBrowserToolName: (name: string) => name,
 }))
 
 mock.module('@craft-agent/shared/agent/backend', () => ({
+  ...actualSharedAgentBackendModule,
   resolveSessionConnection: () => null,
   createBackendFromConnection: () => {
     throw new Error('not used in this test')
@@ -146,19 +149,16 @@ mock.module('@craft-agent/shared/agent/backend', () => ({
   },
   cleanupSourceRuntimeArtifacts: async () => {},
   providerTypeToAgentProvider: () => 'anthropic',
-  // Targeted stubs: prevent SyntaxError in tests that import these from the barrel
   fetchBackendModels: async () => ({ models: [] }),
   initializeBackendHostRuntime: () => {},
+  resolveBackendHostTooling: () => ({
+    sourceCredentialManager: null,
+    sourceServerBuilder: null,
+    sourcePoolFactory: null,
+    sourcePoolServerFactory: null,
+  }),
   testBackendConnection: async () => ({ success: false, error: 'stub' }),
   validateStoredBackendConnection: async () => ({ success: false, error: 'stub' }),
-  createBackend: () => { throw new Error('stub') },
-  createAgent: () => { throw new Error('stub') },
-  detectProvider: () => 'anthropic',
-  getAvailableProviders: () => ['anthropic'],
-  isProviderAvailable: () => true,
-  connectionTypeToProvider: () => 'anthropic',
-  connectionAuthTypeToBackendAuthType: () => 'api_key',
-  resolveSetupTestConnectionHint: () => ({}),
 }))
 
 mock.module('@craft-agent/shared/sources', () => ({
@@ -260,6 +260,7 @@ const { SessionManager } = await import('@craft-agent/server-core/sessions')
 
 describe('session branch rollback on preflight failure', () => {
   beforeEach(() => {
+    process.env.CRAFT_EXPERIMENTAL_STRICT_BRANCH_FORK = '1'
     idCounter = 0
     storedById.clear()
     deletedIds.length = 0
@@ -277,6 +278,10 @@ describe('session branch rollback on preflight failure', () => {
       createdAt: Date.now() - 20,
       lastUsedAt: Date.now() - 5,
     })
+  })
+
+  afterEach(() => {
+    delete process.env.CRAFT_EXPERIMENTAL_STRICT_BRANCH_FORK
   })
 
   it('deletes newly created child session when ensureBranchReady throws', async () => {
@@ -312,5 +317,28 @@ describe('session branch rollback on preflight failure', () => {
     expect((manager as any).sessions.has('child-1')).toBe(false)
     expect(destroyCalled).toBe(true)
     expect(poolStopCalled).toBe(true)
+  })
+
+  it('skips backend preflight in seeded branch mode', async () => {
+    delete process.env.CRAFT_EXPERIMENTAL_STRICT_BRANCH_FORK
+
+    const manager = new SessionManager()
+    let getOrCreateAgentCalled = false
+
+    ;(manager as any).ensureMessagesLoaded = async (_managed: any) => {}
+    ;(manager as any).getOrCreateAgent = async () => {
+      getOrCreateAgentCalled = true
+      throw new Error('should not be called in seeded mode')
+    }
+
+    const child = await manager.createSession('ws-1', {
+      branchFromSessionId: 'source-1',
+      branchFromMessageId: 'm1',
+    } as any)
+
+    expect(child.id).toBe('child-1')
+    expect(getOrCreateAgentCalled).toBe(false)
+    expect(deletedIds).toEqual([])
+    expect(storedById.has('child-1')).toBe(true)
   })
 })

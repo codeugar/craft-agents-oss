@@ -122,6 +122,7 @@ export {
   type IslandContentViewProps,
   type IslandTransitionConfig,
   type IslandActiveViewSize,
+  type IslandMorphTarget,
   type IslandFollowUpContentViewProps,
   type AnchorX,
   type AnchorY,

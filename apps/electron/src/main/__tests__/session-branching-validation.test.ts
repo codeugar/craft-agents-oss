@@ -66,11 +66,16 @@ function validateBranchLikeSessionManager(args: {
       throw new Error(`Invalid branch request: message ${request.branchFromMessageId} not found in source session`)
     }
 
+    const branchContextStrategy: 'sdk-fork' | 'seeded-fresh-session' = 'seeded-fresh-session'
+
     return {
       sourceSessionId: request.branchFromSessionId,
       sourceMessageId: request.branchFromMessageId,
       copiedMessages: sourceSession.messages.slice(0, branchIdx + 1),
-      branchFromSdkSessionId: sourceManagedSdkSessionId || sourceSession.sdkSessionId,
+      branchContextStrategy,
+      branchFromSdkSessionId: branchContextStrategy === 'sdk-fork'
+        ? (sourceManagedSdkSessionId || sourceSession.sdkSessionId)
+        : undefined,
     }
   }
 
@@ -93,7 +98,8 @@ describe('session branching validation semantics', () => {
 
     expect(result).toBeDefined()
     expect(result?.copiedMessages.map(m => m.id)).toEqual(['m1', 'm2'])
-    expect(result?.branchFromSdkSessionId).toBe('sdk-parent')
+    expect(result?.branchContextStrategy).toBe('seeded-fresh-session')
+    expect(result?.branchFromSdkSessionId).toBeUndefined()
   })
 
   it('rejects cross-workspace branch request', () => {
@@ -130,7 +136,8 @@ describe('session branching validation semantics', () => {
     })
 
     expect(result).toBeDefined()
-    expect(result?.branchFromSdkSessionId).toBe('pi-parent')
+    expect(result?.branchContextStrategy).toBe('seeded-fresh-session')
+    expect(result?.branchFromSdkSessionId).toBeUndefined()
   })
 
   it('rejects cross-provider branch requests', () => {

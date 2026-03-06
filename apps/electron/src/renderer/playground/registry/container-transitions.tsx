@@ -2,7 +2,7 @@ import * as React from 'react'
 import { motion } from 'motion/react'
 import { Check, CornerDownRight, GripHorizontal, MessageCircleMore, RefreshCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Island, IslandContentView, IslandFollowUpContentView, type IslandActiveViewSize } from '@craft-agent/ui'
+import { Island, IslandContentView, IslandFollowUpContentView, type IslandActiveViewSize, type IslandMorphTarget } from '@craft-agent/ui'
 import type { ComponentEntry } from './types'
 
 type IslandViewId = 'compact' | 'confirm-follow-up' | 'confirm-ask-inline'
@@ -65,9 +65,11 @@ interface IslandOptionsProps {
   view: IslandViewId
   navigation: IslandNavigation<IslandViewId>
   activeViewSize: IslandActiveViewSize | null
+  useMorph: boolean
+  onToggleMorph: () => void
 }
 
-function IslandOptions({ view, navigation, activeViewSize }: IslandOptionsProps) {
+function IslandOptions({ view, navigation, activeViewSize, useMorph, onToggleMorph }: IslandOptionsProps) {
   return (
     <motion.div className="flex w-[280px] shrink-0 flex-col gap-3 rounded-2xl border border-border/50 bg-background/90 p-3 shadow-middle backdrop-blur-sm">
       <div className="flex items-center justify-between">
@@ -108,6 +110,17 @@ function IslandOptions({ view, navigation, activeViewSize }: IslandOptionsProps)
         </button>
       </div>
 
+      <button
+        type="button"
+        onClick={onToggleMorph}
+        className={cn(
+          'rounded-lg px-2.5 py-1.5 text-xs text-left',
+          useMorph ? 'bg-foreground/10' : 'bg-foreground/5 hover:bg-foreground/10'
+        )}
+      >
+        Morph from target: {useMorph ? 'On' : 'Off'}
+      </button>
+
       <div className="rounded-xl border border-border/40 bg-foreground/3 p-2 text-[11px] text-foreground/65">
         Backstack: {navigation.stack.join(' → ')}
       </div>
@@ -132,6 +145,18 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
   const [askScope, setAskScope] = React.useState<AskScope>('selection')
   const [lastConfirmed, setLastConfirmed] = React.useState<string | null>(null)
   const [activeViewSize, setActiveViewSize] = React.useState<IslandActiveViewSize | null>(null)
+  const [useMorph, setUseMorph] = React.useState(true)
+
+  const morphFrom = React.useMemo<IslandMorphTarget | null>(() => {
+    if (!useMorph) return null
+
+    return {
+      x: 340,
+      y: 540,
+      width: 24,
+      height: 24,
+    }
+  }, [useMorph])
 
   const onConfirm = (intent: 'Follow up' | 'Ask inline', value: string) => {
     const payload = value.trim()
@@ -154,7 +179,7 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
         <div className="relative flex-1 rounded-[12px] border border-border/50 bg-foreground/2 p-5 min-h-[320px] overflow-hidden">
           <div className="absolute left-1/2 bottom-5 -translate-x-1/2">
             <Island activeViewId={navigation.current} onActiveViewSizeChange={setActiveViewSize}>
-              <IslandContentView id="compact" anchorX="center" anchorY="bottom">
+              <IslandContentView id="compact" anchorX="center" anchorY="bottom" morphFrom={morphFrom}>
                 <div className="p-1 flex items-center gap-1">
                   <button
                     type="button"
@@ -187,13 +212,14 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
               <IslandFollowUpContentView
                 id="confirm-follow-up"
                 value={note}
+                morphFrom={morphFrom}
                 onValueChange={setNote}
                 onCancel={navigation.pop}
                 onSubmit={(value) => onConfirm('Follow up', value)}
                 maxInputHeight={400}
               />
 
-              <IslandContentView id="confirm-ask-inline" anchorX="center" anchorY="top">
+              <IslandContentView id="confirm-ask-inline" anchorX="center" anchorY="top" morphFrom={morphFrom}>
                 <div className="w-[500px] p-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -286,6 +312,8 @@ function ToolbarToConfirmTransitionDemo({ initialView = 'compact' }: ToolbarToCo
           view={navigation.current}
           navigation={navigation}
           activeViewSize={activeViewSize}
+          useMorph={useMorph}
+          onToggleMorph={() => setUseMorph((prev) => !prev)}
         />
       </div>
 

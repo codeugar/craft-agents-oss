@@ -43,6 +43,9 @@ import {
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
+  type PermissionModeCanonical,
+  toCanonicalPermissionMode,
+  parsePermissionMode,
 } from './mode-types.ts';
 
 // Import incr-regex-package for smart pattern mismatch diagnostics
@@ -52,6 +55,7 @@ import { IREGEX, DONE, MORE, FAILED } from 'incr-regex-package';
 // Re-export types and config from mode-types (single source of truth)
 export {
   type PermissionMode,
+  type PermissionModeCanonical,
   type ModeConfig,
   type CompiledApiEndpointRule,
   type CompiledBashPattern,
@@ -59,6 +63,8 @@ export {
   PERMISSION_MODE_ORDER,
   PERMISSION_MODE_CONFIG,
   SAFE_MODE_CONFIG,
+  toCanonicalPermissionMode,
+  parsePermissionMode,
 };
 
 // Re-export PowerShell validator types
@@ -2039,8 +2045,8 @@ export function formatSessionState(
 ): string {
   const diagnostics = getPermissionModeDiagnostics(sessionId);
 
-  // Use the display name (lowercased) so the agent sees "explore" instead of internal key "safe"
-  const modeName = PERMISSION_MODE_CONFIG[diagnostics.permissionMode].displayName.toLowerCase();
+  // Use canonical user-facing mode tokens to avoid terminology drift.
+  const modeName = toCanonicalPermissionMode(diagnostics.permissionMode);
   let result = `<session_state>\nsessionId: ${sessionId}\npermissionMode: ${modeName}`;
 
   if (diagnostics.transitionDisplay) {

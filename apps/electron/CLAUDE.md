@@ -423,7 +423,7 @@ apps/electron/
 │   │   │   ├── sources.ts  # Source/permissions handlers
 │   │   │   └── ...         # Other domain handler files
 │   │   ├── menu.ts        # Application menu (File, Edit, View, Help menus)
-│   │   ├── sessions.ts    # SessionManager - CraftAgent integration
+│   │   ├── (delegated)    # SessionManager lives in packages/server-core/src/sessions/SessionManager.ts
 │   │   ├── deep-link.ts   # Deep link URL parsing and handling
 │   │   ├── agent-service.ts # Agent listing, caching, auth checking
 │   │   ├── sources-service.ts # Source and authentication service
@@ -542,7 +542,7 @@ The app uses a WebSocket RPC transport for main ↔ renderer communication (`WsR
 | **Sessions** | | |
 | `sessions:*` | renderer → main | Session CRUD (create, delete, rename, archive) |
 | `sessions:sendMessage` | renderer → main | Send message with optional file attachments |
-| `sessions:setPermissionMode` | renderer → main | Set permission mode ('safe', 'ask', 'allow-all') |
+| `sessions:setPermissionMode` | renderer → main | Set permission mode (Explore/Ask/Execute → internal: 'safe'/'ask'/'allow-all') |
 | `sessions:flag/unflag` | renderer → main | Flag/unflag session for attention |
 | `sessions:setTodoState` | renderer → main | Set session workflow status |
 | `sessions:markRead/markUnread` | renderer → main | Mark session read status |
@@ -715,7 +715,7 @@ craftagents://workspace/{workspaceId}/{compoundRoute}
 
 ### Key Integration Points
 
-**SessionManager** (`main/sessions.ts`):
+**SessionManager** (`packages/server-core/src/sessions/SessionManager.ts`):
 - Wraps `CraftAgent` from `@craft-agent/shared`
 - Sets up SDK path and authentication on initialization
 - Processes `AgentEvent` stream and forwards to renderer
@@ -1137,15 +1137,15 @@ Sessions support naming, archiving, and persistence:
 
 Sessions use a three-level permission mode system to control tool execution:
 
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| `'safe'` | Blocks all write operations, never prompts | Read-only exploration, planning |
-| `'ask'` | Prompts user for bash commands (default) | Normal interactive use |
-| `'allow-all'` | Auto-approves all commands | Trusted automation |
+| Canonical Mode | Internal Key | Behavior | Use Case |
+|------|----------|----------|----------|
+| `explore` | `'safe'` | Blocks all write operations, never prompts | Read-only exploration, planning |
+| `ask` | `'ask'` | Prompts user for bash commands (default) | Normal interactive use |
+| `execute` | `'allow-all'` | Auto-approves all commands | Trusted automation |
 
 **Session-level:**
 ```typescript
-// Set permission mode for a session
+// Internal wire value ('safe' maps to canonical 'explore')
 await window.electronAPI.setPermissionMode(sessionId, 'safe')
 ```
 

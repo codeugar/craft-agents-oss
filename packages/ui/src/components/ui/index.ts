@@ -47,6 +47,7 @@ export {
   type IslandContentViewProps,
   type IslandTransitionConfig,
   type IslandActiveViewSize,
+  type IslandMorphTarget,
   type AnchorX,
   type AnchorY,
 } from './Island'

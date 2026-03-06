@@ -52,7 +52,7 @@ function createFullMessage(): Message {
           { type: 'text-quote', exact: 'Tool', prefix: '', suffix: ' output' },
         ],
       },
-      style: { color: 'yellow', opacity: 0.35 },
+      style: { color: 'yellow' },
     }],
     isStreaming: false,
     isPending: false,

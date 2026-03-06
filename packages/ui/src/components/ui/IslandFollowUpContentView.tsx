@@ -1,7 +1,5 @@
 import * as React from 'react'
-import { motion } from 'motion/react'
-import { Check, X } from 'lucide-react'
-import { IslandContentView, useIslandAnimationConfig } from './Island'
+import { IslandContentView, type IslandMorphTarget } from './Island'
 
 export interface IslandFollowUpContentViewProps {
   id: string
@@ -9,9 +7,15 @@ export interface IslandFollowUpContentViewProps {
   onValueChange: (next: string) => void
   onCancel: () => void
   onSubmit: (value: string) => void
+  onDelete?: () => void
   title?: string
   placeholder?: string
+  submitLabel?: string
+  deleteLabel?: string
   maxInputHeight?: number
+  sendMessageKey?: 'enter' | 'cmd-enter'
+  morphFrom?: IslandMorphTarget | null
+  lockScroll?: boolean
 }
 
 /**
@@ -27,27 +31,20 @@ export function IslandFollowUpContentView({
   onValueChange,
   onCancel,
   onSubmit,
+  onDelete,
   title = 'Follow up',
   placeholder = 'Add comments the agent should consider in the next turn…',
+  submitLabel = 'Continue',
+  deleteLabel = 'Delete',
   maxInputHeight = 400,
+  sendMessageKey = 'enter',
+  morphFrom = null,
+  lockScroll = false,
 }: IslandFollowUpContentViewProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const measureTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
-  const [inputHeight, setInputHeight] = React.useState(76)
+  const [inputHeight, setInputHeight] = React.useState(44)
   const [inputOverflow, setInputOverflow] = React.useState(false)
-  const islandAnimation = useIslandAnimationConfig()
-
-  const submitShortcut = React.useMemo(() => {
-    if (typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)) {
-      return '⌘ + Enter'
-    }
-    return 'Ctrl + Enter'
-  }, [])
-
-  const inputTransition = React.useMemo(
-    () => ({ type: 'spring' as const, duration: islandAnimation.duration, bounce: islandAnimation.bounce }),
-    [islandAnimation.duration, islandAnimation.bounce]
-  )
 
   React.useLayoutEffect(() => {
     const measure = measureTextareaRef.current
@@ -62,35 +59,40 @@ export function IslandFollowUpContentView({
     setInputOverflow((prev) => (prev === nextOverflow ? prev : nextOverflow))
   }, [value, maxInputHeight])
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const raf = window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+
+      textarea.focus()
+      const cursor = textarea.value.length
+      textarea.setSelectionRange(cursor, cursor)
+    })
+
+    return () => window.cancelAnimationFrame(raf)
+  }, [])
+
   return (
-    <IslandContentView id={id} anchorX="center" anchorY="top">
-      <div className="w-[440px] p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">{title}</div>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="h-7 w-7 inline-flex items-center justify-center rounded-[6px] text-foreground/70 hover:bg-foreground/5 hover:text-foreground"
-            aria-label="Back"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+    <IslandContentView id={id} anchorX="center" anchorY="top" morphFrom={morphFrom} lockScroll={lockScroll}>
+      <div className="w-[330px] px-3 pb-3 pt-2 space-y-2.5 select-none">
+        <div className="flex items-center">
+          <div className="pl-[2px] text-sm font-medium">{title}</div>
         </div>
 
-        <div className="relative rounded-[8px] border border-border/70 px-3 py-2 bg-background shadow-minimal">
+        <div className="relative rounded-[8px] px-0 py-1">
           <textarea
             ref={measureTextareaRef}
             aria-hidden="true"
             tabIndex={-1}
             readOnly
-            rows={3}
+            rows={2}
             value={value}
-            className="pointer-events-none absolute left-3 right-3 top-2 resize-none overflow-hidden bg-transparent text-sm leading-5 opacity-0"
+            className="pointer-events-none absolute left-0 right-0 top-1 resize-none overflow-hidden bg-transparent text-sm leading-5 opacity-0 pl-[2px]"
           />
 
-          <motion.textarea
+          <textarea
             ref={textareaRef}
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
@@ -98,6 +100,24 @@ export function IslandFollowUpContentView({
               if (event.key === 'Escape') {
                 event.preventDefault()
                 onCancel()
+                return
+              }
+
+              if (event.nativeEvent.isComposing) return
+
+              if (sendMessageKey === 'enter') {
+                if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                  event.preventDefault()
+                  onSubmit(value)
+                  return
+                }
+
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault()
+                  onSubmit(value)
+                }
+
+                return
               }
 
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -106,17 +126,25 @@ export function IslandFollowUpContentView({
               }
             }}
             placeholder={placeholder}
-            rows={3}
-            initial={false}
-            animate={{ height: inputHeight }}
-            transition={inputTransition}
-            style={{ overflowY: inputOverflow ? 'auto' : 'hidden' }}
-            className="relative w-full resize-none bg-transparent outline-none text-sm leading-5"
+            rows={2}
+            style={{ height: inputHeight, overflowY: inputOverflow ? 'auto' : 'hidden' }}
+            className="relative w-full resize-none bg-transparent outline-none text-sm leading-5 select-text pl-[2px]"
           />
         </div>
 
         <div className="flex justify-between items-center pt-1 shrink-0">
-          <div className="text-[11px] text-foreground/50">Press {submitShortcut} to continue</div>
+          <div>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="h-8 px-3 rounded-[8px] text-sm bg-background shadow-minimal text-red-500 inline-flex items-center cursor-pointer hover:bg-foreground/2"
+              >
+                {deleteLabel}
+              </button>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <button
               type="button"
@@ -128,10 +156,9 @@ export function IslandFollowUpContentView({
             <button
               type="button"
               onClick={() => onSubmit(value)}
-              className="h-8 px-3 rounded-[8px] text-sm bg-foreground text-background inline-flex items-center gap-1.5"
+              className="h-8 px-3 rounded-[8px] text-sm bg-background shadow-minimal text-foreground inline-flex items-center cursor-pointer hover:bg-foreground/2"
             >
-              <Check className="h-3.5 w-3.5" />
-              Continue
+              {submitLabel}
             </button>
           </div>
         </div>

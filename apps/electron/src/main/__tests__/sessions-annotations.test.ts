@@ -25,7 +25,7 @@ mock.module('../notifications', () => ({
   updateBadgeCount: () => {},
 }))
 
-const { SessionManager } = await import('../sessions')
+const { SessionManager } = await import('@craft-agent/server-core/sessions')
 
 function makeAnnotation(id: string, extraMeta?: Record<string, unknown>): AnnotationV1 {
   return {

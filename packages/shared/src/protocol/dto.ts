@@ -120,7 +120,12 @@ export interface CreateSessionOptions {
   labels?: string[]
   isFlagged?: boolean
   enabledSourceSlugs?: string[]
+  /**
+   * Message ID to branch from. This is a hard context cutoff:
+   * the new session must not include model context from later parent messages.
+   */
   branchFromMessageId?: string
+  /** Parent session ID used together with branchFromMessageId. */
   branchFromSessionId?: string
 }
 
@@ -218,6 +223,8 @@ export type SessionCommand =
   | { type: 'markCompactionComplete' }
   | { type: 'clearPendingPlanExecution' }
   | { type: 'addAnnotation'; messageId: string; annotation: AnnotationV1 }
+  | { type: 'removeAnnotation'; messageId: string; annotationId: string }
+  | { type: 'updateAnnotation'; messageId: string; annotationId: string; patch: Partial<AnnotationV1> }
 
 export interface NewChatActionParams {
   input?: string
@@ -459,7 +466,7 @@ export interface TestAutomationPayload {
   workspaceId: string
   automationId?: string
   actions: Array<{ type: 'prompt'; prompt: string; llmConnection?: string; model?: string }>
-  permissionMode?: 'safe' | 'ask' | 'allow-all'
+  permissionMode?: PermissionMode
   labels?: string[]
 }
 

@@ -762,7 +762,8 @@ export function FreeFormInput({
     if (commandId === 'safe') onPermissionModeChange?.('safe')
     else if (commandId === 'ask') onPermissionModeChange?.('ask')
     else if (commandId === 'allow-all') onPermissionModeChange?.('allow-all')
-  }, [onPermissionModeChange])
+    else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
+  }, [onPermissionModeChange, isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {

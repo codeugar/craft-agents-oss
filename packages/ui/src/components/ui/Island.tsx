@@ -5,11 +5,21 @@ import { cn } from '../../lib/utils'
 export type AnchorX = 'left' | 'center' | 'right'
 export type AnchorY = 'top' | 'center' | 'bottom'
 
+export type IslandMorphTarget = {
+  x: number
+  y: number
+  width?: number
+  height?: number
+}
+
 export interface IslandContentViewProps {
   id: string
   anchorX?: AnchorX
   anchorY?: AnchorY
   className?: string
+  morphFrom?: IslandMorphTarget | null
+  /** Locks document scrolling while this view is active and visible (dialog-like behavior). */
+  lockScroll?: boolean
   children: React.ReactNode
 }
 
@@ -49,6 +59,10 @@ export interface IslandProps {
   radius?: number
   transitionConfig?: IslandTransitionConfig
   onActiveViewSizeChange?: (size: IslandActiveViewSize) => void
+  /** Controls shell presence animation. Defaults to true for backward compatibility. */
+  isVisible?: boolean
+  /** Called after hide animation settles. Parent can unmount safely here. */
+  onExitComplete?: () => void
 }
 
 const DEFAULT_TRANSITION: Required<IslandTransitionConfig> = {
@@ -65,16 +79,80 @@ export function useIslandAnimationConfig(): Required<IslandTransitionConfig> {
 
 const CONTENT_EASE = [0.2, 0.8, 0.2, 1] as const
 
+let bodyScrollLockCount = 0
+let previousBodyOverflow: string | null = null
+let previousBodyTouchAction: string | null = null
+
+function acquireBodyScrollLock(): void {
+  if (typeof document === 'undefined') return
+
+  if (bodyScrollLockCount === 0) {
+    previousBodyOverflow = document.body.style.overflow
+    previousBodyTouchAction = document.body.style.touchAction
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+  }
+
+  bodyScrollLockCount += 1
+}
+
+function releaseBodyScrollLock(): void {
+  if (typeof document === 'undefined' || bodyScrollLockCount <= 0) return
+
+  bodyScrollLockCount -= 1
+
+  if (bodyScrollLockCount === 0) {
+    document.body.style.overflow = previousBodyOverflow ?? ''
+    document.body.style.touchAction = previousBodyTouchAction ?? ''
+    previousBodyOverflow = null
+    previousBodyTouchAction = null
+  }
+}
+
 function resolveAlignClass(anchorX: AnchorX = 'center', anchorY: AnchorY = 'top'): string {
   const x = anchorX === 'left' ? 'justify-start' : anchorX === 'right' ? 'justify-end' : 'justify-center'
   const y = anchorY === 'top' ? 'items-start' : anchorY === 'bottom' ? 'items-end' : 'items-center'
   return `${x} ${y}`
 }
 
+function clampScale(value: number): number {
+  if (!Number.isFinite(value)) return 1
+  return Math.max(0.06, Math.min(4, value))
+}
+
+function computeMorphDelta(
+  elementRect: DOMRect,
+  target: IslandMorphTarget,
+  elementLayoutWidth: number,
+  elementLayoutHeight: number,
+): {
+  x: number
+  y: number
+  scaleX: number
+  scaleY: number
+} {
+  const elementCenterX = elementRect.left + elementRect.width / 2
+  const elementCenterY = elementRect.top + elementRect.height / 2
+  const targetWidth = target.width ?? 1
+  const targetHeight = target.height ?? 1
+  const targetCenterX = target.x + targetWidth / 2
+  const targetCenterY = target.y + targetHeight / 2
+
+  const baseWidth = elementLayoutWidth > 0 ? elementLayoutWidth : elementRect.width
+  const baseHeight = elementLayoutHeight > 0 ? elementLayoutHeight : elementRect.height
+
+  return {
+    x: targetCenterX - elementCenterX,
+    y: targetCenterY - elementCenterY,
+    scaleX: clampScale(target.width != null && baseWidth > 0 ? target.width / baseWidth : 0.16),
+    scaleY: clampScale(target.height != null && baseHeight > 0 ? target.height / baseHeight : 0.16),
+  }
+}
+
 /**
  * Animated shell that morphs between registered IslandContentView children.
  *
- * - Outer shell: layout spring
+ * - Outer shell: layout spring + optional morph from/to target
  * - Inner content: parallel enter/exit crossfade + blur
  */
 export function Island({
@@ -84,10 +162,16 @@ export function Island({
   radius = 12,
   transitionConfig,
   onActiveViewSizeChange,
+  isVisible = true,
+  onExitComplete,
 }: IslandProps) {
+  const shellRef = React.useRef<HTMLDivElement | null>(null)
   const activeViewRef = React.useRef<HTMLDivElement | null>(null)
   const lastSizeRef = React.useRef<{ id: string; width: number; height: number } | null>(null)
   const [isTransitionSettling, setIsTransitionSettling] = React.useState(true)
+  const [morphDelta, setMorphDelta] = React.useState<{ x: number; y: number; scaleX: number; scaleY: number } | null>(null)
+  const warmedViewIdsRef = React.useRef<Set<string>>(new Set())
+  const [isMorphWarmReady, setIsMorphWarmReady] = React.useState(true)
   const cfg = React.useMemo(
     () => ({ ...DEFAULT_TRANSITION, ...(transitionConfig ?? {}) }),
     [transitionConfig]
@@ -108,6 +192,8 @@ export function Island({
     anchorX?: AnchorX
     anchorY?: AnchorY
     className?: string
+    morphFrom?: IslandMorphTarget | null
+    lockScroll?: boolean
     node: React.ReactNode
   }
 
@@ -125,6 +211,8 @@ export function Island({
           anchorX: props.anchorX,
           anchorY: props.anchorY,
           className: props.className,
+          morphFrom: props.morphFrom,
+          lockScroll: props.lockScroll,
           node: props.children,
         })
         return
@@ -138,6 +226,8 @@ export function Island({
           anchorX: props.anchorX,
           anchorY: props.anchorY,
           className: props.className,
+          morphFrom: props.morphFrom,
+          lockScroll: props.lockScroll,
           node: child,
         })
       }
@@ -151,10 +241,94 @@ export function Island({
     [contentViews, activeViewId]
   )
 
+  const shouldMorph = Boolean(activeView?.morphFrom)
+
+  React.useLayoutEffect(() => {
+    const target = activeView?.morphFrom
+    const shell = shellRef.current
+
+    if (!target || !shell) {
+      setMorphDelta(null)
+      return
+    }
+
+    const rect = shell.getBoundingClientRect()
+    const layoutWidth = shell.offsetWidth
+    const layoutHeight = shell.offsetHeight
+
+    // Keep last valid delta during transient zero-size frames (mount/layout handoff).
+    // This keeps enter/exit symmetry instead of collapsing to fallback scale only on show.
+    if (rect.width <= 0 || rect.height <= 0 || layoutWidth <= 0 || layoutHeight <= 0) {
+      return
+    }
+
+    setMorphDelta(computeMorphDelta(rect, target, layoutWidth, layoutHeight))
+  }, [
+    activeView?.id,
+    activeView?.morphFrom?.x,
+    activeView?.morphFrom?.y,
+    activeView?.morphFrom?.width,
+    activeView?.morphFrom?.height,
+  ])
+
+  React.useEffect(() => {
+    if (!activeView) {
+      setIsMorphWarmReady(true)
+      return
+    }
+
+    if (!shouldMorph) {
+      setIsMorphWarmReady(true)
+      warmedViewIdsRef.current.add(activeView.id)
+      return
+    }
+
+    if (!isVisible) {
+      setIsMorphWarmReady(false)
+      return
+    }
+
+    if (warmedViewIdsRef.current.has(activeView.id)) {
+      setIsMorphWarmReady(true)
+      return
+    }
+
+    if (!morphDelta) {
+      setIsMorphWarmReady(false)
+      return
+    }
+
+    if (typeof window === 'undefined') {
+      warmedViewIdsRef.current.add(activeView.id)
+      setIsMorphWarmReady(true)
+      return
+    }
+
+    setIsMorphWarmReady(false)
+
+    const raf = window.requestAnimationFrame(() => {
+      warmedViewIdsRef.current.add(activeView.id)
+      setIsMorphWarmReady(true)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(raf)
+    }
+  }, [activeView, shouldMorph, isVisible, morphDelta])
+
   React.useEffect(() => {
     if (!activeView) return
     setIsTransitionSettling(true)
   }, [activeView?.id])
+
+  React.useEffect(() => {
+    if (!activeView?.lockScroll || !isVisible) return
+
+    acquireBodyScrollLock()
+    return () => {
+      releaseBodyScrollLock()
+    }
+  }, [activeView?.id, activeView?.lockScroll, isVisible])
 
   React.useEffect(() => {
     if (!isTransitionSettling) return
@@ -172,6 +346,23 @@ export function Island({
       window.clearTimeout(timeout)
     }
   }, [isTransitionSettling, cfg.duration])
+
+  React.useEffect(() => {
+    if (isVisible || !onExitComplete) return
+
+    if (typeof window === 'undefined') {
+      onExitComplete()
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      onExitComplete()
+    }, Math.max(120, cfg.duration * 1000 + 40))
+
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [isVisible, onExitComplete, cfg.duration])
 
   React.useEffect(() => {
     if (!activeView || !onActiveViewSizeChange) return
@@ -214,12 +405,33 @@ export function Island({
 
   if (!activeView) return null
 
+  const hiddenPose = {
+    opacity: 0,
+    x: morphDelta?.x ?? 0,
+    y: morphDelta?.y ?? 0,
+    scaleX: morphDelta?.scaleX ?? 0.94,
+    scaleY: morphDelta?.scaleY ?? 0.94,
+  }
+
+  const visiblePose = {
+    opacity: 1,
+    x: 0,
+    y: 0,
+    scaleX: 1,
+    scaleY: 1,
+  }
+
+  const effectiveVisible = shouldMorph ? (isVisible && isMorphWarmReady) : isVisible
+
   return (
     <IslandAnimationContext.Provider value={cfg}>
       <motion.div
+        ref={shellRef}
         layout
+        initial={shouldMorph ? hiddenPose : false}
+        animate={effectiveVisible ? visiblePose : hiddenPose}
         transition={layoutTransition}
-        style={{ borderRadius: radius }}
+        style={{ borderRadius: radius, transformOrigin: '50% 50%' }}
         className={cn('mx-auto w-fit overflow-hidden border border-border/50 bg-background shadow-strong', className)}
       >
         <div className="relative">
