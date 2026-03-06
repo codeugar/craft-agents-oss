@@ -1155,6 +1155,7 @@ export class SessionManager implements ISessionManager {
                 pending.mentions,
                 pending.llmConnection,
                 pending.model,
+                pending.automationName,
               )
             )
           )
@@ -3989,8 +3990,9 @@ export class SessionManager implements ISessionManager {
 
       // If this is the first user message and no title exists, set one immediately
       // AI generation will enhance it later, but we always have a title from the start
+      // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
       const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name) {
+      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
         // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
         // so titles show human-readable names instead of raw IDs
         let titleSource = message
@@ -5706,6 +5708,7 @@ To view this task's output:
     mentions?: string[],
     llmConnection?: string,
     model?: string,
+    automationName?: string,
   ): Promise<{ sessionId: string }> {
     // Warn if llmConnection was specified but doesn't resolve
     if (llmConnection) {
@@ -5718,15 +5721,27 @@ To view this task's output:
     // Resolve @mentions to source/skill slugs
     const resolved = mentions ? this.resolveAutomationMentions(workspaceRootPath, mentions) : undefined
 
+    // Use automation name if provided, otherwise fall back to prompt snippet
+    const fallback = `Automation: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`
+    const sessionName = automationName || fallback
+
     // Create a new session for this automation
     const session = await this.createSession(workspaceId, {
-      name: `Automation: ${prompt.slice(0, 50)}${prompt.length > 50 ? '...' : ''}`,
+      name: sessionName,
       labels,
       permissionMode: permissionMode || 'safe',
       enabledSourceSlugs: resolved?.sourceSlugs,
       llmConnection,
       model,
     })
+
+    // Populate triggeredBy metadata so title generation is explicitly skipped
+    // and the session is identifiable as automation-initiated after reload
+    const managed = this.sessions.get(session.id)
+    if (managed) {
+      managed.triggeredBy = { automationName, timestamp: Date.now() }
+      this.persistSession(managed)
+    }
 
     // Notify renderer to hydrate full session metadata (including title)
     // before streaming events arrive. Without this, the renderer may create
