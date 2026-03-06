@@ -418,6 +418,11 @@ export function Island({
   }, [activeView?.id, shouldLockScroll, isVisible])
 
   React.useEffect(() => {
+    if (!shouldLockScroll || !isVisible) return
+    shellRef.current?.focus()
+  }, [shouldLockScroll, isVisible, activeView?.id])
+
+  React.useEffect(() => {
     if (!dismissOnPointerDownOutside || !isVisible || !onRequestClose) return
     if (typeof window === 'undefined') return
 
@@ -602,6 +607,16 @@ export function Island({
         animate={effectiveVisible ? visiblePose : exitHiddenPose}
         transition={shellTransition}
         style={{ borderRadius: radius, transformOrigin: '50% 50%' }}
+        role={shouldLockScroll ? 'dialog' : undefined}
+        aria-modal={shouldLockScroll ? true : undefined}
+        tabIndex={shouldLockScroll ? -1 : undefined}
+        onKeyDown={shouldLockScroll
+          ? (event) => {
+              if (event.key === 'Escape') {
+                event.stopPropagation()
+              }
+            }
+          : undefined}
         className={cn('mx-auto w-fit overflow-hidden border border-border/50 bg-background shadow-strong', className)}
       >
         <div className="relative">

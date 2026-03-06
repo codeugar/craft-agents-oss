@@ -2319,16 +2319,10 @@ export function ResponseCard({
 
   const handleCancelFollowUp = useCallback(() => {
     setFollowUpDraft('')
-
-    if (!pendingSelection) {
-      closeSelectionMenu()
-      return
-    }
-
     setSelectionMenuView('compact')
     setActiveAnnotationDetail(null)
 
-    if (typeof window === 'undefined') {
+    if (!pendingSelection || typeof window === 'undefined') {
       return
     }
 
@@ -2345,7 +2339,7 @@ export function ResponseCard({
       selection.removeAllRanges()
       selection.addRange(range)
     })
-  }, [pendingSelection, closeSelectionMenu])
+  }, [pendingSelection])
 
   const handleOpenAnnotationDetail = useCallback((annotationId: string, index: number, anchorX: number, anchorY: number) => {
     const annotation = (annotations ?? []).find(item => item.id === annotationId)
