@@ -18,6 +18,7 @@ import { RichBlockInteractions } from './extensions/RichBlockInteractions'
 import { cn } from '../../lib/utils'
 import 'katex/dist/katex.min.css'
 import './tiptap-editor.css'
+import './extensions/animated-task-item.css'
 
 export type MarkdownEngine = 'legacy' | 'official'
 

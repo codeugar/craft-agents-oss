@@ -11,6 +11,7 @@ import type {
   TypedError,
   ContentBadge,
   ToolDisplayMeta,
+  AnnotationV1,
   PermissionRequest as BasePermissionRequest,
 } from '@craft-agent/core/types'
 import type { PermissionMode } from '../agent/mode-types'
@@ -179,6 +180,7 @@ export type SessionEvent =
   | { type: 'auth_completed'; sessionId: string; requestId: string; success: boolean; cancelled?: boolean; error?: string }
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
+  | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]
@@ -215,6 +217,7 @@ export type SessionCommand =
   | { type: 'setPendingPlanExecution'; planPath: string }
   | { type: 'markCompactionComplete' }
   | { type: 'clearPendingPlanExecution' }
+  | { type: 'addAnnotation'; messageId: string; annotation: AnnotationV1 }
 
 export interface NewChatActionParams {
   input?: string

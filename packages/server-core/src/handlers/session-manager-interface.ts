@@ -7,7 +7,7 @@
  */
 
 import type { Workspace } from '@craft-agent/core/types'
-import type { StoredAttachment } from '@craft-agent/core/types'
+import type { StoredAttachment, AnnotationV1 } from '@craft-agent/core/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/mode-types'
 import type { ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import type { AuthResult } from '@craft-agent/shared/agent'
@@ -88,6 +88,7 @@ export interface ISessionManager {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+  addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
 
   // ---------------------------------------------------------------------------
   // Permissions & credentials

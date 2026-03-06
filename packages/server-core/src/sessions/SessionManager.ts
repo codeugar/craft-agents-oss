@@ -64,7 +64,7 @@ import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/intercep
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import type { Message, StoredAttachment, ToolDisplayMeta } from '@craft-agent/core/types'
+import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, type LoadedSkill } from '@craft-agent/shared/skills'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -5388,7 +5388,7 @@ To view this task's output:
         const parentToolUseId = existingToolMsg?.parentToolUseId || event.parentToolUseId
 
         if (existingToolMsg) {
-          existingToolMsg.content = formattedResult
+          // Keep lightweight status text in `content` and store full payload in `toolResult` only.
           existingToolMsg.toolResult = formattedResult
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
@@ -5409,7 +5409,7 @@ To view this task's output:
           const toolMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
-            content: formattedResult,
+            content: '',
             timestamp: this.monotonic(),
             toolName: toolName,
             toolUseId: event.toolUseId,

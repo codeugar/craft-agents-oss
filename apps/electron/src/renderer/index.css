@@ -610,7 +610,7 @@ html[data-font="inter"] {
       rgba(0, 0, 0, calc(var(--shadow-blur-opacity) * 0.67)) 0px 24px 24px -12px;
   }
 
-  .shadow-focused {
+  .shadow-panel-focused {
     position: relative;
     box-shadow:
       rgba(0, 0, 0, 0) 0px 0px 0px 0px,
@@ -624,7 +624,7 @@ html[data-font="inter"] {
   }
 
   /* Gradient border: lighter at top, stronger at bottom */
-  .shadow-focused::before {
+  .shadow-panel-focused::before {
     content: '';
     position: absolute;
     inset: 0;
@@ -645,7 +645,7 @@ html[data-font="inter"] {
   }
 
   /* Ensure content sits above the ::before pseudo-element */
-  .shadow-focused > * {
+  .shadow-panel-focused > * {
     position: relative;
     z-index: 2;
   }

@@ -461,7 +461,7 @@ export const RPC_CHANNELS = {
   // ...
 }
 
-// 2. Add handler in the relevant domain file (e.g. main/handlers/sources.ts)
+// 2. Add handler in the relevant domain file (e.g. packages/server-core/src/handlers/rpc/sources.ts)
 export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): void {
   server.handle(RPC_CHANNELS.SOURCES_GET_PERMISSIONS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const { loadSourcePermissionsConfig } = await import('@craft-agent/shared/agent')
@@ -470,7 +470,7 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
   })
 }
 
-// 3. Ensure the domain registrar is wired in main/handlers/index.ts via registerAllRpcHandlers()
+// 3. Ensure the domain registrar is wired in packages/server-core/src/handlers/rpc/index.ts via registerAllRpcHandlers()
 
 // 4. Add method mapping in transport/channel-map.ts
 // buildClientApi() exposes the generated electronAPI proxy automatically.

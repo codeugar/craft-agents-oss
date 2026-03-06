@@ -21,6 +21,8 @@ import {
   Pencil,
   FilePenLine,
   GitBranch,
+  CornerDownRight,
+  MessageCircleMore,
 } from 'lucide-react'
 import * as ReactDOM from 'react-dom'
 import { cn } from '../../lib/utils'
@@ -1376,6 +1378,62 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
 const MAX_HEIGHT = 540
 
 const ANNOTATION_PREFIX_SUFFIX_WINDOW = 24
+const SELECTION_MENU_VIEWPORT_PADDING = 12
+const SELECTION_MENU_HALF_WIDTH_ESTIMATE = 96
+const SELECTION_POINTER_MAX_AGE_MS = 1500
+
+type PendingTextAnnotationSelection = {
+  start: number
+  end: number
+  selectedText: string
+  prefix: string
+  suffix: string
+  anchorX: number
+  anchorY: number
+}
+
+function hasExistingTextRangeAnnotation(
+  annotations: AnnotationV1[] | undefined,
+  start: number,
+  end: number,
+): boolean {
+  return (annotations ?? []).some(annotation => {
+    const pos = annotation.target.selectors.find(s => s.type === 'text-position') as Extract<
+      AnnotationV1['target']['selectors'][number],
+      { type: 'text-position' }
+    > | undefined
+    return pos?.start === start && pos?.end === end
+  })
+}
+
+function createTextSelectionAnnotation(
+  messageId: string,
+  selection: Omit<PendingTextAnnotationSelection, 'anchorX' | 'anchorY'>,
+): AnnotationV1 {
+  return {
+    id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    schemaVersion: 1,
+    createdAt: Date.now(),
+    intent: 'highlight',
+    body: [{ type: 'highlight' }],
+    target: {
+      source: {
+        sessionId: '',
+        messageId,
+      },
+      selectors: [
+        { type: 'text-position', start: selection.start, end: selection.end },
+        {
+          type: 'text-quote',
+          exact: selection.selectedText,
+          prefix: selection.prefix,
+          suffix: selection.suffix,
+        },
+      ],
+    },
+    style: { color: 'yellow', opacity: 0.35 },
+  }
+}
 
 function annotationColorToCss(color?: string): string {
   switch (color) {
@@ -1413,7 +1471,17 @@ function resolveNodeOffset(root: HTMLElement, targetNode: Node, nodeOffset: numb
       return segment.start + nodeOffset
     }
   }
-  return null
+
+  // Fallback: range boundaries may land on element nodes (common with reverse drags).
+  // In that case, derive character offset by measuring text length from root start.
+  try {
+    const probe = document.createRange()
+    probe.selectNodeContents(root)
+    probe.setEnd(targetNode, nodeOffset)
+    return probe.toString().length
+  } catch {
+    return null
+  }
 }
 
 function clearAnnotationMarks(root: HTMLElement): void {
@@ -1530,7 +1598,12 @@ export function ResponseCard({
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Dark mode detection - scroll fade only shown in dark mode
   const [isDarkMode, setIsDarkMode] = useState(false)
+  // Pending text selection waiting for explicit Comment action
+  const [pendingSelection, setPendingSelection] = useState<PendingTextAnnotationSelection | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const selectionMenuRef = useRef<HTMLDivElement>(null)
+  const lastPointerRef = useRef<{ x: number; y: number; ts: number } | null>(null)
+  const selectionStartedInContentRef = useRef(false)
 
   // Detect dark mode from document class and listen for changes
   useEffect(() => {
@@ -1588,10 +1661,202 @@ export function ResponseCard({
     }
   }, [annotations, text, displayedText, isStreaming])
 
+  useEffect(() => {
+    if (variant !== 'response' || isStreaming || !onAddAnnotation || !messageId) {
+      setPendingSelection(null)
+    }
+  }, [variant, isStreaming, onAddAnnotation, messageId])
+
+  useEffect(() => {
+    if (!pendingSelection) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (selectionMenuRef.current?.contains(target)) return
+      setPendingSelection(null)
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPendingSelection(null)
+      }
+    }
+
+    const handleScroll = () => {
+      setPendingSelection(null)
+    }
+
+    const handleSelectionChange = () => {
+      const root = contentRef.current
+      if (!root) {
+        setPendingSelection(null)
+        return
+      }
+
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        setPendingSelection(null)
+        return
+      }
+
+      const range = selection.getRangeAt(0)
+      if (!root.contains(range.commonAncestorContainer)) {
+        setPendingSelection(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    window.addEventListener('scroll', handleScroll, true)
+    document.addEventListener('selectionchange', handleSelectionChange)
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+      window.removeEventListener('scroll', handleScroll, true)
+      document.removeEventListener('selectionchange', handleSelectionChange)
+    }
+  }, [pendingSelection])
+
+  const handleConfirmAnnotation = useCallback(() => {
+    if (!onAddAnnotation || !messageId || !pendingSelection) return
+
+    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end)) {
+      setPendingSelection(null)
+      return
+    }
+
+    const annotation = createTextSelectionAnnotation(messageId, pendingSelection)
+    onAddAnnotation(messageId, annotation)
+    setPendingSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [onAddAnnotation, messageId, pendingSelection, annotations])
+
+  const handleSelectionPointerDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    selectionStartedInContentRef.current = true
+    lastPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      ts: Date.now(),
+    }
+  }, [])
+
+  const showSelectionMenuFromCurrentSelection = useCallback(() => {
+    const root = contentRef.current
+    if (!root) return
+
+    requestAnimationFrame(() => {
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        setPendingSelection(null)
+        return
+      }
+
+      const range = selection.getRangeAt(0)
+      if (!root.contains(range.commonAncestorContainer)) {
+        setPendingSelection(null)
+        return
+      }
+
+      const start = resolveNodeOffset(root, range.startContainer, range.startOffset)
+      const end = resolveNodeOffset(root, range.endContainer, range.endOffset)
+      if (start == null || end == null || end <= start) {
+        setPendingSelection(null)
+        return
+      }
+
+      const selectedText = range.toString()
+      if (!selectedText || !/\S/.test(selectedText)) {
+        setPendingSelection(null)
+        return
+      }
+
+      if (hasExistingTextRangeAnnotation(annotations, start, end)) {
+        setPendingSelection(null)
+        return
+      }
+
+      const fullText = root.textContent || ''
+      const prefix = fullText.slice(Math.max(0, start - ANNOTATION_PREFIX_SUFFIX_WINDOW), start)
+      const suffix = fullText.slice(end, end + ANNOTATION_PREFIX_SUFFIX_WINDOW)
+
+      // Prefer fragmented client rects over union bounds for wrapped selections.
+      // The union rect often produces an x-axis anchor that feels detached.
+      const rects = Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0)
+      const pointer = lastPointerRef.current
+      const hasRecentPointer = Boolean(pointer && (Date.now() - pointer.ts) <= SELECTION_POINTER_MAX_AGE_MS)
+      const pointerX = hasRecentPointer && pointer ? pointer.x : null
+      const pointerY = hasRecentPointer && pointer ? pointer.y : null
+
+      let anchorRect: DOMRect
+      if (rects.length > 0) {
+        if (pointerY != null) {
+          const rowCandidates = rects.filter(rect => pointerY >= rect.top && pointerY <= rect.bottom)
+
+          if (rowCandidates.length > 0) {
+            if (pointerX != null) {
+              const xContaining = rowCandidates.filter(rect => pointerX >= rect.left && pointerX <= rect.right)
+              if (xContaining.length > 0) {
+                anchorRect = xContaining.reduce((best, rect) => (rect.width > best.width ? rect : best))
+              } else {
+                anchorRect = rowCandidates.reduce((best, rect) => {
+                  const bestDistance = Math.min(Math.abs(pointerX - best.left), Math.abs(pointerX - best.right))
+                  const rectDistance = Math.min(Math.abs(pointerX - rect.left), Math.abs(pointerX - rect.right))
+                  return rectDistance < bestDistance ? rect : best
+                })
+              }
+            } else {
+              anchorRect = rowCandidates.reduce((best, rect) => (rect.width > best.width ? rect : best))
+            }
+          } else {
+            anchorRect = rects.reduce((best, rect) => {
+              const bestDistance = Math.abs((best.top + best.bottom) / 2 - pointerY)
+              const rectDistance = Math.abs((rect.top + rect.bottom) / 2 - pointerY)
+              return rectDistance < bestDistance ? rect : best
+            })
+          }
+        } else {
+          anchorRect = rects.reduce((best, rect) => (rect.top < best.top ? rect : best))
+        }
+      } else {
+        anchorRect = range.getBoundingClientRect()
+      }
+
+      const anchorXRaw = (pointerX != null && pointerX >= anchorRect.left && pointerX <= anchorRect.right)
+        ? pointerX
+        : anchorRect.left + (anchorRect.width / 2)
+
+      const minX = SELECTION_MENU_VIEWPORT_PADDING + SELECTION_MENU_HALF_WIDTH_ESTIMATE
+      const maxX = window.innerWidth - SELECTION_MENU_VIEWPORT_PADDING - SELECTION_MENU_HALF_WIDTH_ESTIMATE
+      const anchorX = maxX >= minX
+        ? Math.min(Math.max(anchorXRaw, minX), maxX)
+        : window.innerWidth / 2
+      const anchorY = anchorRect.top - 8
+
+      setPendingSelection({
+        start,
+        end,
+        selectedText,
+        prefix,
+        suffix,
+        anchorX,
+        anchorY,
+      })
+    })
+  }, [annotations])
+
   const handleTextSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!onAddAnnotation || !messageId || variant !== 'response' || isStreaming) return
     const root = contentRef.current
     if (!root) return
+
+    // Mouseup location reflects the user's final intent for popup anchoring.
+    lastPointerRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      ts: Date.now(),
+    }
 
     // Block annotation gesture: Shift+click on a block wrapper
     if (event.shiftKey) {
@@ -1640,58 +1905,89 @@ export function ResponseCard({
           }
         }
       }
+      selectionStartedInContentRef.current = false
+      setPendingSelection(null)
       return
     }
 
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return
+    selectionStartedInContentRef.current = false
+    showSelectionMenuFromCurrentSelection()
+  }, [onAddAnnotation, messageId, variant, isStreaming, annotations, showSelectionMenuFromCurrentSelection])
 
-    const range = selection.getRangeAt(0)
-    if (!root.contains(range.commonAncestorContainer)) return
+  useEffect(() => {
+    if (!onAddAnnotation || !messageId || variant !== 'response' || isStreaming) return
 
-    const start = resolveNodeOffset(root, range.startContainer, range.startOffset)
-    const end = resolveNodeOffset(root, range.endContainer, range.endOffset)
-    if (start == null || end == null || end <= start) return
+    const handleDocumentMouseUp = (event: MouseEvent) => {
+      if (!selectionStartedInContentRef.current) return
+      selectionStartedInContentRef.current = false
 
-    const selectedText = range.toString()
-    if (!selectedText || !/\S/.test(selectedText)) return
+      // Mouseup location reflects the user's final intent for popup anchoring.
+      lastPointerRef.current = {
+        x: event.clientX,
+        y: event.clientY,
+        ts: Date.now(),
+      }
 
-    const fullText = root.textContent || ''
-    const prefix = fullText.slice(Math.max(0, start - ANNOTATION_PREFIX_SUFFIX_WINDOW), start)
-    const suffix = fullText.slice(end, end + ANNOTATION_PREFIX_SUFFIX_WINDOW)
+      const root = contentRef.current
+      if (!root) return
 
-    const alreadyExists = (annotations ?? []).some(annotation => {
-      const pos = annotation.target.selectors.find(s => s.type === 'text-position') as Extract<
-        AnnotationV1['target']['selectors'][number],
-        { type: 'text-position' }
-      > | undefined
-      return pos?.start === start && pos?.end === end
-    })
+      const target = event.target as Node | null
+      if (target && root.contains(target)) {
+        // In-bounds mouseup is already handled by onMouseUp on the content container.
+        return
+      }
 
-    if (alreadyExists) return
-
-    const annotation: AnnotationV1 = {
-      id: `ann-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      schemaVersion: 1,
-      createdAt: Date.now(),
-      intent: 'highlight',
-      body: [{ type: 'highlight' }],
-      target: {
-        source: {
-          sessionId: '',
-          messageId,
-        },
-        selectors: [
-          { type: 'text-position', start, end },
-          { type: 'text-quote', exact: selectedText, prefix, suffix },
-        ],
-      },
-      style: { color: 'yellow', opacity: 0.35 },
+      showSelectionMenuFromCurrentSelection()
     }
 
-    onAddAnnotation(messageId, annotation)
-    selection.removeAllRanges()
-  }, [onAddAnnotation, messageId, variant, isStreaming, annotations])
+    document.addEventListener('mouseup', handleDocumentMouseUp)
+    return () => {
+      document.removeEventListener('mouseup', handleDocumentMouseUp)
+    }
+  }, [onAddAnnotation, messageId, variant, isStreaming, showSelectionMenuFromCurrentSelection])
+
+  const selectionMenu = pendingSelection
+    ? ReactDOM.createPortal(
+        <div
+          ref={selectionMenuRef}
+          className="fixed z-50"
+          style={{
+            left: pendingSelection.anchorX,
+            top: Math.max(36, pendingSelection.anchorY),
+            transform: 'translate(-50%, -100%)',
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <div className="flex items-center gap-1 rounded-[8px] bg-background p-1 shadow-strong">
+            <button
+              type="button"
+              onClick={handleConfirmAnnotation}
+              className={cn(
+                "h-[30px] px-2.5 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5",
+                "text-foreground/85 hover:text-foreground hover:bg-foreground/5",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              )}
+            >
+              <CornerDownRight className="h-3.5 w-3.5" />
+              <span>Follow up</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingSelection(null)}
+              className={cn(
+                "h-[30px] px-2.5 rounded-[5px] text-[13px] font-medium inline-flex items-center gap-1.5",
+                "text-foreground/85 hover:text-foreground hover:bg-foreground/5",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              )}
+            >
+              <MessageCircleMore className="h-3.5 w-3.5" />
+              <span>Ask inline</span>
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null
 
   // Throttle content updates during streaming for performance
   // Updates immediately when streaming ends to show final content
@@ -1770,6 +2066,7 @@ export function ResponseCard({
           {/* Scrollable content area with subtle fade at edges (dark mode only) */}
           <div
             ref={contentRef}
+            onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
             className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto scrollbar-hover"
             style={{
@@ -1866,47 +2163,52 @@ export function ResponseCard({
           onOpenUrl={onOpenUrl}
           onOpenFile={onOpenFile}
         />
+        {selectionMenu}
       </>
     )
   }
 
   // Streaming response - show throttled content with spinner
   return (
-    <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden group">
-      {/* Content area - uses displayedText (throttled) for performance */}
-      {/* Subtle fade at top and bottom edges (dark mode only) */}
-      <div
-        ref={contentRef}
-        onMouseUp={handleTextSelection}
-        className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto scrollbar-hover"
-        style={{
-          maxHeight: MAX_HEIGHT,
-          // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
-          ...(isDarkMode && {
-            maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-          }),
-        }}
-      >
-        <Markdown
-          mode="minimal"
-          onUrlClick={onOpenUrl}
-          onFileClick={onOpenFile}
+    <>
+      <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden group">
+        {/* Content area - uses displayedText (throttled) for performance */}
+        {/* Subtle fade at top and bottom edges (dark mode only) */}
+        <div
+          ref={contentRef}
+          onMouseDown={handleSelectionPointerDown}
+          onMouseUp={handleTextSelection}
+          className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto scrollbar-hover"
+          style={{
+            maxHeight: MAX_HEIGHT,
+            // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
+            ...(isDarkMode && {
+              maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
+            }),
+          }}
         >
-          {displayedText}
-        </Markdown>
-      </div>
-
-      {/* Footer - hidden in compact mode */}
-      {!compactMode && (
-        <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Spinner className={SIZE_CONFIG.spinnerSize} />
-            <span>Streaming...</span>
-          </div>
+          <Markdown
+            mode="minimal"
+            onUrlClick={onOpenUrl}
+            onFileClick={onOpenFile}
+          >
+            {displayedText}
+          </Markdown>
         </div>
-      )}
-    </div>
+
+        {/* Footer - hidden in compact mode */}
+        {!compactMode && (
+          <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Spinner className={SIZE_CONFIG.spinnerSize} />
+              <span>Streaming...</span>
+            </div>
+          </div>
+        )}
+      </div>
+      {selectionMenu}
+    </>
   )
 }
 
