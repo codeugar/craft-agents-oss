@@ -1487,6 +1487,7 @@ export class ClaudeAgent extends BaseAgent {
             console.error('[ClaudeAgent] SDK session expired server-side, clearing and retrying fresh');
             debug('[ClaudeAgent] SDK session expired server-side, clearing and retrying fresh');
             this.sessionId = null;
+            this.config.onSdkSessionIdCleared?.(); // persist cleared ID to JSONL header
             // Clear pinned state so retry captures fresh values
             this.pinnedPreferencesPrompt = null;
             this.preferencesDriftNotified = false;
@@ -1502,6 +1503,28 @@ export class ClaudeAgent extends BaseAgent {
           if (windowsSkillsError) {
             yield windowsSkillsError;
             yield { type: 'complete' };
+            return;
+          }
+
+          // Detect spawn ENOENT — Node.js error when the SDK subprocess binary has
+          // been moved/deleted (e.g., during app bundle swap on auto-update).
+          // Structured fields first (precise), regex fallback for stringified stderr.
+          const spawnError = sdkError as NodeJS.ErrnoException;
+          const isSpawnEnoent =
+            (spawnError.code === 'ENOENT' && spawnError.syscall?.startsWith('spawn')) ||
+            /\bspawn\b[\s\S]*\bENOENT\b/.test(stderrContext || '') ||
+            /\bspawn\b[\s\S]*\bENOENT\b/.test(rawErrorMsg || '');
+
+          if (isSpawnEnoent && !_isRetry) {
+            console.error('[ClaudeAgent] spawn ENOENT detected, retrying in 2s', {
+              sessionId: this.config.session?.id,
+              errorCode: spawnError.code,
+              errorSyscall: spawnError.syscall,
+              stderr: (stderrContext || '').slice(0, 200),
+            });
+            yield { type: 'info', message: 'Reconnecting after update...' };
+            await new Promise(r => setTimeout(r, 2000));
+            yield* this.chat(userMessage, attachments, { isRetry: true });
             return;
           }
 
@@ -2257,28 +2280,43 @@ export class ClaudeAgent extends BaseAgent {
       tools: { type: 'preset', preset: 'claude_code' },
     };
 
+    const BRANCH_PREFLIGHT_TIMEOUT = 15_000;
     let capturedSessionId: string | null = null;
     let preflightQuery: Query | null = null;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
     try {
       preflightQuery = query({ prompt: ' ', options });
 
-      for await (const msg of preflightQuery) {
-        if ('session_id' in msg && msg.session_id) {
-          capturedSessionId = msg.session_id;
-          break;
-        }
-      }
+      capturedSessionId = await Promise.race([
+        (async () => {
+          for await (const msg of preflightQuery!) {
+            if ('session_id' in msg && msg.session_id) return msg.session_id;
+          }
+          return null;
+        })(),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error('Branch preflight timed out after 15s')),
+            BRANCH_PREFLIGHT_TIMEOUT
+          );
+        }),
+      ]);
     } catch (error) {
       throw new Error(
-        `Failed to establish branch context during creation: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to establish branch context: ${error instanceof Error ? error.message : String(error)}`
       );
     } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      // interrupt() serves dual purpose:
+      // - On SUCCESS: query is already done, interrupt() is a benign no-op.
+      // - On TIMEOUT: interrupt() kills the underlying SDK stream, stopping the
+      //   detached async iterator. This is the standard SDK cancellation API.
       if (preflightQuery) {
         try {
           await preflightQuery.interrupt();
         } catch {
-          // Ignore interrupt errors — query may already be complete.
+          // Ignore — query may already be complete or errored.
         }
       }
     }
