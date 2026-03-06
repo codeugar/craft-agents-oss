@@ -1099,6 +1099,7 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 
 /* Description (subtitle) at 70% opacity */
 [data-sonner-toast] [data-description] {
+  color: inherit !important;
   opacity: 0.7 !important;
 }
 
@@ -1120,8 +1121,9 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   left: unset !important;
   right: -14px !important;
   opacity: 0 !important;
-  transition: opacity 0.15s ease !important;
+  transition: opacity 0.15s ease, color 0.15s ease !important;
   background-color: var(--background) !important;
+  color: oklch(from var(--foreground) l c h / 0.7) !important;
   border: none !important;
   box-shadow:
     rgba(0, 0, 0, 0) 0px 0px 0px 0px,
@@ -1135,6 +1137,10 @@ html.dark[data-scenic] .fullscreen-overlay-background {
 [data-sonner-toast].group:hover [data-close-button],
 [data-sonner-toast]:hover [data-close-button] {
   opacity: 1 !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  color: var(--foreground) !important;
 }
 
 /* Tinted backgrounds for toast states - use linear-gradient to layer
