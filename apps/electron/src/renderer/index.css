@@ -1,9 +1,16 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
 /* Tell Tailwind where to scan for utility classes */
-@source "../**/*.{tsx,ts,jsx,js}";
-@source "../../../../packages/ui/src/**/*.{tsx,ts,jsx,js}";
+@source "../renderer/App.tsx";
+@source "../renderer/main.tsx";
+@source "../renderer/components/**/*.{tsx,jsx}";
+@source "../renderer/contexts/**/*.{tsx,jsx}";
+@source "../renderer/hooks/**/*.{tsx,jsx}";
+@source "../renderer/pages/**/*.{tsx,jsx}";
+@source "../renderer/tabs/**/*.{tsx,jsx}";
+@source "../renderer/playground/**/*.{tsx,jsx}";
+@source "../../../../packages/ui/src/components/**/*.{tsx,jsx}";
 
 /* =============================================================================
    ANIMATABLE CSS CUSTOM PROPERTIES

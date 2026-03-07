@@ -857,7 +857,7 @@ export function FreeFormInput({
       }
     }
 
-    // Files via @ mention: [file:path] in text is sufficient context for the agent.
+    // Files via @ mention in text are sufficient context for the agent.
     // Skills also don't need special handling beyond text insertion.
   }, [optimisticSourceSlugs, onSourcesChange])
 
@@ -1328,7 +1328,7 @@ export function FreeFormInput({
     richInputRef.current?.focus()
   }, [inlineSlash, syncToParent])
 
-  // Handle inline slash folder selection (inserts [dir:/path] badge)
+  // Handle inline slash folder selection (inserts a directory badge)
   const handleInlineSlashFolderSelect = React.useCallback((path: string) => {
     const newValue = inlineSlash.handleSelectFolder(path)
     setInput(newValue)

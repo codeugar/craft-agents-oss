@@ -321,6 +321,8 @@ export const CHANNEL_MAP = {
   deleteLlmConnection: invoke(RPC_CHANNELS.llmConnections.DELETE),
   testLlmConnection: invoke(RPC_CHANNELS.llmConnections.TEST),
   setDefaultLlmConnection: invoke(RPC_CHANNELS.llmConnections.SET_DEFAULT),
+  getDefaultThinkingLevel: invoke(RPC_CHANNELS.llmConnections.GET_DEFAULT_THINKING),
+  setDefaultThinkingLevel: invoke(RPC_CHANNELS.llmConnections.SET_DEFAULT_THINKING),
   setWorkspaceDefaultLlmConnection: invoke(RPC_CHANNELS.llmConnections.SET_WORKSPACE_DEFAULT),
 
   // Automations

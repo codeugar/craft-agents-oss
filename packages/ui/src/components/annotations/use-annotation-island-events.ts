@@ -1,4 +1,8 @@
 import * as React from 'react'
+import {
+  resolveIslandOutsideDismissAction,
+  type IslandOutsideDismissBehavior,
+} from './island-dismiss-policy'
 
 export interface UseAnnotationIslandEventsOptions {
   enabled: boolean
@@ -6,6 +10,8 @@ export interface UseAnnotationIslandEventsOptions {
   isCompactView: boolean
   isTargetInsideAnnotationIsland: (target: Node | null) => boolean
   onClose: () => void
+  onBack?: () => boolean
+  outsideClickBehavior?: IslandOutsideDismissBehavior
   scrollGraceMs?: number
 }
 
@@ -15,16 +21,31 @@ export function useAnnotationIslandEvents({
   isCompactView,
   isTargetInsideAnnotationIsland,
   onClose,
+  onBack,
+  outsideClickBehavior = 'back-or-close',
   scrollGraceMs = 180,
 }: UseAnnotationIslandEventsOptions): void {
   React.useEffect(() => {
     if (!enabled) return
 
+    const dismissOutside = () => {
+      const action = resolveIslandOutsideDismissAction({
+        isCompactView,
+        behavior: outsideClickBehavior,
+      })
+
+      if (action === 'back' && onBack?.()) {
+        return
+      }
+
+      onClose()
+    }
+
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null
       if (!target) return
       if (isTargetInsideAnnotationIsland(target)) return
-      onClose()
+      dismissOutside()
     }
 
     const handleScroll = (event: Event) => {
@@ -41,7 +62,7 @@ export function useAnnotationIslandEvents({
         return
       }
 
-      onClose()
+      dismissOutside()
     }
 
     document.addEventListener('mousedown', handlePointerDown)
@@ -51,5 +72,14 @@ export function useAnnotationIslandEvents({
       document.removeEventListener('mousedown', handlePointerDown)
       window.removeEventListener('scroll', handleScroll, true)
     }
-  }, [enabled, openedAtRef, isCompactView, isTargetInsideAnnotationIsland, onClose, scrollGraceMs])
+  }, [
+    enabled,
+    openedAtRef,
+    isCompactView,
+    isTargetInsideAnnotationIsland,
+    onClose,
+    onBack,
+    outsideClickBehavior,
+    scrollGraceMs,
+  ])
 }

@@ -213,6 +213,7 @@ export const SIZE_CONFIG = {
 
 export type ActivityStatus = 'pending' | 'running' | 'completed' | 'error' | 'backgrounded'
 export type ActivityType = 'tool' | 'thinking' | 'intermediate' | 'status' | 'plan'
+export type AnnotationInteractionMode = 'interactive' | 'tooltip-only'
 
 // ============================================================================
 // Todo Types (for TodoWrite tool visualization)
@@ -354,6 +355,8 @@ export interface TurnCardProps {
   hasActiveFollowUpAnnotations?: boolean
   /** External request to open a specific annotation in the follow-up island */
   openAnnotationRequest?: OpenAnnotationRequest | null
+  /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
+  annotationInteractionMode?: AnnotationInteractionMode
 }
 
 // ============================================================================
@@ -1409,6 +1412,8 @@ export interface ResponseCardProps {
   hasActiveFollowUpAnnotations?: boolean
   /** External request to open a specific annotation in this response */
   openAnnotationRequest?: OpenAnnotationRequest | null
+  /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
+  annotationInteractionMode?: AnnotationInteractionMode
 }
 
 interface BranchDropdownProps {
@@ -1646,6 +1651,7 @@ export function ResponseCard({
   sendMessageKey = 'enter',
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
+  annotationInteractionMode = 'interactive',
 }: ResponseCardProps) {
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(text)
@@ -1694,6 +1700,7 @@ export function ResponseCard({
     hasMessageId: !!messageId,
     isStreaming,
   })
+  const allowAnnotationIsland = annotationInteractionMode === 'interactive'
 
   // Detect dark mode from document class and listen for changes
   useEffect(() => {
@@ -1862,14 +1869,6 @@ export function ResponseCard({
     lastPointerRef.current = null
   }, [sessionId, closeSelectionMenu, resetPresentation])
 
-  useAnnotationIslandEvents({
-    enabled: hasAnnotationInteraction(interactionState) && isSelectionMenuVisible,
-    openedAtRef: selectionMenuOpenedAtRef,
-    isCompactView: selectionMenuView === 'compact',
-    isTargetInsideAnnotationIsland,
-    onClose: closeSelectionMenu,
-  })
-
   useEffect(() => {
     if (!hasAnnotationInteraction(interactionState) || !isSelectionMenuVisible) return
 
@@ -2002,6 +2001,8 @@ export function ResponseCard({
     anchorY: number,
     mode: AnnotationIslandMode = 'view'
   ) => {
+    if (!allowAnnotationIsland) return
+
     const annotation = (annotations ?? []).find(item => item.id === annotationId)
     const noteText = annotation ? getAnnotationNoteText(annotation) : ''
 
@@ -2018,9 +2019,11 @@ export function ResponseCard({
     setSelectionMenuTransitionConfig(transition)
     triggerSelectionMenuEntryReplay('annotation-open')
     openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode)
-  }, [annotations, debugSelectionIsland, sessionId, messageId, triggerSelectionMenuEntryReplay, openFromAnnotation])
+  }, [allowAnnotationIsland, annotations, debugSelectionIsland, sessionId, messageId, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
   useEffect(() => {
+    if (!allowAnnotationIsland) return
+
     const contentRect = contentLayerRef.current?.getBoundingClientRect()
     const fallbackAnchor = {
       x: contentRect ? contentRect.left + contentRect.width / 2 : window.innerWidth / 2,
@@ -2039,6 +2042,7 @@ export function ResponseCard({
     setSelectionMenuTransitionConfig(buildAnnotationChipEntryTransition())
     triggerSelectionMenuEntryReplay('annotation-open')
   }, [
+    allowAnnotationIsland,
     openAnnotationRequest,
     messageId,
     annotations,
@@ -2324,7 +2328,16 @@ export function ResponseCard({
     return false
   }, [selectionMenuView, handleCancelFollowUp])
 
-  const selectionMenu = (
+  useAnnotationIslandEvents({
+    enabled: allowAnnotationIsland && hasAnnotationInteraction(interactionState) && isSelectionMenuVisible,
+    openedAtRef: selectionMenuOpenedAtRef,
+    isCompactView: selectionMenuView === 'compact',
+    isTargetInsideAnnotationIsland,
+    onBack: handleSelectionMenuRequestBack,
+    onClose: closeSelectionMenu,
+  })
+
+  const selectionMenu = allowAnnotationIsland ? (
     <AnnotationIslandMenu
       anchor={selectionMenuRenderAnchor}
       sourceKey={selectionMenuRenderSourceKey}
@@ -2346,7 +2359,7 @@ export function ResponseCard({
       zIndex={50}
       usePortal={shouldRenderAnnotationIslandInPortal('turncard')}
     />
-  )
+  ) : null
 
   const annotationOverlayLayer = (
     <AnnotationOverlayLayer
@@ -2354,6 +2367,7 @@ export function ResponseCard({
       chips={annotationOverlay.chips}
       annotations={renderedAnnotations}
       getTooltipText={(annotation) => formatAnnotationFollowUpTooltipText(annotation)}
+      allowChipOpen={allowAnnotationIsland}
       onChipOpen={({ annotationId, index, anchorX, anchorY, mode }) => {
         handleOpenAnnotationDetail(annotationId, index, anchorX, anchorY, mode)
       }}
@@ -2726,6 +2740,7 @@ export const TurnCard = React.memo(function TurnCard({
   sendMessageKey = 'enter',
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
+  annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -3086,6 +3101,7 @@ export const TurnCard = React.memo(function TurnCard({
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
+            annotationInteractionMode={annotationInteractionMode}
           />
         </div>
       ))}
@@ -3123,6 +3139,7 @@ export const TurnCard = React.memo(function TurnCard({
                 sendMessageKey={sendMessageKey}
                 hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
                 openAnnotationRequest={openAnnotationRequest}
+                annotationInteractionMode={annotationInteractionMode}
               />
             </motion.div>
           )}
@@ -3153,6 +3170,7 @@ export const TurnCard = React.memo(function TurnCard({
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
+            annotationInteractionMode={annotationInteractionMode}
           />
         </div>
       )}
@@ -3177,6 +3195,9 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if displayMode changed
   if (prev.displayMode !== next.displayMode) return false
+
+  // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
+  if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false

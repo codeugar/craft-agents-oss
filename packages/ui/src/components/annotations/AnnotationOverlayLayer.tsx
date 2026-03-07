@@ -1,6 +1,7 @@
 import * as React from 'react'
 import type { AnnotationV1 } from '@craft-agent/core'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../tooltip'
+import { cn } from '../../lib/utils'
 import { getAnnotationRectVisual, getAnnotationChipVisual } from './annotation-style-tokens'
 import { getAnnotationChipInteraction } from './interaction-policy'
 import type { AnnotationOverlayRect } from './annotation-core'
@@ -11,6 +12,8 @@ export interface AnnotationOverlayLayerProps {
   chips: AnnotationOverlayChip[]
   annotations?: AnnotationV1[]
   getTooltipText?: (annotation: AnnotationV1, index: number) => string
+  /** Whether clicking a chip should open the annotation island/details view. */
+  allowChipOpen?: boolean
   onChipOpen: (params: { annotationId: string; index: number; anchorX: number; anchorY: number; mode: 'view' }) => void
 }
 
@@ -19,6 +22,7 @@ export function AnnotationOverlayLayer({
   chips,
   annotations,
   getTooltipText,
+  allowChipOpen = true,
   onChipOpen,
 }: AnnotationOverlayLayerProps) {
   const annotationMap = React.useMemo(() => {
@@ -57,13 +61,15 @@ export function AnnotationOverlayLayer({
         const interaction = getAnnotationChipInteraction(chipAnnotation)
         const tooltipText = chipAnnotation && getTooltipText ? getTooltipText(chipAnnotation, chip.index) : ''
 
+        const canOpenChip = allowChipOpen && interaction.clickable
+
         const chipButton = (
           <button
             type="button"
             data-ca-annotation-id={chip.id}
             data-ca-annotation-index={String(chip.index)}
-            aria-disabled={!interaction.clickable}
-            onClick={interaction.clickable ? (event) => {
+            aria-disabled={!canOpenChip}
+            onClick={canOpenChip ? (event) => {
               const rect = event.currentTarget.getBoundingClientRect()
               onChipOpen({
                 annotationId: chip.id,
@@ -73,7 +79,7 @@ export function AnnotationOverlayLayer({
                 mode: interaction.openMode,
               })
             } : undefined}
-            className={chipVisual.className}
+            className={cn(chipVisual.className, !canOpenChip && 'cursor-default')}
             style={{
               left: chip.left,
               top: chip.top,

@@ -18,6 +18,8 @@ import { CONFIG_DIR } from './paths.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { ThinkingLevel } from '../agent/thinking-levels.ts';
+import { isValidThinkingLevel } from '../agent/thinking-levels.ts';
 import { parsePermissionMode, PERMISSION_MODE_ORDER } from '../agent/mode-types.ts';
 import { type ConfigDefaults } from './config-defaults-schema.ts';
 import { isValidThemeFile } from './validators.ts';
@@ -48,6 +50,7 @@ export interface StoredConfig {
   // LLM Connections (authoritative source for auth and model config)
   llmConnections?: LlmConnection[];
   defaultLlmConnection?: string;  // Slug of default connection for new sessions
+  defaultThinkingLevel?: ThinkingLevel;  // App-level default thinking level for new sessions
 
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
@@ -2282,6 +2285,32 @@ export function setDefaultLlmConnection(slug: string): boolean {
   }
 
   config.defaultLlmConnection = slug;
+  saveConfig(config);
+  return true;
+}
+
+/**
+ * Get the app-level default thinking level for new sessions.
+ * Falls back to bundled config-defaults when unset.
+ */
+export function getDefaultThinkingLevel(): ThinkingLevel {
+  const config = loadStoredConfig();
+  if (config?.defaultThinkingLevel && isValidThinkingLevel(config.defaultThinkingLevel)) {
+    return config.defaultThinkingLevel;
+  }
+  const defaults = loadConfigDefaults();
+  return defaults.workspaceDefaults.thinkingLevel;
+}
+
+/**
+ * Set the app-level default thinking level for new sessions.
+ * @returns true if persisted, false if config could not be loaded
+ */
+export function setDefaultThinkingLevel(level: ThinkingLevel): boolean {
+  const config = loadStoredConfig();
+  if (!config) return false;
+
+  config.defaultThinkingLevel = level;
   saveConfig(config);
   return true;
 }

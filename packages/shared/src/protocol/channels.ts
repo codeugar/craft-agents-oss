@@ -154,6 +154,8 @@ export const RPC_CHANNELS = {
     DELETE: 'LLM_Connection:delete',
     TEST: 'LLM_Connection:test',
     SET_DEFAULT: 'LLM_Connection:setDefault',
+    GET_DEFAULT_THINKING: 'LLM_Connection:getDefaultThinking',
+    SET_DEFAULT_THINKING: 'LLM_Connection:setDefaultThinking',
     SET_WORKSPACE_DEFAULT: 'LLM_Connection:setWorkspaceDefault',
     REFRESH_MODELS: 'LLM_Connection:refreshModels',
     CHANGED: 'LLM_Connection:changed',

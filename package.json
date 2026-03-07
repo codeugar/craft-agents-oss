@@ -57,6 +57,7 @@
     "electron:dist:linux": "bun run electron:build && electron-builder --config electron-builder.yml --project apps/electron --linux",
     "playground:dev": "lsof -ti:5173 | xargs kill -9 2>/dev/null; vite dev --config apps/electron/vite.config.ts --open /playground.html",
     "viewer:dev": "lsof -ti:5174 | xargs kill -9 2>/dev/null; vite dev --config apps/viewer/vite.config.ts --open /s/tz5-13I84pwK_he",
+    "viewer:typecheck": "cd apps/viewer && bun run typecheck",
     "viewer:build": "vite build --config apps/viewer/vite.config.ts",
     "viewer:preview": "vite preview --config apps/viewer/vite.config.ts",
     "marketing:dev": "vite dev --config apps/marketing/vite.config.ts",

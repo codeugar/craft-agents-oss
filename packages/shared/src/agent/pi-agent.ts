@@ -27,6 +27,7 @@ import { AbortReason } from './backend/types.ts';
 import { getBackendRuntime } from './backend/internal/driver-types.ts';
 
 import type { PermissionMode } from './mode-manager.ts';
+import type { ThinkingLevel } from './thinking-levels.ts';
 
 // Import models from centralized registry
 import { getModelById } from '../config/models.ts';
@@ -1754,6 +1755,18 @@ export class PiAgent extends BaseAgent {
       this.send({ type: 'set_model', model });
     } else {
       this.debug(`Model updated but no subprocess to forward to: ${previousModel} → ${model}`);
+    }
+  }
+
+  override setThinkingLevel(level: ThinkingLevel): void {
+    const previousLevel = this.getThinkingLevel();
+    super.setThinkingLevel(level);
+    // Forward to subprocess so it uses the new thinking level on next turn
+    if (this.subprocess) {
+      this.debug(`Forwarding thinking level change to subprocess: ${previousLevel} → ${level}`);
+      this.send({ type: 'set_thinking_level', level });
+    } else {
+      this.debug(`Thinking level updated but no subprocess to forward to: ${previousLevel} → ${level}`);
     }
   }
 

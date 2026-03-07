@@ -503,14 +503,6 @@ export function AnnotatableMarkdownDocument({
     showSelectionMenuFromCurrentSelection()
   }, [annotations, canAnnotate, messageId, onAddAnnotation, sessionId, showSelectionMenuFromCurrentSelection])
 
-  useAnnotationIslandEvents({
-    enabled: hasAnnotationInteraction(interactionState) && isSelectionMenuVisible,
-    openedAtRef: selectionMenuOpenedAtRef,
-    isCompactView: selectionMenuView === 'compact',
-    isTargetInsideAnnotationIsland,
-    onClose: closeSelectionMenu,
-  })
-
   React.useEffect(() => {
     if (!canAnnotate) return
 
@@ -589,6 +581,15 @@ export function AnnotatableMarkdownDocument({
 
     return false
   }, [selectionMenuView, handleCancelFollowUp])
+
+  useAnnotationIslandEvents({
+    enabled: hasAnnotationInteraction(interactionState) && isSelectionMenuVisible,
+    openedAtRef: selectionMenuOpenedAtRef,
+    isCompactView: selectionMenuView === 'compact',
+    isTargetInsideAnnotationIsland,
+    onBack: handleSelectionMenuRequestBack,
+    onClose: closeSelectionMenu,
+  })
 
   const selectionMenu = (
     <AnnotationIslandMenu

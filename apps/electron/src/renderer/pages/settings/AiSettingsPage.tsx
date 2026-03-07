@@ -565,6 +565,9 @@ export default function AiSettingsPage() {
         const ws = await window.electronAPI.getWorkspaces()
         setWorkspaces(ws)
 
+        const defaultThinkingLevel = await window.electronAPI.getDefaultThinkingLevel()
+        setDefaultThinking(defaultThinkingLevel)
+
         // Check credential health for potential issues (corruption, machine migration)
         const health = await window.electronAPI.getCredentialHealth()
         if (!health.healthy) {
@@ -807,9 +810,22 @@ export default function AiSettingsPage() {
   }, [defaultConnection, refreshLlmConnections])
 
   const handleDefaultThinkingChange = useCallback(async (level: ThinkingLevel) => {
+    if (!window.electronAPI) return
+
+    const previous = defaultThinking
     setDefaultThinking(level)
-    // TODO: Add app-level thinking level storage
-  }, [])
+
+    try {
+      const result = await window.electronAPI.setDefaultThinkingLevel(level)
+      if (!result.success) {
+        console.error('Failed to set default thinking level:', result.error)
+        setDefaultThinking(previous)
+      }
+    } catch (error) {
+      console.error('Failed to set default thinking level:', error)
+      setDefaultThinking(previous)
+    }
+  }, [defaultThinking])
 
   // Refresh callback for workspace cards
   const handleWorkspaceSettingsChange = useCallback(() => {
