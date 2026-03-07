@@ -49,6 +49,7 @@ import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
 import { getModelsForProviderType } from '@config/llm-connections'
+import { toast } from 'sonner'
 
 /**
  * Derive model dropdown options from a connection's models array,
@@ -324,6 +325,12 @@ interface WorkspaceOverrideCardProps {
   onSettingsChange: () => void
 }
 
+const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>> = {
+  defaultLlmConnection: 'workspace connection override',
+  model: 'workspace model override',
+  thinkingLevel: 'workspace thinking override',
+}
+
 function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: WorkspaceOverrideCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null)
@@ -349,17 +356,30 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
     loadSettings()
   }, [workspace.id])
 
-  // Save workspace setting helper
+  // Save workspace setting helper (optimistic update with rollback)
   const updateSetting = useCallback(async <K extends keyof WorkspaceSettings>(key: K, value: WorkspaceSettings[K]) => {
     if (!window.electronAPI) return
+
+    const previousValue = settings?.[key]
+
+    // Optimistic UI update for immediate feedback
+    setSettings(prev => prev ? { ...prev, [key]: value } : prev)
+
     try {
       await window.electronAPI.updateWorkspaceSetting(workspace.id, key, value)
-      setSettings(prev => prev ? { ...prev, [key]: value } : null)
       onSettingsChange()
     } catch (error) {
-      console.error(`Failed to save ${key}:`, error)
+      // Roll back only the changed key
+      setSettings(prev => prev ? { ...prev, [key]: previousValue } : prev)
+
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      const settingLabel = WORKSPACE_SETTING_LABELS[key] ?? String(key)
+      console.error(`Failed to save ${String(key)}:`, error)
+      toast.error(`Failed to save ${settingLabel}`, {
+        description: message,
+      })
     }
-  }, [workspace.id, onSettingsChange])
+  }, [workspace.id, onSettingsChange, settings])
 
   const handleConnectionChange = useCallback((slug: string) => {
     // 'global' means use app default (clear workspace override)

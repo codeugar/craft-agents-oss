@@ -4,13 +4,14 @@
 /* Tell Tailwind where to scan for utility classes */
 @source "../renderer/App.tsx";
 @source "../renderer/main.tsx";
-@source "../renderer/components/**/*.{tsx,jsx}";
-@source "../renderer/contexts/**/*.{tsx,jsx}";
-@source "../renderer/hooks/**/*.{tsx,jsx}";
-@source "../renderer/pages/**/*.{tsx,jsx}";
-@source "../renderer/tabs/**/*.{tsx,jsx}";
-@source "../renderer/playground/**/*.{tsx,jsx}";
-@source "../../../../packages/ui/src/components/**/*.{tsx,jsx}";
+@source "../renderer/components/**/*.{ts,tsx,jsx}";
+@source "../renderer/contexts/**/*.{ts,tsx,jsx}";
+@source "../renderer/hooks/**/*.{ts,tsx,jsx}";
+@source "../renderer/pages/**/*.{ts,tsx,jsx}";
+@source "../renderer/tabs/**/*.{ts,tsx,jsx}";
+@source "../renderer/playground/**/*.{ts,tsx,jsx}";
+@source "../../../../packages/ui/src/components/**/*.{ts,tsx,jsx}";
+@source "../../../../packages/ui/src/lib/**/*.{ts,tsx,jsx}";
 
 /* =============================================================================
    ANIMATABLE CSS CUSTOM PROPERTIES

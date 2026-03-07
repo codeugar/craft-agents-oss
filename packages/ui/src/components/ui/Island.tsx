@@ -298,8 +298,9 @@ export function Island({
   const [morphDelta, setMorphDelta] = React.useState<{ x: number; y: number; scaleX: number; scaleY: number } | null>(null)
   const warmedViewIdsRef = React.useRef<Set<string>>(new Set())
   const [isMorphWarmReady, setIsMorphWarmReady] = React.useState(true)
-  const [isVisibilityPrimed, setIsVisibilityPrimed] = React.useState(true)
-  const prevVisibilityForReplayRef = React.useRef<boolean>(isVisible)
+  const shouldPrimeInitialVisibleReplay = replayOnVisible === 'always' && isVisible
+  const [isVisibilityPrimed, setIsVisibilityPrimed] = React.useState(() => !shouldPrimeInitialVisibleReplay)
+  const prevVisibilityForReplayRef = React.useRef<boolean>(shouldPrimeInitialVisibleReplay ? false : isVisible)
   const prevReplayEntryKeyRef = React.useRef<string | number | undefined>(replayEntryKey)
   const hasRenderedVisibleRef = React.useRef<boolean>(false)
   const spawnHiddenPoseRef = React.useRef<{ opacity: number; x: number; y: number; scaleX: number; scaleY: number } | null>(null)
@@ -478,7 +479,10 @@ export function Island({
       return
     }
 
-    if (!becameVisible && !replayKeyChangedWhileVisible) {
+    // If we're already unprimed (e.g. StrictMode cancelled the first RAF),
+    // keep scheduling a priming RAF until we reach the visible state.
+    const needsPriming = becameVisible || replayKeyChangedWhileVisible || !isVisibilityPrimed
+    if (!needsPriming) {
       return
     }
 
@@ -496,7 +500,7 @@ export function Island({
     return () => {
       window.cancelAnimationFrame(raf)
     }
-  }, [isVisible, replayEntryKey, replayOnVisible])
+  }, [isVisible, replayEntryKey, replayOnVisible, isVisibilityPrimed])
 
   const shouldLockScroll = (activeView?.lockScroll ?? false) || lockScrollWhileVisible
   const isDialogMode = dialogBehavior !== 'none'
