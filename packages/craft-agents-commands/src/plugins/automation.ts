@@ -20,6 +20,7 @@ import {
   validateActions,
   validatePermissionMode,
 } from '../utils.ts'
+import { ensureLabelsExist } from '@craft-agent/shared/labels/crud'
 import type { CommandPlugin } from './types.ts'
 
 interface NormalizedAutomationsConfig {
@@ -309,6 +310,13 @@ export const automationPlugin: CommandPlugin = {
         usageError('automation create requires actions', 'Provide --prompt or --json/--stdin with actions')
       }
 
+      if (Array.isArray(matcher.labels) && matcher.labels.length > 0) {
+        const stringLabels = (matcher.labels as unknown[]).filter((l): l is string => typeof l === 'string')
+        if (stringLabels.length > 0) {
+          matcher.labels = ensureLabelsExist(workspaceRootPath, stringLabels)
+        }
+      }
+
       const list = config.automations[event] ?? []
       list.push(matcher)
       config.automations[event] = list
@@ -331,6 +339,13 @@ export const automationPlugin: CommandPlugin = {
 
       if (!merged.actions || !Array.isArray(merged.actions) || merged.actions.length === 0) {
         usageError('Updated automation must contain at least one action')
+      }
+
+      if (Array.isArray(merged.labels) && merged.labels.length > 0) {
+        const stringLabels = (merged.labels as unknown[]).filter((l): l is string => typeof l === 'string')
+        if (stringLabels.length > 0) {
+          merged.labels = ensureLabelsExist(workspaceRootPath, stringLabels)
+        }
       }
 
       config.automations[found.event]!.splice(found.index, 1)
