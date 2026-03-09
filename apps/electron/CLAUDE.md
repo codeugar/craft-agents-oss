@@ -1389,6 +1389,27 @@ Native OS notifications and dock badge for session activity:
 - Dock badge shows unread count
 - User preference to enable/disable
 
+## Local Development Build
+
+Build a standalone `.app` you can keep opening without running `electron:dev`:
+
+```bash
+# Build + package (from repo root)
+bun run electron:dist:dev:mac
+
+# Launch — just double-click or:
+open "apps/electron/release/mac-arm64/Craft Agents.app"
+```
+
+`electron:dist:dev:mac` bakes `CRAFT_DEV_RUNTIME=1` into the build at compile time (via esbuild `--define`). This tells the runtime resolver to look outside the `.app` bundle for dependencies that `build-dmg.sh` would normally copy in:
+- **SDK**: walks up from the bundle to find `node_modules/@anthropic-ai/claude-agent-sdk/cli.js` in the monorepo root
+- **Interceptor**: walks up to find `packages/shared/src/unified-network-interceptor.ts`
+- **Bun**: falls back to system `bun` instead of requiring the vendored copy
+
+Production builds (`build-dmg.sh`, `electron:dist:mac`) don't set this flag — they bundle all dependencies and use strict path resolution.
+
+The dev scripts also set `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip code signing (avoids "ambiguous" errors from duplicate developer certificates in keychain).
+
 ## Building for Distribution
 
 Build distributable installers for all platforms using the build scripts:
