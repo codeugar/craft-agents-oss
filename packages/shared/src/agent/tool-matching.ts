@@ -17,8 +17,12 @@
 import type { AgentEvent } from '@craft-agent/core/types';
 import { toolMetadataStore } from '../interceptor-common.ts';
 import { createLogger } from '../utils/debug.ts';
+import { isParentTaskTool } from '../utils/toolNames.ts';
 
 const log = createLogger('tool-matching');
+
+// Re-export from browser-safe module (no Node deps) for backward compatibility
+export { PARENT_TASK_TOOLS, isParentTaskTool } from '../utils/toolNames.ts';
 
 // ============================================================================
 // Tool Index — append-only, order-independent lookup
@@ -395,8 +399,7 @@ function detectBackgroundEvents(
   const events: AgentEvent[] = [];
 
   // Background Task detection — Task/Agent tool with agentId in result
-  // SDK sends 'Agent' as the tool name but internal tests use 'Task'
-  if ((entry.name === 'Task' || entry.name === 'Agent') && !isError && resultStr) {
+  if (isParentTaskTool(entry.name) && !isError && resultStr) {
     const agentIdMatch = resultStr.match(/agentId:\s*([a-zA-Z0-9_-]+)/);
     if (agentIdMatch?.[1]) {
       const intentValue = entry.input._intent;

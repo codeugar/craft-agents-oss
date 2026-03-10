@@ -6,6 +6,7 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
+import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
 
 // Re-export ActivityItem for consumers
@@ -1105,7 +1106,7 @@ export function groupActivitiesByParent(
   // First, build a set of valid Task toolUseIds (parents that actually exist)
   const taskToolUseIds = new Set<string>()
   for (const activity of activities) {
-    if ((activity.toolName === 'Task' || activity.toolName === 'Agent') && activity.toolUseId) {
+    if (isParentTaskTool(activity.toolName ?? '') && activity.toolUseId) {
       taskToolUseIds.add(activity.toolUseId)
     }
   }
@@ -1150,7 +1151,7 @@ export function groupActivitiesByParent(
   // When Task runs with run_in_background: true, the result contains "agentId: xyz"
   const taskToAgentId = new Map<string, string>()
   for (const activity of activities) {
-    if ((activity.toolName === 'Task' || activity.toolName === 'Agent') && (activity.status === 'completed' || activity.status === 'backgrounded') && activity.content) {
+    if (isParentTaskTool(activity.toolName ?? '') && (activity.status === 'completed' || activity.status === 'backgrounded') && activity.content) {
       // Parse agent ID from Task result - look for "agentId: xyz" pattern
       const agentIdMatch = activity.content.match(/agentId:\s*([a-zA-Z0-9_-]+)/)
       const capturedAgentId = agentIdMatch?.[1]
@@ -1175,7 +1176,7 @@ export function groupActivitiesByParent(
     }
 
     // Task/Agent tools become groups with their children
-    if (activity.toolName === 'Task' || activity.toolName === 'Agent') {
+    if (isParentTaskTool(activity.toolName ?? '')) {
       const children = activity.toolUseId
         ? (childrenByParent.get(activity.toolUseId) || [])
         : []

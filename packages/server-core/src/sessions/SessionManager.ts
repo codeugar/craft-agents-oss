@@ -61,6 +61,7 @@ import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/
 import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
 import { resolveAuthEnvVars } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
+import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
@@ -562,6 +563,7 @@ async function resolveToolDisplayMeta(
     'Grep': 'Search',
     'Glob': 'Find Files',
     'Task': 'Agent',
+    'Agent': 'Agent',
     'WebFetch': 'Fetch URL',
     'WebSearch': 'Web Search',
     'TodoWrite': 'Update Todos',
@@ -869,6 +871,8 @@ export class SessionManager implements ISessionManager {
   private activeViewingSession: Map<string, string> = new Map()
   /** Coordinates startup initialization waiters from IPC handlers. */
   private initGate = new InitGate()
+  // O(1) index: taskId → sessionId for background task output lookup (avoids O(n) session scan)
+  private taskOutputIndex: Map<string, string> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -4808,24 +4812,33 @@ export class SessionManager implements ISessionManager {
    * @returns Task output content, or null if task not found
    */
   async getTaskOutput(taskId: string): Promise<string | null> {
-    // Search all sessions for the task output
-    for (const managed of this.sessions.values()) {
-      const info = managed.backgroundTaskOutputs.get(taskId)
-      if (info) {
-        sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
-        try {
-          const content = await readFile(info.outputFile, 'utf-8')
-          return content
-        } catch (err) {
-          sessionLog.error(`Failed to read task output file: ${info.outputFile}`, err)
-          // Fall back to SDK-provided summary
-          return info.summary || null
-        }
-      }
+    // O(1) lookup via taskOutputIndex
+    const sessionId = this.taskOutputIndex.get(taskId)
+    if (!sessionId) {
+      sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
+      return null
     }
 
-    sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
-    return null
+    const managed = this.sessions.get(sessionId)
+    const info = managed?.backgroundTaskOutputs.get(taskId)
+    if (!info) {
+      // Index out of sync — clean up stale entry
+      this.taskOutputIndex.delete(taskId)
+      return null
+    }
+
+    sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
+    try {
+      const content = await readFile(info.outputFile, 'utf-8')
+      // Delete after successful read to prevent memory leak
+      managed!.backgroundTaskOutputs.delete(taskId)
+      this.taskOutputIndex.delete(taskId)
+      return content
+    } catch (err) {
+      sessionLog.error(`Failed to read task output file: ${info.outputFile}`, err)
+      // Fall back to SDK-provided summary
+      return info.summary || null
+    }
   }
 
   /**
@@ -5384,8 +5397,7 @@ export class SessionManager implements ISessionManager {
         // Safety net: when a parent Task completes, mark all its still-pending child tools as completed.
         // This handles the case where child tool_result events never arrive (e.g., subagent internal tools
         // whose results aren't surfaced through the parent stream).
-        const PARENT_TOOLS_FOR_CLEANUP = ['Task', 'Agent', 'TaskOutput']
-        if (PARENT_TOOLS_FOR_CLEANUP.includes(toolName)) {
+        if (isParentTaskTool(toolName) || toolName === 'TaskOutput') {
           const pendingChildren = managed.messages.filter(
             m => m.parentToolUseId === event.toolUseId
               && m.toolStatus !== 'completed'
@@ -5574,7 +5586,19 @@ export class SessionManager implements ISessionManager {
             status: event.status,
             completedAt: Date.now(),
           })
+          // O(1) index for getTaskOutput() — avoids scanning all sessions
+          this.taskOutputIndex.set(event.taskId, sessionId)
           sessionLog.info(`Background task ${event.taskId} completed (status=${event.status})`)
+
+          // Evict stale entries older than 1 hour to bound memory growth
+          const ONE_HOUR = 3_600_000
+          const now = Date.now()
+          for (const [tid, info] of managed.backgroundTaskOutputs) {
+            if (now - info.completedAt > ONE_HOUR) {
+              managed.backgroundTaskOutputs.delete(tid)
+              this.taskOutputIndex.delete(tid)
+            }
+          }
         }
         // Forward to renderer for UI update
         this.sendEvent({

@@ -476,6 +476,56 @@ describe('ClaudeEventAdapter', () => {
         status: 'failed',
       });
     });
+
+    it('should handle task_notification with stopped status', async () => {
+      adapter.startTurn();
+      const events = await adapter.adapt({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'agent-stopped',
+        status: 'stopped',
+        summary: 'User stopped the task',
+        session_id: 'sess-1',
+      } as any);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'task_completed',
+        taskId: 'agent-stopped',
+        status: 'stopped',
+      });
+    });
+
+    it('should skip task_notification with missing task_id', async () => {
+      adapter.startTurn();
+      const events = await adapter.adapt({
+        type: 'system',
+        subtype: 'task_notification',
+        // task_id intentionally missing
+        status: 'completed',
+        session_id: 'sess-1',
+      } as any);
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('should default to completed for unknown task_notification status', async () => {
+      adapter.startTurn();
+      const events = await adapter.adapt({
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'agent-unknown',
+        status: 'some_future_status',
+        session_id: 'sess-1',
+      } as any);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'task_completed',
+        taskId: 'agent-unknown',
+        status: 'completed', // defaults to completed for unknown statuses
+      });
+    });
   });
 
   describe('auth_status', () => {

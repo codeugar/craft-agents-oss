@@ -7,6 +7,7 @@
 
 import type { SessionState, ToolStartEvent, ToolResultEvent, TaskBackgroundedEvent, ShellBackgroundedEvent, TaskProgressEvent, TaskCompletedEvent } from '../types'
 import type { Message } from '../../../shared/types'
+import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import {
   findToolMessage,
   updateMessageAt,
@@ -106,9 +107,8 @@ export function handleToolResult(
 
     // Safety net: when a parent Task completes, auto-complete any still-pending child tools.
     // This handles the case where child tool_result events never arrive.
-    const PARENT_TOOLS = ['Task', 'Agent', 'TaskOutput']
     const completedTool = updatedSession.messages[toolIndex]
-    if (completedTool && PARENT_TOOLS.includes(completedTool.toolName || '')) {
+    if (completedTool && (isParentTaskTool(completedTool.toolName || '') || completedTool.toolName === 'TaskOutput')) {
       const hasOrphanedChildren = updatedSession.messages.some(
         m => m.parentToolUseId === event.toolUseId
           && m.toolStatus !== 'completed'
@@ -269,8 +269,8 @@ export function handleTaskCompleted(
 
   if (toolIndex !== -1) {
     const updatedSession = updateMessageAt(session, toolIndex, {
-      toolStatus: event.status === 'completed' ? 'completed' : 'error',
-      toolResult: event.summary || (event.status === 'completed' ? 'Background task completed' : `Background task ${event.status}`),
+      toolStatus: event.status === 'failed' ? 'error' : 'completed',
+      toolResult: event.summary || `Background task ${event.status}`,
     })
     return { session: updatedSession, streaming }
   }

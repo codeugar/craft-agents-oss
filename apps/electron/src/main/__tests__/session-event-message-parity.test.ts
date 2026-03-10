@@ -457,14 +457,15 @@ describe('background task events field parity', () => {
     }
 
     // Both sides update the tool message (found by taskId) with:
+    // Only 'failed' maps to 'error'; 'completed' and 'stopped' map to 'completed'
     const mainUpdate = {
-      toolStatus: event.status === 'completed' ? 'completed' as const : 'error' as const,
-      toolResult: event.summary || 'Background task completed',
+      toolStatus: event.status === 'failed' ? 'error' as const : 'completed' as const,
+      toolResult: event.summary || `Background task ${event.status}`,
     }
 
     const rendererUpdate = {
-      toolStatus: event.status === 'completed' ? 'completed' as const : 'error' as const,
-      toolResult: event.summary || 'Background task completed',
+      toolStatus: event.status === 'failed' ? 'error' as const : 'completed' as const,
+      toolResult: event.summary || `Background task ${event.status}`,
     }
 
     expect(mainUpdate).toEqual(rendererUpdate)
@@ -480,15 +481,39 @@ describe('background task events field parity', () => {
 
     const mainUpdate = {
       toolStatus: 'error' as const,
-      toolResult: event.summary || 'Background task failed',
+      toolResult: event.summary || `Background task ${event.status}`,
     }
 
     const rendererUpdate = {
       toolStatus: 'error' as const,
-      toolResult: event.summary || 'Background task failed',
+      toolResult: event.summary || `Background task ${event.status}`,
     }
 
     expect(mainUpdate).toEqual(rendererUpdate)
+  })
+
+  it('task_completed with stopped status maps to completed (not error)', () => {
+    const event: TaskCompletedEvent = {
+      taskId: 'agent-stopped',
+      status: 'stopped',
+      summary: '',
+      turnId: 'turn-9',
+    }
+
+    // User-initiated stop should NOT show as an error
+    const mainUpdate = {
+      toolStatus: 'completed' as const,
+      toolResult: event.summary || `Background task ${event.status}`,
+    }
+
+    const rendererUpdate = {
+      toolStatus: 'completed' as const,
+      toolResult: event.summary || `Background task ${event.status}`,
+    }
+
+    expect(mainUpdate).toEqual(rendererUpdate)
+    expect(mainUpdate.toolStatus).toBe('completed')
+    expect(mainUpdate.toolResult).toBe('Background task stopped')
   })
 })
 
