@@ -386,6 +386,16 @@ export interface UserMessageEvent {
 }
 
 /**
+ * Message annotation update event
+ */
+export interface MessageAnnotationsUpdatedEvent {
+  type: 'message_annotations_updated'
+  sessionId: string
+  messageId: string
+  annotations: NonNullable<Message['annotations']>
+}
+
+/**
  * Session shared event - session was shared to viewer
  */
 export interface SessionSharedEvent {
@@ -487,6 +497,7 @@ export type AgentEvent =
   | TaskProgressEvent
   | TaskCompletedEvent
   | UserMessageEvent
+  | MessageAnnotationsUpdatedEvent
   | SessionSharedEvent
   | SessionUnsharedEvent
   | AuthRequestEvent
