@@ -56,6 +56,32 @@ export async function handleSourceOAuthTrigger(
     );
   }
 
+  // Try to resolve without full re-auth (handles race where token was already refreshed)
+  if (ctx.credentialManager) {
+    const workspaceId = basename(ctx.workspacePath) || '';
+    const loadedSource = {
+      config: source,
+      guide: null,
+      folderPath: '',
+      workspaceRootPath: ctx.workspacePath,
+      workspaceId,
+    };
+
+    const existingToken = await ctx.credentialManager.getToken(loadedSource);
+    if (existingToken) {
+      return successResponse(
+        `Source '${sourceSlug}' is already authenticated with a valid token. No re-authentication needed — proceed with using the source's tools directly.`
+      );
+    }
+
+    const refreshedToken = await ctx.credentialManager.refresh(loadedSource);
+    if (refreshedToken) {
+      return successResponse(
+        `Token for source '${sourceSlug}' was expired but has been refreshed successfully. The source is ready — proceed with using its tools directly.`
+      );
+    }
+  }
+
   // Build auth request
   const authRequest: McpOAuthAuthRequest = {
     type: 'oauth',
