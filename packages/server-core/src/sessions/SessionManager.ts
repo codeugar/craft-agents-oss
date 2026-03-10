@@ -61,6 +61,7 @@ import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/
 import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
 import { resolveAuthEnvVars } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
+import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
@@ -565,6 +566,7 @@ async function resolveToolDisplayMeta(
     'Grep': 'Search',
     'Glob': 'Find Files',
     'Task': 'Agent',
+    'Agent': 'Agent',
     'WebFetch': 'Fetch URL',
     'WebSearch': 'Web Search',
     'TodoWrite': 'Update Todos',
@@ -697,6 +699,8 @@ interface ManagedSession {
   }>
   // Map of shellId -> command for killing background shells
   backgroundShellCommands: Map<string, string>
+  // Map of taskId -> output info for background task results
+  backgroundTaskOutputs: Map<string, { outputFile: string; summary: string; status: string; completedAt: number }>
   // Whether messages have been loaded from disk (for lazy loading)
   messagesLoaded: boolean
   // Pending auth request tracking (for unified auth flow)
@@ -769,6 +773,7 @@ function createManagedSession(
     isFlagged: (s.isFlagged ?? false) as boolean,
     messageQueue: [],
     backgroundShellCommands: new Map(),
+    backgroundTaskOutputs: new Map(),
     messagesLoaded: false,
     tokenRefreshManager: new TokenRefreshManager(getSourceCredentialManager(), {
       log: (msg) => sessionLog.debug(msg),
@@ -876,6 +881,8 @@ export class SessionManager implements ISessionManager {
   private activeViewingSession: Map<string, string> = new Map()
   /** Coordinates startup initialization waiters from IPC handlers. */
   private initGate = new InitGate()
+  // O(1) index: taskId → sessionId for background task output lookup (avoids O(n) session scan)
+  private taskOutputIndex: Map<string, string> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -5052,35 +5059,43 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Get output from a background task or shell
+   * Get output from a background task
    *
-   * NOT YET IMPLEMENTED - This is a placeholder.
-   *
-   * Background task output retrieval requires infrastructure that doesn't exist yet:
-   * 1. Storing shell output streams as they come in (tool_result events only have final output)
-   * 2. Associating outputs with task/shell IDs in a queryable store
-   * 3. Handling the BashOutput tool results for ongoing shells
-   *
-   * Current workaround: Users can view task output in the main chat panel where
-   * tool results are displayed inline with the conversation.
+   * Looks up the output file stored when a task_completed event was received,
+   * reads its contents, and returns them. Falls back to the SDK-provided summary
+   * if the file cannot be read.
    *
    * @param taskId - The task or shell ID
-   * @returns Placeholder message explaining the limitation
+   * @returns Task output content, or null if task not found
    */
   async getTaskOutput(taskId: string): Promise<string | null> {
-    sessionLog.info(`Getting output for task: ${taskId} (not implemented)`)
+    // O(1) lookup via taskOutputIndex
+    const sessionId = this.taskOutputIndex.get(taskId)
+    if (!sessionId) {
+      sessionLog.info(`No output found for task: ${taskId} (task may still be running)`)
+      return null
+    }
 
-    // This functionality requires a dedicated output tracking system.
-    // The SDK manages shells internally but doesn't expose an API for querying
-    // their output history outside of tool_result events.
-    return `Background task output retrieval is not yet implemented.
+    const managed = this.sessions.get(sessionId)
+    const info = managed?.backgroundTaskOutputs.get(taskId)
+    if (!info) {
+      // Index out of sync — clean up stale entry
+      this.taskOutputIndex.delete(taskId)
+      return null
+    }
 
-Task ID: ${taskId}
-
-To view this task's output:
-• Check the main chat panel where tool results are displayed
-• Look for the tool_result message associated with this task
-• For ongoing shells, the agent can use BashOutput to check status`
+    sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
+    try {
+      const content = await readFile(info.outputFile, 'utf-8')
+      // Delete after successful read to prevent memory leak
+      managed!.backgroundTaskOutputs.delete(taskId)
+      this.taskOutputIndex.delete(taskId)
+      return content
+    } catch (err) {
+      sessionLog.error(`Failed to read task output file: ${info.outputFile}`, err)
+      // Fall back to SDK-provided summary
+      return info.summary || null
+    }
   }
 
   /**
@@ -5658,8 +5673,7 @@ To view this task's output:
         // Safety net: when a parent Task completes, mark all its still-pending child tools as completed.
         // This handles the case where child tool_result events never arrive (e.g., subagent internal tools
         // whose results aren't surfaced through the parent stream).
-        const PARENT_TOOLS_FOR_CLEANUP = ['Task', 'TaskOutput']
-        if (PARENT_TOOLS_FOR_CLEANUP.includes(toolName)) {
+        if (isParentTaskTool(toolName) || toolName === 'TaskOutput') {
           const pendingChildren = managed.messages.filter(
             m => m.parentToolUseId === event.toolUseId
               && m.toolStatus !== 'completed'
@@ -5833,6 +5847,36 @@ To view this task's output:
       case 'task_backgrounded':
       case 'task_progress':
         // Forward background task events directly to renderer
+        this.sendEvent({
+          ...event,
+          sessionId,
+        }, workspaceId)
+        break
+
+      case 'task_completed':
+        // Store output for later retrieval via getTaskOutput()
+        if (managed) {
+          managed.backgroundTaskOutputs.set(event.taskId, {
+            outputFile: event.outputFile || '',
+            summary: event.summary || '',
+            status: event.status,
+            completedAt: Date.now(),
+          })
+          // O(1) index for getTaskOutput() — avoids scanning all sessions
+          this.taskOutputIndex.set(event.taskId, sessionId)
+          sessionLog.info(`Background task ${event.taskId} completed (status=${event.status})`)
+
+          // Evict stale entries older than 1 hour to bound memory growth
+          const ONE_HOUR = 3_600_000
+          const now = Date.now()
+          for (const [tid, info] of managed.backgroundTaskOutputs) {
+            if (now - info.completedAt > ONE_HOUR) {
+              managed.backgroundTaskOutputs.delete(tid)
+              this.taskOutputIndex.delete(tid)
+            }
+          }
+        }
+        // Forward to renderer for UI update
         this.sendEvent({
           ...event,
           sessionId,

@@ -1078,8 +1078,8 @@ export class ClaudeAgent extends BaseAgent {
           }],
           SubagentStop: [{
             hooks: [async (input, _toolUseID) => {
-              const typedInput = input as { agent_id?: string };
-              debug(`[ClaudeAgent] SubagentStop: agent_id=${typedInput.agent_id}`);
+              const typedInput = input as { agent_id?: string; agent_transcript_path?: string };
+              debug(`[ClaudeAgent] SubagentStop: agent_id=${typedInput.agent_id}, transcript=${typedInput.agent_transcript_path ?? 'none'}`);
               return { continue: true };
             }],
           }],
@@ -1960,6 +1960,17 @@ export class ClaudeAgent extends BaseAgent {
         ],
         canRetry: true,
         retryDelayMs: 2000,
+      },
+      'max_output_tokens': {
+        code: 'invalid_request',
+        title: 'Output Too Large',
+        message: 'The response exceeded the maximum output token limit.',
+        details: ['Try breaking the task into smaller parts', 'Reduce the scope of the request'],
+        actions: [
+          { key: 'r', label: 'Retry', action: 'retry' },
+        ],
+        canRetry: true,
+        retryDelayMs: 1000,
       },
       'unknown': {
         code: 'unknown_error',
