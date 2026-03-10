@@ -56,7 +56,8 @@ export async function handleSourceOAuthTrigger(
     );
   }
 
-  // Try to resolve without full re-auth (handles race where token was already refreshed)
+  // Try silent refresh before triggering full re-auth popup.
+  // Uses server-side refresh (not local expiry check) so a revoked token won't block re-auth.
   if (ctx.credentialManager) {
     const workspaceId = basename(ctx.workspacePath) || '';
     const loadedSource = {
@@ -67,17 +68,10 @@ export async function handleSourceOAuthTrigger(
       workspaceId,
     };
 
-    const existingToken = await ctx.credentialManager.getToken(loadedSource);
-    if (existingToken) {
-      return successResponse(
-        `Source '${sourceSlug}' is already authenticated with a valid token. No re-authentication needed — proceed with using the source's tools directly.`
-      );
-    }
-
     const refreshedToken = await ctx.credentialManager.refresh(loadedSource);
     if (refreshedToken) {
       return successResponse(
-        `Token for source '${sourceSlug}' was expired but has been refreshed successfully. The source is ready — proceed with using its tools directly.`
+        `Token for source '${sourceSlug}' has been refreshed successfully. The source is ready — proceed with using its tools directly.`
       );
     }
   }
