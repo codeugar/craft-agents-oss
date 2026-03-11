@@ -370,9 +370,15 @@ export class PiAgent extends BaseAgent {
       }
     }
 
-    // Retrieve auth credentials for the subprocess
+    // Retrieve auth credentials for the subprocess.
+    // Custom endpoint mode must NOT fall back to global API keys — keyless local endpoints
+    // are valid, and non-local endpoints should fail explicitly instead of using unrelated creds.
     const piAuth = await this.getPiAuth();
-    const legacyApiKey = piAuth ? undefined : await this.getApiKey();
+    const isCustomEndpointMode = !!runtime.customEndpoint;
+    const legacyApiKey = (!piAuth && !isCustomEndpointMode) ? await this.getApiKey() : undefined;
+    if (isCustomEndpointMode && !piAuth) {
+      this.debug('Custom endpoint mode: no provider credential configured, sending empty API key');
+    }
     const sessionPath = this.config.session
       ? getSessionPath(this.config.workspace.rootPath, sessionId)
       : '';

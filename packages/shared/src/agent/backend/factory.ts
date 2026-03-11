@@ -31,7 +31,7 @@ import {
   type LlmConnection,
 } from '../../config/storage.ts';
 // Import deprecated type for legacy migration function only
-import type { LlmConnectionType } from '../../config/llm-connections.ts';
+import type { LlmConnectionType, CustomEndpointConfig } from '../../config/llm-connections.ts';
 // Import validation helpers for provider-auth combinations
 import {
   isValidProviderAuthCombination,
@@ -390,8 +390,16 @@ export function resolveSetupTestConnectionHint(args: {
   provider: AgentProvider;
   baseUrl?: string;
   piAuthProvider?: string;
+  customEndpoint?: CustomEndpointConfig;
 }): Pick<LlmConnection, 'providerType' | 'piAuthProvider'> {
   if (args.provider === 'pi') {
+    if (args.customEndpoint && args.baseUrl?.trim()) {
+      return {
+        providerType: 'pi_compat',
+        piAuthProvider: args.customEndpoint.api === 'anthropic-messages' ? 'anthropic' : 'openai',
+      };
+    }
+
     return {
       providerType: 'pi',
       piAuthProvider: args.piAuthProvider,

@@ -410,13 +410,16 @@ export function useOnboarding({
         }
       }
 
-      // Validate connection by spawning a lightweight subprocess test
+      // Validate connection by spawning a lightweight subprocess test.
+      // Custom endpoint protocol routes through PiAgent at runtime, so test with Pi too.
+      const setupTestProvider = data.customEndpoint ? 'pi' : (isPiApiKeyFlow ? 'pi' : 'anthropic')
       const testResult = await window.electronAPI.testLlmConnectionSetup({
-        provider: isPiApiKeyFlow ? 'pi' : 'anthropic',
+        provider: setupTestProvider,
         apiKey: data.apiKey,
         baseUrl: data.baseUrl,
         model: data.models?.[0],
         piAuthProvider: data.piAuthProvider,
+        customEndpoint: data.customEndpoint,
       })
 
       if (!testResult.success) {
