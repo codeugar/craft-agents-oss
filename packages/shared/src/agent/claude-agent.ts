@@ -2398,10 +2398,15 @@ export class ClaudeAgent extends BaseAgent {
 
       capturedSessionId = await Promise.race([
         (async () => {
+          let sid: string | null = null;
           for await (const msg of preflightQuery!) {
-            if ('session_id' in msg && msg.session_id) return msg.session_id;
+            // Capture session_id but keep draining — the model must complete
+            // its turn so the API records real activity and won't GC the session.
+            if (!sid && 'session_id' in msg && msg.session_id) {
+              sid = msg.session_id;
+            }
           }
-          return null;
+          return sid;
         })(),
         new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(
