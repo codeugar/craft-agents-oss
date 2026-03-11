@@ -2377,9 +2377,9 @@ export class ClaudeAgent extends BaseAgent {
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       tools: { type: 'preset', preset: 'claude_code' },
-      // Single query: fork parent + compact in one step.
-      // /compact triggers context compaction, which creates real API activity
-      // and prevents the forked session from being garbage-collected.
+      // Single query: fork parent and force one real model turn.
+      // The model response creates genuine API activity that prevents
+      // Anthropic from garbage-collecting the forked session.
       maxTurns: 1,
       resume: this.branchFromSdkSessionId,
       forkSession: true,
@@ -2391,7 +2391,10 @@ export class ClaudeAgent extends BaseAgent {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
     try {
-      preflightQuery = query({ prompt: '/compact', options: forkOptions });
+      // Use a real prompt (not an SDK command like /compact) to ensure
+      // the API processes an actual model turn. SDK commands may be
+      // intercepted without creating API-level activity.
+      preflightQuery = query({ prompt: 'Reply with OK', options: forkOptions });
 
       capturedSessionId = await Promise.race([
         (async () => {
