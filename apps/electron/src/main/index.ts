@@ -209,6 +209,33 @@ if (process.defaultApp) {
 import { applyConfiguredProxySettings } from './network-proxy'
 void applyConfiguredProxySettings()
 
+// Accept self-signed / untrusted certificates when connecting to a user-configured remote server.
+// Only bypasses cert validation for the exact CRAFT_SERVER_URL origin — all other connections
+// use standard certificate verification. Without this, wss:// to self-signed servers fails with
+// ERR_CERT_AUTHORITY_INVALID because Chromium's WebSocket rejects untrusted certs.
+if (process.env.CRAFT_SERVER_URL) {
+  let serverOrigin: string | undefined
+  try {
+    serverOrigin = new URL(process.env.CRAFT_SERVER_URL).origin
+  } catch {
+    // Invalid URL — will fail later during connection, no need to handle here
+  }
+  if (serverOrigin) {
+    app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+      try {
+        if (new URL(url).origin === serverOrigin) {
+          event.preventDefault()
+          callback(true)
+          return
+        }
+      } catch {
+        // URL parse failure — fall through to default rejection
+      }
+      callback(false)
+    })
+  }
+}
+
 // Register thumbnail:// custom protocol for file preview thumbnails in the sidebar.
 // Must happen before app.whenReady() — Electron requires early scheme registration.
 registerThumbnailScheme()
