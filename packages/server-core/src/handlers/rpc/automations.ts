@@ -88,7 +88,19 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
         })
 
         if (payload.automationId) {
-          const entry = { id: payload.automationId, ts: Date.now(), ok: result.success, ...(result.error ? { error: result.error.slice(0, 200) } : {}), prompt: `Webhook ${method} ${action.url}`.slice(0, 200) }
+          const entry = {
+            id: payload.automationId,
+            ts: Date.now(),
+            ok: result.success,
+            webhook: {
+              method,
+              url: action.url as string,
+              statusCode: result.statusCode,
+              durationMs: result.durationMs ?? 0,
+              ...(result.error ? { error: result.error.slice(0, 200) } : {}),
+              ...(result.responseBody ? { responseBody: result.responseBody.slice(0, 1000) } : {}),
+            },
+          }
           appendFile(join(workspace.rootPath, HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf-8').catch(e => log.warn('[Automations] Failed to write history:', e))
         }
         continue
