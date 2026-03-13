@@ -103,6 +103,20 @@ export interface LogicalConditionUI {
 
 export type AutomationConditionUI = TimeConditionUI | StateConditionUI | LogicalConditionUI
 
+/** Human-friendly field names for state conditions */
+const FIELD_LABELS: Record<string, string> = {
+  permissionMode: 'permission mode',
+  sessionStatus: 'session status',
+  isFlagged: 'flagged',
+  labels: 'label',
+  sessionName: 'session name',
+}
+
+/** Get a readable field name, falling back to the raw field */
+function fieldLabel(field: string): string {
+  return FIELD_LABELS[field] ?? field
+}
+
 /** Produce a short human-readable label for a single leaf condition */
 function describeLeaf(c: AutomationConditionUI): string {
   switch (c.condition) {
@@ -115,15 +129,22 @@ function describeLeaf(c: AutomationConditionUI): string {
       return parts.length ? parts.join(' ') : 'any time'
     }
     case 'state': {
+      const label = fieldLabel(c.field)
       if (c.from !== undefined || c.to !== undefined) {
-        const from = c.from !== undefined ? String(c.from) : '*'
-        const to = c.to !== undefined ? String(c.to) : '*'
-        return `${c.field}: ${from} → ${to}`
+        const from = c.from !== undefined ? String(c.from) : 'any'
+        const to = c.to !== undefined ? String(c.to) : 'any'
+        return `${label} changed from ${from} to ${to}`
       }
-      if (c.contains) return `${c.field} contains "${c.contains}"`
-      if (c.not_value !== undefined) return `${c.field} ≠ ${String(c.not_value)}`
-      if (c.value !== undefined) return `${c.field} = ${String(c.value)}`
-      return c.field
+      if (c.contains) return `has ${label} "${c.contains}"`
+      if (c.not_value !== undefined) {
+        if (c.field === 'isFlagged') return c.not_value ? 'not flagged' : 'is flagged'
+        return `${label} is not ${String(c.not_value)}`
+      }
+      if (c.value !== undefined) {
+        if (c.field === 'isFlagged') return c.value ? 'is flagged' : 'not flagged'
+        return `${label} is ${String(c.value)}`
+      }
+      return label
     }
     case 'and':
     case 'or':
