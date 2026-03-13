@@ -970,14 +970,23 @@ export function getValidateSteps(): ValidateStep[] {
           return `${r.length} workspaces`
         }
         // Auto-bootstrap a temp workspace for CI environments
-        const { mkdtemp } = await import('fs/promises')
+        const { mkdtemp, cp, stat } = await import('fs/promises')
         const { tmpdir } = await import('os')
+        const { join } = await import('path')
         const tmpDir = await mkdtemp(`${tmpdir()}/craft-validate-`)
         const ws = (await client.invoke('workspaces:create', tmpDir, 'validate-workspace')) as { id: string }
         ctx.workspaceId = ws.id
         ctx.workspaceRootPath = tmpDir
         ctx.createdWorkspace = true
         await client.invoke('window:switchWorkspace', ws.id)
+        // Copy pre-committed CI sources (e.g. .github/agents/sources/) into the temp workspace
+        const ciSourcesDir = join(process.cwd(), '.github', 'agents', 'sources')
+        try {
+          await stat(ciSourcesDir)
+          await cp(ciSourcesDir, join(tmpDir, 'sources'), { recursive: true })
+        } catch {
+          // No CI sources directory — continue without
+        }
         return `0 found → created temp workspace`
       },
     },
