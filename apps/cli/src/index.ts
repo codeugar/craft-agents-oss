@@ -1421,18 +1421,54 @@ SKILLEOF`, 90_000, true, undefined, ctx.onEvent)
         if (!ctx.workspaceRootPath) return 'skipped (no workspace root)'
         const { readFile } = await import('fs/promises')
         const historyPath = `${ctx.workspaceRootPath}/automations-history.jsonl`
-        const content = await readFile(historyPath, 'utf-8').catch(() => '')
-        const lines = content.trim().split('\n').filter(Boolean)
-        const entries = lines.map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-        const webhookEntries = entries.filter((e: any) => e.webhook)
-        if (webhookEntries.length === 0) throw new Error('No webhook history entries found')
-        // Find a recent failed webhook entry (within last 2 minutes)
-        const recentThreshold = Date.now() - 120_000
-        const recentFailed = webhookEntries.find((e: any) =>
-          !e.ok && e.ts > recentThreshold && e.webhook?.method === 'POST'
+
+        const start = Date.now()
+        const deadline = start + 15_000
+        let delay = 200
+
+        let lastLineCount = 0
+        let lastWebhookCount = 0
+        let lastSummary = 'no entries'
+
+        while (Date.now() < deadline) {
+          const content = await readFile(historyPath, 'utf-8').catch(() => '')
+          const lines = content.trim().split('\n').filter(Boolean)
+          lastLineCount = lines.length
+
+          const entries = lines
+            .map((l) => {
+              try {
+                return JSON.parse(l)
+              } catch {
+                return null
+              }
+            })
+            .filter(Boolean) as Array<Record<string, unknown>>
+
+          const webhookEntries = entries.filter((e) => !!e.webhook)
+          lastWebhookCount = webhookEntries.length
+
+          if (webhookEntries.length > 0) {
+            const recentThreshold = Date.now() - 120_000
+            const recentFailed = webhookEntries.find((e: any) =>
+              !e.ok && e.ts > recentThreshold && e.webhook?.method === 'POST'
+            )
+            if (recentFailed) {
+              return `webhook failure recorded: method=${recentFailed.webhook.method}, url=${recentFailed.webhook.url?.slice(0, 50)}`
+            }
+
+            const latest = webhookEntries[webhookEntries.length - 1] as any
+            lastSummary = `latest: ok=${String(latest?.ok)} method=${String(latest?.webhook?.method ?? 'n/a')} ts=${String(latest?.ts ?? 'n/a')}`
+          }
+
+          await new Promise((r) => setTimeout(r, delay))
+          delay = Math.min(Math.round(delay * 1.8), 1500)
+        }
+
+        const waitedMs = Date.now() - start
+        throw new Error(
+          `No recent failed POST webhook history entry after ${waitedMs}ms (lines=${lastLineCount}, webhookEntries=${lastWebhookCount}, ${lastSummary})`,
         )
-        if (!recentFailed) throw new Error('No recent failed webhook entry found in history')
-        return `webhook failure recorded: method=${recentFailed.webhook.method}, url=${recentFailed.webhook.url?.slice(0, 50)}`
       },
     },
     {
