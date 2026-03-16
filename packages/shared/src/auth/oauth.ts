@@ -536,9 +536,17 @@ export async function prepareMcpOAuth(mcpUrl: string, callbackPort: number): Pro
   const redirectUri = `http://localhost:${callbackPort}${CALLBACK_PATH}`;
 
   let clientId: string;
+  let clientSecret: string | undefined;
   if (metadata.registration_endpoint) {
-    const client = await registerMcpOAuthClient(metadata.registration_endpoint, redirectUri);
-    clientId = client.client_id;
+    try {
+      const client = await registerMcpOAuthClient(metadata.registration_endpoint, redirectUri);
+      clientId = client.client_id;
+      clientSecret = client.client_secret;
+    } catch {
+      // Dynamic client registration failed (e.g. Figma returns 403).
+      // Fall back to a default client ID and proceed with the flow.
+      clientId = 'craft-agent';
+    }
   } else {
     clientId = 'craft-agent';
   }
@@ -557,6 +565,7 @@ export async function prepareMcpOAuth(mcpUrl: string, callbackPort: number): Pro
     codeVerifier: pkce.verifier,
     tokenEndpoint: metadata.token_endpoint,
     clientId,
+    clientSecret,
     redirectUri,
     provider: 'mcp',
   };
