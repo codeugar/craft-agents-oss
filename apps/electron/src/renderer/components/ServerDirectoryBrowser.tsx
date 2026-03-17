@@ -202,8 +202,8 @@ export function ServerDirectoryBrowser({
               type="button"
               onClick={() => handleEntryClick(entry.path)}
               onDoubleClick={() => handleEntryDoubleClick(entry.path)}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-foreground/5 transition-colors ${
-                selectedEntry === entry.path ? 'bg-primary/10 text-primary' : ''
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-colors hover:bg-foreground/5 ${
+                selectedEntry === entry.path ? 'bg-foreground/5' : ''
               }`}
             >
               {entry.isSymlink
