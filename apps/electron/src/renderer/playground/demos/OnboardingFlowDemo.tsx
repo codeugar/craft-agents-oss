@@ -92,6 +92,11 @@ export function OnboardingFlowDemo() {
     }, 1200)
   }, [])
 
+  const handleSkip = useCallback(() => {
+    console.log('[Playground] Setup deferred — skipping to complete')
+    setStep('complete')
+  }, [])
+
   const handleRestart = useCallback(() => {
     setStep('welcome')
     setMethod(null)
@@ -152,7 +157,7 @@ export function OnboardingFlowDemo() {
         )}
 
         {step === 'provider-select' && (
-          <ProviderSelectStep onSelect={handleProviderSelect} />
+          <ProviderSelectStep onSelect={handleProviderSelect} onSkip={handleSkip} />
         )}
 
         {step === 'credentials' && method && (

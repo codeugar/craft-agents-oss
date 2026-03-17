@@ -1553,6 +1553,7 @@ export default function App() {
             onContinue={onboarding.handleContinue}
             onBack={onboarding.handleBack}
             onSelectProvider={onboarding.handleSelectProvider}
+            onSkipSetup={onboarding.handleSkipSetup}
             onSelectApiSetupMethod={onboarding.handleSelectApiSetupMethod}
             onSubmitCredential={onboarding.handleSubmitCredential}
             onSubmitLocalModel={onboarding.handleSubmitLocalModel}

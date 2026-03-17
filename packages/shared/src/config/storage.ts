@@ -73,6 +73,8 @@ export interface StoredConfig {
   networkProxy?: import('./types.ts').NetworkProxySettings;
   // Windows: path to Git Bash (bash.exe) for the SDK subprocess
   gitBashPath?: string;
+  // User chose "Setup later" during onboarding — skip showing onboarding on next launch
+  setupDeferred?: boolean;
 }
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -2386,6 +2388,25 @@ export function setNetworkProxySettings(settings: NetworkProxySettings): void {
     config.networkProxy = normalized;
   }
 
+  saveConfig(config);
+}
+
+// ============================================
+// Setup Deferred (user skipped onboarding)
+// ============================================
+
+export function isSetupDeferred(): boolean {
+  return loadStoredConfig()?.setupDeferred === true;
+}
+
+export function setSetupDeferred(deferred: boolean): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  if (deferred) {
+    config.setupDeferred = true;
+  } else {
+    delete config.setupDeferred;
+  }
   saveConfig(config);
 }
 
