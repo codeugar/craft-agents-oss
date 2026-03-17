@@ -1312,7 +1312,7 @@ async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_c
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     debugLog(`[handleMiniCompletion] Error: ${errorMsg}`);
-    send({ type: 'error', message: errorMsg });
+    send({ type: 'error', message: errorMsg, code: 'mini_completion_error' });
   }
 }
 
