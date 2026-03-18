@@ -6108,6 +6108,13 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'error': {
+        // Skip errors after handoff (plan submission, auth request) — the SDK may emit
+        // an error from the interrupted query after we've already stopped processing.
+        if (!managed.isProcessing) {
+          sessionLog.info('Skipping error event after handoff/stop:', event.message)
+          break
+        }
+
         // Skip abort errors - these are expected when force-aborting via Query.close()
         if (event.message.includes('aborted') || event.message.includes('AbortError')) {
           sessionLog.info('Skipping abort error event (expected during interrupt)')
@@ -6140,6 +6147,12 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'typed_error':
+        // Skip errors after handoff (plan submission, auth request)
+        if (!managed.isProcessing) {
+          sessionLog.info('Skipping typed_error event after handoff/stop:', event.error.message || event.error.title)
+          break
+        }
+
         // Skip abort errors - these are expected when force-aborting via Query.close()
         const typedErrorMsg = event.error.message || event.error.title || ''
         if (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError')) {
