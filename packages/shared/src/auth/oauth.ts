@@ -864,7 +864,7 @@ async function discoverViaProtectedResource(
     onLog?.(`  Trying RFC 9728 protected resource discovery...`);
 
     // Make a request to the MCP endpoint to trigger 401
-    // Try HEAD first, fall back to GET if HEAD returns 405
+    // Try HEAD first, fall back to GET, then POST (Streamable HTTP servers only accept POST)
     let response: Response;
     try {
       response = await fetchWithTimeout(mcpUrl, { method: 'HEAD' });
@@ -872,6 +872,15 @@ async function discoverViaProtectedResource(
       if (response.status === 405) {
         onLog?.(`  HEAD not supported, trying GET...`);
         response = await fetchWithTimeout(mcpUrl, { method: 'GET' });
+      }
+      // Streamable HTTP MCP servers only accept POST
+      if (response.status === 405) {
+        onLog?.(`  GET not supported, trying POST...`);
+        response = await fetchWithTimeout(mcpUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
