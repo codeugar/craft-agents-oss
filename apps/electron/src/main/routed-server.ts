@@ -73,7 +73,15 @@ export class RoutedServer implements RpcServer {
         workspace.id,
         workspace.remoteServer,
       )
-      return bridge.invoke(channel, ...args)
+
+      // Rewrite workspace ID in args: many handlers take workspaceId as the
+      // first parameter (statuses:list, labels:list, etc.). The local workspace
+      // ID doesn't exist on the remote — swap it for remoteWorkspaceId.
+      const remoteArgs = [...args]
+      if (typeof remoteArgs[0] === 'string' && remoteArgs[0] === workspace.id) {
+        remoteArgs[0] = workspace.remoteServer.remoteWorkspaceId
+      }
+      return bridge.invoke(channel, ...remoteArgs)
     })
   }
 
