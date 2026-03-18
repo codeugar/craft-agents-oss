@@ -14,9 +14,8 @@ interface AddWorkspaceStep_ConnectRemoteProps {
 /**
  * AddWorkspaceStep_ConnectRemote - Connect to a remote Craft Agent Server
  *
- * Flow: URL + Token → Test Connection → (name auto-fills from remote) → Create
- * The workspace name is optional — defaults to the remote workspace name.
- * The local folder is auto-created under ~/.craft-agent/workspaces/{slug}.
+ * Flow: URL + Token → Test Connection → Name (required for fresh servers, optional override otherwise) → Create
+ * If the remote server has no workspace, one is created with the user's chosen name.
  */
 export function AddWorkspaceStep_ConnectRemote({
   onBack,
@@ -31,14 +30,15 @@ export function AddWorkspaceStep_ConnectRemote({
   const [testError, setTestError] = useState<string | null>(null)
   const [remoteWorkspaceId, setRemoteWorkspaceId] = useState<string | null>(null)
   const [remoteWorkspaceName, setRemoteWorkspaceName] = useState<string | null>(null)
+  const [needsWorkspace, setNeedsWorkspace] = useState(false)
   const [slugError, setSlugError] = useState<string | null>(null)
 
   useEffect(() => {
     window.electronAPI.getHomeDir().then(setHomeDir)
   }, [])
 
-  // Effective name: user override or remote workspace name
-  const effectiveName = name.trim() || remoteWorkspaceName || ''
+  // Effective name: user input, or remote workspace name as fallback (only when workspace exists)
+  const effectiveName = name.trim() || (!needsWorkspace ? remoteWorkspaceName : null) || ''
   const slug = slugify(effectiveName)
   const defaultBasePath = homeDir ? `${homeDir}/.craft-agent/workspaces` : '~/.craft-agent/workspaces'
   const finalPath = slug ? `${defaultBasePath}/${slug}` : null
@@ -73,6 +73,7 @@ export function AddWorkspaceStep_ConnectRemote({
     setTestError(null)
     setRemoteWorkspaceId(null)
     setRemoteWorkspaceName(null)
+    setNeedsWorkspace(false)
   }, [serverUrl, token])
 
   const handleTestConnection = useCallback(async () => {
@@ -83,8 +84,15 @@ export function AddWorkspaceStep_ConnectRemote({
       const result = await window.electronAPI.testRemoteConnection(serverUrl, token)
       if (result.ok) {
         setTestState('ok')
-        setRemoteWorkspaceId(result.remoteWorkspaceId ?? null)
-        setRemoteWorkspaceName(result.remoteWorkspaceName ?? null)
+        if (result.needsWorkspace) {
+          setNeedsWorkspace(true)
+          setRemoteWorkspaceId(null)
+          setRemoteWorkspaceName(null)
+        } else {
+          setNeedsWorkspace(false)
+          setRemoteWorkspaceId(result.remoteWorkspaceId ?? null)
+          setRemoteWorkspaceName(result.remoteWorkspaceName ?? null)
+        }
       } else {
         setTestState('error')
         setTestError(result.error || 'Connection failed')
@@ -96,11 +104,28 @@ export function AddWorkspaceStep_ConnectRemote({
   }, [serverUrl, token])
 
   const handleCreate = useCallback(async () => {
-    if (!effectiveName || !finalPath || !serverUrl || !token || !remoteWorkspaceId || slugError) return
-    await onCreate(finalPath, effectiveName, { url: serverUrl, token, remoteWorkspaceId })
-  }, [effectiveName, finalPath, serverUrl, token, remoteWorkspaceId, slugError, onCreate])
+    if (!effectiveName || !finalPath || !serverUrl || !token || slugError) return
 
-  const canCreate = effectiveName && finalPath && serverUrl && token && remoteWorkspaceId && !slugError && !isCreating
+    let wsId = remoteWorkspaceId
+
+    // If the remote server needs a workspace, create one with the user's name
+    if (needsWorkspace && !wsId) {
+      const result = await window.electronAPI.createRemoteWorkspace(serverUrl, token, effectiveName)
+      if (!result.ok) {
+        setTestState('error')
+        setTestError(result.error || 'Failed to create workspace on remote server')
+        return
+      }
+      wsId = result.remoteWorkspaceId ?? null
+    }
+
+    if (!wsId) return
+    await onCreate(finalPath, effectiveName, { url: serverUrl, token, remoteWorkspaceId: wsId })
+  }, [effectiveName, finalPath, serverUrl, token, remoteWorkspaceId, needsWorkspace, slugError, onCreate])
+
+  // For fresh servers: name is required. For existing: name is optional (defaults to remote name).
+  const hasValidName = needsWorkspace ? !!name.trim() : !!effectiveName
+  const canCreate = hasValidName && finalPath && serverUrl && token && testState === 'ok' && !slugError && !isCreating
 
   return (
     <AddWorkspaceContainer>
@@ -166,10 +191,16 @@ export function AddWorkspaceStep_ConnectRemote({
           >
             {testState === 'testing' ? 'Testing...' : 'Test Connection'}
           </AddWorkspaceSecondaryButton>
-          {testState === 'ok' && (
+          {testState === 'ok' && !needsWorkspace && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <CheckCircle className="h-3.5 w-3.5" />
               Connected{remoteWorkspaceName ? ` — ${remoteWorkspaceName}` : ''}
+            </span>
+          )}
+          {testState === 'ok' && needsWorkspace && (
+            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+              <CheckCircle className="h-3.5 w-3.5" />
+              Connected — new server
             </span>
           )}
           {testState === 'error' && (
@@ -180,22 +211,27 @@ export function AddWorkspaceStep_ConnectRemote({
           )}
         </div>
 
-        {/* Workspace name — shown after successful test, optional override */}
+        {/* Workspace name — shown after successful test */}
         {testState === 'ok' && (
           <div className="space-y-2">
             <label className="block text-sm font-medium text-foreground">
               Workspace name
-              <span className="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
+              {!needsWorkspace && (
+                <span className="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
+              )}
             </label>
             <div className="bg-background shadow-minimal rounded-lg">
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={remoteWorkspaceName || 'Remote Workspace'}
+                placeholder={needsWorkspace ? 'My Remote Workspace' : (remoteWorkspaceName || 'Remote Workspace')}
                 disabled={isCreating}
                 className="border-0 bg-transparent shadow-none"
               />
             </div>
+            {needsWorkspace && !name.trim() && (
+              <p className="text-xs text-muted-foreground">A workspace will be created on the remote server with this name.</p>
+            )}
             {slugError && (
               <p className="text-xs text-destructive">{slugError}</p>
             )}
