@@ -99,9 +99,9 @@ async function listModelsViaHttp(
   }
 }
 
-/** Filter raw models to only those enabled by policy. */
+/** Filter raw models to only those explicitly enabled by policy. */
 function filterEnabledModels(models: RawCopilotModel[]): RawCopilotModel[] {
-  return models.filter(m => !m.policy || m.policy.state === 'enabled');
+  return models.filter(m => m.policy?.state === 'enabled');
 }
 
 /** Convert raw Copilot models to our ModelDefinition format. */
