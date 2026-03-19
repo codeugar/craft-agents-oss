@@ -91,18 +91,19 @@ class ModelRefreshService {
     // Layer 1: Provider API/SDK
     try {
       const credentials = await this.getCredentials(slug)
+      handlerLog.info(`Model refresh [${slug}]: fetching (provider=${connection.providerType}, piAuth=${connection.piAuthProvider}, hasOAuthRefresh=${!!credentials.oauthRefreshToken}, hasOAuthAccess=${!!credentials.oauthAccessToken})`)
       const result = await fetcher.fetchModels(connection, credentials)
       newModels = result.models
       serverDefault = result.serverDefault
-      handlerLog.info(`Model refresh [${slug}]: fetched ${newModels.length} models from provider`)
+      handlerLog.info(`Model refresh [${slug}]: fetched ${newModels.length} models from provider: ${newModels.map(m => m.id).join(', ')}`)
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
-      handlerLog.info(`Model refresh [${slug}]: provider fetch failed: ${msg}`)
+      handlerLog.warn(`Model refresh [${slug}]: provider fetch failed: ${msg}`)
     }
 
     // Layer 2: Persisted connection.models (keep what we have)
     if (!newModels && connection.models && connection.models.length > 0) {
-      handlerLog.info(`Model refresh [${slug}]: keeping ${connection.models.length} persisted models`)
+      handlerLog.warn(`Model refresh [${slug}]: keeping ${connection.models.length} stale persisted models (live fetch failed)`)
       return // Nothing to update
     }
 
