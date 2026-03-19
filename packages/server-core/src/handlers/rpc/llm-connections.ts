@@ -240,9 +240,13 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         deps.platform.logger?.info(`Set default LLM connection: ${setup.slug}`)
       }
 
-      // Fetch available models (non-blocking — validation will also trigger refresh)
-      // Skip when user explicitly provided models (tier selection) to avoid overwriting their choices
-      if (!setup.models?.length) {
+      // Fetch available models (non-blocking — validation will also trigger refresh).
+      // Skip when models were already populated — either explicitly by the user
+      // (tier selection) or auto-filled from the provider SDK during setup (e.g.
+      // Copilot's Pi SDK catalog). Refreshing immediately would race with the
+      // just-persisted models and could overwrite them with stale API data.
+      const hasModels = !!(setup.models?.length || updates.models?.length)
+      if (!hasModels) {
         getModelRefreshService().refreshNow(setup.slug).catch(err => {
           deps.platform.logger?.warn(`Model refresh after setup failed for ${setup.slug}: ${err instanceof Error ? err.message : err}`)
         })

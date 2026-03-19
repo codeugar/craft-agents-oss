@@ -65,6 +65,18 @@ async function fetchCopilotModels(
   // Models without policy info are kept (API may not always report policy).
   const enabledModels = models.filter(m => !m.policy || m.policy.state === 'enabled');
 
+  // Log full breakdown for debugging stale-token issues where the CLI
+  // returns a subset of the user's actual enabled models.
+  const byState = new Map<string, string[]>();
+  for (const m of models) {
+    const state = m.policy?.state ?? 'no-policy';
+    const list = byState.get(state) ?? [];
+    list.push(m.id);
+    byState.set(state, list);
+  }
+  const breakdown = [...byState.entries()].map(([s, ids]) => `${s}=${ids.length}(${ids.join(',')})`).join('; ');
+  console.warn(`[fetchCopilotModels] total=${models.length} enabled=${enabledModels.length} | ${breakdown}`);
+
   if (enabledModels.length === 0) {
     throw new Error('No enabled models found. Enable models in your GitHub Copilot settings.');
   }
