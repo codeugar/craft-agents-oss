@@ -876,9 +876,17 @@ export class ClaudeAgent extends BaseAgent {
         });
       }
 
+      // Enable 1M context window for models that support it.
+      // Despite Anthropic docs claiming 1M is GA, the API still defaults to 200k
+      // without this beta header. See: anthropics/claude-agent-sdk-typescript#238
+      const betas: Options['betas'] = getModelContextWindow(model) === 1_000_000
+        ? ['context-1m-2025-08-07']
+        : undefined;
+
       const options: Options = {
         ...getDefaultOptions(this.config.envOverrides),
         model,
+        ...(betas && { betas }),
         // Capture stderr from SDK subprocess for error diagnostics
         // This helps identify why sessions fail with "process exited with code 1"
         stderr: (data: string) => {
