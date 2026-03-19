@@ -127,15 +127,22 @@ async function fetchCopilotModels(
   timeoutMs: number,
 ): Promise<ModelDefinition[]> {
 
+  // Minimum model count to accept from a CopilotClient tier.
+  // If a tier returns fewer enabled models than the static catalog
+  // has entries, the result is likely stale/partial — fall through.
+  const staticModels = getPiModelsForAuthProvider('github-copilot');
+  const minModels = Math.min(staticModels.length, 5);
+
   // ── Tier 1: CopilotClient with useLoggedInUser ───────────────────
   try {
     const raw = await listModelsViaCli(copilotCliPath, timeoutMs);
     if (raw && raw.length > 0) {
       logModelBreakdown('tier1-loggedInUser', raw);
       const enabled = filterEnabledModels(raw);
-      if (enabled.length > 0) {
+      if (enabled.length >= minModels) {
         return toModelDefinitions(enabled);
       }
+      console.warn(`[fetchCopilotModels] tier1-loggedInUser: only ${enabled.length} enabled (need >=${minModels}), trying next tier`);
     }
   } catch (err) {
     console.warn(`[fetchCopilotModels] tier1-loggedInUser failed: ${(err as Error).message}`);
@@ -147,17 +154,20 @@ async function fetchCopilotModels(
     if (raw && raw.length > 0) {
       logModelBreakdown('tier2-piToken', raw);
       const enabled = filterEnabledModels(raw);
-      if (enabled.length > 0) {
+      if (enabled.length >= minModels) {
         return toModelDefinitions(enabled);
       }
+      console.warn(`[fetchCopilotModels] tier2-piToken: only ${enabled.length} enabled (need >=${minModels}), trying next tier`);
     }
   } catch (err) {
     console.warn(`[fetchCopilotModels] tier2-piToken failed: ${(err as Error).message}`);
   }
 
   // ── Tier 3: Pi SDK static catalog ────────────────────────────────
+  // Not filtered by user policy but always complete. Models the user
+  // hasn't enabled will fail at runtime — still better than a stale
+  // subset that's missing their actively-used models.
   console.warn('[fetchCopilotModels] tier3-staticCatalog: falling back to Pi SDK model registry');
-  const staticModels = getPiModelsForAuthProvider('github-copilot');
   if (staticModels.length > 0) {
     return staticModels;
   }
