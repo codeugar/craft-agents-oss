@@ -99,9 +99,15 @@ async function listModelsViaHttp(
   }
 }
 
-/** Filter raw models to only those explicitly enabled by policy. */
+/** Model ID prefixes to exclude — legacy models that clutter the selector. */
+const EXCLUDED_MODEL_PREFIXES = ['gpt-4', 'gpt-3.5'];
+
+/** Filter raw models to only those explicitly enabled by policy, excluding legacy models. */
 function filterEnabledModels(models: RawCopilotModel[]): RawCopilotModel[] {
-  return models.filter(m => m.policy?.state === 'enabled');
+  return models.filter(m =>
+    m.policy?.state === 'enabled'
+    && !EXCLUDED_MODEL_PREFIXES.some(prefix => m.id.startsWith(prefix)),
+  );
 }
 
 /** Convert raw Copilot models to our ModelDefinition format. */
