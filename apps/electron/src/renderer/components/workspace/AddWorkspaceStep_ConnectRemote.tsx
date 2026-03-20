@@ -229,8 +229,8 @@ export function AddWorkspaceStep_ConnectRemote({
           )}
         </div>
 
-        {/* Workspace selector — shown when multiple workspaces exist on remote */}
-        {testState === 'ok' && remoteWorkspaces.length > 1 && (
+        {/* Workspace selector — shown when remote server has workspaces */}
+        {testState === 'ok' && remoteWorkspaces.length >= 1 && (
           <div className="space-y-2">
             <label className="block text-sm font-medium text-foreground">
               Remote workspace
