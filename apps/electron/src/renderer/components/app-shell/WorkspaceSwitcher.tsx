@@ -225,11 +225,6 @@ export function WorkspaceSwitcher({
                   const openInNewWindow = e.metaKey || e.ctrlKey
                   onSelect(workspace.id, openInNewWindow)
                 }}
-                onContextMenu={(e) => {
-                  if (workspace.id === activeWorkspaceId) return
-                  e.preventDefault()
-                  handleRemoveWorkspace(workspace)
-                }}
                 className={cn(
                   "justify-between group",
                   activeWorkspaceId === workspace.id && "bg-foreground/10",

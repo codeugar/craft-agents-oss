@@ -140,6 +140,7 @@ interface TopBarProps {
   onSelectWorkspace: (workspaceId: string, openInNewWindow?: boolean) => void
   workspaceUnreadMap?: Record<string, boolean>
   onWorkspaceCreated?: (workspace: Workspace) => void
+  onWorkspaceRemoved?: () => void
   activeSessionId?: string | null
   onNewChat: () => void
   onNewWindow?: () => void
@@ -163,6 +164,7 @@ export function TopBar({
   onSelectWorkspace,
   workspaceUnreadMap,
   onWorkspaceCreated,
+  onWorkspaceRemoved,
   activeSessionId,
   onNewChat,
   onNewWindow,
@@ -392,6 +394,7 @@ export function TopBar({
               activeWorkspaceId={activeWorkspaceId}
               onSelect={onSelectWorkspace}
               onWorkspaceCreated={onWorkspaceCreated}
+              onWorkspaceRemoved={onWorkspaceRemoved}
               workspaceUnreadMap={workspaceUnreadMap}
             />
           </div>
