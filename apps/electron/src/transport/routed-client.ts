@@ -53,6 +53,13 @@ export class RoutedClient implements RpcClient {
   /** Factory for creating remote workspace clients on switch. */
   private clientFactory: WorkspaceClientFactory | null = null
 
+  /**
+   * Workspace ID mapping — translates local workspace IDs to remote ones.
+   * When set, REMOTE_ELIGIBLE invoke() calls replace the local ID in
+   * arguments with the remote ID so the server can resolve the workspace.
+   */
+  private workspaceIdMapping: { localId: string; remoteId: string } | null = null
+
   constructor(
     private readonly localClient: WsRpcClient,
     initialWorkspaceClient: WsRpcClient,
@@ -66,13 +73,38 @@ export class RoutedClient implements RpcClient {
     this.clientFactory = factory
   }
 
+  /**
+   * Set workspace ID mapping for remote workspaces.
+   * When a remote workspace is active, RPC calls pass the local workspace ID
+   * as arguments, but the remote server only knows its own workspace IDs.
+   * This mapping translates local → remote in invoke() arguments.
+   */
+  setWorkspaceMapping(localId: string, remoteId: string): void {
+    this.workspaceIdMapping = { localId, remoteId }
+  }
+
+  /** Clear workspace ID mapping (when switching to a local workspace). */
+  clearWorkspaceMapping(): void {
+    this.workspaceIdMapping = null
+  }
+
   // -------------------------------------------------------------------------
   // RpcClient interface
   // -------------------------------------------------------------------------
 
   async invoke(channel: string, ...args: any[]): Promise<any> {
-    const target = isLocalOnly(channel) ? this.localClient : this.workspaceClient
-    const result = await target.invoke(channel, ...args)
+    const isLocal = isLocalOnly(channel)
+    const target = isLocal ? this.localClient : this.workspaceClient
+
+    // Translate local workspace IDs → remote workspace IDs for remote-routed calls.
+    // RPC handlers receive workspaceId as a method argument (not from connection context).
+    // When routing to a remote server, the renderer's local workspace ID must be replaced
+    // with the server's workspace ID so the handler can resolve the workspace.
+    const translatedArgs = (!isLocal && this.workspaceIdMapping)
+      ? args.map(arg => arg === this.workspaceIdMapping!.localId ? this.workspaceIdMapping!.remoteId : arg)
+      : args
+
+    const result = await target.invoke(channel, ...translatedArgs)
 
     // Intercept SWITCH_WORKSPACE response to swap workspace client
     if (channel === RPC_CHANNELS.window.SWITCH_WORKSPACE) {
@@ -145,12 +177,14 @@ export class RoutedClient implements RpcClient {
     if (!result) return
 
     if (result.remoteServer && this.clientFactory) {
-      // Remote workspace — create + connect new client, then swap
+      // Remote workspace — set up ID mapping and create + connect new client
+      this.setWorkspaceMapping(result.workspaceId, result.remoteServer.remoteWorkspaceId)
       const newClient = this.clientFactory(result.remoteServer)
       newClient.connect()
       this.swapWorkspaceClient(newClient)
     } else if (!result.remoteServer && this.workspaceClient !== this.localClient) {
-      // Switching to local workspace — revert to local client
+      // Switching to local workspace — clear mapping and revert to local client
+      this.clearWorkspaceMapping()
       this.swapWorkspaceClient(this.localClient)
     }
   }

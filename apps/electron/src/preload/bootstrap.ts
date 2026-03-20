@@ -131,6 +131,11 @@ if (isClientOnly) {
 
   const routedClient = new RoutedClient(localClient, initialWorkspaceClient)
 
+  // Set workspace ID mapping if initial workspace is remote
+  if (remoteConfig) {
+    routedClient.setWorkspaceMapping(workspaceId, remoteConfig.remoteWorkspaceId)
+  }
+
   // Factory for creating remote workspace clients on switch
   routedClient.setClientFactory((remoteServer: RemoteServerConfig) => {
     return new WsRpcClient(remoteServer.url, {
