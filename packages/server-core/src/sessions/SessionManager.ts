@@ -6623,6 +6623,8 @@ export class SessionManager implements ISessionManager {
     bundle: SessionBundle,
     mode: DispatchMode,
   ): Promise<{ sessionId: string; warnings?: string[] }> {
+    sessionLog.info(`[import] Starting import: workspaceId=${workspaceId}, mode=${mode}, bundleSessionId=${bundle?.session?.header?.id ?? 'unknown'}, files=${bundle?.files?.length ?? 0}`)
+
     if (!validateBundle(bundle)) {
       throw new Error('Invalid session bundle')
     }
@@ -6631,6 +6633,8 @@ export class SessionManager implements ISessionManager {
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`)
     }
+
+    sessionLog.info(`[import] Target workspace: "${workspace.name}" at ${workspace.rootPath}`)
 
     const warnings: string[] = []
     const workspaceRootPath = workspace.rootPath
@@ -6694,22 +6698,30 @@ export class SessionManager implements ISessionManager {
       const availableSlugs = new Set(availableSources.map(s => s.config.slug))
       const missingSources = storedSession.enabledSourceSlugs.filter(s => !availableSlugs.has(s))
       if (missingSources.length > 0) {
+        sessionLog.warn(`[import] Sources not available: ${missingSources.join(', ')}`)
         warnings.push(`Sources not available in target workspace: ${missingSources.join(', ')}`)
       }
     }
 
     // Check LLM connection compatibility (before writing JSONL so the fix is persisted)
     if (storedSession.llmConnection) {
+      sessionLog.info(`[import] Checking LLM connection: "${storedSession.llmConnection}"`)
       const conn = resolveSessionConnection(storedSession.llmConnection, undefined)
       if (!conn) {
+        sessionLog.warn(`[import] LLM connection "${storedSession.llmConnection}" not found — clearing to use default`)
         warnings.push(`LLM connection "${storedSession.llmConnection}" not found in target — session will use default`)
         storedSession.llmConnection = undefined
         storedSession.connectionLocked = false
+      } else {
+        sessionLog.info(`[import] LLM connection "${storedSession.llmConnection}" resolved OK`)
       }
+    } else {
+      sessionLog.info('[import] No LLM connection in bundle — will use default')
     }
 
     // Write JSONL file (after compatibility checks so remapped values are persisted)
     const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
+    sessionLog.info(`[import] Writing JSONL: ${sessionFile} (llmConnection=${storedSession.llmConnection ?? 'default'}, messages=${storedSession.messages.length})`)
     writeSessionJsonl(sessionFile, storedSession)
 
     // Write all bundle files (attachments, plans, data, downloads, etc.)
@@ -6751,6 +6763,7 @@ export class SessionManager implements ISessionManager {
     // Emit session_created so renderer picks it up
     this.sendEvent({ type: 'session_created', sessionId }, workspaceId)
 
+    sessionLog.info(`[import] Complete: sessionId=${sessionId}, warnings=${warnings.length > 0 ? warnings.join('; ') : 'none'}`)
     return { sessionId, warnings: warnings.length > 0 ? warnings : undefined }
   }
 

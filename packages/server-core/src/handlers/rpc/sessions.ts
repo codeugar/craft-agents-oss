@@ -116,7 +116,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     } catch (error) {
       log.error('GET_SESSIONS continuing after initialization failure:', error)
     }
-    const end = perf.start('ipc.getSessions')
+    const end = perf.start('rpc.getSessions')
     const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
     const sessions = sessionManager.getSessions(workspaceId ?? undefined)
     end()
@@ -139,7 +139,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Get a single session with messages (for lazy loading)
   server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
-    const end = perf.start('ipc.getSessionMessages')
+    const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
     end()
     return session
@@ -147,7 +147,7 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
 
   // Create a new session
   server.handle(RPC_CHANNELS.sessions.CREATE, async (_ctx, workspaceId: string, options?: import('@craft-agent/shared/protocol').CreateSessionOptions) => {
-    const end = perf.start('ipc.createSession', { workspaceId })
+    const end = perf.start('rpc.createSession', { workspaceId })
     const session = await sessionManager.createSession(workspaceId, options)
     end()
     return session
