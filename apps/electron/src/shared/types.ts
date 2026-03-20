@@ -235,6 +235,7 @@ export interface ElectronAPI {
 
   // App lifecycle
   relaunchApp(): Promise<void>
+  removeWorkspace(workspaceId: string): Promise<boolean>
 
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>

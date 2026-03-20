@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useState, useCallback, useRef } from "react"
-import { Check, FolderPlus, ExternalLink, ChevronDown, Cloud, CloudOff } from "lucide-react"
+import { Check, FolderPlus, ExternalLink, ChevronDown, Cloud, CloudOff, Trash2 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { useSetAtom } from "jotai"
 import { toast } from "sonner"
@@ -28,6 +28,7 @@ interface WorkspaceSwitcherProps {
   activeWorkspaceId: string | null
   onSelect: (workspaceId: string, openInNewWindow?: boolean) => void
   onWorkspaceCreated?: (workspace: Workspace) => void
+  onWorkspaceRemoved?: () => void
   /** workspaceId -> has unread */
   workspaceUnreadMap?: Record<string, boolean>
 }
@@ -46,6 +47,7 @@ export function WorkspaceSwitcher({
   activeWorkspaceId,
   onSelect,
   onWorkspaceCreated,
+  onWorkspaceRemoved,
   workspaceUnreadMap,
 }: WorkspaceSwitcherProps) {
   const [showCreationScreen, setShowCreationScreen] = useState(false)
@@ -119,6 +121,18 @@ export function WorkspaceSwitcher({
     onWorkspaceCreated?.(workspace)
     onSelect(workspace.id)
   }
+
+  const handleRemoveWorkspace = useCallback(async (workspace: Workspace) => {
+    if (workspace.id === activeWorkspaceId) {
+      toast.error('Cannot remove the active workspace')
+      return
+    }
+    const removed = await window.electronAPI.removeWorkspace(workspace.id)
+    if (removed) {
+      toast.success(`Removed "${workspace.name}"`)
+      onWorkspaceRemoved?.()
+    }
+  }, [activeWorkspaceId, onWorkspaceRemoved])
 
   const handleCloseCreationScreen = () => {
     setShowCreationScreen(false)
@@ -208,9 +222,13 @@ export function WorkspaceSwitcher({
                 disabled={disconnected}
                 onClick={(e) => {
                   if (disconnected) return
-                  // Cmd/Ctrl+Click opens in new window
                   const openInNewWindow = e.metaKey || e.ctrlKey
                   onSelect(workspace.id, openInNewWindow)
+                }}
+                onContextMenu={(e) => {
+                  if (workspace.id === activeWorkspaceId) return
+                  e.preventDefault()
+                  handleRemoveWorkspace(workspace)
                 }}
                 className={cn(
                   "justify-between group",
@@ -234,7 +252,19 @@ export function WorkspaceSwitcher({
                   {workspaceUnreadMap?.[workspace.id] && <span className="h-2 w-2 rounded-full bg-accent shrink-0" />}
                 </div>
                 <div className="flex items-center gap-1">
-                  {/* Open in new window button - only visible on hover for non-active workspaces */}
+                  {/* Action buttons - only visible on hover for non-active workspaces */}
+                  {activeWorkspaceId !== workspace.id && (
+                    <button
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-destructive/20 hover:text-destructive transition-opacity"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemoveWorkspace(workspace)
+                      }}
+                      title="Remove workspace"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   {activeWorkspaceId !== workspace.id && !disconnected && (
                     <button
                       className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-foreground/10 transition-opacity"

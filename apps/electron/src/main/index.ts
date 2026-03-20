@@ -668,6 +668,13 @@ app.whenReady().then(async () => {
       moduleClientResolver = resolveClientId
 
       // IPC handlers — preload uses sendSync to get WS connection details
+
+      // Remove workspace from config (cleanup stale entries)
+      ipcMain.handle('workspace:remove', async (_event, workspaceId: string) => {
+        const { removeWorkspace: remove } = await import('@craft-agent/shared/config')
+        return remove(workspaceId)
+      })
+
       // App relaunch (for server config changes — NOT an update install)
       ipcMain.handle('app:relaunch', () => {
         app.relaunch()
