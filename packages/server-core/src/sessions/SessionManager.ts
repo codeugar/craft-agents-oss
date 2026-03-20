@@ -6688,19 +6688,7 @@ export class SessionManager implements ISessionManager {
       storedSession.sharedId = undefined
     }
 
-    // Write JSONL file
-    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
-    writeSessionJsonl(sessionFile, storedSession)
-
-    // Write all bundle files (attachments, plans, data, downloads, etc.)
-    for (const file of bundle.files) {
-      const targetPath = join(sessionDir, file.relativePath)
-      const targetDir = dirname(targetPath)
-      await mkdir(targetDir, { recursive: true })
-      await writeFile(targetPath, Buffer.from(file.contentBase64, 'base64'))
-    }
-
-    // Check source compatibility
+    // Check source compatibility (before writing JSONL so fixes are persisted)
     if (storedSession.enabledSourceSlugs?.length) {
       const availableSources = loadWorkspaceSources(workspaceRootPath)
       const availableSlugs = new Set(availableSources.map(s => s.config.slug))
@@ -6710,7 +6698,7 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    // Check LLM connection compatibility
+    // Check LLM connection compatibility (before writing JSONL so the fix is persisted)
     if (storedSession.llmConnection) {
       const conn = resolveSessionConnection(storedSession.llmConnection, undefined)
       if (!conn) {
@@ -6718,6 +6706,18 @@ export class SessionManager implements ISessionManager {
         storedSession.llmConnection = undefined
         storedSession.connectionLocked = false
       }
+    }
+
+    // Write JSONL file (after compatibility checks so remapped values are persisted)
+    const sessionFile = getSessionFilePath(workspaceRootPath, sessionId)
+    writeSessionJsonl(sessionFile, storedSession)
+
+    // Write all bundle files (attachments, plans, data, downloads, etc.)
+    for (const file of bundle.files) {
+      const targetPath = join(sessionDir, file.relativePath)
+      const targetDir = dirname(targetPath)
+      await mkdir(targetDir, { recursive: true })
+      await writeFile(targetPath, Buffer.from(file.contentBase64, 'base64'))
     }
 
     // Register in-memory — pass session metadata without messages to avoid
