@@ -1,9 +1,12 @@
 /**
- * SendToWorkspaceDialog — Transfer sessions between workspaces.
+ * SendToWorkspaceDialog — Transfer sessions to remote workspaces.
  *
- * Shows a workspace picker with connection status indicators.
- * Remote workspaces are disabled (cross-server transfer is a future enhancement).
- * Transfer progress is shown via sonner toasts.
+ * Shows a workspace picker filtered to remote workspaces only (sending
+ * between local workspaces on the same machine is pointless).
+ *
+ * Uses invokeOnServer for cross-server transfer:
+ * 1. Export session from current server (local)
+ * 2. Import to target server via temporary connection
  */
 
 import * as React from 'react'
@@ -49,17 +52,20 @@ export function SendToWorkspaceDialog({
   const [isTransferring, setIsTransferring] = useState(false)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
 
-  // Filter out current workspace
-  const otherWorkspaces = workspaces.filter(w => w.id !== activeWorkspaceId)
+  // Only show remote workspaces (local-to-local is pointless)
+  const remoteWorkspaces = workspaces.filter(w => w.id !== activeWorkspaceId && w.remoteServer)
 
   const handleTransfer = useCallback(async () => {
     if (!selectedWorkspaceId || sessionIds.length === 0) return
 
-    setIsTransferring(true)
     const targetWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
-    const targetName = targetWorkspace?.name ?? 'workspace'
+    if (!targetWorkspace?.remoteServer) return
+
+    setIsTransferring(true)
+    const targetName = targetWorkspace.name
     const count = sessionIds.length
     const label = count === 1 ? 'session' : 'sessions'
+    const { url, token, remoteWorkspaceId } = targetWorkspace.remoteServer
 
     const toastId = toast.loading(`Sending ${count} ${label} to ${targetName}...`)
 
@@ -73,11 +79,15 @@ export function SendToWorkspaceDialog({
           throw new Error(`Failed to export session ${sessionId}`)
         }
 
-        // 2. Import to target workspace (same server)
-        const result = await window.electronAPI.importSession(selectedWorkspaceId, bundle, 'fork')
+        // 2. Import on remote server via cross-server RPC
+        const result = await window.electronAPI.invokeOnServer(
+          url, token,
+          'sessions:import',
+          remoteWorkspaceId, bundle, 'fork'
+        ) as { sessionId: string; warnings?: string[] }
+
         newSessionIds.push(result.sessionId)
 
-        // Show warnings if any
         if (result.warnings?.length) {
           for (const warning of result.warnings) {
             toast.warning(warning)
@@ -123,34 +133,31 @@ export function SendToWorkspaceDialog({
             Send to Workspace
           </DialogTitle>
           <DialogDescription>
-            Copy {count} {label} to another workspace.
+            Send {count} {label} to a remote workspace.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Workspace list */}
+        {/* Workspace list — remote only */}
         <div className="flex flex-col gap-1 max-h-64 overflow-y-auto py-1">
-          {otherWorkspaces.length === 0 ? (
+          {remoteWorkspaces.length === 0 ? (
             <p className="text-sm text-muted-foreground px-2 py-4 text-center">
-              No other workspaces available.
+              No remote workspaces available.
             </p>
           ) : (
-            otherWorkspaces.map(workspace => {
-              const isRemote = !!workspace.remoteServer
+            remoteWorkspaces.map(workspace => {
               const isSelected = selectedWorkspaceId === workspace.id
 
               return (
                 <button
                   key={workspace.id}
                   type="button"
-                  disabled={isRemote || isTransferring}
+                  disabled={isTransferring}
                   onClick={() => setSelectedWorkspaceId(workspace.id)}
                   className={cn(
                     'flex items-center gap-2 w-full px-2 py-2 rounded-md text-left text-sm transition-colors',
                     'hover:bg-foreground/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     isSelected && 'bg-foreground/10 ring-1 ring-foreground/15',
-                    isRemote && 'opacity-50 cursor-not-allowed',
                   )}
-                  title={isRemote ? 'Cross-server transfer coming soon' : undefined}
                 >
                   <CrossfadeAvatar
                     src={workspaceIconMap.get(workspace.id)}
@@ -160,9 +167,7 @@ export function SendToWorkspaceDialog({
                     fallback={workspace.name?.charAt(0) || 'W'}
                   />
                   <span className="flex-1 truncate">{workspace.name}</span>
-                  {isRemote && (
-                    <Cloud className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  )}
+                  <Cloud className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 </button>
               )
             })

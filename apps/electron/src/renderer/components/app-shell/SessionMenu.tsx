@@ -59,7 +59,7 @@ export interface SessionMenuProps {
   /** Callback when labels are toggled (receives full updated labels array) */
   onLabelsChange?: (labels: string[]) => void
   /** Whether multiple workspaces exist (enables "Send to Workspace" item) */
-  hasMultipleWorkspaces?: boolean
+  hasRemoteWorkspaces?: boolean
   /** Callbacks */
   onRename: () => void
   onFlag: () => void
@@ -92,7 +92,7 @@ export function SessionMenu({
   onOpenInNewWindow,
   onSendToWorkspace,
   onDelete,
-  hasMultipleWorkspaces,
+  hasRemoteWorkspaces,
 }: SessionMenuProps) {
   // Derive display state from item
   const sessionId = item.id
@@ -189,7 +189,7 @@ export function SessionMenu({
       )}
 
       {/* Send to Workspace — visible when at least one other workspace exists */}
-      {hasMultipleWorkspaces && onSendToWorkspace && (
+      {hasRemoteWorkspaces && onSendToWorkspace && (
         <MenuItem onClick={onSendToWorkspace}>
           <Send className="h-3.5 w-3.5" />
           <span className="flex-1">Send to Workspace...</span>

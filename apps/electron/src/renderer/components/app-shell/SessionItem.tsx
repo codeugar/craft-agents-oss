@@ -41,7 +41,7 @@ export function SessionItem({
 }: SessionItemProps) {
   const ctx = useSessionListContext()
   const { workspaces } = useAppShellContext()
-  const hasMultipleWorkspaces = (workspaces?.length ?? 0) > 1
+  const hasRemoteWorkspaces = workspaces?.some(w => w.remoteServer) ?? false
   const { hotkey: nextHotkey } = useActionLabel('chat.nextSearchMatch')
   const { hotkey: prevHotkey } = useActionLabel('chat.prevSearchMatch')
   const title = getSessionTitle(item)
@@ -111,7 +111,7 @@ export function SessionItem({
           onSessionStatusChange={(s) => ctx.onSessionStatusChange(item.id, s)}
           onOpenInNewWindow={() => ctx.onOpenInNewWindow(item)}
           onSendToWorkspace={ctx.onSendToWorkspace ? () => ctx.onSendToWorkspace!([item.id]) : undefined}
-          hasMultipleWorkspaces={hasMultipleWorkspaces}
+          hasRemoteWorkspaces={hasRemoteWorkspaces}
           onDelete={() => ctx.onDelete(item.id)}
         />
       }

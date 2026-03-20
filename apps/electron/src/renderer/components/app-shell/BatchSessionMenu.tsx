@@ -49,7 +49,7 @@ export function BatchSessionMenu({ onSendToWorkspace }: BatchSessionMenuProps = 
     labels = [],
   } = useAppShellContext()
 
-  const hasMultipleWorkspaces = (workspaces?.length ?? 0) > 1
+  const hasRemoteWorkspaces = workspaces?.some(w => w.remoteServer) ?? false
 
   // Hydrate selected session metadata
   const selectedMetas = useMemo(() => {
@@ -235,7 +235,7 @@ export function BatchSessionMenu({ onSendToWorkspace }: BatchSessionMenuProps = 
       </MenuItem>
 
       {/* Send to Workspace */}
-      {hasMultipleWorkspaces && (
+      {hasRemoteWorkspaces && (
         <MenuItem onClick={handleSendToWorkspace}>
           <Send className="h-3.5 w-3.5" />
           <span className="flex-1">Send to Workspace...</span>

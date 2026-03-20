@@ -675,6 +675,18 @@ app.whenReady().then(async () => {
         return remove(workspaceId)
       })
 
+      // Cross-server RPC — invoke a channel on an arbitrary remote server
+      ipcMain.handle('server:invokeOnServer', async (_event, url: string, token: string, channel: string, ...args: unknown[]) => {
+        const { connectToRemote } = await import('./handlers/workspace')
+        const { client, error } = await connectToRemote(url, token)
+        if (!client) throw new Error(error ?? 'Connection failed')
+        try {
+          return await client.invoke(channel, ...args)
+        } finally {
+          client.destroy()
+        }
+      })
+
       // App relaunch (for server config changes — NOT an update install)
       ipcMain.handle('app:relaunch', () => {
         app.relaunch()

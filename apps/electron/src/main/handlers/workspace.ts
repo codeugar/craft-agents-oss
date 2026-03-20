@@ -16,7 +16,7 @@ export const GUI_HANDLED_CHANNELS = [
  * Connect to a remote server and wait for handshake.
  * Returns the connected client or null + error message.
  */
-async function connectToRemote(url: string, token: string) {
+export async function connectToRemote(url: string, token: string) {
   const { WsRpcClient } = await import('../../transport/client')
   const client = new WsRpcClient(url, { token, autoReconnect: false, tlsRejectUnauthorized: false })
 
