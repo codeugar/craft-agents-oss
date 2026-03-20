@@ -19,7 +19,7 @@ import { getValidClaudeOAuthToken } from '../auth/state.ts';
 import { resolveAuthEnvVars } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
-import { DEFAULT_MODEL, isClaudeModel, isOpusModel, getDefaultSummarizationModel, getModelContextWindow } from '../config/models.ts';
+import { DEFAULT_MODEL, isClaudeModel, getDefaultSummarizationModel, getModelContextWindow } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { loadPreferences, formatPreferencesForPrompt } from '../config/preferences.ts';
 import type { FileAttachment } from '../utils/files.ts';
@@ -876,12 +876,12 @@ export class ClaudeAgent extends BaseAgent {
         });
       }
 
-      // Enable 1M context window for Opus models.
+      // Enable 1M context window for models that support it.
       // Despite Anthropic docs claiming 1M is GA, the API still defaults to 200k
       // without an explicit opt-in. The betas header only works for API key users;
-      // for OAuth the [1m] model suffix is the way. Only apply to Opus — Sonnet
-      // works without it. See: anthropics/claude-agent-sdk-typescript#238
-      const effectiveModel = getModelContextWindow(model) === 1_000_000 && isOpusModel(model)
+      // for OAuth the [1m] model suffix is the way. Use the suffix unconditionally
+      // since it works for both auth paths. See: anthropics/claude-agent-sdk-typescript#238
+      const effectiveModel = getModelContextWindow(model) === 1_000_000
         ? `${model}[1m]`
         : model;
 
