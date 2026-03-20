@@ -84,14 +84,26 @@ export function ServerDirectoryBrowser({
     }
 
     const init = async () => {
-      // Always fetch server home dir — needed for platform detection in both modes
-      const homeDir = await window.electronAPI.getHomeDir()
-      setServerHomePath(homeDir)
-
       if (mode === 'browse') {
-        // Only use initialPath if it matches the server's platform
-        const useInitial = initialPath && !isWrongPlatformPath(initialPath, homeDir)
-        void navigateTo(useInitial ? initialPath : homeDir)
+        // Navigate to initial path or ~ (server resolves ~ to its own home directory).
+        // This ensures the directory browser starts from the REMOTE server's home,
+        // not the client's local home directory.
+        const startPath = initialPath || '~'
+        try {
+          const result = await window.electronAPI.listServerDirectory(startPath)
+          setListing(result)
+          setPathInput(result.currentPath)
+          setServerHomePath(result.currentPath) // Use resolved path for platform detection
+        } catch {
+          // If initialPath fails (e.g. wrong platform), fall back to ~
+          if (initialPath) {
+            void navigateTo('~')
+          }
+        }
+      } else {
+        // Manual mode — fetch home dir for platform detection
+        const homeDir = await window.electronAPI.getHomeDir()
+        setServerHomePath(homeDir)
       }
     }
     void init()
