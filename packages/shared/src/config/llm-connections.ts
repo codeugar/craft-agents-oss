@@ -428,12 +428,10 @@ export function getModelsForProviderType(providerType: LlmProviderType, piAuthPr
     return _piModelResolver(piAuthProvider);
   }
 
-  // Bedrock uses Anthropic models with Bedrock-native IDs
-  if (providerType === 'bedrock') {
-    return ANTHROPIC_MODELS.map(m => ({ ...m, id: toBedrockNativeId(m.id) }));
-  }
-
-  // Anthropic, Vertex use Claude models
+  // Anthropic, Bedrock, Vertex use Claude models with bare Anthropic IDs.
+  // Note: providerType==='bedrock' goes through ClaudeAgent → Anthropic API,
+  // which requires bare IDs. Pi+amazon-bedrock goes through PiAgent and
+  // gets Bedrock-native IDs via the Pi SDK model resolver.
   return ANTHROPIC_MODELS;
 }
 
@@ -483,11 +481,7 @@ export function getDefaultModelsForConnection(providerType: LlmProviderType, piA
   }
   if (providerType === 'pi_compat') return [];  // Dynamic — user specifies
   if (providerType === 'anthropic_compat') return [];  // Dynamic — user specifies
-  // Bedrock uses Anthropic models with Bedrock-native IDs
-  if (providerType === 'bedrock') {
-    return ANTHROPIC_MODELS.map(m => ({ ...m, id: toBedrockNativeId(m.id) }));
-  }
-  // anthropic, vertex
+  // anthropic, bedrock, vertex
   return ANTHROPIC_MODELS;
 }
 

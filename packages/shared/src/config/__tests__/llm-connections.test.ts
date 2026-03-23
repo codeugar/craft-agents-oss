@@ -27,18 +27,9 @@ describe('getDefaultModelsForConnection', () => {
     expect(typeof (first as any).id).toBe('string')
   })
 
-  it('bedrock returns Bedrock-native model IDs', () => {
-    const models = getDefaultModelsForConnection('bedrock')
-    expect(models.length).toBe(ANTHROPIC_MODELS.length)
-    // All IDs should be Bedrock-native (start with anthropic.)
-    for (const m of models) {
-      const id = typeof m === 'string' ? m : m.id
-      expect(id.startsWith('anthropic.')).toBe(true)
-    }
-    // Display names should still be human-readable
-    const first = models[0]!
-    expect(typeof first).toBe('object')
-    expect((first as any).name).toBe(ANTHROPIC_MODELS[0]!.name)
+  it('bedrock returns bare Anthropic models (same as anthropic)', () => {
+    // providerType==='bedrock' is not the Pi SDK Bedrock path — it keeps bare IDs
+    expect(getDefaultModelsForConnection('bedrock')).toEqual(ANTHROPIC_MODELS)
   })
 
   it('vertex returns same models as anthropic', () => {

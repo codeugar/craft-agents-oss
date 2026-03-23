@@ -40,7 +40,7 @@ import type { Workspace, AuthType } from '@craft-agent/core/types';
 
 // Import LLM connection types and constants
 import type { LlmConnection } from './llm-connections.ts';
-import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider, normalizeBedrockModelId, toBedrockNativeId } from './llm-connections.ts';
+import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider, normalizeBedrockModelId, toBedrockNativeId, fromBedrockNativeId } from './llm-connections.ts';
 import {
   getModelProvider,
 } from './models.ts';
@@ -1697,9 +1697,11 @@ function migrateWorkspaceOpus45ToOpus46(config: StoredConfig): void {
 }
 
 /**
- * Normalize Bedrock model IDs from bare Anthropic format to Bedrock-native format.
- * Handles both providerType==='bedrock' and Pi+Bedrock (piAuthProvider==='amazon-bedrock').
- * Applied after opus/sonnet migrations so newly-migrated IDs also get normalized.
+ * Normalize Bedrock model IDs for Pi+Bedrock connections AND reverse-fix
+ * any providerType==='bedrock' connections that were incorrectly normalized.
+ *
+ * - piAuthProvider==='amazon-bedrock': bare → Bedrock-native (PiAgent → Pi SDK → Bedrock)
+ * - providerType==='bedrock': Bedrock-native → bare (reverse incorrect migration)
  */
 function migrateBedrockModelIds(config: StoredConfig): boolean {
   if (!config.llmConnections) return false;
@@ -1707,37 +1709,48 @@ function migrateBedrockModelIds(config: StoredConfig): boolean {
   let changed = false;
 
   for (const connection of config.llmConnections) {
-    const isBedrock = connection.providerType === 'bedrock' || connection.piAuthProvider === 'amazon-bedrock';
-    if (!isBedrock) continue;
-
-    // For Pi+Bedrock connections, IDs are stored as pi/{bedrockNativeId}.
-    // We need to normalize the inner part after stripping pi/.
-    const isPi = connection.providerType === 'pi';
-
-    if (connection.defaultModel) {
-      const normalized = isPi
-        ? normalizePiBedrockId(connection.defaultModel)
-        : toBedrockNativeId(connection.defaultModel);
-      if (normalized !== connection.defaultModel) {
-        connection.defaultModel = normalized;
-        changed = true;
+    // Forward: Pi+Bedrock connections need Bedrock-native IDs for Pi SDK resolution
+    if (connection.piAuthProvider === 'amazon-bedrock') {
+      if (connection.defaultModel) {
+        const normalized = normalizePiBedrockId(connection.defaultModel);
+        if (normalized !== connection.defaultModel) {
+          connection.defaultModel = normalized;
+          changed = true;
+        }
       }
+      if (connection.models && Array.isArray(connection.models)) {
+        for (let i = 0; i < connection.models.length; i++) {
+          const model = connection.models[i];
+          if (typeof model === 'string') {
+            const normalized = normalizePiBedrockId(model);
+            if (normalized !== model) { connection.models[i] = normalized; changed = true; }
+          } else if (model && typeof model === 'object') {
+            const normalized = normalizePiBedrockId(model.id);
+            if (normalized !== model.id) { model.id = normalized; changed = true; }
+          }
+        }
+      }
+      continue;
     }
 
-    if (connection.models && Array.isArray(connection.models)) {
-      for (let i = 0; i < connection.models.length; i++) {
-        const model = connection.models[i];
-        if (typeof model === 'string') {
-          const normalized = isPi ? normalizePiBedrockId(model) : toBedrockNativeId(model);
-          if (normalized !== model) {
-            connection.models[i] = normalized;
-            changed = true;
-          }
-        } else if (model && typeof model === 'object') {
-          const normalized = isPi ? normalizePiBedrockId(model.id) : toBedrockNativeId(model.id);
-          if (normalized !== model.id) {
-            model.id = normalized;
-            changed = true;
+    // Reverse: providerType==='bedrock' was incorrectly normalized — revert to bare IDs
+    if (connection.providerType === 'bedrock') {
+      if (connection.defaultModel) {
+        const bare = fromBedrockNativeId(connection.defaultModel);
+        if (bare !== connection.defaultModel) {
+          connection.defaultModel = bare;
+          changed = true;
+        }
+      }
+      if (connection.models && Array.isArray(connection.models)) {
+        for (let i = 0; i < connection.models.length; i++) {
+          const model = connection.models[i];
+          if (typeof model === 'string') {
+            const bare = fromBedrockNativeId(model);
+            if (bare !== model) { connection.models[i] = bare; changed = true; }
+          } else if (model && typeof model === 'object') {
+            const bare = fromBedrockNativeId(model.id);
+            if (bare !== model.id) { model.id = bare; changed = true; }
           }
         }
       }

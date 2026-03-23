@@ -1,5 +1,5 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, normalizeBedrockModelId, toBedrockNativeId } from '@craft-agent/shared/config'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -160,13 +160,16 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
           updates.defaultModel = toPiModelId(updates.defaultModel)
         }
       } else if (effectiveProviderType === 'bedrock') {
+        // providerType==='bedrock' goes through ClaudeAgent → Anthropic API,
+        // which uses bare Anthropic IDs. Only strip the pi/ prefix.
+        const stripPiPrefix = (id: string) => id.startsWith('pi/') ? id.slice(3) : id
         if (updates.models) {
           updates.models = updates.models.map(m => typeof m === 'string'
-            ? normalizeBedrockModelId(m)
-            : { ...m, id: normalizeBedrockModelId(m.id) })
+            ? stripPiPrefix(m)
+            : { ...m, id: stripPiPrefix(m.id) })
         }
         if (updates.defaultModel) {
-          updates.defaultModel = normalizeBedrockModelId(updates.defaultModel)
+          updates.defaultModel = stripPiPrefix(updates.defaultModel)
         }
       }
 
