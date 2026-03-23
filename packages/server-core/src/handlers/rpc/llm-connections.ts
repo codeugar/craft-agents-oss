@@ -136,10 +136,15 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         }
       }
 
-      // Bedrock auth method override — set providerType and authType
+      // Bedrock auth method override — set authType and region.
+      // providerType stays 'pi' when piAuthProvider==='amazon-bedrock' (Pi SDK Bedrock path).
+      // Only set providerType='bedrock' when there's no Pi auth provider.
       if (setup.bedrockAuthMethod) {
         updates.authType = setup.bedrockAuthMethod
-        updates.providerType = 'bedrock'
+        const hasPiBedrockAuth = (updates.piAuthProvider ?? connection.piAuthProvider) === 'amazon-bedrock'
+        if (!hasPiBedrockAuth) {
+          updates.providerType = 'bedrock'
+        }
         if (setup.awsRegion) updates.awsRegion = setup.awsRegion
       }
 

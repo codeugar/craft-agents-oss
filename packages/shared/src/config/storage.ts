@@ -1697,11 +1697,17 @@ function migrateWorkspaceOpus45ToOpus46(config: StoredConfig): void {
 }
 
 /**
- * Normalize Bedrock model IDs for Pi+Bedrock connections AND reverse-fix
- * any providerType==='bedrock' connections that were incorrectly normalized.
+ * Fix Bedrock connections and normalize model IDs.
  *
- * - piAuthProvider==='amazon-bedrock': bare → Bedrock-native (PiAgent → Pi SDK → Bedrock)
- * - providerType==='bedrock': Bedrock-native → bare (reverse incorrect migration)
+ * 1. Connections with providerType==='bedrock' + piAuthProvider==='amazon-bedrock'
+ *    are misconfigured: providerType should be 'pi' so PiAgent routes to Bedrock.
+ *    Fix the providerType and normalize model IDs to Bedrock-native (pi-prefixed).
+ *
+ * 2. Pure piAuthProvider==='amazon-bedrock' connections (already providerType==='pi')
+ *    get model IDs normalized to Bedrock-native for Pi SDK resolution.
+ *
+ * 3. Pure providerType==='bedrock' without piAuthProvider==='amazon-bedrock'
+ *    get Bedrock-native IDs reverted to bare (reverse previous incorrect migration).
  */
 function migrateBedrockModelIds(config: StoredConfig): boolean {
   if (!config.llmConnections) return false;
@@ -1709,8 +1715,14 @@ function migrateBedrockModelIds(config: StoredConfig): boolean {
   let changed = false;
 
   for (const connection of config.llmConnections) {
-    // Forward: Pi+Bedrock connections need Bedrock-native IDs for Pi SDK resolution
-    if (connection.piAuthProvider === 'amazon-bedrock') {
+    // Fix misconfigured connections: bedrock providerType should be 'pi' when piAuthProvider is set
+    if (connection.providerType === 'bedrock' && connection.piAuthProvider === 'amazon-bedrock') {
+      connection.providerType = 'pi';
+      changed = true;
+    }
+
+    // Forward: Pi+Bedrock connections need Bedrock-native IDs (pi-prefixed) for Pi SDK resolution
+    if (connection.providerType === 'pi' && connection.piAuthProvider === 'amazon-bedrock') {
       if (connection.defaultModel) {
         const normalized = normalizePiBedrockId(connection.defaultModel);
         if (normalized !== connection.defaultModel) {
@@ -1733,7 +1745,8 @@ function migrateBedrockModelIds(config: StoredConfig): boolean {
       continue;
     }
 
-    // Reverse: providerType==='bedrock' was incorrectly normalized — revert to bare IDs
+    // Reverse: providerType==='bedrock' without piAuthProvider was incorrectly
+    // normalized in a previous migration — revert to bare Anthropic IDs
     if (connection.providerType === 'bedrock') {
       if (connection.defaultModel) {
         const bare = fromBedrockNativeId(connection.defaultModel);
