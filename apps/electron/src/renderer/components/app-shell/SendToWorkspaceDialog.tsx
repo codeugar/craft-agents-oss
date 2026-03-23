@@ -6,8 +6,8 @@
  * Disconnected remote workspaces are shown as disabled with a CloudOff icon.
  *
  * Uses invokeOnServer for cross-server transfer:
- * 1. Export session from current server (local)
- * 2. Import to target server via temporary connection
+ * 1. Generate a mini-summary handoff payload from the current server
+ * 2. Import that summarized payload on the target server via temporary connection
  */
 
 import * as React from 'react'
@@ -115,26 +115,17 @@ export function SendToWorkspaceDialog({
       const newSessionIds: string[] = []
 
       for (const sessionId of sessionIds) {
-        // 1. Export from current server
-        const bundle = await window.electronAPI.exportSession(sessionId)
-        if (!bundle) {
-          throw new Error(`Failed to export session ${sessionId}`)
-        }
+        // 1. Export a summarized handoff payload from the current server
+        const payload = await window.electronAPI.exportRemoteSessionTransfer(sessionId)
 
         // 2. Import on remote server via cross-server RPC
         const result = await window.electronAPI.invokeOnServer(
           url, token,
-          'sessions:import',
-          remoteWorkspaceId, bundle, 'fork'
-        ) as { sessionId: string; warnings?: string[] }
+          'sessions:importRemoteTransfer',
+          remoteWorkspaceId, payload,
+        ) as { sessionId: string }
 
         newSessionIds.push(result.sessionId)
-
-        if (result.warnings?.length) {
-          for (const warning of result.warnings) {
-            toast.warning(warning)
-          }
-        }
       }
 
       toast.success(`Sent ${count} ${label} to ${targetName}`, {

@@ -102,6 +102,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.UNWATCH_FILES,
   RPC_CHANNELS.sessions.EXPORT,
   RPC_CHANNELS.sessions.IMPORT,
+  RPC_CHANNELS.sessions.EXPORT_REMOTE_TRANSFER,
+  RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER,
 ] as const
 
 export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -478,5 +480,23 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     if (mode !== 'move' && mode !== 'fork') throw new Error(`Invalid dispatch mode: ${mode}`)
 
     return sessionManager.importSession(targetWorkspaceId, bundle as import('@craft-agent/shared/sessions').SessionBundle, mode)
+  })
+
+  // Export a session as a summarized remote-transfer payload.
+  server.handle(RPC_CHANNELS.sessions.EXPORT_REMOTE_TRANSFER, async (ctx, sessionId: string) => {
+    await sessionManager.waitForInit()
+    const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
+    if (!workspaceId) throw new Error('No workspace context')
+
+    const payload = await sessionManager.exportRemoteSessionTransfer(sessionId, workspaceId)
+    if (!payload) throw new Error(`Failed to export remote transfer for session ${sessionId}`)
+    return payload
+  })
+
+  // Import a summarized remote-transfer payload into a target workspace.
+  server.handle(RPC_CHANNELS.sessions.IMPORT_REMOTE_TRANSFER, async (_ctx, targetWorkspaceId: string, payload: import('@craft-agent/shared/protocol').RemoteSessionTransferPayload) => {
+    await sessionManager.waitForInit()
+    if (!targetWorkspaceId || typeof targetWorkspaceId !== 'string') throw new Error('targetWorkspaceId is required')
+    return sessionManager.importRemoteSessionTransfer(targetWorkspaceId, payload)
   })
 }

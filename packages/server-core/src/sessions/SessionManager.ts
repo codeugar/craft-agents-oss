@@ -6,7 +6,7 @@ import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir, realpath } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -77,11 +77,12 @@ import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/intercep
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, type LoadedSkill } from '@craft-agent/shared/skills'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
+import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
 import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
@@ -882,6 +883,10 @@ interface ManagedSession {
   branchFromSdkTurnId?: string
   // One-shot flag for seeded branch mode - set true after first turn seed injection.
   branchSeedApplied?: boolean
+  // One-shot hidden summary injected on the first turn after a remote transfer.
+  transferredSessionSummary?: string
+  // Whether the transferred-session summary has already been injected.
+  transferredSessionSummaryApplied?: boolean
   // Token refresh manager for OAuth token refresh with rate limiting
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by automations
@@ -2683,6 +2688,20 @@ export class SessionManager implements ISessionManager {
         })
       }
 
+      const getTransferredSessionSummary = () => {
+        if (managed.transferredSessionSummaryApplied) return null
+        return managed.transferredSessionSummary ?? null
+      }
+
+      const markTransferredSessionSummaryApplied = () => {
+        if (managed.transferredSessionSummaryApplied || !managed.transferredSessionSummary) return
+        managed.transferredSessionSummaryApplied = true
+        this.persistSession(managed)
+        sessionLog.info('Transferred session summary applied', {
+          sessionId: managed.id,
+        })
+      }
+
       // ============================================================
       // Construct backend via factory
       // ============================================================
@@ -2701,6 +2720,8 @@ export class SessionManager implements ISessionManager {
         getBranchFallbackMessages,
         getBranchSeedMessages,
         markBranchSeedApplied,
+        getTransferredSessionSummary,
+        markTransferredSessionSummaryApplied,
         mcpPool: managed.mcpPool,
         poolServerUrl,
         envOverrides,
@@ -6579,6 +6600,132 @@ export class SessionManager implements ISessionManager {
   // Export / Import / Dispatch
   // ============================================
 
+  private async generateRemoteTransferSummary(managed: ManagedSession): Promise<string | null> {
+    await this.ensureMessagesLoaded(managed)
+
+    const messages = managed.messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .filter(m => !m.isIntermediate)
+      .map(m => ({
+        type: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+
+    if (messages.length === 0) return null
+
+    const workspaceRootPath = managed.workspace.rootPath
+    const wsConfig = loadWorkspaceConfig(workspaceRootPath)
+    const defaultModel = wsConfig?.defaults?.model
+    const backendContext = resolveBackendContext({
+      sessionConnectionSlug: managed.llmConnection,
+      workspaceDefaultConnectionSlug: wsConfig?.defaults?.defaultLlmConnection,
+      managedModel: managed.model || defaultModel,
+    })
+
+    const miniModel = backendContext.connection
+      ? (getMiniModel(backendContext.connection) ?? backendContext.connection.defaultModel ?? getDefaultSummarizationModel())
+      : getDefaultSummarizationModel()
+
+    const envOverrides: Record<string, string> = {
+      CRAFT_WORKSPACE_PATH: workspaceRootPath,
+      ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
+    }
+
+    const agent = createBackendFromResolvedContext({
+      context: backendContext,
+      hostRuntime: buildBackendHostRuntimeContext(),
+      coreConfig: {
+        workspace: managed.workspace,
+        session: {
+          id: `${managed.id}-remote-transfer-summary`,
+          workspaceRootPath,
+          createdAt: Date.now(),
+          lastUsedAt: Date.now(),
+          workingDirectory: managed.workingDirectory,
+          sdkCwd: managed.sdkCwd,
+          model: managed.model,
+          llmConnection: managed.llmConnection,
+          permissionMode: managed.permissionMode,
+          previousPermissionMode: managed.previousPermissionMode,
+        },
+        miniModel,
+        envOverrides,
+        isHeadless: true,
+      },
+      providerOptions: { piAuthProvider: backendContext.connection?.piAuthProvider },
+    })
+
+    try {
+      return await generateConversationSummary(messages, agent.runMiniCompletion.bind(agent))
+    } finally {
+      agent.destroy()
+    }
+  }
+
+  async exportRemoteSessionTransfer(sessionId: string, workspaceId: string): Promise<RemoteSessionTransferPayload | null> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`[dispatch] Cannot export remote transfer: ${sessionId} not found`)
+      return null
+    }
+
+    if (managed.workspace.id !== workspaceId) {
+      sessionLog.warn(`[dispatch] Session ${sessionId} does not belong to workspace ${workspaceId}`)
+      return null
+    }
+
+    if (managed.isProcessing) {
+      sessionLog.warn(`[dispatch] Cannot export remote transfer ${sessionId}: still processing`)
+      return null
+    }
+
+    this.persistSession(managed)
+    await sessionPersistenceQueue.flush(sessionId)
+
+    const summary = await this.generateRemoteTransferSummary(managed)
+    if (!summary) {
+      sessionLog.warn(`[dispatch] Failed to generate remote transfer summary for ${sessionId}`)
+      return null
+    }
+
+    return {
+      sourceSessionId: managed.id,
+      name: managed.name,
+      sessionStatus: managed.sessionStatus,
+      labels: managed.labels,
+      permissionMode: managed.permissionMode,
+      summary,
+    }
+  }
+
+  async importRemoteSessionTransfer(
+    workspaceId: string,
+    payload: RemoteSessionTransferPayload,
+  ): Promise<ImportRemoteSessionTransferResult> {
+    if (!payload || typeof payload !== 'object' || typeof payload.summary !== 'string' || !payload.summary.trim()) {
+      throw new Error('Invalid remote session transfer payload')
+    }
+
+    const session = await this.createSession(workspaceId, {
+      name: payload.name,
+      permissionMode: payload.permissionMode,
+      sessionStatus: payload.sessionStatus,
+      labels: payload.labels,
+    })
+
+    const managed = this.sessions.get(session.id)
+    if (!managed) {
+      throw new Error(`Transferred session ${session.id} was not created`)
+    }
+
+    managed.transferredSessionSummary = payload.summary.trim()
+    managed.transferredSessionSummaryApplied = false
+    this.persistSession(managed)
+    await sessionPersistenceQueue.flush(session.id)
+
+    return { sessionId: session.id }
+  }
+
   /**
    * Export a session as a portable SessionBundle.
    *
@@ -6689,6 +6836,8 @@ export class SessionManager implements ISessionManager {
       connectionLocked: header.connectionLocked,
       thinkingLevel: header.thinkingLevel,
       hidden: header.hidden,
+      transferredSessionSummary: header.transferredSessionSummary,
+      transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
       messages: bundle.session.messages,
       tokenUsage: header.tokenUsage ?? DEFAULT_TOKEN_USAGE,
     }

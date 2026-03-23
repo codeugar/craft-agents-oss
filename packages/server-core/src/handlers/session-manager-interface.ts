@@ -141,6 +141,15 @@ export interface ISessionManager {
   exportSession(sessionId: string, workspaceId: string): Promise<SessionBundle | null>
 
   /**
+   * Export a session as a summary-based payload for cross-server transfer.
+   * Generates a mini-model summary instead of shipping the full transcript.
+   */
+  exportRemoteSessionTransfer(
+    sessionId: string,
+    workspaceId: string,
+  ): Promise<import('@craft-agent/shared/protocol').RemoteSessionTransferPayload | null>
+
+  /**
    * Import a session bundle into a target workspace.
    * Creates session directory, writes JSONL + files, registers in memory.
    * Returns the new session ID and any compatibility warnings.
@@ -150,6 +159,14 @@ export interface ISessionManager {
     bundle: SessionBundle,
     mode: DispatchMode,
   ): Promise<{ sessionId: string; warnings?: string[] }>
+
+  /**
+   * Import a summary-based remote transfer payload into a target workspace.
+   */
+  importRemoteSessionTransfer(
+    workspaceId: string,
+    payload: import('@craft-agent/shared/protocol').RemoteSessionTransferPayload,
+  ): Promise<import('@craft-agent/shared/protocol').ImportRemoteSessionTransferResult>
 
   // ---------------------------------------------------------------------------
   // Utilities

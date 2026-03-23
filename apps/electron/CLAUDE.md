@@ -6,6 +6,8 @@ Primary desktop interface for Craft Agents:
 - Session/source/workspace management
 - Main-process integration with `@craft-agent/shared`
 
+Remote **Send to Workspace** handoffs use a summarized transfer payload, not a raw full-session bundle.
+
 ## Commands (run from repo root)
 ```bash
 # From project root - ALWAYS use @latest for Tailwind CSS v4 compatibility

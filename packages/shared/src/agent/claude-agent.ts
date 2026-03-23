@@ -67,6 +67,7 @@ import {
   BUILT_IN_TOOLS,
 } from './core/pre-tool-use.ts';
 import { type ThinkingLevel, THINKING_TO_EFFORT, getThinkingTokens, DEFAULT_THINKING_LEVEL } from './thinking-levels.ts';
+import { generateConversationSummary } from './conversation-summary.ts';
 import type { LoadedSource } from '../sources/types.ts';
 import { sourceNeedsAuthentication } from '../sources/credential-manager.ts';
 import type {
@@ -2589,20 +2590,8 @@ This is a branched conversation. All prior messages in this conversation are par
     const messages = this.config.getBranchFallbackMessages?.();
     if (!messages || messages.length === 0) return null;
 
-    // Format transcript, truncating individual messages to stay within mini limits
-    const transcript = messages
-      .map(m => `${m.type === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 500)}`)
-      .join('\n\n');
-
-    // Cap total transcript to ~12K chars for mini input
-    const bounded = transcript.slice(0, 12_000);
-
     try {
-      const summary = await this.runMiniCompletion(
-        `Summarize this conversation concisely. Preserve: key decisions, ongoing tasks, ` +
-        `technical context, and the user's current goal. Be specific, not generic.\n\n${bounded}`
-      );
-      return summary;
+      return await generateConversationSummary(messages, this.runMiniCompletion.bind(this));
     } catch (error) {
       debug(`[ClaudeAgent] Branch fallback mini summary failed: ${error}`);
       return null;

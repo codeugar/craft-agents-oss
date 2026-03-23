@@ -45,6 +45,8 @@ export const RPC_CHANNELS = {
     SEARCH_CONTENT: 'sessions:searchContent',
     EXPORT: 'sessions:export',
     IMPORT: 'sessions:import',
+    EXPORT_REMOTE_TRANSFER: 'sessions:exportRemoteTransfer',
+    IMPORT_REMOTE_TRANSFER: 'sessions:importRemoteTransfer',
   },
   tasks: {
     GET_OUTPUT: 'tasks:getOutput',

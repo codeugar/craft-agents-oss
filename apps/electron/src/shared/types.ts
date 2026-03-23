@@ -205,6 +205,8 @@ import type {
   TestAutomationResult,
   WindowCloseRequest,
   DirectoryListingResult,
+  RemoteSessionTransferPayload,
+  ImportRemoteSessionTransferResult,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -241,6 +243,8 @@ export interface ElectronAPI {
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>
   importSession(targetWorkspaceId: string, bundle: unknown, mode: 'move' | 'fork'): Promise<{ sessionId: string; warnings?: string[] }>
+  exportRemoteSessionTransfer(sessionId: string): Promise<RemoteSessionTransferPayload>
+  importRemoteSessionTransfer(targetWorkspaceId: string, payload: RemoteSessionTransferPayload): Promise<ImportRemoteSessionTransferResult>
 
   // Pending plan execution (for reload recovery)
   getPendingPlanExecution(sessionId: string): Promise<{ planPath: string; draftInputSnapshot?: string; awaitingCompaction: boolean } | null>
