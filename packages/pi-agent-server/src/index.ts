@@ -1195,6 +1195,27 @@ function isContextOverflowErrorMessage(message: string): boolean {
   );
 }
 
+/**
+ * Wait for any in-flight compaction to finish before sending a prompt.
+ * Prevents a race in the Pi SDK where concurrent _runAutoCompaction calls
+ * crash on a shared AbortController (see craft-agents-oss#464).
+ */
+async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs = 60_000): Promise<void> {
+  if (!session.isCompacting) return;
+  debugLog('Waiting for in-flight compaction to finish before prompt...');
+  const start = Date.now();
+  while (session.isCompacting) {
+    if (Date.now() - start > timeoutMs) {
+      debugLog('Compaction wait timed out after 60s, proceeding anyway');
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  if (Date.now() - start < timeoutMs) {
+    debugLog('Compaction finished, proceeding with prompt');
+  }
+}
+
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   currentUserMessage = msg.message;
 
@@ -1225,6 +1246,9 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
     unsubscribeEvents = session.subscribe(handleSessionEvent);
 
+    // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
+    await waitForCompaction(session);
+
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
     await session.prompt(msg.message, {
@@ -1241,6 +1265,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
       try {
         const session = await ensureSession();
         await session.compact();
+        await waitForCompaction(session);
         await session.prompt(msg.message, {
           images: msg.images && msg.images.length > 0 ? msg.images : undefined,
           streamingBehavior: 'followUp',
