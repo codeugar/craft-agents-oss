@@ -167,13 +167,13 @@ export function PanelHeader({
     </>
   )
 
-  // Base padding (16px = pl-4, removed when leading action present — panel edge inset provides spacing)
-  const basePadding = leadingAction ? 0 : 16
+  // Base padding (16px = pl-4, matches pr-2 when leading action present for symmetry)
+  const basePadding = leadingAction ? 8 : 16
 
   const baseClassName = cn(
     'flex shrink-0 items-center pr-2 min-w-0 gap-1.5 relative z-panel h-[42px]',
     // Only use static paddingLeft class when not animating
-    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-0' : 'pl-4')),
+    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-2' : 'pl-4')),
     className
   )
 

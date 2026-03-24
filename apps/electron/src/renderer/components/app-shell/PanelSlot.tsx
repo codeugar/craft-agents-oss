@@ -74,18 +74,15 @@ export function PanelSlot({
   }, [handleClose])
 
   // Build back button for compact mode — closes the panel to reveal the session list.
-  // Uses a flat chevron (no shadow/border) for a native mobile feel.
+  // Same PanelHeaderCenterButton style as X and share, just on the left side.
   const backButton = useMemo(() => {
     if (!isCompact) return undefined
     return (
-      <button
-        type="button"
+      <PanelHeaderCenterButton
+        icon={<ChevronLeft className="h-4 w-4" />}
         onClick={handleClose}
-        className="panel-header-btn inline-flex items-center justify-center p-1.5 shrink-0 rounded-[6px] titlebar-no-drag text-foreground/60 hover:text-foreground hover:bg-foreground/5 transition-colors"
-        aria-label="Back to list"
-      >
-        <ChevronLeft className="h-5 w-5" />
-      </button>
+        tooltip="Back to list"
+      />
     )
   }, [isCompact, handleClose])
 
