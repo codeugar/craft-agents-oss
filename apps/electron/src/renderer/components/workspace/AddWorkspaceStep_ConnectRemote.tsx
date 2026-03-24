@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { ArrowLeft, CheckCircle, XCircle, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { slugify } from "@/lib/slugify"
 import { Input } from "../ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSeparator } from "../ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { AddWorkspaceContainer, AddWorkspaceStepHeader, AddWorkspacePrimaryButton, AddWorkspaceSecondaryButton } from "./primitives"
 
 const CREATE_NEW_VALUE = '__create_new__'
@@ -61,6 +61,7 @@ export function AddWorkspaceStep_ConnectRemote({
   const [selectedValue, setSelectedValue] = useState<string | null>(null) // workspace ID or CREATE_NEW_VALUE
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [serverVersion, setServerVersion] = useState<string | null>(null)
+  const selectPortalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     window.electronAPI.getHomeDir().then(setHomeDir)
@@ -242,6 +243,9 @@ export function AddWorkspaceStep_ConnectRemote({
           </div>
         )}
 
+        {/* Portal container for Select — must be inside the Dialog to receive pointer events */}
+        <div ref={selectPortalRef} />
+
         {/* Workspace selector — pick existing or create new */}
         {testState === 'ok' && remoteWorkspaces.length > 0 && !isCreateNew && (
           <div className="space-y-2">
@@ -257,7 +261,7 @@ export function AddWorkspaceStep_ConnectRemote({
                 <SelectTrigger className="border-0 bg-transparent shadow-none">
                   <SelectValue placeholder="Select a workspace..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent container={selectPortalRef.current}>
                   {remoteWorkspaces.map(ws => (
                     <SelectItem key={ws.id} value={ws.id}>
                       {ws.name}

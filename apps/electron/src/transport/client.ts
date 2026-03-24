@@ -119,6 +119,7 @@ export class WsRpcClient implements RpcClient {
   private manualReconnectRequested = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private connectTimer: ReturnType<typeof setTimeout> | null = null
+  private backoffResetTimer: ReturnType<typeof setTimeout> | null = null
   private destroyed = false
   /** Set when server sends shuttingDown — prevents reconnection attempts. */
   private permanentlyClosed = false
@@ -456,6 +457,10 @@ export class WsRpcClient implements RpcClient {
       clearInterval(this.ackTimer)
       this.ackTimer = null
     }
+    if (this.backoffResetTimer) {
+      clearTimeout(this.backoffResetTimer)
+      this.backoffResetTimer = null
+    }
 
     this.manualReconnectRequested = false
     this.currentHandshakeWasReconnect = false
@@ -514,8 +519,11 @@ export class WsRpcClient implements RpcClient {
           ? new Set(envelope.registeredChannels)
           : null
         this.connected = true
-        this.reconnectAttempt = 0
         this.connectError = null
+        // Delay backoff reset — only reset after 10s of stable connection.
+        // Immediate reset causes rapid reconnect loops when the server
+        // accepts the handshake but drops the connection right after.
+        this.scheduleBackoffReset()
 
         if (!serverRecognizedReconnect) {
           this.lastSeenSeq = 0
@@ -704,6 +712,12 @@ export class WsRpcClient implements RpcClient {
       this.connectTimer = null
     }
 
+    // Cancel backoff reset — counter carries over across short-lived connections
+    if (this.backoffResetTimer) {
+      clearTimeout(this.backoffResetTimer)
+      this.backoffResetTimer = null
+    }
+
     const closeInfo: TransportCloseInfo | undefined = closeEvent
       ? {
           code: Number.isFinite(closeEvent.code) ? closeEvent.code : undefined,
@@ -778,6 +792,14 @@ export class WsRpcClient implements RpcClient {
       this.reconnectTimer = null
       this.connect()
     }, delay)
+  }
+
+  private scheduleBackoffReset(): void {
+    if (this.backoffResetTimer) clearTimeout(this.backoffResetTimer)
+    this.backoffResetTimer = setTimeout(() => {
+      this.backoffResetTimer = null
+      this.reconnectAttempt = 0
+    }, 10_000)
   }
 
   /** Best-effort send that skips closing/closed sockets and swallows send races. */
