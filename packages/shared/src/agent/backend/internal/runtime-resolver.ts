@@ -62,8 +62,10 @@ function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): stri
   const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary);
   if (existsSync(bunPath)) return bunPath;
 
-  // Dev runtime: fall back to system bun
-  if (IS_DEV_RUNTIME) {
+  // Non-packaged (headless server, dev mode): fall back to system bun via PATH.
+  // Packaged apps must ship their own bundled bun — never resolve from PATH
+  // to avoid picking up an incompatible system install.
+  if (!hostRuntime.isPackaged) {
     try {
       const whichCmd = process.platform === 'win32' ? 'where' : 'which';
       const systemBun = execFileSync(whichCmd, ['bun'], { encoding: 'utf-8' }).trim();
