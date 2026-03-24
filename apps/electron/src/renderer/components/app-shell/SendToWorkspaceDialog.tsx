@@ -115,14 +115,15 @@ export function SendToWorkspaceDialog({
       const newSessionIds: string[] = []
 
       for (const sessionId of sessionIds) {
-        // 1. Export a summarized handoff payload from the current server
-        const payload = await window.electronAPI.exportRemoteSessionTransfer(sessionId)
+        // 1. Export full session bundle (messages + metadata)
+        const bundle = await window.electronAPI.exportSession(sessionId)
+        if (!bundle) throw new Error(`Failed to export session ${sessionId}`)
 
-        // 2. Import on remote server via cross-server RPC
+        // 2. Import full bundle on remote server via cross-server RPC (fork mode)
         const result = await window.electronAPI.invokeOnServer(
           url, token,
-          'sessions:importRemoteTransfer',
-          remoteWorkspaceId, payload,
+          'sessions:import',
+          remoteWorkspaceId, bundle, 'fork',
         ) as { sessionId: string }
 
         newSessionIds.push(result.sessionId)
