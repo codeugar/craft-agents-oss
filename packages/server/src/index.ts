@@ -45,6 +45,14 @@ import type { HandlerDeps } from '@craft-agent/server-core/handlers'
 
 process.env.CRAFT_IS_PACKAGED ??= 'false'
 
+// Prevent unhandled rejections from crashing the server.
+// SDK subprocess abort can reject promises that propagate up unhandled;
+// Bun (unlike Node) terminates the process on unhandled rejections by default.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason)
+  console.error(`[server] Unhandled rejection (caught, not crashing): ${msg}`)
+})
+
 if (process.env.CRAFT_DEBUG === 'true' || process.env.CRAFT_DEBUG === '1') {
   enableDebug()
 }
