@@ -1,21 +1,89 @@
 ---
-title: Headless Server
-description: Run Craft Agents as a headless server on a remote machine
+title: Remote Server
+description: Run Craft Agents as a remote server — from the desktop app or standalone
 ---
 
-# Headless Server
+# Remote Server
 
-Craft Agents can run as a headless server without the desktop GUI. This lets you keep long-running sessions alive on a remote machine, access them from multiple clients, and run compute-heavy tasks on a powerful server.
+Craft Agents can run as a remote server, letting you keep long-running sessions alive on a remote machine, access them from multiple clients (desktop app, browser, or CLI), and run compute-heavy tasks on a powerful server.
 
-## Prerequisites
+There are two ways to run the server:
 
-Install [Bun](https://bun.sh) (v1.3+):
+| Method | Best for |
+|--------|----------|
+| **Embedded** (from desktop app) | Quick setup on your own machine — one toggle in Settings |
+| **Standalone** (from source) | Dedicated servers, Linux VMs, Docker, CI/CD |
+
+## Embedded Server Mode
+
+The simplest way to run a server. No terminal, no config files — just a toggle in Settings.
+
+### Enable the server
+
+1. Open **Settings** → **Server**
+2. Toggle **Enable Server Mode**
+3. The app generates a token and displays your connection URL
+
+The server binds to port **9100** by default. You can change the port in the settings.
+
+### TLS (recommended)
+
+Without TLS, the token and all session data are sent in cleartext. The settings page shows a warning when TLS is not configured.
+
+To enable TLS, provide paths to your certificate and key files in the Server settings. For development, self-signed certificates work — the desktop app accepts self-signed certs when connecting to remote servers.
+
+<Warning>
+**Never run without TLS on a network.** The server token and all session data are transmitted over the WebSocket connection. Without TLS, anyone on the network can intercept them.
+</Warning>
+
+### Restart behavior
+
+Changing server settings (port, TLS, enable/disable) requires a restart. The app shows a banner prompting you to relaunch when settings have changed.
+
+## Web UI
+
+When the server is running (embedded or standalone), it serves a browser-accessible web UI on the same port.
+
+### Accessing the Web UI
+
+Open `https://your-server:9100` (or `http://` without TLS) in any browser. You'll see a login page.
+
+### Authentication
+
+Enter the server token as the password. The server issues a session cookie on successful login.
+
+- Login attempts are rate-limited to **5 per 60 seconds** per IP
+- The session persists until you log out or the cookie expires
+
+### What you can do
+
+The web UI provides the same session interface as the desktop app — create sessions, send messages, manage workspaces. OAuth flows for Claude and Copilot work directly in the browser.
+
+## Standalone Server (from Source)
+
+For dedicated servers, Linux VMs, or Docker deployments.
+
+### Prerequisites
+
+Install [Bun](https://bun.sh) (v1.0+):
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
 ```
 
-Clone the repository and install dependencies:
+### Quick setup
+
+Clone and run the install script:
+
+```bash
+git clone https://github.com/lukilabs/craft-agents-oss.git
+cd craft-agents-oss
+./scripts/install-server.sh
+```
+
+The script installs dependencies, generates a token, and prints the run command. **Save your token — it cannot be recovered.**
+
+### Manual setup
 
 ```bash
 git clone https://github.com/lukilabs/craft-agents-oss.git
@@ -23,20 +91,20 @@ cd craft-agents-oss
 bun install
 ```
 
-## Setup
-
-### 1. Generate a token
+Generate a token and start:
 
 ```bash
 export CRAFT_SERVER_TOKEN=$(openssl rand -hex 32)
-echo $CRAFT_SERVER_TOKEN  # Save this — clients need it to connect
+echo $CRAFT_SERVER_TOKEN  # Save this
+
+CRAFT_SERVER_TOKEN=$CRAFT_SERVER_TOKEN \
+CRAFT_RPC_HOST=0.0.0.0 \
+CRAFT_RPC_TLS_CERT=certs/cert.pem \
+CRAFT_RPC_TLS_KEY=certs/key.pem \
+bun run packages/server/src/index.ts
 ```
 
-### 2. Generate TLS certificates
-
-TLS is required for remote connections. The server token and all session data are transmitted over the WebSocket connection — **never run without TLS on a network**.
-
-For development, generate a self-signed certificate:
+For development TLS, generate a self-signed certificate:
 
 ```bash
 ./scripts/generate-dev-cert.sh
@@ -44,16 +112,6 @@ For development, generate a self-signed certificate:
 ```
 
 For production, use certificates from a trusted CA (e.g., Let's Encrypt) or place the server behind a reverse proxy (nginx, Caddy) that terminates TLS.
-
-### 3. Start the server
-
-```bash
-CRAFT_SERVER_TOKEN=$CRAFT_SERVER_TOKEN \
-CRAFT_RPC_HOST=0.0.0.0 \
-CRAFT_RPC_TLS_CERT=certs/cert.pem \
-CRAFT_RPC_TLS_KEY=certs/key.pem \
-bun run packages/server/src/index.ts
-```
 
 The server prints connection details on startup:
 
@@ -64,9 +122,21 @@ CRAFT_SERVER_TOKEN=<your-token>
 
 ## Connecting Clients
 
+### Desktop App (Hybrid Mode)
+
+Connect to a remote server while keeping local workspaces:
+
+1. Click the workspace dropdown in the sidebar
+2. Select **Add Workspace...** → **Connect to Remote Server**
+3. Enter the server URL (e.g., `wss://192.168.1.100:9100`) and token
+4. Click **Test Connection** to verify
+5. Select an existing workspace or create a new one on the server
+
+Once connected, remote workspaces appear in your workspace switcher alongside local ones. A CloudOff icon indicates when a remote workspace is unreachable.
+
 ### Desktop App (Thin Client)
 
-Launch the Electron app in thin-client mode by setting the server URL:
+Launch the app as a pure thin client — all logic runs on the server:
 
 ```bash
 CRAFT_SERVER_URL=wss://your-server:9100 \
@@ -74,7 +144,9 @@ CRAFT_SERVER_TOKEN=<token> \
 bun run electron:start
 ```
 
-The desktop app renders the UI but all session logic, tool execution, and LLM calls run on the remote server.
+### Web UI
+
+Open the server URL in any browser and log in with the token. See [Web UI](#web-ui) above.
 
 ### CLI Client
 
@@ -96,6 +168,7 @@ See the [CLI guide](/server/cli) for the full command reference.
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CRAFT_SERVER_TOKEN` | Yes | — | Bearer token for authentication |
+| `CRAFT_SERVER_URL` | No | — | Server URL for client connections |
 | `CRAFT_RPC_HOST` | No | `127.0.0.1` | Bind address (`0.0.0.0` for remote) |
 | `CRAFT_RPC_PORT` | No | `9100` | Bind port |
 | `CRAFT_RPC_TLS_CERT` | Yes* | — | PEM certificate file (enables `wss://`) |
@@ -212,3 +285,7 @@ tail -f /tmp/craft-agents.log
 # Stop and unload
 launchctl unload ~/Library/LaunchAgents/com.craft.agents-server.plist
 ```
+
+## Version Compatibility
+
+The server includes its version in the connection handshake. When a client connects to an older server (pre-0.8.0), it shows a warning that some features may not be available.
