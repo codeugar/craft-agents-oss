@@ -23,17 +23,20 @@ services:
       context: .
       dockerfile: Dockerfile.server
     ports:
-      - "${CRAFT_RPC_PORT}:9000"
+      - "${CRAFT_RPC_PORT:-9100}:9100"
     env_file:
       - path: .env
         required: false
     environment:
       HOME: /home/craftagents
       CRAFT_RPC_HOST: "0.0.0.0"
-      CRAFT_RPC_PORT: ${CRAFT_RPC_PORT}
+      CRAFT_RPC_PORT: "${CRAFT_RPC_PORT:-9100}"
     user: "${CRAFT_DOCKER_UID:-1000}:${CRAFT_DOCKER_GID:-1000}"
     volumes:
-      - /home/testuser:/home/craftagents
+      - craftagents-data:/home/craftagents/.craft-agent
       # TLS certs (uncomment if needed):
-      - ./certs:/certs:ro
+      # - ./certs:/certs:ro
     restart: unless-stopped
+
+volumes:
+  craftagents-data:

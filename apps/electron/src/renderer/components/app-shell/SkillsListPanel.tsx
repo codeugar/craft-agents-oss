@@ -6,6 +6,7 @@ import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { skillSelection } from '@/hooks/useEntitySelection'
 import { SkillMenu } from './SkillMenu'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { useActiveWorkspace } from '@/context/AppShellContext'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -27,6 +28,9 @@ export function SkillsListPanel({
   workspaceRootPath,
   className,
 }: SkillsListPanelProps) {
+  const activeWorkspace = useActiveWorkspace()
+  const canRevealLocally = !activeWorkspace?.remoteServer
+
   return (
     <EntityPanel<LoadedSkill>
       items={skills}
@@ -73,8 +77,15 @@ export function SkillsListPanel({
             skillSlug={skill.slug}
             skillName={skill.metadata.name}
             onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://skills/skill/${skill.slug}?window=focused`)}
-            onShowInFinder={() => { if (workspaceId) window.electronAPI.openSkillInFinder(workspaceId, skill.slug) }}
-            onDelete={() => onDeleteSkill(skill.slug)}
+            onShowInFinder={() => {
+              if (canRevealLocally) {
+                void window.electronAPI.showInFolder(`${skill.path}/SKILL.md`)
+              }
+            }}
+            canShowInFinder={canRevealLocally}
+            onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
+            canDelete={skill.source === 'workspace'}
+            deleteLabel={skill.source === 'workspace' ? 'Delete Skill' : 'Managed by project'}
           />
         ),
       })}

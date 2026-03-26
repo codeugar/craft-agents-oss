@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { SkillMenu } from '@/components/app-shell/SkillMenu'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { routes, navigate } from '@/lib/navigate'
+import { useActiveWorkspace } from '@/context/AppShellContext'
 import {
   Info_Page,
   Info_Section,
@@ -32,6 +33,8 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const activeWorkspace = useActiveWorkspace()
+  const canRevealLocally = !activeWorkspace?.remoteServer
 
   // Load skill data
   useEffect(() => {
@@ -82,17 +85,19 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     if (!skill) return
 
     try {
-      await window.electronAPI.openSkillInFinder(workspaceId, skillSlug)
+      if (!canRevealLocally) return
+      await window.electronAPI.showInFolder(`${skill.path}/SKILL.md`)
     } catch (err) {
       console.error('Failed to open skill in finder:', err)
     }
-  }, [skill, workspaceId, skillSlug])
+  }, [canRevealLocally, skill])
 
   // Handle delete
   const handleDelete = useCallback(async () => {
     if (!skill) return
 
     try {
+      if (skill.source !== 'workspace') return
       await window.electronAPI.deleteSkill(workspaceId, skillSlug)
       toast.success(`Deleted skill: ${skill.metadata.name}`)
       navigate(routes.view.skills())
@@ -110,6 +115,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
 
   // Get skill name for header
   const skillName = skill?.metadata.name || skillSlug
+  const canDeleteSkill = skill?.source === 'workspace'
 
   // Format path to show just the skill-relative portion (skills/{slug}/)
   const formatPath = (path: string) => {
@@ -124,6 +130,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   const handleLocationClick = () => {
     if (!skill) return
     // Show the SKILL.md file in Finder (this reveals the enclosing folder with file focused)
+    if (!canRevealLocally) return
     window.electronAPI.showInFolder(`${skill.path}/SKILL.md`)
   }
 
@@ -141,7 +148,10 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             skillName={skillName}
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenInFinder}
-            onDelete={handleDelete}
+            canShowInFinder={canRevealLocally}
+            onDelete={canDeleteSkill ? handleDelete : undefined}
+            canDelete={canDeleteSkill}
+            deleteLabel={canDeleteSkill ? 'Delete Skill' : 'Managed by project'}
           />
         }
       />

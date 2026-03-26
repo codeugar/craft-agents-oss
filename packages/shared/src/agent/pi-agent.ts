@@ -150,6 +150,11 @@ export class PiAgent extends BaseAgent {
   private subprocessErrorRepeatCount = 0;
   private static readonly MAX_IDENTICAL_SUBPROCESS_ERRORS = 3;
 
+  private resetSubprocessErrorDedup(): void {
+    this.lastSubprocessError = null;
+    this.subprocessErrorRepeatCount = 0;
+  }
+
   // Pending permission requests (used by handlePreToolUseRequest for ask-mode prompting)
   private pendingPermissions: Map<string, {
     resolve: (allowed: boolean) => void;
@@ -300,6 +305,7 @@ export class PiAgent extends BaseAgent {
     const cwd = this.resolvedCwd();
 
     this.debug(`Spawning Pi subprocess: ${nodePath} ${piServerPath}`);
+    this.resetSubprocessErrorDedup();
 
     // Set up ready promise before spawning
     this.subprocessReady = new Promise<void>((resolve) => {
@@ -391,6 +397,7 @@ export class PiAgent extends BaseAgent {
 
     child.on('error', (error) => {
       this.debug(`Subprocess error: ${error.message}`);
+      this.resetSubprocessErrorDedup();
       this.eventQueue.enqueue({ type: 'error', message: `Pi subprocess error: ${error.message}` });
       this.eventQueue.complete();
     });
@@ -755,6 +762,10 @@ export class PiAgent extends BaseAgent {
     }
 
     const type = msg.type as string;
+
+    if (type !== 'error') {
+      this.resetSubprocessErrorDedup();
+    }
 
     switch (type) {
       case 'ready':
@@ -1502,6 +1513,7 @@ export class PiAgent extends BaseAgent {
 
     this.subprocess = null;
     this.readline = null;
+    this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
 

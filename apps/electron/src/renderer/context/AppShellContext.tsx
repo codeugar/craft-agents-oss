@@ -104,7 +104,7 @@ export interface AppShellContextType {
   onOpenUrl: (url: string) => void
 
   // Workspace
-  onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void
+  onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void | Promise<void>
   onRefreshWorkspaces?: () => void
 
   // App actions

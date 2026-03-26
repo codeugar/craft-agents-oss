@@ -22,8 +22,8 @@ interface WorkspaceCreationScreenProps {
   className?: string
   /** When set, skip choice step and open ConnectRemote in reconnect mode */
   reconnectWorkspace?: Workspace
-  /** Called when a workspace's remote config is successfully updated */
-  onWorkspaceReconnected?: (workspaceId: string) => void
+  /** Reconnect an existing remote workspace and resolve only on real success. */
+  onReconnectWorkspace?: (workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => Promise<void>
 }
 
 /**
@@ -39,7 +39,7 @@ export function WorkspaceCreationScreen({
   onClose,
   className,
   reconnectWorkspace,
-  onWorkspaceReconnected,
+  onReconnectWorkspace,
 }: WorkspaceCreationScreenProps) {
   // Start at 'remote' step directly when reconnecting
   const [step, setStep] = useState<CreationStep>(reconnectWorkspace ? 'remote' : 'choice')
@@ -78,6 +78,19 @@ export function WorkspaceCreationScreen({
       setIsCreating(false)
     }
   }, [onWorkspaceCreated])
+
+  const handleReconnectWorkspace = useCallback(async (workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => {
+    if (!onReconnectWorkspace) {
+      throw new Error('Reconnect handler not configured')
+    }
+
+    setIsCreating(true)
+    try {
+      await onReconnectWorkspace(workspaceId, remoteServer)
+    } finally {
+      setIsCreating(false)
+    }
+  }, [onReconnectWorkspace])
 
   const renderStep = () => {
     switch (step) {
@@ -121,12 +134,7 @@ export function WorkspaceCreationScreen({
               name: reconnectWorkspace.name,
               remoteWorkspaceId: reconnectWorkspace.remoteServer.remoteWorkspaceId,
             } : undefined}
-            onUpdate={async (workspaceId, remoteServer) => {
-              await window.electronAPI.updateWorkspaceRemoteServer(workspaceId, remoteServer)
-              await window.electronAPI.reconnectTransport()
-              onWorkspaceReconnected?.(workspaceId)
-              onClose()
-            }}
+            onUpdate={handleReconnectWorkspace}
           />
         )
 

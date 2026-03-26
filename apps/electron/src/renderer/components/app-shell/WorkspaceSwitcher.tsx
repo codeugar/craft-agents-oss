@@ -17,6 +17,7 @@ import {
 import { CrossfadeAvatar } from "@/components/ui/avatar"
 import { FadingText } from "@/components/ui/fading-text"
 import { WorkspaceCreationScreen } from "@/components/workspace"
+import { waitForTransportConnected } from '@/lib/transport-wait'
 import { useWorkspaceIcons } from "@/hooks/useWorkspaceIcon"
 import { useTransportConnectionState } from "@/hooks/useTransportConnectionState"
 import type { Workspace } from "../../../shared/types"
@@ -26,7 +27,7 @@ interface WorkspaceSwitcherProps {
   isCollapsed?: boolean
   workspaces: Workspace[]
   activeWorkspaceId: string | null
-  onSelect: (workspaceId: string, openInNewWindow?: boolean) => void
+  onSelect: (workspaceId: string, openInNewWindow?: boolean) => void | Promise<void>
   onWorkspaceCreated?: (workspace: Workspace) => void
   onWorkspaceRemoved?: () => void
   /** workspaceId -> has unread */
@@ -146,17 +147,26 @@ export function WorkspaceSwitcher({
     }
   }, [activeWorkspaceId, onWorkspaceRemoved])
 
-  const handleCloseCreationScreen = () => {
+  const handleCloseCreationScreen = useCallback(() => {
     setShowCreationScreen(false)
     setReconnectTarget(null)
     setFullscreenOverlayOpen(false)
-  }
+  }, [setFullscreenOverlayOpen])
 
-  const handleWorkspaceReconnected = (workspaceId: string) => {
+  const handleReconnectWorkspace = useCallback(async (workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }) => {
+    await window.electronAPI.updateWorkspaceRemoteServer(workspaceId, remoteServer)
+
+    if (workspaceId === activeWorkspaceId) {
+      await window.electronAPI.reconnectTransport()
+      await waitForTransportConnected(window.electronAPI)
+    } else {
+      await Promise.resolve(onSelect(workspaceId))
+      await waitForTransportConnected(window.electronAPI)
+    }
+
     handleCloseCreationScreen()
     toast.success('Workspace reconnected')
-    onSelect(workspaceId)
-  }
+  }, [activeWorkspaceId, handleCloseCreationScreen, onSelect])
 
   return (
     <>
@@ -167,7 +177,7 @@ export function WorkspaceSwitcher({
             onWorkspaceCreated={handleWorkspaceCreated}
             onClose={handleCloseCreationScreen}
             reconnectWorkspace={reconnectTarget ?? undefined}
-            onWorkspaceReconnected={handleWorkspaceReconnected}
+            onReconnectWorkspace={handleReconnectWorkspace}
           />
         )}
       </AnimatePresence>

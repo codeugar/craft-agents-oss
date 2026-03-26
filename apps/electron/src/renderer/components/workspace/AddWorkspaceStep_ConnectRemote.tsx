@@ -130,12 +130,18 @@ export function AddWorkspaceStep_ConnectRemote({
 
     // Reconnect mode — update existing workspace config
     if (isReconnectMode && onUpdate) {
-      await onUpdate(reconnectWorkspace!.id, {
-        url: serverUrl,
-        token,
-        remoteWorkspaceId: reconnectWorkspace!.remoteWorkspaceId,
-      })
-      return
+      try {
+        await onUpdate(reconnectWorkspace!.id, {
+          url: serverUrl,
+          token,
+          remoteWorkspaceId: reconnectWorkspace!.remoteWorkspaceId,
+        })
+        return
+      } catch (err) {
+        setTestState('error')
+        setTestError(err instanceof Error ? err.message : 'Failed to reconnect workspace')
+        return
+      }
     }
 
     if (!homeDir) return

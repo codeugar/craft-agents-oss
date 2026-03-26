@@ -142,15 +142,15 @@ const PREVIEWABLE_EXTENSIONS = new Set([
 ])
 
 /**
- * Extensions safe to load as full base64 data URLs in web mode.
- * Excludes pdf/psd/ai/svg — too large or not renderable as <img> in browser.
+ * Extensions that get lightweight image previews in web mode.
+ * Excludes pdf/psd/ai/svg — not rendered as <img> thumbnails here.
  */
 const WEB_PREVIEWABLE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico',
 ])
 
 /** True when running in web UI (browser) rather than Electron. */
-const isWebMode = window.electronAPI.getVersions().electron === 'web'
+const isWebMode = window.electronAPI.getRuntimeEnvironment() === 'web'
 
 /**
  * Constructs a thumbnail:// protocol URL for a given file path.
@@ -165,7 +165,7 @@ function getThumbnailUrl(filePath: string): string {
  * FileThumbnail — Renders an image thumbnail with cross-fade from icon fallback.
  *
  * In Electron: loads via the custom thumbnail:// protocol (efficient 64x64 resize).
- * In Web mode: loads via readFileDataUrl RPC (full-size base64, but shown small).
+ * In Web mode: loads via readFilePreviewDataUrl RPC (server-side resized preview).
  *
  * Shows the Lucide icon immediately, then cross-fades to the thumbnail on load.
  * If loading fails, the icon stays visible — no layout shift, no error state.
@@ -186,11 +186,11 @@ const FileThumbnail = memo(function FileThumbnail({ file }: { file: SessionFile 
   const previewableSet = isWebMode ? WEB_PREVIEWABLE_EXTENSIONS : PREVIEWABLE_EXTENSIONS
   const canPreview = previewableSet.has(ext)
 
-  // Web mode: load thumbnail via RPC as base64 data URL
+  // Web mode: load a small preview via RPC as a base64 data URL
   useEffect(() => {
     if (!isWebMode || !canPreview || failed) return
     let cancelled = false
-    window.electronAPI.readFileDataUrl(file.path).then((url) => {
+    window.electronAPI.readFilePreviewDataUrl(file.path, 64).then((url) => {
       if (!cancelled) setDataUrl(url)
     }).catch(() => {
       if (!cancelled) setFailed(true)
