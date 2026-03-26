@@ -5,10 +5,6 @@
 #   1. Copy .env.example to .env and fill in your values
 #   2. docker compose up --build
 #
-# With webui:
-#   1. bun run webui:build              (build frontend assets on host)
-#   2. docker compose --profile webui up --build
-#
 # Generate a server token:
 #   docker compose run --rm server bun run packages/server/src/index.ts --generate-token
 #
@@ -34,31 +30,6 @@ services:
     user: "${CRAFT_DOCKER_UID:-1000}:${CRAFT_DOCKER_GID:-1000}"
     volumes:
       - craft-agent-config:/home/craftagents/.craft-agent
-      # TLS certs (uncomment if needed):
-      # - ./certs:/certs:ro
-    restart: unless-stopped
-
-  # Server with webui — run `bun run webui:build` on host first.
-  # Activate: docker compose --profile webui up --build
-  server-webui:
-    profiles: [webui]
-    build:
-      context: .
-      dockerfile: Dockerfile.server
-    ports:
-      - "${CRAFT_RPC_PORT:-9100}:9100"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      HOME: /home/craftagents
-      CRAFT_RPC_HOST: "0.0.0.0"
-      CRAFT_RPC_PORT: "9100"
-      CRAFT_WEBUI_DIR: /webui
-    user: "${CRAFT_DOCKER_UID:-1000}:${CRAFT_DOCKER_GID:-1000}"
-    volumes:
-      - craft-agent-config:/home/craftagents/.craft-agent
-      - ./apps/webui/dist:/webui:ro
       # TLS certs (uncomment if needed):
       # - ./certs:/certs:ro
     restart: unless-stopped
