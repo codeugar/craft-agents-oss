@@ -1452,7 +1452,7 @@ bash scripts/build-dmg.sh arm64
 bash scripts/build-dmg.sh x64
 ```
 
-**Output:** `apps/electron/release/Craft-Agent-{arch}.dmg`
+**Output:** `apps/electron/release/Craft-Agents-{arch}.dmg`
 
 ### Windows
 
@@ -1461,7 +1461,7 @@ bash scripts/build-dmg.sh x64
 powershell -ExecutionPolicy Bypass -File scripts/build-win.ps1
 ```
 
-**Output:** `apps/electron/release/Craft-Agent-x64.exe`
+**Output:** `apps/electron/release/Craft-Agents-x64.exe`
 
 ### Linux
 
@@ -1470,7 +1470,7 @@ bash scripts/build-linux.sh x64
 bash scripts/build-linux.sh arm64
 ```
 
-**Output:** `apps/electron/release/Craft-Agent-{arch}.AppImage`
+**Output:** `apps/electron/release/Craft-Agents-{arch}.AppImage`
 
 ### What the build scripts do
 
