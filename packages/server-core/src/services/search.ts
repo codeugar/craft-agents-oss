@@ -311,8 +311,9 @@ export async function searchSessions(
           if (rawLine.includes('"isIntermediate":true')) continue;
 
           // Skip messages with base64-encoded content (images, attachments)
-          // The query can match inside base64 noise, producing false positives
-          if (rawLine.includes('"type":"base64"')) continue;
+          // The query can match inside base64 noise, producing false positives.
+          // Covers both content blocks ("type":"base64") and attachment thumbnails.
+          if (rawLine.includes('base64')) continue;
 
           // Get or create session result
           let sessionResult = results.get(sessionId);
