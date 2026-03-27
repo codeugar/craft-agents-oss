@@ -10,8 +10,20 @@
 @source "../renderer/pages/**/*.{ts,tsx,jsx}";
 @source "../renderer/tabs/**/*.{ts,tsx,jsx}";
 @source "../renderer/playground/**/*.{ts,tsx,jsx}";
+@source "../renderer/utils/**/*.{ts,tsx,jsx}";
+@source "../renderer/config/**/*.{ts,tsx,jsx}";
 @source "../../../../packages/ui/src/components/**/*.{ts,tsx,jsx}";
 @source "../../../../packages/ui/src/lib/**/*.{ts,tsx,jsx}";
+
+/* CSS Custom Highlight API styles for search highlighting */
+::highlight(search-passive) {
+  background-color: rgb(253 224 71 / 0.3);
+  color: inherit;
+}
+::highlight(search-active) {
+  background-color: rgb(253 224 71);
+  color: rgb(0 0 0 / 0.9);
+}
 
 /* =============================================================================
    ANIMATABLE CSS CUSTOM PROPERTIES

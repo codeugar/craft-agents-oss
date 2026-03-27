@@ -604,14 +604,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Current match index for navigation (internal state, exposed via ref)
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0)
   const turnRefs = React.useRef<Map<string, HTMLDivElement>>(new Map())
-  // Track actual match IDs created in DOM (state so it triggers re-renders)
-  const [actualMatchIds, setActualMatchIds] = useState<Set<string>>(new Set())
-  // Track how many matching turns have been highlighted (state for re-render on progress)
-  const [highlightedTurnCount, setHighlightedTurnCount] = useState(0)
-  // Track which turn IDs have been highlighted (to avoid re-highlighting on pagination)
-  const highlightedTurnIdsRef = React.useRef<Set<string>>(new Set())
-  // Track previous search/session to detect when to clear vs accumulate highlights
-  const prevHighlightContextRef = React.useRef<{ searchQuery: string; sessionId: string | null }>({ searchQuery: '', sessionId: null })
+  // CSS Custom Highlight API handle — cast once (TS lib types are incomplete)
+  const cssHighlightsRef = React.useRef(typeof CSS !== 'undefined' ? CSS.highlights as unknown as Map<string, Highlight> | undefined : undefined)
   // Flag to control when scrolling to matches should happen
   // Only scroll when: session changes with search active, or user clicks navigation
   const shouldScrollToMatchRef = React.useRef(false)
@@ -619,7 +613,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   // Use the external search query from props
   const searchQuery = externalSearchQuery || ''
-  const isSearchActive = Boolean(searchQuery.trim())
+  // Require 2+ characters to activate in-chat search (aligned with session list isSearchMode)
+  const isSearchActive = searchQuery.trim().length >= 2
 
   // Focus textarea when zone gains focus via keyboard (Tab, Cmd+3, ArrowRight)
   // Requires isFocused to be true - respects zone architecture
@@ -666,8 +661,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
 
     setCurrentMatchIndex(0)
-    setActualMatchIds(new Set()) // Clear stale match IDs to prevent incorrect counts
-    setHighlightedTurnCount(0)
   }, [session?.id, searchQuery, isSearchActive])
 
   // Helper to count occurrences of a substring
@@ -740,8 +733,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   useEffect(() => {
     if (!isSearchActive || matchingOccurrences.length === 0) return
 
-    // Find the earliest matching turn index
-    const earliestMatchTurnIndex = Math.min(...matchingOccurrences.map(m => m.turnIndex))
+    // Find the earliest matching turn index (reduce to avoid RangeError on large arrays)
+    const earliestMatchTurnIndex = matchingOccurrences.reduce(
+      (min, m) => m.turnIndex < min ? m.turnIndex : min,
+      matchingOccurrences[0]!.turnIndex
+    )
     const totalTurns = groupMessagesByTurn(session?.messages || []).length
 
     // Calculate how many turns we need to show to include all matches
@@ -759,13 +755,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return Array.from(uniqueTurnIds)
   }, [matchingOccurrences])
 
-  // Filter to only valid matches that exist in DOM (actualMatchIds is updated after highlighting)
-  const validMatches = useMemo(() => {
-    // Before highlighting runs, return empty — never show an inflated count.
-    // After highlighting, filter to only matches that exist in DOM.
-    if (actualMatchIds.size === 0) return []
-    return matchingOccurrences.filter(m => actualMatchIds.has(m.matchId))
-  }, [matchingOccurrences, actualMatchIds])
+  // With CSS Custom Highlight API, navigation is driven by logical matches — no DOM verification needed.
+  const validMatches = matchingOccurrences
 
   // Auto-scroll to match ONLY when there's exactly one match
   // Multiple matches: user navigates with chevrons to avoid jarring scroll
@@ -775,137 +766,93 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     }
   }, [validMatches.length, isSearchActive])
 
-  // Scroll to current match (with delay to wait for DOM rendering)
+  // Scroll to current match turn
   // Only scrolls when shouldScrollToMatchRef is true (single match auto-scroll or nav button click)
   useEffect(() => {
-    // Only scroll if explicitly requested (session change or navigation click)
     if (!shouldScrollToMatchRef.current) return
 
     if (validMatches.length > 0 && currentMatchIndex < validMatches.length) {
       const matchData = validMatches[currentMatchIndex]
-      const { matchId, turnIndex } = matchData
+      const { turnId, turnIndex } = matchData
       const totalTurns = totalTurnCountRef.current
 
-      // Calculate current visible range
-      const currentStartIndex = Math.max(0, totalTurns - visibleTurnCount)
-
       // Check if the match is outside the visible range
+      const currentStartIndex = Math.max(0, totalTurns - visibleTurnCount)
       if (turnIndex < currentStartIndex) {
-        // Expand visible turns to include this match (with some buffer)
-        const newVisibleCount = totalTurns - turnIndex + 5 // Add 5 turns buffer
+        const newVisibleCount = totalTurns - turnIndex + 5
         setVisibleTurnCount(newVisibleCount)
-        // Keep shouldScroll true - will scroll on next effect run after DOM updates
         return
       }
 
-      // Use multiple attempts to ensure DOM is ready (highlights are applied)
-      let attempts = 0
-      const maxAttempts = 5
-
-      const tryScroll = () => {
-        const matchEl = document.getElementById(matchId) as HTMLElement | null
-        if (matchEl) {
-          // Only scroll if match is not comfortably visible on screen (with 128px edge buffer)
-          const rect = matchEl.getBoundingClientRect()
-          const buffer = 128
-          const isVisible = rect.top >= buffer && rect.bottom <= window.innerHeight - buffer
-          if (!isVisible) {
-            matchEl.scrollIntoView({ behavior: 'instant', block: 'center' })
-          }
-          // Add active styling to current match (prominent yellow with shadow and ring)
-          // Using ring instead of border to avoid layout shift
-          matchEl.classList.remove('bg-yellow-300/30')
-          matchEl.classList.add('bg-yellow-300', 'shadow-tinted', 'text-black/90', 'ring-1', 'ring-yellow-500')
-          ;(matchEl as HTMLElement).style.setProperty('--shadow-color', '90, 50, 5') // dark amber for stronger shadow
-          // Remove active styling from other matches (revert to passive)
-          document.querySelectorAll('mark.search-highlight.bg-yellow-300').forEach(el => {
-            if (el.id !== matchId) {
-              el.classList.remove('bg-yellow-300', 'shadow-tinted', 'text-black/90', 'ring-1', 'ring-yellow-500')
-              el.classList.add('bg-yellow-300/30')
-              ;(el as HTMLElement).style.removeProperty('--shadow-color')
-            }
-          })
-          shouldScrollToMatchRef.current = false
-        } else if (attempts < maxAttempts) {
-          attempts++
-          setTimeout(tryScroll, 50)
-        } else {
-          // Give up - validMatches should only contain valid matches, but timing can cause this
-          shouldScrollToMatchRef.current = false
+      // Scroll the turn into view
+      const turnEl = turnRefs.current.get(turnId)
+      if (turnEl) {
+        const rect = turnEl.getBoundingClientRect()
+        const buffer = 128
+        const isVisible = rect.top >= buffer && rect.bottom <= window.innerHeight - buffer
+        if (!isVisible) {
+          turnEl.scrollIntoView({ behavior: 'instant', block: 'center' })
         }
       }
-
-      // Start with requestAnimationFrame for initial attempt
-      const rafId = requestAnimationFrame(tryScroll)
-      return () => cancelAnimationFrame(rafId)
+      shouldScrollToMatchRef.current = false
     }
   }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount])
 
-  // Text highlighting within messages
-  // Uses DOM manipulation after render to highlight matching text
+  // ---------------------------------------------------------------------------
+  // CSS Custom Highlight API — non-destructive text highlighting
+  // Creates browser-native highlight ranges over matching text without
+  // modifying the DOM tree. Safe with React re-renders and streaming.
+  // Uses cross-node matching: concatenates text across node boundaries
+  // to find matches that span multiple DOM nodes (e.g. Shiki-split tokens).
+  // ---------------------------------------------------------------------------
+
+  const MAX_HIGHLIGHT_RANGES = 5000
+
   useEffect(() => {
-    // Clear previous highlights
-    const clearHighlights = () => {
-      const existingMarks = document.querySelectorAll('mark.search-highlight')
-      existingMarks.forEach(mark => {
-        const parent = mark.parentNode
-        if (parent) {
-          parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
-          parent.normalize() // Merge adjacent text nodes
-        }
-      })
-    }
+    const cssHighlights = cssHighlightsRef.current
 
-    // Detect if search/session changed (need full clear) vs just pagination (accumulate)
-    const prevContext = prevHighlightContextRef.current
-    const contextChanged = prevContext.searchQuery !== searchQuery || prevContext.sessionId !== session?.id
-    prevHighlightContextRef.current = { searchQuery, sessionId: session?.id ?? null }
+    // Always clear previous highlights first
+    try {
+      cssHighlights?.delete('search-passive')
+      cssHighlights?.delete('search-active')
+    } catch { /* API unavailable — no-op */ }
 
-    // Only clear highlights and reset state when search/session changes
-    // When just pagination changes, we accumulate new highlights
-    if (contextChanged) {
-      clearHighlights()
-      setActualMatchIds(new Set())
-      setHighlightedTurnCount(0)
-      highlightedTurnIdsRef.current = new Set()
-    }
-
-    if (!searchQuery.trim() || !isSearchActive) return
+    if (!searchQuery.trim() || !isSearchActive || !cssHighlights) return
 
     const query = searchQuery.toLowerCase()
-    const createdMatchIds: string[] = [] // Collect IDs as we create marks
+    const matchingTurnIdSet = new Set(matchingTurnIds)
+    if (matchingTurnIdSet.size === 0) return
 
-    // Highlighting function - applies highlights only to MATCHING turn refs
-    // Uses cross-node matching: concatenates text across node boundaries to find
-    // matches that span multiple DOM nodes (e.g. Shiki-split tokens)
-    const applyHighlights = () => {
-      const matchingTurnIdSet = new Set(matchingTurnIds)
+    const rafId = requestAnimationFrame(() => {
+      const allRanges: Range[] = []
+      // Map from global match index → Range for active-match highlighting
+      const rangeByGlobalIndex = new Map<number, Range>()
+      let globalIndex = 0
 
-      turnRefs.current.forEach((container, turnId) => {
-        if (!matchingTurnIdSet.has(turnId)) return
-        if (highlightedTurnIdsRef.current.has(turnId)) return
-        highlightedTurnIdsRef.current.add(turnId)
+      turnRefs.current.forEach((container, turnKey) => {
+        if (allRanges.length >= MAX_HIGHLIGHT_RANGES) return
+        if (!matchingTurnIdSet.has(turnKey)) return
 
-        // Step 1: Collect ALL eligible text nodes (no query filter — needed for cross-node matching)
+        // For assistant turns, narrow search to response content root
+        const searchRoot = container.querySelector('[data-search-root="response"]') || container
+
+        // Collect ALL eligible text nodes (no query filter — needed for cross-node matching)
         const walker = document.createTreeWalker(
-          container,
+          searchRoot,
           NodeFilter.SHOW_TEXT,
           {
             acceptNode: (node) => {
               const parent = node.parentElement
               if (!parent) return NodeFilter.FILTER_REJECT
-              const tagName = parent.tagName.toLowerCase()
-              if (tagName === 'script' || tagName === 'style' || tagName === 'mark') {
-                return NodeFilter.FILTER_REJECT
-              }
-              if (parent.closest('[data-search-exclude="true"]')) {
-                return NodeFilter.FILTER_REJECT
-              }
+              const tag = parent.tagName.toLowerCase()
+              if (tag === 'script' || tag === 'style') return NodeFilter.FILTER_REJECT
+              if (parent.closest('[data-search-exclude="true"]')) return NodeFilter.FILTER_REJECT
               return NodeFilter.FILTER_ACCEPT
-            }
+            },
           }
         )
 
+        // Build concatenated string with node offset mapping for cross-node matching
         const textNodes: Text[] = []
         let currentNode: Node | null
         while ((currentNode = walker.nextNode())) {
@@ -913,7 +860,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         }
         if (textNodes.length === 0) return
 
-        // Step 2: Build concatenated string with node offset mapping
         const nodeOffsets: { node: Text; start: number; end: number }[] = []
         let totalLength = 0
         for (const node of textNodes) {
@@ -924,135 +870,64 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         const concatenated = textNodes.map(n => n.textContent || '').join('')
         const lowerConcatenated = concatenated.toLowerCase()
 
-        // Step 3: Find all matches in the concatenated string
-        interface ConcatMatch { start: number; end: number }
-        const matches: ConcatMatch[] = []
+        // Find all matches in the concatenated string
         let searchPos = 0
-        while (searchPos < lowerConcatenated.length) {
+        while (searchPos < lowerConcatenated.length && allRanges.length < MAX_HIGHLIGHT_RANGES) {
           const idx = lowerConcatenated.indexOf(query, searchPos)
           if (idx === -1) break
-          matches.push({ start: idx, end: idx + query.length })
-          searchPos = idx + query.length
-        }
-        if (matches.length === 0) return
+          const matchEnd = idx + query.length
 
-        // Step 4: Map each match back to source nodes and determine which nodes are affected
-        // A match can span multiple nodes (cross-node match)
-        interface NodeSlice { nodeIndex: number; node: Text; sliceStart: number; sliceEnd: number }
-        interface ResolvedMatch { matchIndex: number; slices: NodeSlice[] }
-        const resolvedMatches: ResolvedMatch[] = []
+          // Create a Range spanning the match (may cross node boundaries)
+          try {
+            const range = new Range()
+            let startSet = false
 
-        for (let mi = 0; mi < matches.length; mi++) {
-          const match = matches[mi]
-          const slices: NodeSlice[] = []
+            for (const offset of nodeOffsets) {
+              if (offset.end <= idx) continue
+              if (offset.start >= matchEnd) break
 
-          for (let ni = 0; ni < nodeOffsets.length; ni++) {
-            const offset = nodeOffsets[ni]
-            // Does this node overlap with the match?
-            if (offset.end <= match.start) continue
-            if (offset.start >= match.end) break
-
-            const sliceStart = Math.max(0, match.start - offset.start)
-            const sliceEnd = Math.min(offset.end - offset.start, match.end - offset.start)
-            slices.push({ nodeIndex: ni, node: offset.node, sliceStart, sliceEnd })
-          }
-
-          if (slices.length > 0) {
-            resolvedMatches.push({ matchIndex: mi, slices })
-          }
-        }
-
-        // Step 5: Apply highlights in reverse order to avoid invalidating positions
-        // Group modifications by node to handle multiple matches in the same node
-        for (let ri = resolvedMatches.length - 1; ri >= 0; ri--) {
-          const { matchIndex, slices } = resolvedMatches[ri]
-          const markId = `${turnId}-match-${matchIndex}`
-
-          for (let si = slices.length - 1; si >= 0; si--) {
-            const { node, sliceStart, sliceEnd } = slices[si]
-            const text = node.textContent || ''
-            if (!node.parentNode) continue
-
-            const mark = document.createElement('mark')
-            // Only the first slice of a match gets the navigable ID
-            if (si === 0) {
-              mark.id = markId
-              createdMatchIds.push(markId)
+              if (!startSet) {
+                range.setStart(offset.node, idx - offset.start)
+                startSet = true
+              }
+              range.setEnd(offset.node, Math.min(offset.end - offset.start, matchEnd - offset.start))
             }
-            mark.className = 'search-highlight bg-yellow-300/30 rounded-[2px]'
-            mark.textContent = text.slice(sliceStart, sliceEnd)
 
-            const parent = node.parentNode
-            // Split: [before][mark][after]
-            const before = text.slice(0, sliceStart)
-            const after = text.slice(sliceEnd)
-
-            const afterNode = after ? document.createTextNode(after) : null
-            if (afterNode) parent.insertBefore(afterNode, node.nextSibling)
-            parent.insertBefore(mark, node.nextSibling)
-
-            if (before) {
-              node.textContent = before
-            } else {
-              parent.removeChild(node)
+            if (startSet) {
+              allRanges.push(range)
+              rangeByGlobalIndex.set(globalIndex, range)
+              globalIndex++
             }
+          } catch {
+            // Range creation can fail if node was removed during walk
           }
+
+          searchPos = matchEnd
         }
       })
-    }
 
-    // Retry logic: if no refs available yet, wait and try again
-    let attempts = 0
-    const maxAttempts = 15
-    let highlightTimeoutId: ReturnType<typeof setTimeout> | null = null
+      if (allRanges.length === 0) return
 
-    const tryHighlight = () => {
-      // If no turns to highlight, don't retry - there's nothing to wait for
-      if (matchingTurnIds.length === 0) {
-        return
-      }
+      try {
+        // Separate active match from passive matches for differentiated styling
+        const activeRange = rangeByGlobalIndex.get(currentMatchIndex)
+        const passiveRanges = activeRange
+          ? allRanges.filter(r => r !== activeRange)
+          : allRanges
 
-      // Only count turns that are in refs AND not already highlighted
-      const unhighlightedMatchingInRefs = matchingTurnIds.filter(id =>
-        turnRefs.current.has(id) && !highlightedTurnIdsRef.current.has(id)
-      ).length
-      if (unhighlightedMatchingInRefs > 0) {
-        applyHighlights()
-        // Accumulate match IDs (for pagination - adds new matches to existing)
-        setActualMatchIds(prev => {
-          const merged = new Set(prev)
-          createdMatchIds.forEach(id => merged.add(id))
-          return merged
-        })
-        setHighlightedTurnCount(highlightedTurnIdsRef.current.size)
-
-        // Some matching turns may not have refs yet (still rendering).
-        // Schedule another attempt if there are remaining unprocessed turns.
-        const remaining = matchingTurnIds.filter(id =>
-          !highlightedTurnIdsRef.current.has(id)
-        ).length
-        if (remaining > 0 && attempts < maxAttempts) {
-          attempts++
-          highlightTimeoutId = setTimeout(tryHighlight, 200)
+        if (passiveRanges.length > 0) {
+          cssHighlights.set('search-passive', new Highlight(...passiveRanges))
         }
-      } else if (attempts < maxAttempts) {
-        // Refs not ready yet - retry with exponential backoff
-        attempts++
-        const delay = Math.min(100 * Math.pow(1.5, attempts - 1), 1000)
-        highlightTimeoutId = setTimeout(tryHighlight, delay)
+        if (activeRange) {
+          cssHighlights.set('search-active', new Highlight(activeRange))
+        }
+      } catch {
+        // Highlight API call failed — degrade gracefully to ring-only turn highlighting
       }
-    }
+    })
 
-    // Start with initial delay for DOM rendering
-    const timeoutId = setTimeout(tryHighlight, 50)
-
-    // Cleanup function - only clear timeouts, not highlights
-    // Highlights are cleared in the effect body when search/session changes (contextChanged)
-    return () => {
-      clearTimeout(timeoutId)
-      if (highlightTimeoutId) clearTimeout(highlightTimeoutId)
-    }
-  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, visibleTurnCount]) // Added visibleTurnCount to re-highlight after pagination
+    return () => cancelAnimationFrame(rafId)
+  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, visibleTurnCount, currentMatchIndex])
 
   // Navigate to next match (no looping - stops at last match)
   const goToNextMatch = useCallback(() => {
@@ -1076,8 +951,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     })
   }, [validMatches])
 
-  // Highlighting is in progress when we have matching turns but haven't processed them all yet
-  const isHighlighting = isSearchActive && matchingTurnIds.length > 0 && highlightedTurnCount < matchingTurnIds.length
+  // With CSS Highlight API, highlighting is instant — no settling phase
+  const isHighlighting = false
 
   // Expose navigation via imperative handle (for session list navigation controls)
   React.useImperativeHandle(ref, () => ({
@@ -1086,7 +961,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     matchCount: validMatches.length,
     currentMatchIndex,
     isHighlighting,
-  }), [goToNextMatch, goToPrevMatch, validMatches.length, currentMatchIndex, isHighlighting])
+  }), [goToNextMatch, goToPrevMatch, validMatches.length, currentMatchIndex])
 
   // Notify parent when match info (count, index, highlighting state) changes
   useEffect(() => {

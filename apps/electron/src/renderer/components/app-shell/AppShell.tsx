@@ -739,8 +739,14 @@ function AppShellContent({
   const [chatMatchInfo, setChatMatchInfo] = React.useState<{ sessionId: string | null; count: number; index: number; isHighlighting?: boolean }>({ sessionId: null, count: 0, index: 0 })
 
   // Callback for immediate match info updates from ChatDisplay
+  // Memo guard prevents render feedback loops from identical updates
   const handleChatMatchInfoChange = React.useCallback((info: { sessionId: string | null; count: number; index: number; isHighlighting: boolean }) => {
-    setChatMatchInfo(info)
+    setChatMatchInfo(prev => {
+      if (prev.sessionId === info.sessionId && prev.count === info.count && prev.index === info.index && prev.isHighlighting === info.isHighlighting) {
+        return prev
+      }
+      return info
+    })
   }, [])
 
   // Reset match info when search is deactivated
