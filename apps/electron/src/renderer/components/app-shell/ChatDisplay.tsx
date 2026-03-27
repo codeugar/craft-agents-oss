@@ -822,11 +822,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // ---------------------------------------------------------------------------
 
   const MAX_HIGHLIGHT_RANGES = 5000
+  // Store computed ranges so the active-match effect can restyle without re-walking the DOM
+  const highlightRangesRef = React.useRef<Range[]>([])
 
+  // Effect 1: Walk DOM and collect highlight ranges when search/session/pagination changes
   useEffect(() => {
     const cssHighlights = cssHighlightsRef.current
+    highlightRangesRef.current = []
 
-    // Always clear previous highlights first
+    // Clear previous highlights
     try {
       cssHighlights?.delete('search-passive')
       cssHighlights?.delete('search-active')
@@ -840,9 +844,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     const rafId = requestAnimationFrame(() => {
       const allRanges: Range[] = []
-      // Map from global match index → Range for active-match highlighting
-      const rangeByGlobalIndex = new Map<number, Range>()
-      let globalIndex = 0
 
       turnRefs.current.forEach((container, turnKey) => {
         if (allRanges.length >= MAX_HIGHLIGHT_RANGES) return
@@ -910,8 +911,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
             if (startSet) {
               allRanges.push(range)
-              rangeByGlobalIndex.set(globalIndex, range)
-              globalIndex++
             }
           } catch {
             // Range creation can fail if node was removed during walk
@@ -921,28 +920,41 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         }
       })
 
+      // Store ranges for the active-match effect to use
+      highlightRangesRef.current = allRanges
+
       if (allRanges.length === 0) return
 
       try {
-        // Separate active match from passive matches for differentiated styling
-        const activeRange = rangeByGlobalIndex.get(currentMatchIndex)
-        const passiveRanges = activeRange
-          ? allRanges.filter(r => r !== activeRange)
-          : allRanges
-
-        if (passiveRanges.length > 0) {
-          cssHighlights.set('search-passive', new Highlight(...passiveRanges))
-        }
-        if (activeRange) {
-          cssHighlights.set('search-active', new Highlight(activeRange))
-        }
+        // Apply all ranges as passive initially — the active-match effect will restyle
+        cssHighlights.set('search-passive', new Highlight(...allRanges))
       } catch {
-        // Highlight API call failed — degrade gracefully to ring-only turn highlighting
+        // Highlight API call failed — degrade gracefully
       }
     })
 
     return () => cancelAnimationFrame(rafId)
-  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, visibleTurnCount, currentMatchIndex])
+  }, [searchQuery, isSearchActive, matchingTurnIds, session?.id, visibleTurnCount])
+
+  // Effect 2: Update active/passive highlight split when navigation index changes
+  // Lightweight — just reshuffles existing Range objects between two Highlight instances
+  useEffect(() => {
+    const cssHighlights = cssHighlightsRef.current
+    const allRanges = highlightRangesRef.current
+    if (!cssHighlights || allRanges.length === 0) return
+
+    try {
+      const activeRange = allRanges[currentMatchIndex]
+      if (activeRange) {
+        const passiveRanges = allRanges.filter((_, i) => i !== currentMatchIndex)
+        cssHighlights.set('search-passive', new Highlight(...passiveRanges))
+        cssHighlights.set('search-active', new Highlight(activeRange))
+      } else {
+        cssHighlights.set('search-passive', new Highlight(...allRanges))
+        cssHighlights.delete('search-active')
+      }
+    } catch { /* graceful degradation */ }
+  }, [currentMatchIndex])
 
   // Navigate to next match (no looping - stops at last match)
   const goToNextMatch = useCallback(() => {
