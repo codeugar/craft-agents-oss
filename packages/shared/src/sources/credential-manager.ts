@@ -379,7 +379,13 @@ export class SourceCredentialManager {
     source: LoadedSource,
     options: { callbackPort?: number; callbackUrl?: string },
   ): Promise<PreparedOAuthFlow> {
-    const { callbackPort, callbackUrl } = options;
+    const { callbackPort } = options;
+    // When callbackUrl is provided (WebUI), route through the relay so the
+    // redirect_uri registered with OAuth providers is always agents.craft.do.
+    // The relay bounces the callback to the actual server via return_to.
+    const callbackUrl = options.callbackUrl
+      ? `https://agents.craft.do/auth/callback?return_to=${encodeURIComponent(options.callbackUrl)}`
+      : undefined;
     const provider = this.detectProvider(source);
 
     switch (provider) {
