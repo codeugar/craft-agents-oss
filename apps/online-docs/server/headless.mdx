@@ -415,6 +415,31 @@ server {
 
 When using a reverse proxy, bind the server to localhost only (`CRAFT_RPC_HOST=127.0.0.1`) and let the proxy handle external access.
 
+### Cloudflare Tunnel
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) exposes your server over HTTPS without opening ports or managing certificates. Install `cloudflared` and run:
+
+```bash
+# Quick tunnel — instant HTTPS URL, no config needed
+cloudflared tunnel --url http://localhost:9100
+```
+
+This prints a `https://<random>.trycloudflare.com` URL you can open in any browser. For a permanent custom domain:
+
+```bash
+# One-time setup
+cloudflared tunnel login
+cloudflared tunnel create craft-agents
+cloudflared tunnel route dns craft-agents agents.yourdomain.com
+
+# Run the tunnel
+cloudflared tunnel run --url http://localhost:9100 craft-agents
+```
+
+<Note>
+Cloudflare Tunnel handles TLS termination automatically — no need to set `CRAFT_RPC_TLS_CERT` / `CRAFT_RPC_TLS_KEY`. Keep `CRAFT_RPC_HOST=127.0.0.1` so the server only listens locally.
+</Note>
+
 ### SSH tunnel
 
 For quick, ad-hoc access without any setup:
