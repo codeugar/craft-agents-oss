@@ -149,6 +149,8 @@ export interface WebuiHandler {
   fetch: (req: Request) => Promise<Response>
   /** Call on shutdown to release timers. */
   dispose: () => void
+  /** Inject OAuth callback deps after bootstrap (lazy wiring). */
+  setOAuthCallbackDeps: (deps: OAuthCallbackDeps) => void
 }
 
 /**
@@ -382,6 +384,9 @@ export function createWebuiHandler(options: WebuiHandlerOptions): WebuiHandler {
   return {
     fetch,
     dispose: () => clearInterval(cleanupTimer),
+    setOAuthCallbackDeps: (deps: OAuthCallbackDeps) => {
+      options.oauthCallbackDeps = deps
+    },
   }
 }
 
