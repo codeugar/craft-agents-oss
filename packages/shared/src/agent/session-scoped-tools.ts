@@ -104,6 +104,10 @@ export interface SessionScopedToolCallbacks {
   getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
   listSessionsFn?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
+  /** Resolve label display names to IDs. */
+  resolveLabelsFn?: (labels: string[]) => import('@craft-agent/session-tools-core').ResolvedLabelsResult;
+  /** Resolve a status display name to its ID. */
+  resolveStatusFn?: (status: string) => import('@craft-agent/session-tools-core').ResolvedStatusResult;
 }
 
 // Registry of callbacks keyed by sessionId
@@ -330,6 +334,14 @@ export function getSessionScopedTools(
       listSessions: (options) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         return callbacks?.listSessionsFn?.(options) ?? { total: 0, returned: 0, sessions: [] };
+      },
+      resolveLabels: (labels) => {
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        return callbacks?.resolveLabelsFn?.(labels) ?? { resolved: labels, unknown: [], available: [] };
+      },
+      resolveStatus: (status) => {
+        const callbacks = getSessionScopedToolCallbacks(sessionId);
+        return callbacks?.resolveStatusFn?.(status) ?? { resolved: status, available: [] };
       },
     });
 

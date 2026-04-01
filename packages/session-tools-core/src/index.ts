@@ -130,6 +130,8 @@ export type {
   SessionListItem,
   ListSessionsOptions,
   ListSessionsResult,
+  ResolvedLabelsResult,
+  ResolvedStatusResult,
 } from './context.ts';
 
 export { createNodeFileSystem } from './context.ts';

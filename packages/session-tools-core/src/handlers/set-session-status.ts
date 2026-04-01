@@ -15,8 +15,21 @@ export async function handleSetSessionStatus(
   }
 
   try {
-    ctx.setSessionStatus(args.status);
-    return successResponse(`Session status set to: ${args.status}`);
+    let status = args.status;
+
+    // Resolve display name → ID, reject unknown statuses
+    if (ctx.resolveStatus) {
+      const { resolved, available } = ctx.resolveStatus(status);
+      if (!resolved) {
+        return errorResponse(
+          `Unknown status: "${status}". Available status IDs: ${available.join(', ')}`
+        );
+      }
+      status = resolved;
+    }
+
+    ctx.setSessionStatus(status);
+    return successResponse(`Session status set to: ${status}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return errorResponse(`Failed to set status: ${message}`);

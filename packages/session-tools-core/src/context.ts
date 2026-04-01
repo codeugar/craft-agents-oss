@@ -322,6 +322,12 @@ export interface SessionToolContext {
   /** List sessions in the workspace with pagination. Injected by backend. */
   listSessions?(options?: ListSessionsOptions): ListSessionsResult;
 
+  /** Resolve label display names to IDs against configured labels. Injected by backend. */
+  resolveLabels?(labels: string[]): ResolvedLabelsResult;
+
+  /** Resolve a status display name to its ID against configured statuses. Injected by backend. */
+  resolveStatus?(status: string): ResolvedStatusResult;
+
   // ============================================================
   // Session Paths (for transform_data / render_template)
   // ============================================================
@@ -337,6 +343,28 @@ export interface SessionToolContext {
    * Used by transform_data and render_template for output files.
    */
   dataPath?: string;
+}
+
+// ============================================================
+// Session Self-Management Types — Resolution
+// ============================================================
+
+/** Result of resolving label names/IDs against configured labels. */
+export interface ResolvedLabelsResult {
+  /** Resolved label IDs (ready to store) */
+  resolved: string[];
+  /** Labels that couldn't be matched to any configured label */
+  unknown: string[];
+  /** All valid label IDs (for error messages) */
+  available: string[];
+}
+
+/** Result of resolving a status name/ID against configured statuses. */
+export interface ResolvedStatusResult {
+  /** Matched status ID, or null if unknown */
+  resolved: string | null;
+  /** All valid status IDs (for error messages) */
+  available: string[];
 }
 
 // ============================================================

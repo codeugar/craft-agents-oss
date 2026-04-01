@@ -15,11 +15,24 @@ export async function handleSetSessionLabels(
   }
 
   try {
-    ctx.setSessionLabels(args.labels);
+    let labels = args.labels;
+
+    // Resolve display names → IDs, reject unknown labels
+    if (ctx.resolveLabels) {
+      const { resolved, unknown, available } = ctx.resolveLabels(labels);
+      if (unknown.length > 0) {
+        return errorResponse(
+          `Unknown labels: ${unknown.join(', ')}. Available label IDs: ${available.join(', ')}`
+        );
+      }
+      labels = resolved;
+    }
+
+    ctx.setSessionLabels(labels);
     return successResponse(
-      args.labels.length === 0
+      labels.length === 0
         ? 'Labels cleared.'
-        : `Labels set: ${args.labels.join(', ')}`
+        : `Labels set: ${labels.join(', ')}`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
