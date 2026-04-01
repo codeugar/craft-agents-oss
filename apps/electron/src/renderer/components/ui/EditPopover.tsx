@@ -10,6 +10,7 @@
 import * as React from 'react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import i18n from 'i18next'
 import { GripHorizontal } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
@@ -98,6 +99,14 @@ export interface EditConfig {
   example: string
   /** Optional custom placeholder text - overrides the default "Describe what you'd like to change" */
   overridePlaceholder?: string
+  /** Translated display label for UI (resolved from displayLabelKey, falls back to context.label) */
+  displayLabel?: string
+  /** i18n key for the display label (translated for UI, keeps context.label in English for agent) */
+  displayLabelKey?: string
+  /** i18n key for the example text */
+  exampleKey?: string
+  /** i18n key for overridePlaceholder */
+  overridePlaceholderKey?: string
   /** Optional model for mini agent (e.g., 'haiku', 'sonnet') */
   model?: string
   /** Optional system prompt preset for mini agent (e.g., 'mini' for focused edits) */
@@ -124,6 +133,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: "Allow running 'make build' in Explore mode",
+    displayLabelKey: 'editPopover.label.permissionSettings',
+    exampleKey: 'editPopover.example.workspacePermissions',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -143,6 +154,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Allow git fetch command',
+    displayLabelKey: 'editPopover.label.defaultPermissions',
+    exampleKey: 'editPopover.example.defaultPermissions',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -162,6 +175,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add error handling guidelines',
+    displayLabelKey: 'editPopover.label.skillInstructions',
+    exampleKey: 'editPopover.example.skillInstructions',
     model: 'haiku',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -179,6 +194,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Update the skill description',
+    displayLabelKey: 'editPopover.label.skillMetadata',
+    exampleKey: 'editPopover.example.skillMetadata',
     model: 'haiku',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -196,6 +213,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add rate limit documentation',
+    displayLabelKey: 'editPopover.label.sourceDocumentation',
+    exampleKey: 'editPopover.example.sourceGuide',
     model: 'haiku',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -213,6 +232,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Update the display name',
+    displayLabelKey: 'editPopover.label.sourceConfiguration',
+    exampleKey: 'editPopover.example.sourceConfig',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -230,6 +251,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Allow list operations in Explore mode',
+    displayLabelKey: 'editPopover.label.sourcePermissions',
+    exampleKey: 'editPopover.example.sourcePermissions',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -249,6 +272,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Only allow read operations (list, get, search)',
+    displayLabelKey: 'editPopover.label.toolPermissions',
+    exampleKey: 'editPopover.example.sourceToolPermissions',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -267,6 +292,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add coding style preferences',
+    displayLabelKey: 'editPopover.label.preferencesNotes',
+    exampleKey: 'editPopover.example.preferencesNotes',
     model: 'haiku',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -287,6 +314,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'Connect to my Craft space',
     overridePlaceholder: 'What would you like to connect?',
+    displayLabelKey: 'editPopover.label.addSource',
+    exampleKey: 'editPopover.example.addSource',
+    overridePlaceholderKey: 'editPopover.placeholder.addSource',
   }),
 
   // Filter-specific add-source contexts: user is viewing a filtered list and wants to add that type
@@ -305,6 +335,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'Connect to the OpenAI API',
     overridePlaceholder: 'What API would you like to connect?',
+    displayLabelKey: 'editPopover.label.addApi',
+    exampleKey: 'editPopover.example.addSourceApi',
+    overridePlaceholderKey: 'editPopover.placeholder.addSourceApi',
   }),
 
   'add-source-mcp': (location) => ({
@@ -322,6 +355,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'Connect to Linear',
     overridePlaceholder: 'What MCP server would you like to connect?',
+    displayLabelKey: 'editPopover.label.addMcpServer',
+    exampleKey: 'editPopover.example.addSourceMcp',
+    overridePlaceholderKey: 'editPopover.placeholder.addSourceMcp',
   }),
 
   'add-source-local': (location) => ({
@@ -340,6 +376,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'Connect to my Obsidian vault',
     overridePlaceholder: 'What folder would you like to connect?',
+    displayLabelKey: 'editPopover.label.addLocalFolder',
+    exampleKey: 'editPopover.example.addSourceLocal',
+    overridePlaceholderKey: 'editPopover.placeholder.addSourceLocal',
   }),
 
   'add-skill': (location) => ({
@@ -356,6 +395,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'Review PRs following our code standards',
     overridePlaceholder: 'What should I learn to do?',
+    displayLabelKey: 'editPopover.label.addSkill',
+    exampleKey: 'editPopover.example.addSkill',
+    overridePlaceholderKey: 'editPopover.placeholder.addSkill',
   }),
 
   // Status configuration context
@@ -373,6 +415,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add a "Blocked" status',
+    displayLabelKey: 'editPopover.label.statusConfiguration',
+    exampleKey: 'editPopover.example.editStatuses',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -394,6 +438,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add a "Bug" label with red color',
+    displayLabelKey: 'editPopover.label.labelConfiguration',
+    exampleKey: 'editPopover.example.editLabels',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -414,6 +460,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add a rule to detect GitHub issue URLs',
+    displayLabelKey: 'editPopover.label.autoApplyRules',
+    exampleKey: 'editPopover.example.editAutoRules',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -435,6 +483,9 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     },
     example: 'A red "Bug" label',
     overridePlaceholder: 'What label would you like to create?',
+    displayLabelKey: 'editPopover.label.addLabel',
+    exampleKey: 'editPopover.example.addLabel',
+    overridePlaceholderKey: 'editPopover.placeholder.addLabel',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -456,6 +507,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add a "Stale" view for sessions inactive > 7 days',
+    displayLabelKey: 'editPopover.label.viewsConfiguration',
+    exampleKey: 'editPopover.example.editViews',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -477,6 +530,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Confirm clearly when done.',
     },
     example: 'Add an icon for my custom CLI tool "deploy"',
+    displayLabelKey: 'editPopover.label.toolIcons',
+    exampleKey: 'editPopover.example.editToolIcons',
     model: 'haiku',               // Use fast model for quick config edits
     systemPromptPreset: 'mini',   // Use focused mini prompt
     inlineExecution: true,        // Execute inline in popover
@@ -494,6 +549,8 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'After editing, confirm clearly what changed.',
     },
     example: 'Change the cron schedule to every 30 minutes',
+    displayLabelKey: 'editPopover.label.automationConfiguration',
+    exampleKey: 'editPopover.example.automationConfig',
     model: 'sonnet',
     systemPromptPreset: 'mini',
     inlineExecution: true,
@@ -514,7 +571,16 @@ export function getEditConfig(key: EditContextKey, location: string): EditConfig
   if (!factory) {
     throw new Error(`Unknown edit context key: ${key}. Add it to EDIT_CONFIGS in EditPopover.tsx`)
   }
-  return factory(location)
+  const config = factory(location)
+
+  // Resolve i18n keys to translated strings for UI display
+  // context.label remains in English for agent prompts; displayLabel is used in UI
+  return {
+    ...config,
+    displayLabel: config.displayLabelKey ? i18n.t(config.displayLabelKey) : config.context.label,
+    example: config.exampleKey ? i18n.t(config.exampleKey) : config.example,
+    overridePlaceholder: config.overridePlaceholderKey ? i18n.t(config.overridePlaceholderKey) : config.overridePlaceholder,
+  }
 }
 
 /**
@@ -560,6 +626,8 @@ export interface EditPopoverProps {
   secondaryAction?: SecondaryAction
   /** Optional custom placeholder - overrides the default "Describe what you'd like to change" */
   overridePlaceholder?: string
+  /** Translated display label for badges and empty state (falls back to context.label) */
+  displayLabel?: string
   /**
    * Controlled open state - when provided, the popover becomes controlled.
    * Use this when opening the popover programmatically (e.g., from context menus).
@@ -613,9 +681,10 @@ interface EditPromptResult {
  * // Without user instructions (for context menu - opens window with context pre-filled)
  * const { prompt, badges } = buildEditPrompt(context, "")
  */
-export function buildEditPrompt(context: EditContext, userInstructions: string): EditPromptResult {
+export function buildEditPrompt(context: EditContext, userInstructions: string, displayLabel?: string): EditPromptResult {
   // Build the metadata section (will be hidden by badge)
   // Simple structure: label (for display/context), file (where to edit), optional context
+  // context.label stays in English for the agent; displayLabel is translated for UI
   const metadataSection = `<edit_request>
 <label>${context.label}</label>
 <file>${context.filePath}</file>
@@ -623,8 +692,8 @@ ${context.context ? `<context>${context.context}</context>\n` : ''}</edit_reques
 
 `
 
-  // Badge display: just the label (no "Edit:" prefix for cleaner appearance)
-  const collapsedLabel = context.label
+  // Badge display: use translated displayLabel if available, else English label
+  const collapsedLabel = displayLabel || context.label
 
   // Full prompt = metadata + user instructions
   const prompt = metadataSection + userInstructions
@@ -656,6 +725,7 @@ export function EditPopover({
   align = 'end',
   secondaryAction,
   overridePlaceholder,
+  displayLabel,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   modal = false,
@@ -883,7 +953,7 @@ export function EditPopover({
   // Handle sending message from ChatDisplay (inline mode)
   // Creates hidden session on first message, then uses App context for sending
   const handleInlineSendMessage = useCallback(async (message: string) => {
-    const { prompt, badges } = buildEditPrompt(context, message)
+    const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
 
     // Create session on first message
     let sessionId = inlineSessionId
@@ -905,11 +975,11 @@ export function EditPopover({
     if (sessionId) {
       onSendMessage(sessionId, prompt, undefined, undefined, badges)
     }
-  }, [context, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
+  }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
 
   // Legacy mode: navigates to chat in the same window
   const handleLegacySendMessage = useCallback((message: string) => {
-    const { prompt, badges } = buildEditPrompt(context, message)
+    const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
     const encodedInput = encodeURIComponent(prompt)
     const encodedBadges = encodeURIComponent(JSON.stringify(badges))
 
@@ -921,7 +991,7 @@ export function EditPopover({
 
     window.electronAPI.openUrl(url)
     setOpen(false)
-  }, [context, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
+  }, [context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
 
   return (
     <>
@@ -988,7 +1058,7 @@ export function EditPopover({
                   onModelChange={setCurrentModel}
                   compactMode={true}
                   placeholder={placeholder}
-                  emptyStateLabel={context.label}
+                  emptyStateLabel={displayLabel || context.label}
                 />
               </div>
             </div>

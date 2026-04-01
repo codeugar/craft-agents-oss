@@ -283,12 +283,13 @@ export default function PermissionsSettingsPage() {
                     action={
                       (() => {
                         // Get centralized edit config - all strings defined in EditPopover.tsx
-                        const { context, example } = getEditConfig('workspace-permissions', activeWorkspace?.rootPath || '')
+                        const { context, example, displayLabel } = getEditConfig('workspace-permissions', activeWorkspace?.rootPath || '')
                         return (
                           <EditPopover
                             trigger={<EditButton />}
                             example={example}
                             context={context}
+                            displayLabel={displayLabel}
                             secondaryAction={activeWorkspace ? {
                               label: t("common.editFile"),
                               filePath: `${activeWorkspace.rootPath}/permissions.json`,
