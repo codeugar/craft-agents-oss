@@ -310,11 +310,11 @@ export interface SessionToolContext {
   // Session Self-Management (for set_session_labels, etc.)
   // ============================================================
 
-  /** Set labels on the current session. Injected by backend. */
-  setSessionLabels?(labels: string[]): void;
+  /** Set labels on a session. Defaults to current session if no ID given. Injected by backend. */
+  setSessionLabels?(sessionId: string | undefined, labels: string[]): void;
 
-  /** Set status on the current session. Injected by backend. */
-  setSessionStatus?(status: string): void;
+  /** Set status on a session. Defaults to current session if no ID given. Injected by backend. */
+  setSessionStatus?(sessionId: string | undefined, status: string): void;
 
   /** Get detailed info about a session. Defaults to current session if no ID given. Injected by backend. */
   getSessionInfo?(sessionId?: string): SessionInfo | null;

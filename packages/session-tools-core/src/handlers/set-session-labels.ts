@@ -3,6 +3,7 @@ import type { ToolResult } from '../types.ts';
 import { successResponse, errorResponse } from '../response.ts';
 
 export interface SetSessionLabelsArgs {
+  sessionId?: string;
   labels: string[];
 }
 
@@ -28,11 +29,12 @@ export async function handleSetSessionLabels(
       labels = resolved;
     }
 
-    ctx.setSessionLabels(labels);
+    ctx.setSessionLabels(args.sessionId, labels);
+    const target = args.sessionId ? `session ${args.sessionId}` : 'current session';
     return successResponse(
       labels.length === 0
-        ? 'Labels cleared.'
-        : `Labels set: ${labels.join(', ')}`
+        ? `Labels cleared on ${target}.`
+        : `Labels set on ${target}: ${labels.join(', ')}`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

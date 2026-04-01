@@ -96,10 +96,10 @@ export interface SessionScopedToolCallbacks {
    */
   browserPaneFns?: BrowserPaneFns;
 
-  /** Set labels on the current session. */
-  setSessionLabelsFn?: (labels: string[]) => void;
-  /** Set status on the current session. */
-  setSessionStatusFn?: (status: string) => void;
+  /** Set labels on a session (defaults to current). */
+  setSessionLabelsFn?: (sessionId: string | undefined, labels: string[]) => void;
+  /** Set status on a session (defaults to current). */
+  setSessionStatusFn?: (sessionId: string | undefined, status: string) => void;
   /** Get detailed info about a session (defaults to current). */
   getSessionInfoFn?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   /** List sessions in the workspace with pagination. */
@@ -319,13 +319,13 @@ export function getSessionScopedTools(
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onAuthRequest?.(request as AuthRequest);
       },
-      setSessionLabels: (labels: string[]) => {
+      setSessionLabels: (sid: string | undefined, labels: string[]) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        callbacks?.setSessionLabelsFn?.(labels);
+        callbacks?.setSessionLabelsFn?.(sid, labels);
       },
-      setSessionStatus: (status: string) => {
+      setSessionStatus: (sid: string | undefined, status: string) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        callbacks?.setSessionStatusFn?.(status);
+        callbacks?.setSessionStatusFn?.(sid, status);
       },
       getSessionInfo: (sid?: string) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);

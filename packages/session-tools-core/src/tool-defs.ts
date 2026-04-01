@@ -171,10 +171,12 @@ export const SpawnSessionSchema = z.object({
 
 // Session self-management tools
 export const SetSessionLabelsSchema = z.object({
-  labels: z.array(z.string()).describe('Labels to set on the current session (replaces all existing labels)'),
+  sessionId: z.string().optional().describe('Session ID to update. Omit to update the current session.'),
+  labels: z.array(z.string()).describe('Labels to set (replaces all existing labels)'),
 });
 
 export const SetSessionStatusSchema = z.object({
+  sessionId: z.string().optional().describe('Session ID to update. Omit to update the current session.'),
   status: z.string().describe('Status to set (e.g., "todo", "in_progress", "done")'),
 });
 
@@ -414,14 +416,15 @@ Only use 'attachments' for existing file paths on disk — the tool reads them a
 
 Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
 
-  set_session_labels: `Set labels on the current session. Replaces all existing labels.
+  set_session_labels: `Set labels on the current session or a specific session by ID. Replaces all existing labels.
 
-Use this to tag your session for filtering or to trigger label-based automations (LabelAdd/LabelRemove events).
-Pass an empty array to clear all labels.`,
+Use this to tag sessions for filtering or to trigger label-based automations (LabelAdd/LabelRemove events).
+Pass an empty array to clear all labels. Omit sessionId to target the current session.`,
 
-  set_session_status: `Set the status of the current session (e.g., "todo", "in_progress", "done").
+  set_session_status: `Set the status of the current session or a specific session by ID (e.g., "todo", "in_progress", "done").
 
-Use this to signal completion or trigger status-based automations (SessionStatusChange events).`,
+Use this to signal completion or trigger status-based automations (SessionStatusChange events).
+Omit sessionId to target the current session.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
