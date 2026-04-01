@@ -10,10 +10,10 @@ let initialized = false;
  * Call once at app startup. Pass `plugins` to add framework integrations
  * (e.g. initReactI18next for React apps, LanguageDetector for browser apps).
  */
-export function setupI18n(
+export async function setupI18n(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   plugins: any[] = [],
-): I18nInstance {
+): Promise<I18nInstance> {
   if (initialized) return i18n;
 
   let instance = i18n;
@@ -21,7 +21,7 @@ export function setupI18n(
     instance = instance.use(plugin);
   }
 
-  instance.init({
+  await instance.init({
     resources: {
       en: { translation: en },
       es: { translation: es },
@@ -29,6 +29,11 @@ export function setupI18n(
     fallbackLng: "en",
     supportedLngs: [...SUPPORTED_LANGUAGE_CODES],
     interpolation: { escapeValue: false },
+    detection: {
+      order: ["localStorage", "navigator"],
+      caches: ["localStorage"],
+      lookupLocalStorage: "i18nextLng",
+    },
   });
 
   initialized = true;

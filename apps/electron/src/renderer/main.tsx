@@ -14,7 +14,7 @@ import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
 
 // Initialize i18n before any React rendering
-setupI18n([LanguageDetector, initReactI18next])
+await setupI18n([LanguageDetector, initReactI18next])
 
 // Known-harmless console messages that should NOT be sent to Sentry.
 // These are dev-mode noise or expected warnings that aren't actionable.

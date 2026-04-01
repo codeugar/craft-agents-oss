@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { useSetAtom } from "jotai"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
+import { getDateLocale } from "@craft-agent/shared/i18n"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
@@ -96,10 +97,10 @@ interface SessionListProps {
 export type { SessionStatusId }
 
 // Note: uses date-fns format for non-today/yesterday dates; Today/Yesterday translated at render time
-function formatDateGroupLabel(date: Date, t: (key: string) => string): string {
+function formatDateGroupLabel(date: Date, t: (key: string) => string, lang: string): string {
   if (isToday(date)) return t('common.today')
   if (isYesterday(date)) return t('common.yesterday')
-  return format(date, 'MMM d')
+  return format(date, 'MMM d', { locale: getDateLocale(lang) })
 }
 
 /**
@@ -141,7 +142,7 @@ export function SessionList({
   hasPendingPrompt,
   activeChatMatchInfo,
 }: SessionListProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const setSendToWorkspace = useSetAtom(sendToWorkspaceAtom)
 
   // --- Selection (atom-backed, shared with ChatDisplay + BatchActionPanel) ---
@@ -344,7 +345,7 @@ export function SessionList({
       if (!groupsByKey.has(groupKey)) {
         groupsByKey.set(groupKey, {
           key: groupKey,
-          label: formatDateGroupLabel(day, t),
+          label: formatDateGroupLabel(day, t, i18n.language),
           items: [],
           collapsible: true,
         })
@@ -359,7 +360,7 @@ export function SessionList({
         const date = new Date(meta.key)
         groupsByKey.set(meta.key, {
           key: meta.key,
-          label: formatDateGroupLabel(date, t),
+          label: formatDateGroupLabel(date, t, i18n.language),
           items: [],
           collapsible: true,
           collapsedCount: meta.count,
