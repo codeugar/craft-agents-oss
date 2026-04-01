@@ -311,10 +311,10 @@ export interface SessionToolContext {
   // ============================================================
 
   /** Set labels on a session. Defaults to current session if no ID given. Injected by backend. */
-  setSessionLabels?(sessionId: string | undefined, labels: string[]): void;
+  setSessionLabels?(sessionId: string | undefined, labels: string[]): void | Promise<void>;
 
   /** Set status on a session. Defaults to current session if no ID given. Injected by backend. */
-  setSessionStatus?(sessionId: string | undefined, status: string): void;
+  setSessionStatus?(sessionId: string | undefined, status: string): void | Promise<void>;
 
   /** Get detailed info about a session. Defaults to current session if no ID given. Injected by backend. */
   getSessionInfo?(sessionId?: string): SessionInfo | null;

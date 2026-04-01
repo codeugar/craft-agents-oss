@@ -29,7 +29,7 @@ export async function handleSetSessionLabels(
       labels = resolved;
     }
 
-    ctx.setSessionLabels(args.sessionId, labels);
+    await ctx.setSessionLabels(args.sessionId, labels);
     const target = args.sessionId ? `session ${args.sessionId}` : 'current session';
     return successResponse(
       labels.length === 0

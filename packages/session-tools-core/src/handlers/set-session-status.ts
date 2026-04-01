@@ -29,7 +29,7 @@ export async function handleSetSessionStatus(
       status = resolved;
     }
 
-    ctx.setSessionStatus(args.sessionId, status);
+    await ctx.setSessionStatus(args.sessionId, status);
     const target = args.sessionId ? `session ${args.sessionId}` : 'current session';
     return successResponse(`Status set to "${status}" on ${target}.`);
   } catch (error) {

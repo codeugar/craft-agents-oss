@@ -82,8 +82,8 @@ export interface ClaudeContextOptions {
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
   // Session self-management callbacks (optional — injected by backend)
-  setSessionLabels?: (sessionId: string | undefined, labels: string[]) => void;
-  setSessionStatus?: (sessionId: string | undefined, status: string) => void;
+  setSessionLabels?: (sessionId: string | undefined, labels: string[]) => void | Promise<void>;
+  setSessionStatus?: (sessionId: string | undefined, status: string) => void | Promise<void>;
   getSessionInfo?: (sessionId?: string) => import('@craft-agent/session-tools-core').SessionInfo | null;
   listSessions?: (options?: import('@craft-agent/session-tools-core').ListSessionsOptions) => import('@craft-agent/session-tools-core').ListSessionsResult;
   resolveLabels?: (labels: string[]) => import('@craft-agent/session-tools-core').ResolvedLabelsResult;

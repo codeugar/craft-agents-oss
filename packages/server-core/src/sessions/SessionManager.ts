@@ -3430,8 +3430,8 @@ export class SessionManager implements ISessionManager {
         setSessionLabelsFn: (sessionId: string | undefined, labels: string[]) => {
           this.setSessionLabels(sessionId ?? managed.id, labels)
         },
-        setSessionStatusFn: (sessionId: string | undefined, status: string) => {
-          this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
+        setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
+          await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
         },
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
