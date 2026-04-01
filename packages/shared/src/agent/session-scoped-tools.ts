@@ -319,13 +319,13 @@ export function getSessionScopedTools(
         const callbacks = getSessionScopedToolCallbacks(sessionId);
         callbacks?.onAuthRequest?.(request as AuthRequest);
       },
-      setSessionLabels: (sid: string | undefined, labels: string[]) => {
+      setSessionLabels: async (sid: string | undefined, labels: string[]) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        callbacks?.setSessionLabelsFn?.(sid, labels);
+        await callbacks?.setSessionLabelsFn?.(sid, labels);
       },
-      setSessionStatus: (sid: string | undefined, status: string) => {
+      setSessionStatus: async (sid: string | undefined, status: string) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
-        callbacks?.setSessionStatusFn?.(sid, status);
+        await callbacks?.setSessionStatusFn?.(sid, status);
       },
       getSessionInfo: (sid?: string) => {
         const callbacks = getSessionScopedToolCallbacks(sessionId);
