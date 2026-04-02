@@ -578,8 +578,20 @@ async function ensureSession(): Promise<AgentSession> {
     try {
       const piModel = resolvePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
       if (piModel) {
-        sessionOptions.model = piModel;
-        setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
+        // Verify resolved model's provider is compatible with the authenticated provider.
+        // Without this, a model that resolves to a different provider (e.g. azure-openai-responses
+        // when authed as github-copilot) would cause "No API key found" at runtime.
+        const resolvedProvider = (piModel as any)?.provider;
+        const isCompatible = !initConfig.piAuth ||
+          resolvedProvider === initConfig.piAuth.provider ||
+          resolvedProvider === 'custom-endpoint';
+        if (isCompatible) {
+          sessionOptions.model = piModel;
+          setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
+        } else {
+          debugLog(`Model ${initConfig.model} resolved to incompatible provider ${resolvedProvider} (expected ${initConfig.piAuth!.provider}), skipping`);
+          setInterceptorApiHints(undefined);
+        }
       } else {
         setInterceptorApiHints(undefined);
       }
