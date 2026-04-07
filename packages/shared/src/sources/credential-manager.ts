@@ -52,6 +52,11 @@ import {
   type MicrosoftOAuthResult,
   type MicrosoftOAuthOptions,
 } from '../auth/microsoft-oauth.ts';
+import {
+  prepareGenericOAuth,
+  exchangeGenericOAuth,
+  refreshGenericOAuthToken,
+} from '../auth/generic-oauth.ts';
 import { debug } from '../utils/debug.ts';
 import { markSourceAuthenticated, loadSourceConfig, saveSourceConfig } from './storage.ts';
 
@@ -280,9 +285,11 @@ export class SourceCredentialManager {
     if (source.config.type === 'mcp') {
       type = mcp?.authType === 'bearer' ? 'source_bearer' : 'source_oauth';
     } else if (source.config.type === 'api') {
-      // OAuth providers (Google/Slack/Microsoft) store credentials as source_oauth.
-      // This separates HOW we get credentials (OAuth flow) from HOW we send them (Bearer header).
+      // Order matters: provider-specific checks first, then generic OAuth fallback
       if (isApiOAuthProvider(source.config.provider)) {
+        type = 'source_oauth';
+      } else if (api?.authType === 'oauth' && api?.oauth) {
+        // Generic OAuth API sources (e.g. GitHub, Linear)
         type = 'source_oauth';
       } else if (api?.authType === 'bearer') {
         type = 'source_bearer';
@@ -360,9 +367,11 @@ export class SourceCredentialManager {
    * Detect the OAuth provider for a source.
    */
   detectProvider(source: LoadedSource): OAuthProvider {
+    // Order matters: provider-specific checks first, then generic OAuth fallback
     if (source.config.provider === 'google') return 'google';
     if (source.config.provider === 'slack') return 'slack';
     if (source.config.provider === 'microsoft') return 'microsoft';
+    if (source.config.api?.authType === 'oauth' && source.config.api?.oauth) return 'generic';
     return 'mcp';
   }
 
@@ -463,6 +472,15 @@ export class SourceCredentialManager {
         break;
       }
 
+      case 'generic': {
+        const oauthConfig = source.config.api?.oauth;
+        if (!oauthConfig) {
+          throw new Error(`Source '${source.config.slug}' missing api.oauth config block`);
+        }
+        prepared = prepareGenericOAuth({ oauthConfig, callbackPort, callbackUrl: providerCallbackUrl });
+        break;
+      }
+
       case 'mcp': {
         if (!source.config.mcp?.url) {
           throw new Error('MCP URL not configured');
@@ -500,6 +518,9 @@ export class SourceCredentialManager {
         break;
       case 'microsoft':
         result = await exchangeMicrosoftOAuth(params);
+        break;
+      case 'generic':
+        result = await exchangeGenericOAuth(params);
         break;
       case 'mcp':
         result = await exchangeMcpOAuth(params);
@@ -560,6 +581,11 @@ export class SourceCredentialManager {
     // Microsoft APIs use Microsoft OAuth
     if (source.config.provider === 'microsoft') {
       return this.authenticateMicrosoft(source, cb, sessionContext);
+    }
+
+    // Generic OAuth (any API source with api.oauth config block)
+    if (source.config.api?.authType === 'oauth' && source.config.api?.oauth) {
+      return this.authenticateGeneric(source, cb, sessionContext);
     }
 
     // MCP OAuth flow
@@ -882,6 +908,11 @@ export class SourceCredentialManager {
       return this.refreshMicrosoft(source, cred);
     }
 
+    // Generic OAuth refresh — tokenUrl from config, clientId/clientSecret from stored credential falling back to config
+    if (source.config.api?.authType === 'oauth' && source.config.api?.oauth?.tokenUrl) {
+      return this.refreshGeneric(source, cred);
+    }
+
     // MCP refresh
     if (source.config.type === 'mcp' && source.config.mcp?.url) {
       return this.refreshMcp(source, cred);
@@ -972,6 +1003,65 @@ export class SourceCredentialManager {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       debug(`[SourceCredentialManager] Microsoft token refresh failed:`, error);
+      this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
+      return null;
+    }
+  }
+
+  /**
+   * Authenticate source via generic OAuth flow (CLI/test convenience wrapper).
+   * Note: The session-based UI flow goes through prepareOAuth() + exchangeAndStore() instead.
+   */
+  private async authenticateGeneric(
+    source: LoadedSource,
+    _cb: OAuthCallbacks,
+    _sessionContext?: OAuthSessionContext,
+  ): Promise<AuthResult> {
+    const oauthConfig = source.config.api?.oauth;
+    if (!oauthConfig) {
+      return { success: false, error: 'Source missing api.oauth config block' };
+    }
+
+    // CLI generic OAuth is not yet implemented — the desktop app handles this
+    // through the source_oauth_trigger → prepareOAuth → exchangeAndStore pipeline.
+    return { success: false, error: 'Generic OAuth CLI flow not supported — use the desktop app or source_oauth_trigger tool' };
+  }
+
+  /**
+   * Refresh generic OAuth token.
+   * tokenUrl from source config, clientId/clientSecret from stored credential falling back to config.
+   */
+  private async refreshGeneric(
+    source: LoadedSource,
+    cred: StoredCredential,
+  ): Promise<string | null> {
+    const oauthConfig = source.config.api?.oauth;
+    if (!oauthConfig?.tokenUrl) {
+      debug(`[SourceCredentialManager] No tokenUrl in config for generic OAuth refresh`);
+      this.markSourceNeedsReauth(source, 'Missing tokenUrl in api.oauth config');
+      return null;
+    }
+
+    try {
+      const result = await refreshGenericOAuthToken(
+        cred.refreshToken!,
+        oauthConfig.tokenUrl,
+        cred.clientId || oauthConfig.clientId,
+        cred.clientSecret || oauthConfig.clientSecret,
+      );
+
+      await this.save(source, {
+        ...cred,
+        value: result.accessToken,
+        refreshToken: result.refreshToken || cred.refreshToken,
+        expiresAt: result.expiresAt,
+      });
+
+      debug(`[SourceCredentialManager] Refreshed generic OAuth token for ${source.config.slug}`);
+      return result.accessToken;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      debug(`[SourceCredentialManager] Generic OAuth token refresh failed:`, error);
       this.markSourceNeedsReauth(source, `Token refresh failed: ${errorMsg}`);
       return null;
     }
