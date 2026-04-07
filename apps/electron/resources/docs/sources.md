@@ -511,7 +511,23 @@ Common multi-header use cases:
 
 **Generic OAuth (authType: 'oauth'):**
 
-For API sources that use OAuth 2.0 but aren't Google, Slack, or Microsoft, use generic OAuth. This supports any standard OAuth 2.0 provider (GitHub, Linear, Notion, Spotify, etc.).
+For API sources that use OAuth 2.0 but aren't Google, Slack, or Microsoft. Two modes:
+
+**Auto-discovery (recommended):** If the API supports RFC 9728 (OAuth Protected Resource Metadata), just set `authType: "oauth"` — endpoints and client registration are discovered automatically:
+
+```json
+{
+  "name": "Craft Connect",
+  "type": "api",
+  "provider": "craft",
+  "api": {
+    "baseUrl": "https://connect.craft.do/my/api/v1/",
+    "authType": "oauth"
+  }
+}
+```
+
+**Explicit config:** For APIs without standard OAuth metadata (GitHub, Linear, etc.), provide endpoints manually:
 
 ```json
 {
@@ -532,7 +548,7 @@ For API sources that use OAuth 2.0 but aren't Google, Slack, or Microsoft, use g
 }
 ```
 
-The `oauth` block fields:
+The `oauth` block fields (only needed for explicit config):
 - `authorizationUrl` (required): The OAuth authorization endpoint
 - `tokenUrl` (required): The OAuth token exchange endpoint
 - `clientId` (required): Your OAuth app's client ID

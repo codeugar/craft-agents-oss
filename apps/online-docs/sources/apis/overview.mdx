@@ -110,6 +110,27 @@ Appends credentials as a query parameter: `?api_key={token}`.
 
 ### OAuth 2.0
 
+Two modes: **auto-discovery** (simplest) and **explicit config** (for providers without standard metadata).
+
+#### Auto-discovery (recommended)
+
+If the API supports [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) (OAuth Protected Resource Metadata), just set `authType` — endpoints and client registration are handled automatically:
+
+```json
+{
+  "api": {
+    "baseUrl": "https://connect.craft.do/my/api/v1/",
+    "authType": "oauth"
+  }
+}
+```
+
+Craft Agents will hit the base URL, read the `WWW-Authenticate` header, discover OAuth metadata, dynamically register a client, and start the authorization flow. No `oauth` config block needed.
+
+#### Explicit config
+
+For providers that don't expose standard OAuth metadata (e.g. GitHub, Linear), provide the endpoints manually:
+
 ```json
 {
   "api": {
@@ -126,8 +147,6 @@ Appends credentials as a query parameter: `?api_key={token}`.
 }
 ```
 
-Full OAuth 2.0 flow with PKCE. Tokens are automatically refreshed and sent as `Authorization: Bearer {token}`. Works with any OAuth 2.0 provider — GitHub, Linear, Notion, Spotify, etc.
-
 | Field | Required | Description |
 |-------|----------|-------------|
 | `oauth.authorizationUrl` | Yes | OAuth authorization endpoint |
@@ -137,6 +156,8 @@ Full OAuth 2.0 flow with PKCE. Tokens are automatically refreshed and sent as `A
 | `oauth.scopes` | No | Requested OAuth scopes |
 | `oauth.audience` | No | Auth0-style audience parameter |
 | `oauth.extraParams` | No | Additional authorization URL params |
+
+Full OAuth 2.0 flow with PKCE in both modes. Tokens are automatically refreshed and sent as `Authorization: Bearer {token}`.
 
 <Tip>
 For Google, Microsoft, and Slack APIs, Craft Agents has built-in OAuth support with predefined scopes — you don't need to configure the `oauth` block manually. Just set the appropriate `provider` field.
