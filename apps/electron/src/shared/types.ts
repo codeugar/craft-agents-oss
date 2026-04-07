@@ -63,6 +63,10 @@ export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
 import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/types';
 export type { LoadedSkill, SkillMetadata };
 
+// Resource bundle types (cross-workspace export/import)
+import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult } from '@craft-agent/shared/resources';
+export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult };
+
 // LLM connection types
 import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings } from '@craft-agent/shared/config';
 export type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings };
@@ -628,6 +632,10 @@ export interface ElectronAPI {
 
   // Automations change listener
   onAutomationsChanged(callback: (workspaceId: string) => void): () => void
+
+  // Resources (cross-workspace export/import)
+  exportResources(workspaceId: string, options: ExportResourcesOptions): Promise<ExportResult>
+  importResources(workspaceId: string, bundle: ResourceBundle, mode: ResourceImportMode): Promise<ResourceImportResult>
 }
 
 // =============================================================================

@@ -372,4 +372,8 @@ export const CHANNEL_MAP = {
   getAutomationLastExecuted: invoke(RPC_CHANNELS.automations.GET_LAST_EXECUTED),
   replayAutomation: invoke(RPC_CHANNELS.automations.REPLAY),
   onAutomationsChanged: listener(RPC_CHANNELS.automations.CHANGED),
+
+  // Resources (cross-workspace export/import)
+  exportResources: invoke(RPC_CHANNELS.resources.EXPORT),
+  importResources: invoke(RPC_CHANNELS.resources.IMPORT),
 } satisfies ChannelMap
