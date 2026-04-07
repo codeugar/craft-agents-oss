@@ -385,7 +385,8 @@ async function buildServersFromSources(
   // Uses TokenRefreshManager for unified refresh logic (DRY principle)
   const getTokenForSource = (source: LoadedSource) => {
     const provider = source.config.provider
-    if (isApiOAuthProvider(provider)) {
+    // Provider-specific OAuth (Google, Slack, Microsoft) or generic OAuth (authType: 'oauth')
+    if (isApiOAuthProvider(provider) || source.config.api?.authType === 'oauth') {
       // Use TokenRefreshManager if provided, otherwise create temporary one
       const manager = tokenRefreshManager ?? new TokenRefreshManager(credManager, {
         log: (msg) => sessionLog.debug(msg),
