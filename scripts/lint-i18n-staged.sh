@@ -26,7 +26,7 @@ fi
 
 # Quick check: do any staged diffs contain potential UI text patterns?
 # If not, skip entirely — no point scanning files with only logic/style changes.
-has_text_changes="$(git diff --cached -U0 -- $staged_tsx | grep -E '^\+.*(tooltip="|placeholder="|description="|title="|toast\.(error|success|warning|info)\()' | head -1 || true)"
+has_text_changes="$(git diff --cached -U0 -- $staged_tsx | grep -E '^\+.*(tooltip="|placeholder="|description="|title="|toast\.(error|success|warning|info)\(|DropdownMenuItem|SimpleDropdownItem|<Button)' | head -1 || true)"
 if [ -z "$has_text_changes" ]; then
   exit 0
 fi
@@ -51,7 +51,12 @@ for file in $staged_tsx; do
   # Check for toast calls with hardcoded strings
   toast_matches="$(echo "$staged_content" | grep -nE "toast\.(error|success|warning|info)\(['\"][A-Z]" | grep -v 't(' || true)"
 
-  if [ -n "$matches" ] || [ -n "$title_matches" ] || [ -n "$toast_matches" ]; then
+  # Check for hardcoded text inside interactive elements (the biggest blind spot).
+  # Matches: >CapitalizedText with 2+ words< inside DropdownMenuItem, Button, etc.
+  # Excludes lines with {t( (already localized) and brand names.
+  jsx_text_matches="$(echo "$staged_content" | grep -nE '>([ ]*)[A-Z][a-z]+( [A-Za-z]+)+</' | grep -v '{t(' | grep -v 't(' | grep -v '^ *\*' | grep -v '^ *//' | grep -vE '>(Craft|Claude|Anthropic|OpenAI|MCP|Mermaid|LaTeX|Markdown|GitHub|WebSocket)<' || true)"
+
+  if [ -n "$matches" ] || [ -n "$title_matches" ] || [ -n "$toast_matches" ] || [ -n "$jsx_text_matches" ]; then
     found=1
     output+="
 ⚠️  $file"
@@ -61,6 +66,8 @@ $(echo "$matches" | sed 's/^/    /')"
 $(echo "$title_matches" | sed 's/^/    /')"
     [ -n "$toast_matches" ] && output+="
 $(echo "$toast_matches" | sed 's/^/    /')"
+    [ -n "$jsx_text_matches" ] && output+="
+$(echo "$jsx_text_matches" | sed 's/^/    /')"
   fi
 done
 

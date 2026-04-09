@@ -1431,6 +1431,7 @@ interface BranchDropdownProps {
 }
 
 function BranchDropdown({ onBranch }: BranchDropdownProps) {
+  const { t } = useTranslation()
   const handleBranchClick = () => {
     onBranch({ newPanel: true })
   }
@@ -1441,7 +1442,7 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
         <button
           type="button"
           aria-label="Branch options"
-          title="Branch"
+          title={t('chat.branch')}
           className={cn(
             "p-1 rounded-[4px] transition-colors select-none",
             "text-muted-foreground hover:text-foreground hover:bg-foreground/5",
@@ -2427,7 +2428,7 @@ export function ResponseCard({
               "text-muted-foreground/50 hover:text-foreground",
               "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
             )}
-            title="View Fullscreen"
+            title={t('common.viewFullscreen')}
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>

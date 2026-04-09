@@ -214,7 +214,7 @@ function TiptapCodeBlockView({ node, updateAttributes }: TiptapCodeBlockViewProp
           trigger={(
             <TiptapHoverActionButton
               active={languageDropdownOpen}
-              title="Code language"
+              title={t('editor.codeLanguage')}
               aria-label="Select code language"
               className="tiptap-code-block-language-trigger"
             >
@@ -229,7 +229,7 @@ function TiptapCodeBlockView({ node, updateAttributes }: TiptapCodeBlockViewProp
               value={languageFilter}
               onChange={(event) => setLanguageFilter(event.target.value)}
               onKeyDown={handleLanguageFilterKeyDown}
-              placeholder="Search languages..."
+              placeholder={t('editor.searchLanguages')}
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground placeholder:select-none"
             />
           </div>

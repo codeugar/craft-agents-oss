@@ -99,7 +99,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
       // Show terminal output in overlay
       onShowTerminalOverlay({
         command: task.intent || `${task.type} task`,
-        output: output || 'No output available yet',
+        output: output || t('chat.noOutputYet'),
         description: task.intent,
         toolType: 'bash', // Use 'bash' for both shell and agent tasks
       })
@@ -139,7 +139,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
 
           {/* Type badge */}
           <span className="opacity-60">
-            {task.type === 'agent' ? 'Task' : 'Shell'}
+            {task.type === 'agent' ? t('chat.taskTypeAgent') : t('chat.taskTypeShell')}
           </span>
 
           {/* Task ID (shortened) */}
@@ -160,7 +160,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
         {/* View Output - Primary action */}
         <StyledDropdownMenuItem onClick={handleViewOutput}>
           <ArrowUpRight />
-          View Output
+          {t('chat.viewOutput')}
         </StyledDropdownMenuItem>
 
         {/* Stop Task - Only show for shell tasks (inserts kill command into input) */}
@@ -169,7 +169,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
             <StyledDropdownMenuSeparator />
             <StyledDropdownMenuItem onClick={handleStopTask}>
               <Square />
-              Stop Task
+              {t('chat.stopTask')}
             </StyledDropdownMenuItem>
           </>
         )}
