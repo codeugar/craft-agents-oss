@@ -33,7 +33,6 @@ export const meta: DetailsPageMeta = {
 interface PreferencesFormState {
   name: string
   timezone: string
-  language: string
   city: string
   country: string
   notes: string
@@ -42,7 +41,6 @@ interface PreferencesFormState {
 const emptyFormState: PreferencesFormState = {
   name: '',
   timezone: '',
-  language: '',
   city: '',
   country: '',
   notes: '',
@@ -55,7 +53,6 @@ function parsePreferences(json: string): PreferencesFormState {
     return {
       name: prefs.name || '',
       timezone: prefs.timezone || '',
-      language: prefs.language || '',
       city: prefs.location?.city || '',
       country: prefs.location?.country || '',
       notes: prefs.notes || '',
@@ -71,7 +68,6 @@ function serializePreferences(state: PreferencesFormState): string {
 
   if (state.name) prefs.name = state.name
   if (state.timezone) prefs.timezone = state.timezone
-  if (state.language) prefs.language = state.language
 
   if (state.city || state.country) {
     const location: Record<string, string> = {}
@@ -216,14 +212,6 @@ export default function PreferencesPage() {
                 value={formState.timezone}
                 onChange={(v) => updateField('timezone', v)}
                 placeholder={t("settings.preferences.timezonePlaceholder")}
-                inCard
-              />
-              <SettingsInput
-                label={t("settings.preferences.language")}
-                description={t("settings.preferences.languageDesc")}
-                value={formState.language}
-                onChange={(v) => updateField('language', v)}
-                placeholder={t("settings.preferences.languagePlaceholder")}
                 inCard
               />
             </SettingsCard>
