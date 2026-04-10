@@ -228,53 +228,61 @@ export function SendToWorkspaceDialog({
           >
             Cancel
           </Button>
-          <Button
-            className="relative overflow-visible"
+          <TransferButton
             onClick={handleTransfer}
             disabled={!selectedWorkspaceId || isTransferring}
-          >
-            {isTransferring && (
-              <TransferProgressBorder progress={transferProgress ? transferProgress.sent / transferProgress.total : 0} />
-            )}
-            {isTransferring ? 'Sending…' : 'Send'}
-          </Button>
+            isTransferring={isTransferring}
+            progress={transferProgress ? transferProgress.sent / transferProgress.total : 0}
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-/** Purple LED border that traces around the button proportional to transfer progress */
-function TransferProgressBorder({ progress }: { progress: number }) {
+/** Send button with purple LED border that traces around it during transfer */
+function TransferButton({ onClick, disabled, isTransferring, progress }: {
+  onClick: () => void
+  disabled: boolean
+  isTransferring: boolean
+  progress: number
+}) {
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const rectRef = useRef<SVGRectElement>(null)
   const [perim, setPerim] = useState(0)
 
   useEffect(() => {
-    if (rectRef.current) {
+    if (rectRef.current && isTransferring) {
       setPerim(rectRef.current.getTotalLength())
     }
-  }, [])
+  }, [isTransferring])
 
   return (
-    <svg
-      className="absolute pointer-events-none z-10"
-      style={{ inset: '-2px', width: 'calc(100% + 4px)', height: 'calc(100% + 4px)', overflow: 'visible' }}
-    >
-      <rect
-        ref={rectRef}
-        x="1" y="1"
-        width="calc(100% - 2px)" height="calc(100% - 2px)"
-        rx="9" ry="9"
-        fill="none"
-        stroke="#8B5CF6"
-        strokeWidth="2"
-        strokeDasharray={perim > 0 ? `${progress * perim} ${perim}` : '0 999'}
-        strokeDashoffset="0"
-        style={{
-          transition: 'stroke-dasharray 0.2s ease-out',
-          filter: 'drop-shadow(0 0 3px #8B5CF6) drop-shadow(0 0 6px rgba(139,92,246,0.3))',
-        }}
-      />
-    </svg>
+    <div ref={wrapperRef} className="relative">
+      <Button onClick={onClick} disabled={disabled}>
+        {isTransferring ? 'Sending...' : 'Send'}
+      </Button>
+      {isTransferring && (
+        <svg
+          className="absolute pointer-events-none"
+          style={{ inset: '-3px', width: 'calc(100% + 6px)', height: 'calc(100% + 6px)', overflow: 'visible' }}
+        >
+          <rect
+            ref={rectRef}
+            x="1.5" y="1.5"
+            width="calc(100% - 3px)" height="calc(100% - 3px)"
+            rx="10" ry="10"
+            fill="none"
+            stroke="#8B5CF6"
+            strokeWidth="2"
+            strokeDasharray={perim > 0 ? `${progress * perim} ${perim}` : '0 999'}
+            style={{
+              transition: 'stroke-dasharray 0.2s ease-out',
+              filter: 'drop-shadow(0 0 3px #8B5CF6) drop-shadow(0 0 6px rgba(139,92,246,0.3))',
+            }}
+          />
+        </svg>
+      )}
+    </div>
   )
 }
