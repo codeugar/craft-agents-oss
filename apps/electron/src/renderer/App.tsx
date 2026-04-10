@@ -1035,10 +1035,30 @@ export default function App() {
           console.info(`[App] Stale reconnect recovery complete — active session has ${session.messages?.length ?? 0} messages`)
         }
       }
+
+      // Debug: verify store has the data after recovery
+      const debugIds = store.get(sessionIdsAtom)
+      const debugMeta = store.get(sessionMetaMapAtom)
+      console.warn(`[Debug:reconnect] Store state after recovery — sessionIdsAtom: ${debugIds.length} ids, sessionMetaMapAtom: ${debugMeta.size} entries`)
+      if (sessionSelection.selected) {
+        const debugSession = store.get(sessionAtomFamily(sessionSelection.selected))
+        console.warn(`[Debug:reconnect] Active session atom: ${debugSession?.messages?.length ?? 0} messages`)
+      }
     })
 
     return cleanup
   }, [store, sessionSelection.selected, refreshSessionFromServer, refreshSessionListMetadataFromServer])
+
+  // Debug: monitor if Jotai subscriptions fire after store.set()
+  useEffect(() => {
+    const unsub1 = store.sub(sessionIdsAtom, () => {
+      console.warn('[Debug:sub] sessionIdsAtom subscription fired!', store.get(sessionIdsAtom).length, 'ids')
+    })
+    const unsub2 = store.sub(sessionMetaMapAtom, () => {
+      console.warn('[Debug:sub] sessionMetaMapAtom subscription fired!', store.get(sessionMetaMapAtom).size, 'entries')
+    })
+    return () => { unsub1(); unsub2() }
+  }, [store])
 
   // Listen for menu bar events
   useEffect(() => {
