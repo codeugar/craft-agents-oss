@@ -408,6 +408,11 @@ client.onConnectionStateChanged((state) => {
   ipcRenderer.invoke('server:invokeOnServer', url, token, channel, ...args)
 ;(api as ElectronAPI).transferSessionToWorkspace = (sessionId: string, targetWorkspaceId: string) =>
   ipcRenderer.invoke('session:transferToRemoteWorkspace', sessionId, targetWorkspaceId)
+;(api as ElectronAPI).onTransferProgress = (cb: (progress: { sent: number; total: number }) => void) => {
+  const handler = (_e: any, progress: { sent: number; total: number }) => cb(progress)
+  ipcRenderer.on('transfer:progress', handler)
+  return () => { ipcRenderer.removeListener('transfer:progress', handler) }
+}
 
 // System warnings — expose env-based flags set during main process startup
 // (preload-only: reads env var directly, no IPC round-trip needed)

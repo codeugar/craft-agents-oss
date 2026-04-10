@@ -53,7 +53,18 @@ export function SendToWorkspaceDialog({
   const { t } = useTranslation()
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [isTransferring, setIsTransferring] = useState(false)
+  const [transferProgress, setTransferProgress] = useState<{ sent: number; total: number } | null>(null)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
+
+  // Listen for chunk upload progress from main process
+  useEffect(() => {
+    if (!isTransferring) {
+      setTransferProgress(null)
+      return
+    }
+    const cleanup = window.electronAPI.onTransferProgress(setTransferProgress)
+    return cleanup
+  }, [isTransferring])
 
   // Health check results for remote workspaces (checked on dialog open)
   const [remoteHealthMap, setRemoteHealthMap] = useState<Map<string, 'ok' | 'error' | 'checking'>>(new Map())
@@ -221,7 +232,28 @@ export function SendToWorkspaceDialog({
             onClick={handleTransfer}
             disabled={!selectedWorkspaceId || isTransferring}
           >
-            {isTransferring ? 'Sending...' : 'Send'}
+            {isTransferring ? (
+              <span className="flex items-center gap-2">
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20">
+                  {/* Background ring */}
+                  <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" strokeWidth="2" opacity="0.2" />
+                  {/* Progress arc — fills clockwise as chunks are sent */}
+                  <circle
+                    cx="10" cy="10" r="8" fill="none"
+                    stroke="#8B5CF6"
+                    strokeWidth="2.5"
+                    strokeDasharray={`${(transferProgress ? transferProgress.sent / transferProgress.total : 0) * 50.26} 50.26`}
+                    strokeLinecap="round"
+                    transform="rotate(-90 10 10)"
+                    style={{ transition: 'stroke-dasharray 0.15s ease-out' }}
+                  />
+                </svg>
+                {transferProgress
+                  ? `${Math.round((transferProgress.sent / transferProgress.total) * 100)}%`
+                  : 'Sending…'
+                }
+              </span>
+            ) : 'Send'}
           </Button>
         </DialogFooter>
       </DialogContent>

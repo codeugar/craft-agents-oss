@@ -246,6 +246,7 @@ export interface ElectronAPI {
 
   // Remote session transfer (main-process orchestrated, supports chunked upload)
   transferSessionToWorkspace(sessionId: string, targetWorkspaceId: string): Promise<{ sessionId: string }>
+  onTransferProgress(callback: (progress: { sent: number; total: number }) => void): () => void
 
   // Session export/import (cross-workspace transfer)
   exportSession(sessionId: string): Promise<unknown>

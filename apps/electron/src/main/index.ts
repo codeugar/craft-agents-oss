@@ -753,6 +753,9 @@ app.whenReady().then(async () => {
               'sessions:import',
               [remoteWorkspaceId, bundle, 'fork'],
               1,  // bundle is args[1]
+              (sent, total) => {
+                try { _event.sender.send('transfer:progress', { sent, total }) } catch { /* renderer may be gone */ }
+              },
             )
           }
         } finally {

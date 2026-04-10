@@ -35,6 +35,7 @@ const CHUNK_RETRY_DELAY = 1000
  * @param channel     The original RPC channel (e.g. 'sessions:import')
  * @param args        The original arguments array
  * @param largeArgIndex  Which argument is the large payload (will be chunked)
+ * @param onProgress  Optional callback with (sentChunks, totalChunks) for UI progress
  * @returns           The result from the remote handler (same as a direct invoke)
  */
 export async function invokeChunked(
@@ -42,6 +43,7 @@ export async function invokeChunked(
   channel: string,
   args: any[],
   largeArgIndex: number,
+  onProgress?: (sent: number, total: number) => void,
 ): Promise<any> {
   // 1. Serialize the large argument to JSON, then to raw bytes
   const json = JSON.stringify(args[largeArgIndex])
@@ -96,6 +98,8 @@ export async function invokeChunked(
     if (lastError) {
       throw new Error(`Chunk ${i + 1}/${chunks.length} failed after ${MAX_CHUNK_RETRIES} attempts: ${lastError.message}`)
     }
+
+    onProgress?.(i + 1, chunks.length)
 
     if ((i + 1) % 10 === 0 || i === chunks.length - 1) {
       console.log(`[ChunkedRPC] Sent chunk ${i + 1}/${chunks.length}`)
