@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Dialog,
@@ -37,16 +37,6 @@ export function RenameDialog({
   // Register with modal context so X button / Cmd+W closes this dialog first
   useRegisterModal(open, () => onOpenChange(false))
 
-  // Focus input after dialog opens (avoids Radix Dialog focus race condition)
-  useEffect(() => {
-    if (open) {
-      const timer = setTimeout(() => {
-        inputRef.current?.focus()
-      }, 0)
-      return () => clearTimeout(timer)
-    }
-  }, [open])
-
   const handleSubmit = () => {
     if (value.trim()) {
       onSubmit()
@@ -55,7 +45,11 @@ export function RenameDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[400px]" onOpenAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent className="sm:max-w-[400px]" onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          inputRef.current?.focus()
+          inputRef.current?.select()
+        }}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
