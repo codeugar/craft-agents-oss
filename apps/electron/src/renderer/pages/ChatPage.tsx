@@ -329,7 +329,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Session action handlers
   const handleRename = React.useCallback(() => {
     setRenameName(displayTitle)
-    setRenameDialogOpen(true)
+    requestAnimationFrame(() => {
+      setRenameDialogOpen(true)
+    })
   }, [displayTitle])
 
   const handleRenameSubmit = React.useCallback(() => {
