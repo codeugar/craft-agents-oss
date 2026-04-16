@@ -113,8 +113,14 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         updates.authType = (isLoopbackBaseUrl(setup.baseUrl ?? undefined) && !setup.credential)
           ? 'none'
           : 'api_key_with_endpoint'
-        // Keep provider hint in lockstep with selected protocol toggle.
-        updates.piAuthProvider = customEndpoint.api === 'anthropic-messages' ? 'anthropic' : 'openai'
+        if (isLoopbackBaseUrl(setup.baseUrl ?? undefined)) {
+          // Local models use the OpenAI protocol but aren't "OpenAI".
+          // Leave piAuthProvider unset → generic icon in the selector.
+          updates.name = 'Local Model'
+        } else {
+          // Remote custom endpoints: keep provider hint for correct icon.
+          updates.piAuthProvider = customEndpoint.api === 'anthropic-messages' ? 'anthropic' : 'openai'
+        }
       } else if (setup.baseUrl !== undefined) {
         // Base URL was explicitly updated without custom protocol config.
         // Treat this as non-custom mode and clear stale custom endpoint metadata.

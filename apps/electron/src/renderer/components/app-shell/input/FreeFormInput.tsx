@@ -57,7 +57,7 @@ import { isMac, PATH_SEP, getPathBasename } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ANTHROPIC_MODELS, getModelShortName, getModelDisplayName, getModelContextWindow, type ModelDefinition } from '@config/models'
-import { resolveEffectiveConnectionSlug, isCompatProvider } from '@config/llm-connections'
+import { resolveEffectiveConnectionSlug, isCompatProvider, isLocalConnection } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
@@ -359,6 +359,7 @@ export function FreeFormInput({
   const connectionsByProvider = React.useMemo(() => {
     const groups: Record<string, typeof llmConnections> = {
       'Anthropic': [],
+      'Local': [],
       'Craft Agents Backend': [],
     }
     for (const conn of llmConnections) {
@@ -366,6 +367,8 @@ export function FreeFormInput({
       // Group by SDK: only 'anthropic' uses Claude Agent SDK
       if (provider === 'anthropic') {
         groups['Anthropic'].push(conn)
+      } else if (provider === 'pi_compat' && isLocalConnection(conn)) {
+        groups['Local'].push(conn)
       } else if (provider === 'pi' || provider === 'pi_compat') {
         groups['Craft Agents Backend'].push(conn)
       }
