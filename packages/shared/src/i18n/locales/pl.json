@@ -820,7 +820,7 @@
   "settings.messaging.whatsapp.desktopApprovalsOnly": "Approvals happen in the desktop app",
   "settings.messaging.whatsapp.disable": "Disable",
   "settings.messaging.whatsapp.disconnected": "WhatsApp rozłączony",
-  "settings.messaging.whatsapp.forget": "Forget Device",
+  "settings.messaging.whatsapp.forget": "Disconnect",
   "settings.messaging.whatsapp.reconnect": "Reconnect",
   "settings.messaging.whatsapp.title": "WhatsApp",
   "settings.messaging.whatsapp.unofficialApiShort": "Korzysta z nieoficjalnego API — na własne ryzyko",
