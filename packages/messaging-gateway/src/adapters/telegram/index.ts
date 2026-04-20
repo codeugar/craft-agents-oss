@@ -500,4 +500,15 @@ export class TelegramAdapter implements PlatformAdapter {
       messageId: String(sent.message_id),
     }
   }
+
+  async clearButtons(channelId: string, messageId: string): Promise<void> {
+    if (!this.bot) return
+    try {
+      await this.bot.api.editMessageReplyMarkup(Number(channelId), Number(messageId), {
+        reply_markup: { inline_keyboard: [] },
+      })
+    } catch {
+      // Non-fatal: message may have been deleted by the user or already cleared.
+    }
+  }
 }

@@ -32,6 +32,7 @@ import type {
   InlineButton,
   ResponseMode,
 } from './types'
+import type { PlanTokenRegistry } from './plan-tokens'
 
 /** Session event shape (subset of the full SessionEvent from server-core). */
 export interface SessionEvent {
@@ -78,9 +79,33 @@ const BACKOFF_RESET_MS = 30_000
 
 const THINKING_LABEL = '💭 thinking…'
 
+/**
+ * Max characters rendered inline with the buttons before we spill the full
+ * plan into an attached file. Telegram's hard cap is 4096 — leaving margin
+ * for the header, buttons, and formatting.
+ */
+const PLAN_INLINE_LIMIT = 3500
+
+/** Hook the renderer calls when it wants to remember a plan message id. */
+export type PlanMessageRecorder = (
+  sessionId: string,
+  token: string,
+  messageId: string,
+) => void
+
 export class Renderer {
   /** Per-binding render state. Keyed by binding.id */
   private states = new Map<string, RenderState>()
+  private readonly planTokens: PlanTokenRegistry | undefined
+  private readonly recordPlanMessage: PlanMessageRecorder | undefined
+
+  constructor(deps?: {
+    planTokens?: PlanTokenRegistry
+    recordPlanMessage?: PlanMessageRecorder
+  }) {
+    this.planTokens = deps?.planTokens
+    this.recordPlanMessage = deps?.recordPlanMessage
+  }
 
   private getState(bindingId: string): RenderState {
     let state = this.states.get(bindingId)
@@ -118,7 +143,7 @@ export class Renderer {
       return
     }
     if (event.type === 'plan_submitted') {
-      await this.handlePlanSubmitted(binding, adapter)
+      await this.handlePlanSubmitted(event, binding, adapter)
       return
     }
     if (event.type === 'error' || event.type === 'typed_error') {
@@ -461,14 +486,73 @@ Approve in the desktop app to continue.`,
   }
 
   private async handlePlanSubmitted(
+    event: SessionEvent,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
-    if (binding.platform !== 'whatsapp') return
-    await adapter.sendText(
-      binding.channelId,
-      '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
-    )
+    // WhatsApp: no interactive buttons yet — keep the generic pointer.
+    if (binding.platform === 'whatsapp') {
+      await adapter.sendText(
+        binding.channelId,
+        '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
+      )
+      return
+    }
+
+    if (binding.platform !== 'telegram') return
+
+    // Token registry is optional for backwards compatibility; without it we
+    // degrade to the generic pointer so Telegram still sees *something*.
+    if (!this.planTokens) {
+      await adapter.sendText(
+        binding.channelId,
+        '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
+      )
+      return
+    }
+
+    const planMessage = event.message as
+      | { planPath?: string; content?: string }
+      | undefined
+    const planPath = planMessage?.planPath ?? ''
+    const planContent = planMessage?.content ?? ''
+
+    const token = this.planTokens.issue(binding.sessionId, planPath)
+    const buttons: InlineButton[] = [
+      { id: `plan:accept:${token}`, label: '✅ Accept plan' },
+      { id: `plan:compact:${token}`, label: '♻️ Accept & compact' },
+    ]
+
+    const header = '📝 *Plan ready for review*'
+    const fitsInline = planContent.length > 0 && planContent.length <= PLAN_INLINE_LIMIT
+
+    const bodyText = fitsInline
+      ? `${header}\n\n${planContent}`
+      : planContent.length === 0
+        ? `${header}\n\nOpen the desktop app to see the plan, or use the buttons below to accept.`
+        : `${header}\n\n${firstLines(planContent, 15)}\n\n…full plan attached below.`
+
+    try {
+      const sent = await adapter.sendButtons(binding.channelId, bodyText, buttons)
+      this.recordPlanMessage?.(binding.sessionId, token, sent.messageId)
+
+      if (!fitsInline && planContent.length > 0) {
+        await adapter.sendFile(
+          binding.channelId,
+          Buffer.from(planContent, 'utf-8'),
+          'plan.md',
+          'Full plan',
+        )
+      }
+    } catch (err) {
+      // Fall back to a plain text notice so the user at least knows.
+      await adapter.sendText(
+        binding.channelId,
+        `📝 A plan is ready for review (couldn't render inline: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }). Open the desktop app to approve it.`,
+      )
+    }
   }
 
   private async handleError(
@@ -621,4 +705,10 @@ function formatPermissionText(request: PermissionRequest): string {
   if (request.command) lines.push(`Command: ${request.command}`)
   if (request.description) lines.push(request.description)
   return lines.join('\n')
+}
+
+function firstLines(text: string, n: number): string {
+  const lines = text.split('\n')
+  if (lines.length <= n) return text
+  return lines.slice(0, n).join('\n')
 }

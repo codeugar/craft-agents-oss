@@ -158,6 +158,14 @@ export interface PlatformAdapter {
   sendTyping(channelId: string): Promise<void>
   sendFile(channelId: string, file: Buffer, filename: string, caption?: string): Promise<SentMessage>
 
+  /**
+   * Clear the inline keyboard on a previously-sent message. Optional because
+   * only platforms with inline-button support (currently Telegram) need it.
+   * Errors are the caller's concern — most implementations should swallow
+   * "message can't be edited" since it's non-fatal.
+   */
+  clearButtons?(channelId: string, messageId: string): Promise<void>
+
   /** Webhook handler for headless server (Telegram only). */
   handleWebhook?(request: Request): Promise<Response>
 }

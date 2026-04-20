@@ -169,6 +169,14 @@ const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
 const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
 
+/**
+ * Text sent to the session when a plan is approved from outside the desktop
+ * UI (e.g. Telegram button). Mirrors the English `plan.approved` i18n key
+ * used by the desktop flow at `plan-approval-message.ts`. Not localized —
+ * the agent reads this, not the end user.
+ */
+const PLAN_APPROVAL_MESSAGE = 'Plan approved, please execute.'
+
 // validateSpawnAttachmentPath removed — use shared validateFilePath from @craft-agent/server-core/handlers
 
 const PI_TURN_ANCHORS_VERSION = 1
@@ -3871,6 +3879,27 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return null
     return getStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+  }
+
+  /**
+   * Dispatch a plan approval for a session, equivalent to the desktop
+   * "Accept plan" button. Switches the session out of Explore mode (safe)
+   * into allow-all if needed so the plan can execute without per-tool
+   * prompts, then sends the approval message through the normal sendMessage
+   * path.
+   */
+  async acceptPlan(sessionId: string, _planPath?: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`acceptPlan: session ${sessionId} not found`)
+      return
+    }
+
+    if (managed.permissionMode === 'safe') {
+      this.setSessionPermissionMode(sessionId, 'allow-all')
+    }
+
+    await this.sendMessage(sessionId, PLAN_APPROVAL_MESSAGE)
   }
 
   // ============================================

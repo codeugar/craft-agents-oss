@@ -3,7 +3,7 @@
  */
 
 import * as React from 'react'
-import { AlertTriangle, Check } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -91,13 +91,6 @@ export function WhatsAppConnectDialog({ open, onOpenChange, onConnected }: Whats
           <DialogTitle>{t('dialog.whatsapp.title')}</DialogTitle>
           <DialogDescription>{t('dialog.whatsapp.description')}</DialogDescription>
         </DialogHeader>
-
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <div>{t('dialog.whatsapp.unofficialApi')}</div>
-          </div>
-        </div>
 
         <div className="rounded-md border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-800 dark:text-sky-200">
           {t('dialog.whatsapp.selfChatHint')}

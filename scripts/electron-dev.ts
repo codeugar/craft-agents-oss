@@ -322,23 +322,36 @@ async function buildPiAgentServer(): Promise<{ success: boolean; error?: string 
   }
 }
 
-// Verify a JavaScript file exists and has content.
-// Note: We don't use `node --check` because it evaluates module-level code,
-// which fails for Electron-specific packages like @sentry/electron that
-// require Electron's runtime. esbuild's successful build already guarantees
-// valid JavaScript syntax.
+// Verify a built JavaScript bundle is parseable. `node --check` performs
+// syntax-only validation — it does NOT execute module-level code or resolve
+// `require()`, so Electron-specific top-level requires (e.g. @sentry/electron)
+// are safe. This catches truncated writes, FS corruption, and edge cases that
+// esbuild's build-success signal doesn't cover.
 async function verifyJsFile(filePath: string): Promise<{ valid: boolean; error?: string }> {
   if (!existsSync(filePath)) {
     return { valid: false, error: "File does not exist" };
   }
 
-  // Check file has content
   const stats = statSync(filePath);
   if (stats.size === 0) {
     return { valid: false, error: "File is empty" };
   }
 
-  return { valid: true };
+  try {
+    const proc = spawn({
+      cmd: ["node", "--check", filePath],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      return { valid: false, error: stderr.trim() || `node --check exited ${exitCode}` };
+    }
+    return { valid: true };
+  } catch (err) {
+    return { valid: false, error: String(err) };
+  }
 }
 
 // Wait for file to stabilize (no size changes)

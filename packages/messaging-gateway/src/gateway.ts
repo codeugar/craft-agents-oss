@@ -12,6 +12,7 @@ import { BindingStore } from './binding-store'
 import { Router } from './router'
 import { Commands, type PairingCodeConsumer } from './commands'
 import { Renderer, type SessionEvent } from './renderer'
+import { PlanTokenRegistry } from './plan-tokens'
 import type {
   PlatformAdapter,
   PlatformType,
@@ -49,6 +50,30 @@ export interface GatewayOptions {
   logger?: MessagingLogger
 }
 
+/**
+ * Per-plan metadata tracked while a plan approval button is live on a chat.
+ * Used to disable the inline keyboard after a tap. Keyed by plan token.
+ */
+interface PlanMessageRecord {
+  bindingId: string
+  platform: PlatformType
+  channelId: string
+  messageId: string
+}
+
+interface PendingCompactAccept {
+  token: string
+  sessionId: string
+  bindingId: string
+  platform: PlatformType
+  channelId: string
+  messageId: string
+  planPath: string
+  createdAt: number
+}
+
+const COMPACT_ACCEPT_TTL_MS = 10 * 60 * 1000
+
 export class MessagingGateway {
   private readonly sessionManager: ISessionManager
   private readonly workspaceId: string
@@ -56,6 +81,9 @@ export class MessagingGateway {
   private readonly router: Router
   private readonly commands: Commands
   private readonly renderer: Renderer
+  private readonly planTokens: PlanTokenRegistry
+  private readonly planMessages = new Map<string, PlanMessageRecord>()
+  private readonly pendingCompactAccepts = new Map<string, PendingCompactAccept>()
   private readonly adapters = new Map<PlatformType, PlatformAdapter>()
   private readonly log: MessagingLogger
   private started = false
@@ -88,7 +116,23 @@ export class MessagingGateway {
       this.commands,
       this.log.child({ component: 'router' }),
     )
-    this.renderer = new Renderer()
+    this.planTokens = new PlanTokenRegistry()
+    this.renderer = new Renderer({
+      planTokens: this.planTokens,
+      recordPlanMessage: (sessionId, token, messageId) => {
+        // Resolve the binding for attribution so we can later call
+        // adapter.clearButtons() without re-scanning.
+        const bindings = this.bindingStore.findBySession(sessionId)
+        const binding = bindings.find((b) => b.platform === 'telegram')
+        if (!binding) return
+        this.planMessages.set(token, {
+          bindingId: binding.id,
+          platform: binding.platform,
+          channelId: binding.channelId,
+          messageId,
+        })
+      },
+    })
   }
 
   // -------------------------------------------------------------------------
@@ -205,6 +249,16 @@ export class MessagingGateway {
     const event = args[0] as SessionEvent | undefined
     if (!event?.sessionId) return
 
+    // If this session has a pending "accept & compact" that is now finishing
+    // compaction, dispatch the approval now. Before the fan-out so the
+    // renderer's own `info:compaction_complete` path doesn't race.
+    if (
+      event.type === 'info' &&
+      (event as { statusType?: string }).statusType === 'compaction_complete'
+    ) {
+      void this.finishPendingCompactAccept(event.sessionId)
+    }
+
     const bindings = this.bindingStore.findBySession(event.sessionId)
     if (bindings.length === 0) return
 
@@ -287,6 +341,130 @@ export class MessagingGateway {
 
       await adapter.sendText(press.channelId, allowed ? '✅ Allowed' : '❌ Denied')
       return
+    }
+
+    if (press.buttonId.startsWith('plan:')) {
+      await this.handlePlanButton(platform, adapter, press)
+      return
+    }
+  }
+
+  private async handlePlanButton(
+    platform: PlatformType,
+    adapter: PlatformAdapter,
+    press: ButtonPress,
+  ): Promise<void> {
+    const parts = press.buttonId.split(':')
+    const action = parts[1]
+    const token = parts[2]
+    if (!token || (action !== 'accept' && action !== 'compact')) return
+
+    const entry = this.planTokens.resolve(token)
+    if (!entry) {
+      await adapter.sendText(
+        press.channelId,
+        '⚠️ This plan has expired. Retry from the desktop app.',
+      )
+      return
+    }
+
+    // Disable the buttons so the user can't tap twice. Non-fatal if it fails.
+    const record = this.planMessages.get(token)
+    if (record && adapter.clearButtons) {
+      await adapter.clearButtons(record.channelId, record.messageId).catch(() => {})
+    }
+
+    this.planTokens.revoke(token)
+    this.planMessages.delete(token)
+
+    if (action === 'accept') {
+      try {
+        await this.sessionManager.acceptPlan(entry.sessionId, entry.planPath)
+        await adapter.sendText(press.channelId, '✅ Plan accepted. Agent resuming.')
+      } catch (err) {
+        this.log.error('acceptPlan failed', {
+          event: 'plan_accept_failed',
+          sessionId: entry.sessionId,
+          error: err,
+        })
+        await adapter.sendText(
+          press.channelId,
+          '❌ Couldn\'t accept the plan. Check the desktop app.',
+        )
+      }
+      return
+    }
+
+    // action === 'compact': persist the "waiting for compaction" intent, send
+    // /compact, and let onSessionEvent → finishPendingCompactAccept dispatch
+    // the approval once compaction finishes.
+    const binding = this.bindingStore.findByChannel(platform, press.channelId)
+    if (!binding) return
+
+    this.pendingCompactAccepts.set(entry.sessionId, {
+      token,
+      sessionId: entry.sessionId,
+      bindingId: binding.id,
+      platform,
+      channelId: press.channelId,
+      messageId: record?.messageId ?? '',
+      planPath: entry.planPath,
+      createdAt: Date.now(),
+    })
+
+    try {
+      await this.sessionManager.setPendingPlanExecution(entry.sessionId, entry.planPath)
+      await this.sessionManager.sendMessage(entry.sessionId, '/compact')
+      await adapter.sendText(
+        press.channelId,
+        '♻️ Compacting conversation, then executing the plan…',
+      )
+    } catch (err) {
+      this.pendingCompactAccepts.delete(entry.sessionId)
+      this.log.error('compact dispatch failed', {
+        event: 'plan_compact_failed',
+        sessionId: entry.sessionId,
+        error: err,
+      })
+      await adapter.sendText(
+        press.channelId,
+        '❌ Couldn\'t start compaction. Check the desktop app.',
+      )
+    }
+  }
+
+  private async finishPendingCompactAccept(sessionId: string): Promise<void> {
+    const entry = this.pendingCompactAccepts.get(sessionId)
+    if (!entry) return
+    this.pendingCompactAccepts.delete(sessionId)
+
+    if (Date.now() - entry.createdAt > COMPACT_ACCEPT_TTL_MS) {
+      this.log.warn('dropping stale compact-accept entry', {
+        event: 'plan_compact_stale',
+        sessionId,
+      })
+      return
+    }
+
+    const adapter = this.adapters.get(entry.platform)
+    try {
+      await this.sessionManager.acceptPlan(sessionId, entry.planPath)
+      await this.sessionManager.clearPendingPlanExecution(sessionId)
+      if (adapter?.isConnected()) {
+        await adapter.sendText(entry.channelId, '✅ Plan executing after compaction.')
+      }
+    } catch (err) {
+      this.log.error('post-compaction acceptPlan failed', {
+        event: 'plan_post_compact_accept_failed',
+        sessionId,
+        error: err,
+      })
+      if (adapter?.isConnected()) {
+        await adapter.sendText(
+          entry.channelId,
+          '❌ Compaction finished but the plan couldn\'t execute. Check the desktop app.',
+        )
+      }
     }
   }
 
