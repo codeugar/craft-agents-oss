@@ -1147,6 +1147,8 @@
   "thinking.notSupported": "此模型不支持",
   "thinking.off": "无思考",
   "thinking.offDesc": "最快的响应，无推理",
+  "thinking.xhigh": "超高",
+  "thinking.xhighDesc": "适用于长周期代理任务的更深入推理（Opus 4.7；在其他模型上回退到『高』）",
   "time.compact.days": "{{count}}天",
   "time.compact.hours": "{{count}}小时",
   "time.compact.minutes": "{{count}}分",

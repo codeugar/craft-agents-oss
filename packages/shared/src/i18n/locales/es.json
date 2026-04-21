@@ -1147,6 +1147,8 @@
   "thinking.notSupported": "No compatible con este modelo",
   "thinking.off": "Sin Pensamiento",
   "thinking.offDesc": "Respuestas más rápidas, sin razonamiento",
+  "thinking.xhigh": "Extra Alto",
+  "thinking.xhighDesc": "Razonamiento más profundo para trabajo agéntico de largo plazo (Opus 4.7; vuelve a Alto en otros modelos)",
   "time.compact.days": "{{count}}d",
   "time.compact.hours": "{{count}}h",
   "time.compact.minutes": "{{count}}min",

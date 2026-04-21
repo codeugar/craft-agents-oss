@@ -1147,6 +1147,8 @@
   "thinking.notSupported": "Ez a modell nem támogatja",
   "thinking.off": "Gondolkodás kikapcsolva",
   "thinking.offDesc": "Leggyorsabb válaszok, gondolkodás nélkül",
+  "thinking.xhigh": "Extra Magas",
+  "thinking.xhighDesc": "Mélyebb gondolkodás hosszabb ügynöki munkához (Opus 4.7; más modelleken Magasra esik vissza)",
   "time.compact.days": "{{count}}n",
   "time.compact.hours": "{{count}}ó",
   "time.compact.minutes": "{{count}}p",

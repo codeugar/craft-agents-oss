@@ -1147,6 +1147,8 @@
   "thinking.notSupported": "Von diesem Modell nicht unterstützt",
   "thinking.off": "Kein Denken",
   "thinking.offDesc": "Schnellste Antworten, kein Denken",
+  "thinking.xhigh": "Extra Hoch",
+  "thinking.xhighDesc": "Tieferes Denken für langfristige agentische Aufgaben (Opus 4.7; fällt bei anderen Modellen auf Hoch zurück)",
   "time.compact.days": "{{count}}T",
   "time.compact.hours": "{{count}}Std",
   "time.compact.minutes": "{{count}}Min",

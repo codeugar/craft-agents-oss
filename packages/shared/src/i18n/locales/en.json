@@ -1147,6 +1147,8 @@
   "thinking.notSupported": "Not supported by this model",
   "thinking.off": "No Thinking",
   "thinking.offDesc": "Fastest responses, no reasoning",
+  "thinking.xhigh": "Extra High",
+  "thinking.xhighDesc": "Deeper reasoning for long-horizon agentic work (Opus 4.7; falls back to High on other models)",
   "time.compact.days": "{{count}}d",
   "time.compact.hours": "{{count}}h",
   "time.compact.minutes": "{{count}}m",
