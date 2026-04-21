@@ -84,6 +84,10 @@ export interface StoredConfig {
   setupDeferred?: boolean;
   // Server mode — embedded remote server settings
   serverConfig?: import('./server-config.ts').ServerConfig;
+  // One-shot migration markers. Used by migrations that should run at most
+  // once per user (e.g. restoring a previously-removed model to connection
+  // lists without re-adding it if the user later removes it deliberately).
+  migrationsApplied?: string[];
 }
 
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -1689,82 +1693,47 @@ function migrateOpus45ToOpus46(config: StoredConfig): boolean {
   return changed;
 }
 
+// TODO(opus-4.6-sunset): delete this migration, its call site, its one-shot
+// marker ('opus-4-6-restored'), and the associated test when Opus 4.6 is
+// deprecated. This reverses the earlier forward migration Opus 4.6 → 4.7
+// that was removed in the same commit — users who were auto-migrated no
+// longer had 4.6 in their connection.models, so the picker wouldn't show it.
 /**
- * Migrate Opus 4.6 to Opus 4.7 for direct Anthropic connections (API key or OAuth).
- * Only applies to anthropic provider type (not compat), as third-party providers
- * like OpenRouter may not support the new model ID yet.
+ * Restore claude-opus-4-6 to direct Anthropic connections that were previously
+ * force-migrated to 4.7 and no longer list 4.6. Runs once per user (tracked via
+ * config.migrationsApplied). Never touches `defaultModel` — users keep whatever
+ * default they had, and can switch models themselves.
  */
-function migrateOpus46ToOpus47(config: StoredConfig): boolean {
-  if (!config.llmConnections) return false;
+function restoreOpus46ToAnthropicConnections(config: StoredConfig): boolean {
+  const MARKER = 'opus-4-6-restored';
+  if (config.migrationsApplied?.includes(MARKER)) return false;
 
   const OPUS_46_ID = 'claude-opus-4-6';
   const OPUS_47_ID = 'claude-opus-4-7';
 
   let changed = false;
 
-  for (const connection of config.llmConnections) {
-    // Only migrate direct Anthropic connections (not compat/third-party)
+  for (const connection of config.llmConnections ?? []) {
     if (connection.providerType !== 'anthropic') continue;
+    if (!Array.isArray(connection.models) || connection.models.length === 0) continue;
 
-    // Migrate defaultModel
-    if (connection.defaultModel === OPUS_46_ID) {
-      connection.defaultModel = OPUS_47_ID;
+    const ids = connection.models.map(m => typeof m === 'string' ? m : m.id);
+    const has47 = ids.includes(OPUS_47_ID);
+    const has46 = ids.includes(OPUS_46_ID);
+
+    // Only restore when 4.7 is present (indicates the user was migrated) and
+    // 4.6 isn't already there. Skip connections that never had Opus at all,
+    // and connections where the user already re-added 4.6 manually.
+    if (has47 && !has46) {
+      connection.models.push(OPUS_46_ID);
       changed = true;
     }
-
-    // Migrate models array
-    if (connection.models && Array.isArray(connection.models)) {
-      const hasNew = connection.models.some(m =>
-        (typeof m === 'string' ? m : m.id) === OPUS_47_ID
-      );
-
-      if (hasNew) {
-        // New model already exists — just remove the old entry to avoid duplicates
-        const before = connection.models.length;
-        connection.models = connection.models.filter(m =>
-          (typeof m === 'string' ? m : m.id) !== OPUS_46_ID
-        );
-        if (connection.models.length !== before) changed = true;
-      } else {
-        // New model doesn't exist — rename the old entry in place
-        for (let i = 0; i < connection.models.length; i++) {
-          const model = connection.models[i];
-          if (typeof model === 'string' && model === OPUS_46_ID) {
-            connection.models[i] = OPUS_47_ID;
-            changed = true;
-          } else if (typeof model === 'object' && model.id === OPUS_46_ID) {
-            model.id = OPUS_47_ID;
-            if (model.name?.includes('4.6')) {
-              model.name = model.name.replace('4.6', '4.7');
-            }
-            changed = true;
-          }
-        }
-      }
-    }
   }
 
-  return changed;
-}
-
-/**
- * Migrate Opus 4.6 to Opus 4.7 in workspace default models.
- */
-function migrateWorkspaceOpus46ToOpus47(config: StoredConfig): void {
-  if (!config.workspaces) return;
-
-  const OPUS_46_ID = 'claude-opus-4-6';
-  const OPUS_47_ID = 'claude-opus-4-7';
-
-  for (const workspace of config.workspaces) {
-    const wsConfig = loadWorkspaceConfig(workspace.rootPath);
-    if (!wsConfig?.defaults?.model) continue;
-
-    if (wsConfig.defaults.model === OPUS_46_ID) {
-      wsConfig.defaults.model = OPUS_47_ID;
-      saveWorkspaceConfig(workspace.rootPath, wsConfig);
-    }
-  }
+  // Always set the marker — even when nothing changed, the migration has been
+  // "seen" and should not run again on subsequent startups.
+  config.migrationsApplied = [...(config.migrationsApplied ?? []), MARKER];
+  return true;
 }
 
 /**
@@ -2133,12 +2102,12 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     }
     // Phase 1g: Migrate Sonnet 4.5 → Sonnet 4.6 in workspace default models
     migrateWorkspaceSonnet45ToSonnet46(config);
-    // Phase 1h: Migrate Opus 4.6 → Opus 4.7 for direct Anthropic connections
-    if (migrateOpus46ToOpus47(config)) {
+    // Phase 1h: Restore Opus 4.6 to direct Anthropic connections that were
+    // previously force-migrated away from it (one-shot, guarded by marker).
+    // TODO(opus-4.6-sunset): drop this call and the function when 4.6 is deprecated.
+    if (restoreOpus46ToAnthropicConnections(config)) {
       needsSave = true;
     }
-    // Phase 1i: Migrate Opus 4.6 → Opus 4.7 in workspace default models
-    migrateWorkspaceOpus46ToOpus47(config);
     // Phase 1j: Migrate legacy provider types (bedrock/vertex/anthropic_compat → pi/pi_compat)
     if (migrateLegacyProviderTypes(config)) {
       needsSave = true;

@@ -249,3 +249,155 @@ describe('startup migration (integration)', () => {
     expect(connection.defaultModel).toBe('pi/x-ai/grok-4')
   })
 })
+
+// TODO(opus-4.6-sunset): drop this describe block (and the helper below) when
+// Opus 4.6 is deprecated and the restoreOpus46ToAnthropicConnections migration
+// is removed.
+function readConfigJson(configPath: string): any {
+  return JSON.parse(readFileSync(configPath, 'utf-8'))
+}
+
+function findConnection(configPath: string, slug: string): any {
+  return readConfigJson(configPath).llmConnections.find((c: any) => c.slug === slug)
+}
+
+function modelIdsOf(connection: any): string[] {
+  return (connection?.models ?? []).map((m: any) => typeof m === 'string' ? m : m.id)
+}
+
+describe('restoreOpus46ToAnthropicConnections (integration)', () => {
+  it('re-adds claude-opus-4-6 to a migrated anthropic connection and sets marker', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic',
+        name: 'Anthropic',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+        defaultModel: 'claude-opus-4-7',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'anthropic')
+    const ids = modelIdsOf(connection)
+    expect(ids).toContain('claude-opus-4-7')
+    expect(ids).toContain('claude-opus-4-6')
+    // defaultModel is intentionally left alone — do not rewrite user choice.
+    expect(connection.defaultModel).toBe('claude-opus-4-7')
+
+    const config = readConfigJson(configPath)
+    expect(config.migrationsApplied ?? []).toContain('opus-4-6-restored')
+  })
+
+  it('does not double-add 4.6 when it already exists', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic',
+        name: 'Anthropic',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6'],
+        defaultModel: 'claude-opus-4-7',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'anthropic')
+    const ids = modelIdsOf(connection)
+    expect(ids.filter(id => id === 'claude-opus-4-6')).toHaveLength(1)
+  })
+
+  it('does not add bare claude-opus-4-6 to Pi connections', () => {
+    // The restore migration scopes itself to providerType === 'anthropic'.
+    // Other migrations may still normalize Pi model arrays (e.g. stripping
+    // unknown IDs); this test only asserts that we don't leak a bare
+    // 'claude-opus-4-6' entry into a Pi connection.
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'pi-api-key',
+        name: 'Craft Agents Backend (Anthropic)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'anthropic',
+        modelSelectionMode: 'userDefined3Tier',
+        createdAt: Date.now(),
+        models: ['pi/claude-opus-4-6', 'pi/claude-sonnet-4-6', 'pi/claude-haiku-4-5'],
+        defaultModel: 'pi/claude-opus-4-6',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'pi-api-key')
+    const ids = modelIdsOf(connection)
+    // pi/-prefixed 4.6 is fine (existing format); the restore migration must
+    // not inject a bare 'claude-opus-4-6' entry alongside it.
+    expect(ids).not.toContain('claude-opus-4-6')
+  })
+
+  it('leaves anthropic connections without Opus 4.7 untouched', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic',
+        name: 'Anthropic',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+        defaultModel: 'claude-sonnet-4-6',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'anthropic')
+    const ids = modelIdsOf(connection)
+    expect(ids).not.toContain('claude-opus-4-6')
+  })
+
+  it('is a no-op on the second run once the marker is set', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic',
+        name: 'Anthropic',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-opus-4-7', 'claude-sonnet-4-6'],
+        defaultModel: 'claude-opus-4-7',
+      },
+    ])
+
+    runMigration(configDir)
+
+    // User deliberately removes 4.6 after the first-run restore
+    const configAfterFirst = readConfigJson(configPath)
+    const connAfterFirst = configAfterFirst.llmConnections.find((c: any) => c.slug === 'anthropic')
+    connAfterFirst.models = connAfterFirst.models.filter(
+      (m: any) => (typeof m === 'string' ? m : m.id) !== 'claude-opus-4-6',
+    )
+    writeFileSync(configPath, JSON.stringify(configAfterFirst, null, 2), 'utf-8')
+
+    runMigration(configDir)
+
+    const connection = findConnection(configPath, 'anthropic')
+    const ids = modelIdsOf(connection)
+    // Marker from first run prevents re-adding — deliberate removal sticks.
+    expect(ids).not.toContain('claude-opus-4-6')
+  })
+})
