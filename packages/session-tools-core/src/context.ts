@@ -335,6 +335,24 @@ export interface SessionToolContext {
   /** Send a message to another session. Injected by backend (SessionManager). */
   sendAgentMessage?(sessionId: string, message: string, attachments?: Array<{ path: string; name?: string }>): Promise<void>;
 
+  /**
+   * Activate a source in the running session: add to enabledSourceSlugs,
+   * build its MCP/API servers, apply to the agent.
+   *
+   * Only available in backends that run alongside SessionManager (Claude in-process, Pi subprocess).
+   * Codex and other backends leave this undefined — callers should degrade gracefully (restart required).
+   *
+   * `availability` indicates when the source's tools become visible to the model:
+   * - `'immediate'` — tools available on the current/next tool call (Claude SDK supports live MCP updates)
+   * - `'next-turn'` — tools visible after the next user message (Pi subprocess recreates its session between turns)
+   * - undefined — backend could not determine; assume restart may be needed
+   */
+  activateSourceInSession?(sourceSlug: string): Promise<{
+    ok: boolean;
+    reason?: string;
+    availability?: 'immediate' | 'next-turn';
+  }>;
+
   // ============================================================
   // Messaging Gateway (for list/unbind messaging channels)
   // ============================================================

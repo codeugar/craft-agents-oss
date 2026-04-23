@@ -1520,18 +1520,20 @@ export function FreeFormInput({
         />
 
         {/* Controlled EditPopover for "Add New Label" — opens when user selects
-            the option from the # menu with no matches */}
+            the option from the # menu with no matches.
+            Spread the full config so optional fields like `inlineExecution`,
+            `displayLabel`, and `displayLabelKey` reach the popover. The previous
+            cherry-pick dropped `inlineExecution: true`, which made the popover
+            fall back to the same-window deep-link path; that worked inside
+            Electron but launched the desktop app from the WebUI via `craftagents://`.
+            Match the AppShell pattern (which already uses spread). */}
         {addLabelEditConfig && (
           <EditPopover
             trigger={<span className="absolute top-0 left-0 w-0 h-0 overflow-hidden" />}
             open={addLabelPopoverOpen}
             onOpenChange={setAddLabelPopoverOpen}
-            context={addLabelEditConfig.context}
-            example={addLabelEditConfig.example}
-            overridePlaceholder={addLabelEditConfig.overridePlaceholder}
+            {...addLabelEditConfig}
             defaultValue={addLabelPrefill}
-            model={addLabelEditConfig.model}
-            systemPromptPreset={addLabelEditConfig.systemPromptPreset}
             secondaryAction={workspaceRootPath ? {
               label: 'Edit File',
               filePath: `${workspaceRootPath}/labels/config.json`,

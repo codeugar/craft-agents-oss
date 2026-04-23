@@ -97,6 +97,7 @@ export interface SpawnSessionRequest {
   model?: string;
   enabledSourceSlugs?: string[];
   permissionMode?: PermissionMode;
+  thinkingLevel?: ThinkingLevel;
   labels?: string[];
   workingDirectory?: string;
   attachments?: Array<{ path: string; name?: string }>;
@@ -1131,6 +1132,7 @@ ${formattedMessages}
       model: input.model as string | undefined,
       enabledSourceSlugs: input.enabledSourceSlugs as string[] | undefined,
       permissionMode: input.permissionMode as SpawnSessionRequest['permissionMode'],
+      thinkingLevel: input.thinkingLevel as SpawnSessionRequest['thinkingLevel'],
       labels: input.labels as string[] | undefined,
       workingDirectory: typeof input.workingDirectory === 'string' && input.workingDirectory
         ? expandPath(input.workingDirectory)
