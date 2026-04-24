@@ -3581,11 +3581,19 @@ export class SessionManager implements ISessionManager {
               reason: 'Activation failed — source may be unusable (disabled/unauthenticated) or server build failed. Check session logs.',
             }
           }
-          // Pi subprocess refreshes its tool list via continueRecent() on the next
-          // handlePrompt, so newly activated sources are visible on the next turn.
-          // Claude SDK supports live MCP updates, so tools are available immediately.
-          const availability: 'immediate' | 'next-turn' = provider === 'pi' ? 'next-turn' : 'immediate'
-          return { ok: true, availability }
+          // Both backends need the current turn to end before new tools are visible:
+          // Claude SDK freezes mcpServers at query() start; Pi only picks up new proxy
+          // tool defs on the next handlePrompt (`toolsChanged` flag in pi-agent-server).
+          // Mark a pending restart on the agent — ClaudeAgent/PiAgent consume it after
+          // the next tool_result, yield source_activated, and forceAbort. The renderer's
+          // auto_retry effect then resends the original user message with a
+          // "[{slug} activated]" suffix — landing in a fresh turn with tools live.
+          // Same machinery as the tool-call-error auto-retry path.
+          const userMessage = managed.agent?.getCurrentTurnUserMessage?.() ?? ''
+          if (userMessage) {
+            managed.agent?.setPendingSourceActivationRestart({ sourceSlug, userMessage })
+          }
+          return { ok: true, availability: 'next-turn' as const }
         },
       })
 

@@ -134,7 +134,7 @@ describe('source_test auto-enable', () => {
       validateStdioMcpConnection: stubMcpOk(),
       activateSourceInSession: async (slug) => {
         activated = slug;
-        return { ok: true, availability: 'immediate' };
+        return { ok: true, availability: 'next-turn' };
       },
     });
 
@@ -142,7 +142,7 @@ describe('source_test auto-enable', () => {
 
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('Source auto-enabled in config');
-    expect(text).toContain('tools available now');
+    expect(text).toContain('turn will auto-restart');
     expect(activated).toBe('craft-kb');
 
     const persisted = JSON.parse(
@@ -159,7 +159,7 @@ describe('source_test auto-enable', () => {
       validateStdioMcpConnection: stubMcpOk(),
       activateSourceInSession: async (slug) => {
         activated = slug;
-        return { ok: true, availability: 'immediate' };
+        return { ok: true, availability: 'next-turn' };
       },
     });
 
@@ -169,7 +169,7 @@ describe('source_test auto-enable', () => {
     // No "auto-enabled in config" line because enabled was already true.
     expect(text).not.toContain('auto-enabled in config');
     expect(activated).toBe('craft-kb');
-    expect(text).toContain('tools available now');
+    expect(text).toContain('turn will auto-restart');
   });
 
   it('autoEnable: false skips both the flag flip and the activation callback', async () => {
@@ -258,7 +258,7 @@ describe('source_test auto-enable', () => {
     expect(persisted.enabled).toBe(true);
   });
 
-  it('Pi next-turn availability is reported in the response', async () => {
+  it('successful activation reports a single auto-restart message (backend-agnostic)', async () => {
     writeSource(tempDir, 'craft-kb', { enabled: true });
 
     const ctx = createCtx(tempDir, {
@@ -269,22 +269,10 @@ describe('source_test auto-enable', () => {
     const result = await handleSourceTest(ctx, { sourceSlug: 'craft-kb' });
     const text = result.content[0]?.text ?? '';
 
-    expect(text).toContain('available on your next message');
+    // Both backends route through the same source_activated + auto_retry machinery
+    // now, so the user-visible message is one line — no Claude vs Pi branching.
+    expect(text).toContain('turn will auto-restart');
     expect(text).not.toContain('tools available now');
-  });
-
-  it('immediate availability is reported in the response', async () => {
-    writeSource(tempDir, 'craft-kb', { enabled: true });
-
-    const ctx = createCtx(tempDir, {
-      validateStdioMcpConnection: stubMcpOk(),
-      activateSourceInSession: async () => ({ ok: true, availability: 'immediate' }),
-    });
-
-    const result = await handleSourceTest(ctx, { sourceSlug: 'craft-kb' });
-    const text = result.content[0]?.text ?? '';
-
-    expect(text).toContain('tools available now');
     expect(text).not.toContain('available on your next message');
   });
 });

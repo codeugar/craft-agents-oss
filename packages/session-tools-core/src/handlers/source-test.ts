@@ -168,11 +168,11 @@ export async function handleSourceTest(
       try {
         const result = await ctx.activateSourceInSession(sourceSlug);
         if (result.ok) {
-          if (result.availability === 'next-turn') {
-            lines.push('✓ Source activated — tools will be available on your next message (backend refreshes tool list between turns)');
-          } else {
-            lines.push('✓ Source activated in session — tools available now');
-          }
+          // Activation succeeded — the backend will abort this turn after the
+          // tool result lands, and the renderer auto-resends the original user
+          // message with a "[{slug} activated]" suffix. From the model's POV,
+          // the "next step" is a new turn where the tools are live.
+          lines.push('✓ Source activated — the current turn will auto-restart with tools available');
         } else {
           lines.push(`⚠ Config updated, but session activation failed: ${result.reason ?? 'unknown error'}. Restart session to load tools.`);
           hasWarnings = true;
