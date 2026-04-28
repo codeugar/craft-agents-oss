@@ -426,12 +426,17 @@ export function UserMessageBubble({
         </div>
       )}
 
-      {/* Text content bubble */}
+      {/* Text content bubble. Queued messages get a distinct "draft"
+          treatment — dashed border, lifted bg opacity, dimmed text — so
+          users can tell at a glance their send is waiting (#616). */}
       <div
         className={cn(
-          "max-w-[80%] bg-user-message-bubble rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
+          "max-w-[80%] rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
           compactMode ? "px-4 py-2" : "px-5 py-3.5",
-          isPending && "animate-shimmer"
+          isPending && "animate-shimmer",
+          isQueued
+            ? "bg-user-message-bubble/40 border border-dashed border-foreground/30 text-foreground/75"
+            : "bg-user-message-bubble"
         )}
       >
         {hasInlineBadges
@@ -449,16 +454,15 @@ export function UserMessageBubble({
         }
       </div>
 
-      {/* Queued indicator — stays visible until the backend replays this
-          message. Bug #616: previously rendered as a subtle "queued" pill that
-          users frequently missed, leading to a "silent drop" perception. */}
+      {/* Queued indicator badge. Paired with the dashed-bubble treatment
+          above so the message is unmistakably distinct from a sent one. */}
       {isQueued && (
         <span
-          className="inline-flex items-center gap-1.5 text-[11px] text-foreground/70 bg-foreground/[0.07] px-2.5 py-1 rounded-full"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80 bg-foreground/10 px-2.5 py-1 rounded-full"
           role="status"
           aria-live="polite"
         >
-          <Clock className="h-3 w-3" aria-hidden="true" />
+          <Clock className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
           {t('chat.queuedBadge')}
         </span>
       )}
