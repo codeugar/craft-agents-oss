@@ -81,6 +81,19 @@ export function handleComplete(
     })
   }
 
+  // Clear isQueued from any user messages once the turn completes. Pi's steer
+  // path never emits a 'processing' status update to clear it (the message is
+  // injected mid-stream and absorbed into the current response), so this is
+  // the natural place to drop the indicator. Claude's queued path has already
+  // cleared via the 'processing' status update before this fires; this is
+  // a safe no-op for that case.
+  const hasQueuedUserBubbles = updatedMessages.some(m => m.role === 'user' && m.isQueued)
+  if (hasQueuedUserBubbles) {
+    updatedMessages = updatedMessages.map(m =>
+      m.role === 'user' && m.isQueued ? { ...m, isQueued: false } : m
+    )
+  }
+
   return {
     state: {
       session: {
@@ -525,14 +538,25 @@ export function handleUserMessage(
       return { state, effects: [] }
     }
 
-    // Update existing message - remove isPending, add isQueued if status is 'queued'
+    // Update existing message — clear isPending, set isQueued based on status.
+    //
+    // - 'queued'     → isQueued = true  (Claude path: backend queued for re-send)
+    // - 'processing' → isQueued = false (queued message is now actually running)
+    // - 'accepted'   → isQueued = preserve from optimistic state (Pi steer path:
+    //   the backend just acknowledges receipt; the optimistic message already
+    //   knows whether this was a mid-stream send and we keep that flag visible
+    //   until the current turn ends or the message gets picked up).
     updatedMessages = session.messages.map((m, i) => {
       if (i === existingIndex) {
+        const nextIsQueued =
+          status === 'queued' ? true
+          : status === 'processing' ? false
+          : (existingMessage.isQueued ?? false)
         return {
           ...m,
           id: message.id,  // Use backend's ID as canonical
           isPending: false,
-          isQueued: status === 'queued',
+          isQueued: nextIsQueued,
         }
       }
       return m
