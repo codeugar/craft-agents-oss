@@ -272,11 +272,18 @@ export function handleInfo(
 }
 
 /**
- * Handle interrupted - agent was interrupted
- * When message is provided, it's a user-initiated stop (shows "Response interrupted")
- * When message is omitted, it's a silent redirect (user sent new message while processing)
- * When queuedMessages is provided, those messages were waiting to be processed and should
- * be restored to the input field (the corresponding user bubbles are removed from the chat).
+ * Handle interrupted - agent was interrupted.
+ *
+ * Two distinct shapes:
+ * - **User-initiated stop** (`event.message` present): user clicked the Stop
+ *   button. We render the "Response interrupted" notice, drop queued user
+ *   bubbles, and restore their text to the input field so the user can edit
+ *   and re-send.
+ * - **Silent redirect** (`event.message` absent): the agent aborted internally
+ *   so a new message could be processed. The backend's `processNextQueuedMessage`
+ *   will auto-replay queued messages — we must NOT remove the queued bubbles
+ *   nor restore them to the input, otherwise the user perceives a silent drop
+ *   (#616).
  */
 export function handleInterrupted(
   state: SessionState,
@@ -284,15 +291,16 @@ export function handleInterrupted(
 ): ProcessResult {
   const { session } = state
   const effects: Effect[] = []
+  const isUserInitiated = !!event.message
 
   // Clear transient streaming state (isPending, isStreaming) and mark running tools as interrupted
   // These fields are not persisted, so this matches the state after a reload
   // Also filter out status messages - they are transient UI state that shouldn't persist after interruption
-  // (similar to isPending/isStreaming, and they're not persisted to disk anyway)
-  // Also remove queued user messages — they are being restored to the input field
   const updatedMessages = session.messages
     .filter(m => m.role !== 'status')  // Remove transient status messages
-    .filter(m => !m.isQueued)          // Remove queued user messages (restored to input)
+    // Only drop queued bubbles when the user explicitly stopped — silent
+    // redirects auto-replay them so they must remain visible (#616).
+    .filter(m => !(isUserInitiated && m.isQueued))
     .map(m => {
       // Mark running tools as interrupted
       if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
@@ -310,8 +318,10 @@ export function handleInterrupted(
     ? [...updatedMessages, event.message]
     : updatedMessages
 
-  // Restore queued message text to the input field
-  if (event.queuedMessages && event.queuedMessages.length > 0) {
+  // Restore queued message text to the input field — only on user-initiated
+  // stops. Silent redirects keep the bubble in chat and rely on the backend's
+  // auto-replay (#616).
+  if (isUserInitiated && event.queuedMessages && event.queuedMessages.length > 0) {
     effects.push({
       type: 'restore_input',
       text: event.queuedMessages.join('\n\n'),

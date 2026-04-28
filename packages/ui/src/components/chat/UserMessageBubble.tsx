@@ -12,6 +12,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { Clock } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
 import { cn } from '../../lib/utils'
@@ -448,10 +449,17 @@ export function UserMessageBubble({
         }
       </div>
 
-      {/* Queued badge */}
+      {/* Queued indicator — stays visible until the backend replays this
+          message. Bug #616: previously rendered as a subtle "queued" pill that
+          users frequently missed, leading to a "silent drop" perception. */}
       {isQueued && (
-        <span className="text-[10px] text-muted-foreground bg-foreground/5 px-2 py-0.5 rounded-full">
-          queued
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] text-foreground/70 bg-foreground/[0.07] px-2.5 py-1 rounded-full"
+          role="status"
+          aria-live="polite"
+        >
+          <Clock className="h-3 w-3" aria-hidden="true" />
+          {t('chat.queuedBadge')}
         </span>
       )}
     </div>

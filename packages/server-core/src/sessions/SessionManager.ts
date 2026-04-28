@@ -4798,7 +4798,23 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
-  async sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachment[], options?: SendMessageOptions, existingMessageId?: string, _isAuthRetry?: boolean): Promise<void> {
+  async sendMessage(
+    sessionId: string,
+    message: string,
+    attachments?: FileAttachment[],
+    storedAttachments?: StoredAttachment[],
+    options?: SendMessageOptions,
+    existingMessageId?: string,
+    _isAuthRetry?: boolean,
+    /**
+     * Internal hook fired after the user message has been pushed to
+     * `managed.messages` and persisted to disk, but before the model-streaming
+     * work begins. The RPC handler uses this to send a synchronous "accepted"
+     * ack to the client so a crash mid-stream doesn't lose the user message
+     * (#616). Pre-persist errors still reject the outer promise as before.
+     */
+    onAck?: (messageId: string) => void,
+  ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
@@ -4819,7 +4835,12 @@ export class SessionManager implements ISessionManager {
       const agent = managed.agent
       const steered = agent?.redirect(message) ?? false
 
-      sessionLog.info(`Session ${sessionId} ${steered ? 'redirected mid-stream (steer)' : 'aborting to queue message'}`)
+      sessionLog.info('mid-stream send', {
+        sessionId,
+        steered,
+        queueLengthBefore: managed.messageQueue.length,
+        backend: agent ? agent.constructor.name : 'none',
+      })
 
       // Create user message for UI
       const userMessage: Message = {
@@ -4849,6 +4870,9 @@ export class SessionManager implements ISessionManager {
       }
 
       this.persistSession(managed)
+      // Fire ack now — the user message is on disk regardless of how the
+      // downstream stream resolves (#616 reliability fix).
+      onAck?.(userMessage.id)
       return
     }
 
@@ -4875,6 +4899,12 @@ export class SessionManager implements ISessionManager {
 
       // Update lastMessageRole for badge display
       managed.lastMessageRole = 'user'
+
+      // Persist before announcing — the user message must be on disk before
+      // we tell the renderer "accepted" so a crash mid-stream doesn't lose it
+      // (#616).
+      this.persistSession(managed)
+      onAck?.(userMessage.id)
 
       // Emit user_message event so UI can confirm the optimistic message
       this.sendEvent({
@@ -5590,7 +5620,11 @@ export class SessionManager implements ISessionManager {
     if (!managed || managed.messageQueue.length === 0) return
 
     const next = managed.messageQueue.shift()!
-    sessionLog.info(`Processing queued message for session ${sessionId}`)
+    sessionLog.info('replay queued', {
+      sessionId,
+      messageId: next.messageId,
+      queueLengthAfterShift: managed.messageQueue.length,
+    })
 
     // Update UI: queued → processing
     if (next.messageId) {
@@ -5620,13 +5654,26 @@ export class SessionManager implements ISessionManager {
         next.options,
         next.messageId
       ).catch(err => {
-        sessionLog.error('Error processing queued message:', err)
+        sessionLog.error('replay failed', {
+          sessionId,
+          messageId: next.messageId,
+          error: err instanceof Error ? err.message : String(err),
+        })
         // Report queued message failures via runtime hooks
         sessionRuntimeHooks.captureException(err, { errorSource: 'chat-queue', sessionId })
+        // Surface a typed error so the UI can show a clear, actionable banner
+        // instead of a generic "Unknown error" (#616).
         this.sendEvent({
-          type: 'error',
+          type: 'typed_error',
           sessionId,
-          error: err instanceof Error ? err.message : 'Unknown error'
+          error: {
+            code: 'queued_message_replay_failed',
+            title: 'Queued message could not be sent',
+            message: 'A message you sent while the agent was running could not be re-sent automatically. Tap retry to send it now.',
+            actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
+            canRetry: true,
+            originalError: err instanceof Error ? err.message : String(err),
+          },
         }, managed.workspace.id)
         // Call onProcessingStopped to handle cleanup and check for more queued messages
         this.onProcessingStopped(sessionId, 'error')
