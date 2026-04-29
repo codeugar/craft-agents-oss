@@ -4871,8 +4871,10 @@ export class SessionManager implements ISessionManager {
       }
 
       this.persistSession(managed)
-      // Fire ack now — the user message is on disk regardless of how the
-      // downstream stream resolves (#616 reliability fix).
+      // Force a synchronous flush so the user message is genuinely on disk
+      // before we tell the renderer "accepted" — `persistSession` only
+      // enqueues with a 500ms debounce. (#616 reliability fix.)
+      await this.flushSession(managed.id)
       onAck?.(userMessage.id)
       return
     }
@@ -4901,10 +4903,11 @@ export class SessionManager implements ISessionManager {
       // Update lastMessageRole for badge display
       managed.lastMessageRole = 'user'
 
-      // Persist before announcing — the user message must be on disk before
-      // we tell the renderer "accepted" so a crash mid-stream doesn't lose it
-      // (#616).
+      // Persist + flush before announcing — the user message must be
+      // genuinely on disk before we tell the renderer "accepted", and
+      // `persistSession` is debounced (500ms). #616.
       this.persistSession(managed)
+      await this.flushSession(managed.id)
       onAck?.(userMessage.id)
 
       // Emit user_message event so UI can confirm the optimistic message
