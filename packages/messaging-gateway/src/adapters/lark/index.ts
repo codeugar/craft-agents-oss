@@ -233,12 +233,32 @@ export class LarkAdapter implements PlatformAdapter {
     }) as unknown as LarkClient
 
     // Long-connection WS client + event dispatcher.
+    //
+    // Lifecycle hooks log explicitly so we can distinguish "socket never
+    // opened" from "socket open but no events firing" — the second one
+    // usually means the app's scopes or event subscriptions are misconfigured
+    // on the Open Platform side, which is invisible from our side otherwise.
     this.wsClient = new lark.WSClient({
       appId: creds.appId,
       appSecret: creds.appSecret,
       domain: sdkDomain,
-      loggerLevel: lark.LoggerLevel.warn,
-    })
+      loggerLevel: lark.LoggerLevel.info,
+      onReady: () => {
+        this.log.info('[lark] ws ready', { event: 'lark_ws_ready' })
+      },
+      onError: (err: unknown) => {
+        this.log.error('[lark] ws error', {
+          event: 'lark_ws_error',
+          error: err instanceof Error ? err.message : String(err),
+        })
+      },
+      onReconnecting: () => {
+        this.log.info('[lark] ws reconnecting', { event: 'lark_ws_reconnecting' })
+      },
+      onReconnected: () => {
+        this.log.info('[lark] ws reconnected', { event: 'lark_ws_reconnected' })
+      },
+    } as unknown as ConstructorParameters<typeof lark.WSClient>[0])
 
     // The SDK's `register` typing is a wide-open union over hundreds of event
     // names. Cast the handler block once via `unknown` to keep the adapter
@@ -497,6 +517,17 @@ export class LarkAdapter implements PlatformAdapter {
   private async handleIncomingMessage(data: LarkMessageEvent): Promise<void> {
     if (!this.messageHandler) return
     const { sender, message } = data.event
+
+    // Visibility log: if this never fires, the bot isn't getting the event
+    // from Lark. Most common causes: missing `im:message` scope, missing
+    // event subscription, or app not published.
+    this.log.info('[lark] event received', {
+      event: 'lark_event_received',
+      messageType: message.message_type,
+      chatType: message.chat_type,
+      chatId: message.chat_id,
+      messageId: message.message_id,
+    })
 
     const senderId =
       sender.sender_id?.user_id ?? sender.sender_id?.open_id ?? sender.sender_id?.union_id ?? ''
