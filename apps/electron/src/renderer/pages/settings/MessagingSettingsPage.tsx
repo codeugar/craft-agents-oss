@@ -134,12 +134,6 @@ const PLATFORM_LABEL_KEYS: Record<Platform, string> = {
   lark: 'settings.messaging.lark.title',
 }
 
-const PLATFORM_API_DESCRIPTION: Record<Platform, string> = {
-  telegram: 'Bot API',
-  whatsapp: 'Unofficial Web API',
-  lark: 'Open Platform API',
-}
-
 // Row column geometry shared across the bot header and all child rows.
 // 16px outer padding (`px-4`) + 22px icon slot + 12px gap (`gap-3`).
 // Secondary icons render at 16px inside the same 22px slot for a clean
@@ -302,7 +296,7 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">{label}</div>
             <div className="mt-0.5 truncate text-xs text-muted-foreground">
-              {PLATFORM_API_DESCRIPTION[platform]} · {description}
+              {t(`settings.messaging.${platform}.apiType`)} · {description}
             </div>
           </div>
 
@@ -312,7 +306,7 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                 <button
                   className="rounded-md p-1.5 transition-colors hover:bg-foreground/[0.05] data-[state=open]:bg-foreground/[0.05]"
                   data-state={menuOpen ? 'open' : 'closed'}
-                  aria-label={t('common.more', { defaultValue: 'More' })}
+                  aria-label={t('common.more')}
                 >
                   <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                 </button>
@@ -322,32 +316,28 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
                   <>
                     <StyledDropdownMenuItem onClick={() => runAfterMenuClose(handleReconfigure)}>
                       <Settings2 className="h-3.5 w-3.5" />
-                      <span>
-                        {t('settings.messaging.telegram.reconfigure', {
-                          defaultValue: 'Reconfigure',
-                        })}
-                      </span>
+                      <span>{t('common.reconfigure')}</span>
                     </StyledDropdownMenuItem>
                     <StyledDropdownMenuSeparator />
                     <StyledDropdownMenuItem onClick={handleDisconnect} variant="destructive">
                       <PowerOff className="h-3.5 w-3.5" />
-                      <span>{t('settings.messaging.telegram.disconnect')}</span>
+                      <span>{t('common.disconnect')}</span>
                     </StyledDropdownMenuItem>
                   </>
                 ) : (
                   <>
                     <StyledDropdownMenuItem onClick={() => runAfterMenuClose(handleConnect)}>
                       <RefreshCcw className="h-3.5 w-3.5" />
-                      <span>{t('settings.messaging.whatsapp.reconnect')}</span>
+                      <span>{t('common.reconnect')}</span>
                     </StyledDropdownMenuItem>
                     <StyledDropdownMenuItem onClick={handleDisconnect}>
                       <PowerOff className="h-3.5 w-3.5" />
-                      <span>{t('settings.messaging.whatsapp.disable')}</span>
+                      <span>{t('common.disable')}</span>
                     </StyledDropdownMenuItem>
                     <StyledDropdownMenuSeparator />
                     <StyledDropdownMenuItem onClick={handleForget} variant="destructive">
                       <Trash2 className="h-3.5 w-3.5" />
-                      <span>{t('settings.messaging.whatsapp.forget')}</span>
+                      <span>{t('common.disconnect')}</span>
                     </StyledDropdownMenuItem>
                   </>
                 )}
@@ -356,7 +346,7 @@ function PlatformRow({ platform, workspaceId }: { platform: Platform; workspaceI
           ) : (
             <Button variant="outline" size="sm" onClick={handleConnect}>
               <Plus className="h-3.5 w-3.5" />
-              {t('common.connect', { defaultValue: 'Connect' })}
+              {t('common.connect')}
             </Button>
           )}
         </div>
@@ -636,9 +626,7 @@ function PairedSupergroupSection({
                   className="text-destructive hover:text-destructive"
                   onClick={onUnpair}
                 >
-                  {t('settings.messaging.telegram.supergroup.disconnect', {
-                    defaultValue: 'Disconnect',
-                  })}
+                  {t('common.disconnect')}
                 </Button>
               </div>
             </div>
@@ -717,7 +705,7 @@ function RowActions({ onOpen, onUnbind }: { onOpen: () => void; onUnbind: () => 
         className="text-destructive hover:text-destructive"
         onClick={onUnbind}
       >
-        {t('settings.messaging.bindings.unbind')}
+        {t('common.disconnect')}
       </Button>
     </div>
   )
