@@ -202,6 +202,10 @@ Set `awsRegion` to the region where you have Bedrock model access enabled (e.g.,
 
 Custom endpoints default to a **128K context window** and **text-only input**. If your model supports a larger context window or accepts image input, set those capabilities explicitly in the connection config.
 
+<Tip>
+For toggling per-model **image support** specifically, the chat input model picker now exposes an inline image icon on each row of a custom-endpoint connection — one click flips `models[i].supportsImages` and persists. See [API Providers → Image Input for Custom Endpoints](/reference/config/custom-endpoint#image-input-for-custom-endpoints). The JSON forms below remain useful for automation and for setting `customEndpoint.supportsImages` (the endpoint-wide default), which has no UI surface.
+</Tip>
+
 ### Per-model overrides (recommended)
 
 Use model objects when an endpoint hosts a mix of text-only and multimodal models:
