@@ -1213,29 +1213,21 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   });
 }
 
-function isContextOverflowErrorMessage(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes('context_length_exceeded') ||
-    normalized.includes('exceeds the context window') ||
-    normalized.includes('context window') && normalized.includes('exceed') ||
-    normalized.includes('too many tokens') ||
-    normalized.includes('token limit exceeded')
-  );
-}
-
 /**
- * Wait for any in-flight compaction to finish before sending a prompt.
- * Prevents a race in the Pi SDK where concurrent _runAutoCompaction calls
- * crash on a shared AbortController (see craft-agents-oss#464).
+ * Wait for any in-flight compaction to finish before sending a prompt or
+ * starting another compaction. Prevents a race in the Pi SDK where concurrent
+ * _runAutoCompaction calls crash on a shared AbortController
+ * (see craft-agents-oss#464). Default timeout matches the RPC compact timeout
+ * in PiAgent.requestCompact (300 s), since GPT compactions can legitimately
+ * take 60–120 s.
  */
-async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs = 60_000): Promise<void> {
+async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs = 300_000): Promise<void> {
   if (!session.isCompacting) return;
   debugLog('Waiting for in-flight compaction to finish before prompt...');
   const start = Date.now();
   while (session.isCompacting) {
     if (Date.now() - start > timeoutMs) {
-      debugLog('Compaction wait timed out after 60s, proceeding anyway');
+      debugLog(`Compaction wait timed out after ${Math.floor(timeoutMs / 1000)}s, proceeding anyway`);
       break;
     }
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -1287,32 +1279,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
 
-    // Fallback hardening: if the provider surfaced a context-overflow error,
-    // force a manual compact and retry this prompt once.
-    if (isContextOverflowErrorMessage(errorMsg)) {
-      debugLog(`Prompt overflow detected, attempting compact+retry: ${errorMsg}`);
-      try {
-        const session = await ensureSession();
-        await session.compact();
-        await waitForCompaction(session);
-        await session.prompt(msg.message, {
-          images: msg.images && msg.images.length > 0 ? msg.images : undefined,
-          streamingBehavior: 'followUp',
-        });
-        debugLog('Compact+retry succeeded after overflow');
-        return;
-      } catch (retryError) {
-        const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
-        debugLog(`Compact+retry failed: ${retryMsg}`);
-        send({
-          type: 'error',
-          message: `Prompt overflow recovery failed: ${retryMsg}`,
-          code: 'prompt_overflow_recovery_failed',
-        });
-        send({ type: 'event', event: { type: 'agent_end', messages: [] } });
-        return;
-      }
-    }
+    // No wrapper-side overflow recovery here. The Pi SDK's _checkCompaction
+    // already runs `_runAutoCompaction("overflow", true)` on overflow and
+    // calls agent.continue() to retry once. Running our own session.compact()
+    // in parallel raced against the SDK and is the documented cause of the
+    // AbortController crash in `_runAutoCompaction` (see
+    // plans/fix-pi-gpt-compaction.md). PiEventAdapter holds the Craft event
+    // queue open across the SDK's recovery flow so the recovered turn
+    // reaches the UI.
 
     debugLog(`Prompt failed: ${errorMsg}`);
     send({ type: 'error', message: errorMsg, code: 'prompt_error' });
@@ -1422,6 +1396,13 @@ async function handleEnsureSessionReady(msg: Extract<InboundMessage, { type: 'en
 async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>): Promise<void> {
   try {
     const session = await ensureSession();
+    // Serialize manual /compact behind any in-flight auto-compaction. Public
+    // session.compact() calls agent.abort() and uses its own controller; if
+    // it runs while _runAutoCompaction is suspended, agent state churns and
+    // the SDK's race surface widens. Wait for the auto-compaction to drain
+    // before starting a manual one. waitForCompaction has its own timeout
+    // fallback so we don't deadlock on a stuck subprocess.
+    await waitForCompaction(session);
     const result = await session.compact(msg.customInstructions);
     send({
       type: 'compact_result',

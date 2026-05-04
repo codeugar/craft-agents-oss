@@ -292,6 +292,17 @@ export class PiAgent extends BaseAgent {
       this.adapter.setSessionDir(join(config.workspace.rootPath, 'sessions', config.session.id));
     }
 
+    // Wire the adapter's async overflow fallback into the event queue. The
+    // fallback fires when the SDK doesn't emit a compaction_start after a
+    // held overflow agent_end (e.g. _overflowRecoveryAttempted was already
+    // true). It runs outside adaptEvent() so it can't yield through the
+    // generator — instead, it calls these callbacks to enqueue the buffered
+    // error and terminate the iterator.
+    this.adapter.setOverflowFallbackHandlers(
+      (event) => this.eventQueue.enqueue(event),
+      () => this.eventQueue.complete(),
+    );
+
     if (!config.isHeadless) {
       this.startConfigWatcher();
     }
@@ -1064,8 +1075,13 @@ export class PiAgent extends BaseAgent {
       this.eventQueue.enqueue(agentEvent);
     }
 
-    // Check for agent end (turn complete)
-    if (eventType === 'agent_end') {
+    // Turn-completion is now adapter-driven so overflow recovery can hold the
+    // queue open across the SDK's compaction → agent.continue() sequence
+    // (see PiEventAdapter overflow state machine). The adapter returns true
+    // when the queue should terminate — either on a normal agent_end with no
+    // recovery in flight, or on a compaction_end failure that drains a held
+    // overflow.
+    if (this.adapter.shouldCompleteQueue(eventType === 'agent_end')) {
       this.eventQueue.complete();
     }
   }
@@ -2172,6 +2188,10 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+
+    // Clear any in-flight overflow-recovery state so a stale fallback timer
+    // doesn't fire on a torn-down adapter.
+    this.adapter.resetOverflowState();
   }
 
   // ============================================================
