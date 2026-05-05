@@ -199,3 +199,22 @@ PY
     exit 1
   }
 fi
+
+# ─── Code-key coverage check ───────────────────────────────────────────────
+# Run when any source file or any locale file is staged. Catches:
+#  - new t('...') references to keys that don't exist in en.json
+#  - locale edits that drop keys still referenced from source code (this is
+#    the failure mode the parity check above cannot detect — when all locales
+#    lose the same keys symmetrically, parity passes but the UI breaks).
+staged_for_coverage="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx)$|i18n/locales/.*\.json' || true)"
+if [ -n "$staged_for_coverage" ]; then
+  if ! coverage_result="$(bun run lint:i18n:coverage 2>&1)"; then
+    echo ""
+    echo "🌐 i18n: Code-key coverage check failed"
+    echo "$coverage_result" | sed 's/^/   /'
+    echo ""
+    echo "   Skip: git commit --no-verify (not recommended)"
+    echo ""
+    exit 1
+  fi
+fi
