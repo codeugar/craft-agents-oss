@@ -486,15 +486,18 @@ export function resolveMidStreamBehavior(
  * Return a new LlmConnection with the given model's `supportsImages` override set.
  *
  * Centralizes the string-vs-object normalization for `connection.models[]`:
- *   - string entry → promoted to `{ id, supportsImages: enabled }`
+ *   - string entry → promoted to `{ id, name, shortName, supportsImages: enabled }`
  *   - object entry → only `supportsImages` is updated
  *   - model not in array → connection returned unchanged (defensive)
  *
  * Pure function — does not mutate the input. Storage round-trip is handled
  * upstream via `saveLlmConnection`. The stored object form for custom-endpoint
- * models is `{ id, contextWindow?, supportsImages? }` (passthrough-validated by
- * the storage schema); the `ModelDefinition` cast here matches the existing
- * shape produced by `ApiKeyInput.tsx` and the Pi driver.
+ * models is `{ id, name?, shortName?, contextWindow?, supportsImages? }`
+ * (passthrough-validated by the storage schema). `name` and `shortName` default
+ * to the model's `id` when promoting so that downstream renderer surfaces that
+ * read `m.name` (the trigger button display, picker row labels) keep showing a
+ * label after the toggle promotes a string entry. The `ModelDefinition` cast
+ * matches the existing shape produced by `ApiKeyInput.tsx` and the Pi driver.
  */
 export function setModelSupportsImages(
   connection: LlmConnection,
@@ -509,7 +512,7 @@ export function setModelSupportsImages(
   const entry = connection.models[idx]!;
   const nextEntry =
     typeof entry === 'string'
-      ? { id: entry, supportsImages: enabled }
+      ? { id: entry, name: entry, shortName: entry, supportsImages: enabled }
       : { ...entry, supportsImages: enabled };
 
   const nextModels = connection.models.slice();

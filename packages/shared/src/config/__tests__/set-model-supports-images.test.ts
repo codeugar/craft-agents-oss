@@ -15,12 +15,20 @@ const BASE: LlmConnection = {
 }
 
 describe('setModelSupportsImages', () => {
-  it('promotes a string entry to an object with supportsImages set', () => {
+  it('promotes a string entry to an object with supportsImages set (and name/shortName mirroring id)', () => {
     const conn: LlmConnection = { ...BASE, models: ['foo', 'bar'] }
     const updated = setModelSupportsImages(conn, 'foo', true)
 
     expect(updated).not.toBe(conn)
-    expect(updated.models![0]).toEqual({ id: 'foo', supportsImages: true } as never)
+    // name/shortName are mirrored from id so renderer surfaces that read
+    // `model.name` (the trigger button, picker row labels) keep showing a
+    // label after the toggle flips a string entry into an object.
+    expect(updated.models![0]).toEqual({
+      id: 'foo',
+      name: 'foo',
+      shortName: 'foo',
+      supportsImages: true,
+    } as never)
     expect(updated.models![1]).toBe('bar')
   })
 
@@ -69,7 +77,12 @@ describe('setModelSupportsImages', () => {
     }
     const updated = setModelSupportsImages(conn, 'foo', true)
 
-    expect(updated.models![0]).toEqual({ id: 'foo', supportsImages: true } as never)
+    expect(updated.models![0]).toEqual({
+      id: 'foo',
+      name: 'foo',
+      shortName: 'foo',
+      supportsImages: true,
+    } as never)
     expect(updated.models![1]).toBe('foo')
   })
 
