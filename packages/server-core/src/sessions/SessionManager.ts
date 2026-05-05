@@ -2694,16 +2694,21 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Get or create agent for a session (lazy loading)
-   * Creates the appropriate backend agent based on LLM connection.
+   * Refresh an existing agent's runtime config in place when the session's
+   * resolved connection signature has drifted from what the agent was created
+   * with. No-ops when the agent doesn't exist, when the signature still
+   * matches, or when the agent is mid-stream (the gate is `agent.isProcessing()`
+   * — `managed.isProcessing` is not used because `sendMessage` flips it before
+   * calling `getOrCreateAgent`, which would make every send-path refresh dead
+   * code).
    *
-   * Provider resolution order:
-   * 1. session.llmConnection (locked after first message)
-   * 2. workspace.defaults.defaultLlmConnection
-   * 3. global defaultLlmConnection
-   * 4. fallback: no connection configured
+   * If in-place refresh fails (or the backend doesn't support it), the runtime
+   * is disposed so the next `getOrCreateAgent` recreates a fresh agent against
+   * the latest config.
    */
-  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+  private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+    if (!managed.agent) return
+
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
       sessionConnectionSlug: managed.llmConnection,
@@ -2718,53 +2723,102 @@ export class SessionManager implements ISessionManager {
       resolvedModel: backendContext.resolvedModel,
     })
 
-    if (managed.agent && !managed.backendRuntimeSignature) {
+    if (!managed.backendRuntimeSignature) {
       managed.backendRuntimeSignature = runtimeSignature
+      return
+    }
+    if (managed.backendRuntimeSignature === runtimeSignature) return
+
+    if (managed.agent.isProcessing()) {
+      sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
+      return
     }
 
-    if (managed.agent && managed.backendRuntimeSignature !== runtimeSignature) {
-      if (managed.isProcessing || managed.agent.isProcessing()) {
-        sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle`)
-      } else {
-        let refreshed = false
-        if (managed.agent.updateRuntimeConfig) {
-          try {
-            refreshed = await managed.agent.updateRuntimeConfig({
-              model: backendContext.resolvedModel,
-              providerType: connection?.providerType,
-              authType: backendContext.authType,
-              runtime: connection ? {
-                baseUrl: connection.baseUrl,
-                piAuthProvider: connection.piAuthProvider,
-                customEndpoint: connection.customEndpoint,
-                customModels: connection.models?.map(model => {
-                  if (typeof model === 'string') return model
-                  const supportsImages = typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined
-                  if (model.contextWindow || supportsImages !== undefined) {
-                    return {
-                      id: model.id,
-                      ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-                      ...(supportsImages !== undefined ? { supportsImages } : {}),
-                    }
-                  }
-                  return model.id
-                }),
-              } : undefined,
-            })
-          } catch (error) {
-            sessionLog.warn(`Runtime config in-place refresh failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
-          }
-        }
-
-        if (refreshed) {
-          managed.backendRuntimeSignature = runtimeSignature
-          sessionLog.info(`Refreshed runtime config for session ${managed.id}`)
-        } else {
-          sessionLog.info(`Recreating backend runtime for session ${managed.id} after config change`)
-          await this.disposeManagedAgentRuntime(managed, 'runtime config refresh')
-        }
+    let refreshed = false
+    if (managed.agent.updateRuntimeConfig) {
+      try {
+        refreshed = await managed.agent.updateRuntimeConfig({
+          model: backendContext.resolvedModel,
+          providerType: connection?.providerType,
+          authType: backendContext.authType,
+          runtime: connection ? {
+            baseUrl: connection.baseUrl,
+            piAuthProvider: connection.piAuthProvider,
+            customEndpoint: connection.customEndpoint,
+            customModels: connection.models?.map(model => {
+              if (typeof model === 'string') return model
+              const supportsImages = typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined
+              if (model.contextWindow || supportsImages !== undefined) {
+                return {
+                  id: model.id,
+                  ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
+                  ...(supportsImages !== undefined ? { supportsImages } : {}),
+                }
+              }
+              return model.id
+            }),
+          } : undefined,
+        })
+      } catch (error) {
+        sessionLog.warn(`Runtime config in-place refresh failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
       }
     }
+
+    if (refreshed) {
+      managed.backendRuntimeSignature = runtimeSignature
+      sessionLog.info(`Refreshed runtime config for session ${managed.id} (${reason})`)
+    } else {
+      sessionLog.info(`Recreating backend runtime for session ${managed.id} after config change (${reason})`)
+      await this.disposeManagedAgentRuntime(managed, 'runtime config refresh')
+    }
+  }
+
+  /**
+   * Push a connection's runtime updates (e.g. `supportsImages` toggle) to every
+   * active session that uses it. Called from the `llmConnections.SAVE` handler
+   * so capability changes reach live Pi subprocesses immediately instead of
+   * waiting for the next send to lazily notice the signature drift.
+   */
+  async refreshConnectionRuntime(connectionSlug: string): Promise<void> {
+    for (const managed of this.sessions.values()) {
+      if (managed.llmConnection !== connectionSlug) continue
+      try {
+        await this.tryRefreshAgentRuntime(managed, 'connection update')
+      } catch (error) {
+        sessionLog.warn(`refreshConnectionRuntime failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
+      }
+    }
+  }
+
+  /**
+   * Get or create agent for a session (lazy loading)
+   * Creates the appropriate backend agent based on LLM connection.
+   *
+   * Provider resolution order:
+   * 1. session.llmConnection (locked after first message)
+   * 2. workspace.defaults.defaultLlmConnection
+   * 3. global defaultLlmConnection
+   * 4. fallback: no connection configured
+   */
+  private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    // Refresh runtime config in-place when the connection has drifted since
+    // the agent was created. May null out `managed.agent` if the in-place
+    // refresh fails, in which case the create branch below rebuilds it.
+    await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
+
+    const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
+    const backendContext = resolveBackendContext({
+      sessionConnectionSlug: managed.llmConnection,
+      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
+      managedModel: managed.model,
+    })
+    const connection = backendContext.connection
+    const runtimeSignature = buildBackendRuntimeSignature({
+      connection,
+      provider: backendContext.provider,
+      authType: backendContext.authType,
+      resolvedModel: backendContext.resolvedModel,
+    })
 
     if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })

@@ -438,6 +438,11 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         }
       }
       deps.platform.logger?.info(`LLM connection saved: ${connection.slug}`)
+      // Push runtime updates (e.g. supportsImages toggle) to live sessions on
+      // this connection so Pi subprocesses re-register with the new capabilities
+      // before the next prompt — the lazy refresh on getOrCreateAgent is a
+      // backstop, not the primary path.
+      await sessionManager.refreshConnectionRuntime(connection.slug)
       // Reinitialize auth if the saved connection is the current default
       // (updates env vars and summarization model override)
       const defaultSlug = getDefaultLlmConnection()
