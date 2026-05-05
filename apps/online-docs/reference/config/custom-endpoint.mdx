@@ -119,11 +119,27 @@ This works with self-hosted proxies, enterprise gateways, or any service that im
 
 ## Image Input for Custom Endpoints
 
-Custom endpoints are **text-only by default**. If your endpoint serves a multimodal model — for example **Gemma 4** via Ollama or another OpenAI-compatible proxy — you must opt it into image support explicitly in the connection config.
+Custom endpoints are **text-only by default**. If your endpoint serves a multimodal model — for example **Gemma 4** via Ollama or another OpenAI-compatible proxy — you must opt it into image support explicitly. There is no automatic capability detection: a model that silently strips images would otherwise produce confusing answers (the user sees the image in their bubble, but the model never receives it).
 
-These examples use the low-level **LLM connection** schema from [LLM Connections](/reference/config/llm-connections), where `customEndpoint.api` selects the endpoint wire format.
+### Toggle from the chat input (recommended)
 
-### Per-model opt-in (recommended)
+For everyday use, enable image input directly from the chat input model picker:
+
+1. Open the model dropdown above the chat input.
+2. Each model row on a custom-endpoint (`pi_compat`) connection shows a small image icon on the right. The icon is **dim** when image input is off, **bright** when on.
+3. Click the icon to flip the per-model `supportsImages` override. The change persists immediately to your config.
+
+If you attach an image while the active model is still text-only, an inline pre-flight banner appears above the chat input with a one-click **Enable image support** action. Clicking it flips the same override and dismisses the banner — no need to re-attach the image.
+
+<Note>
+The picker toggle and the pre-flight banner write to **per-model** overrides only (`models[i].supportsImages`). The endpoint-wide default (`customEndpoint.supportsImages`) is set via JSON config — see below.
+</Note>
+
+### JSON config (automation / advanced)
+
+For headless setups, automation scripts, or when you want every model on an endpoint multimodal at once, write the connection config directly. These examples use the low-level **LLM connection** schema from [LLM Connections](/reference/config/llm-connections), where `customEndpoint.api` selects the endpoint wire format.
+
+#### Per-model opt-in
 
 ```json
 {
@@ -134,7 +150,7 @@ These examples use the low-level **LLM connection** schema from [LLM Connections
 }
 ```
 
-### Whole-endpoint opt-in
+#### Whole-endpoint opt-in
 
 ```json
 {
@@ -146,7 +162,7 @@ These examples use the low-level **LLM connection** schema from [LLM Connections
 ```
 
 <Note>
-There is currently no automatic capability detection for arbitrary endpoints. If `supportsImages` is not set, Craft Agents will treat the endpoint as text-only.
+Per-model overrides take precedence over the endpoint-wide default, so you can opt one specific model out of vision (`supportsImages: false`) even if the endpoint default is `true`.
 </Note>
 
 For the full config schema, see [LLM Connections](/reference/config/llm-connections#custom-endpoint-capabilities).

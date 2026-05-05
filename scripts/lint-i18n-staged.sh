@@ -130,12 +130,12 @@ fi
 
 staged_locales="$(git diff --cached --name-only --diff-filter=ACMR | grep 'i18n/locales/.*\.json' || true)"
 if [ -n "$staged_locales" ]; then
-  if ! sort_result="$(bun run scripts/check-locales-sorted.ts $staged_locales 2>&1)"; then
+  if ! sort_result="$(bun run lint:i18n:sorted 2>&1)"; then
     echo ""
     echo "🌐 i18n: Locale keys are not sorted alphabetically"
     echo "$sort_result" | sed 's/^/   /'
     echo ""
-    echo "   Fix: bun run sort:locales"
+    echo "   Fix: bun run sort-locales"
     echo "   Skip: git commit --no-verify (not recommended)"
     echo ""
     exit 1
