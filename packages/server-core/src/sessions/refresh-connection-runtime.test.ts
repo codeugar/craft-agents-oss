@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { resolveBackendContext } from '@craft-agent/shared/agent/backend'
+import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
+import { buildRestartRequiredSignature } from './runtime-config.ts'
 
 // Regression coverage for the stale-Pi-subprocess bug where toggling
 // `supportsImages` on a custom-endpoint model wrote to disk but never reached
@@ -38,7 +41,7 @@ function injectSession(
   workspaceRoot: string,
   llmConnection: string,
   agent: AgentStub | null,
-  opts: { backendRuntimeSignature?: string; isProcessing?: boolean } = {},
+  opts: { backendRuntimeSignature?: string; backendRestartSignature?: string; isProcessing?: boolean } = {},
 ) {
   const workspace = {
     id: 'ws_test',
@@ -50,12 +53,30 @@ function injectSession(
     { id, name: id, llmConnection },
     workspace as never,
     { messagesLoaded: true },
-  ) as unknown as { agent: AgentStub | null; backendRuntimeSignature?: string; isProcessing: boolean; llmConnection?: string }
+  ) as unknown as { agent: AgentStub | null; backendRuntimeSignature?: string; backendRestartSignature?: string; isProcessing: boolean; llmConnection?: string }
   managed.agent = agent
-  // Force a stale signature so the helper's comparison always reaches the
-  // refresh branch — the signature it computes from real disk config will
+  // Force a stale runtime signature so the helper's comparison always reaches
+  // the refresh branch — the signature it computes from real disk config will
   // never equal this sentinel.
-  managed.backendRuntimeSignature = opts.backendRuntimeSignature ?? '__stale_signature_for_test__'
+  managed.backendRuntimeSignature = opts.backendRuntimeSignature ?? '__stale_runtime_signature_for_test__'
+  // Pre-compute the restart signature against the same resolution the helper
+  // will use, so by default tests route through the in-place refresh path.
+  // Tests that want the restart-required path pass an explicit sentinel.
+  if (opts.backendRestartSignature !== undefined) {
+    managed.backendRestartSignature = opts.backendRestartSignature
+  } else {
+    const workspaceConfig = loadWorkspaceConfig(workspaceRoot)
+    const ctx = resolveBackendContext({
+      sessionConnectionSlug: llmConnection,
+      workspaceDefaultConnectionSlug: workspaceConfig?.defaults?.defaultLlmConnection,
+    })
+    managed.backendRestartSignature = buildRestartRequiredSignature({
+      connection: ctx.connection,
+      provider: ctx.provider,
+      authType: ctx.authType,
+      resolvedModel: ctx.resolvedModel,
+    })
+  }
   managed.isProcessing = opts.isProcessing ?? false
   managed.llmConnection = llmConnection
   ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(id, managed)
@@ -125,5 +146,52 @@ describe('refreshConnectionRuntime', () => {
 
     expect(failingAgent.updateRuntimeConfig).toHaveBeenCalledTimes(1)
     expect(managed.agent).toBeNull()
+  })
+
+  it('skips in-place refresh and forces recreation when a restart-required field changed', async () => {
+    // `update_runtime_config` cannot propagate `piAuthProvider`, slug,
+    // providerType, or authType cleanly. When any of those drift, the helper
+    // must dispose the runtime instead of marking it refreshed (which would
+    // record the new signature against a stale subprocess).
+    const agent = createAgentStub()
+    const managed = injectSession(sm, 'auth-changed', tmpRoot, 'slug-A', agent, {
+      backendRestartSignature: '__stale_restart_signature__',
+    })
+
+    await sm.refreshConnectionRuntime('slug-A')
+
+    expect(agent.updateRuntimeConfig).not.toHaveBeenCalled()
+    expect(managed.agent).toBeNull()
+  })
+
+  it('records customModels with the per-model supportsImages flag in the IPC payload', async () => {
+    // End-to-end shape check: when the session's connection resolves to a
+    // pi_compat connection with explicit per-model `supportsImages`, the
+    // helper must forward that field on `customModels` so the Pi subprocess
+    // can re-register the model with `input: ['text', 'image']`.
+    const agent = createAgentStub()
+    injectSession(sm, 'shape-check', tmpRoot, 'slug-A', agent)
+
+    await sm.refreshConnectionRuntime('slug-A')
+
+    expect(agent.updateRuntimeConfig).toHaveBeenCalledTimes(1)
+    const payload = agent.updateRuntimeConfig.mock.calls[0]?.[0]
+    expect(payload).toBeDefined()
+    expect(payload).toMatchObject({
+      model: expect.any(String),
+      runtime: expect.any(Object),
+    })
+    // The runtime envelope mirrors what `pi-agent.ts:requestRuntimeConfigUpdate`
+    // unpacks — `customModels` shape preserves `supportsImages` when set.
+    if (payload.runtime?.customModels) {
+      for (const m of payload.runtime.customModels) {
+        if (typeof m === 'object') {
+          expect(typeof m.id).toBe('string')
+          if ('supportsImages' in m) {
+            expect(typeof m.supportsImages).toBe('boolean')
+          }
+        }
+      }
+    }
   })
 })

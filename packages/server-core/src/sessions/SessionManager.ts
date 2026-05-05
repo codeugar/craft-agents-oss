@@ -94,7 +94,7 @@ import { extractLabelId, resolveSessionLabels } from '@craft-agent/shared/labels
 import { ensureLabelsExist } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
-import { buildBackendRuntimeSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -878,6 +878,12 @@ interface ManagedSession {
   envOverrides?: Record<string, string>
   // Runtime-affecting backend config signature captured when the live agent was created/refreshed.
   backendRuntimeSignature?: string
+  /**
+   * Signature over fields that cannot be propagated via `update_runtime_config`
+   * (see `runtime-config.ts:buildRestartRequiredSignature`). When this drifts,
+   * the agent must be disposed + recreated rather than refreshed in place.
+   */
+  backendRestartSignature?: string
   // Whether the previous turn was interrupted (for context injection on next message).
   // Ephemeral — not persisted to disk. Cleared after one-shot injection.
   wasInterrupted?: boolean
@@ -2690,6 +2696,7 @@ export class SessionManager implements ISessionManager {
     managed.agentReady = undefined
     managed.agentReadyResolve = undefined
     managed.backendRuntimeSignature = undefined
+    managed.backendRestartSignature = undefined
     unregisterSessionScopedToolCallbacks(sessionId)
   }
 
@@ -2702,9 +2709,13 @@ export class SessionManager implements ISessionManager {
    * calling `getOrCreateAgent`, which would make every send-path refresh dead
    * code).
    *
-   * If in-place refresh fails (or the backend doesn't support it), the runtime
-   * is disposed so the next `getOrCreateAgent` recreates a fresh agent against
-   * the latest config.
+   * The helper distinguishes two kinds of drift:
+   *   - Restart-required (provider/auth/slug/piAuthProvider): goes straight
+   *     to dispose + recreate because `update_runtime_config` cannot fully
+   *     re-route credential/provider state in a live subprocess.
+   *   - In-place safe (model/baseUrl/customEndpoint/customModels): attempts
+   *     `agent.updateRuntimeConfig` and falls back to dispose if the backend
+   *     can't apply the update.
    */
   private async tryRefreshAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
     if (!managed.agent) return
@@ -2716,21 +2727,34 @@ export class SessionManager implements ISessionManager {
       managedModel: managed.model,
     })
     const connection = backendContext.connection
-    const runtimeSignature = buildBackendRuntimeSignature({
+    const sigInput = {
       connection,
       provider: backendContext.provider,
       authType: backendContext.authType,
       resolvedModel: backendContext.resolvedModel,
-    })
+    }
+    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
+    const restartSignature = buildRestartRequiredSignature(sigInput)
 
-    if (!managed.backendRuntimeSignature) {
+    if (!managed.backendRuntimeSignature || !managed.backendRestartSignature) {
       managed.backendRuntimeSignature = runtimeSignature
+      managed.backendRestartSignature = restartSignature
       return
     }
-    if (managed.backendRuntimeSignature === runtimeSignature) return
+
+    const restartRequired = managed.backendRestartSignature !== restartSignature
+    const runtimeChanged = managed.backendRuntimeSignature !== runtimeSignature
+
+    if (!restartRequired && !runtimeChanged) return
 
     if (managed.agent.isProcessing()) {
       sessionLog.info(`Runtime config changed for ${managed.id}; deferring refresh until session is idle (${reason})`)
+      return
+    }
+
+    if (restartRequired) {
+      sessionLog.info(`Restart-required field changed for session ${managed.id}; recreating backend runtime (${reason})`)
+      await this.disposeManagedAgentRuntime(managed, 'restart-required runtime change')
       return
     }
 
@@ -2766,6 +2790,7 @@ export class SessionManager implements ISessionManager {
 
     if (refreshed) {
       managed.backendRuntimeSignature = runtimeSignature
+      managed.backendRestartSignature = restartSignature
       sessionLog.info(`Refreshed runtime config for session ${managed.id} (${reason})`)
     } else {
       sessionLog.info(`Recreating backend runtime for session ${managed.id} after config change (${reason})`)
@@ -2813,12 +2838,14 @@ export class SessionManager implements ISessionManager {
       managedModel: managed.model,
     })
     const connection = backendContext.connection
-    const runtimeSignature = buildBackendRuntimeSignature({
+    const sigInput = {
       connection,
       provider: backendContext.provider,
       authType: backendContext.authType,
       resolvedModel: backendContext.resolvedModel,
-    })
+    }
+    const runtimeSignature = buildBackendRuntimeSignature(sigInput)
+    const restartSignature = buildRestartRequiredSignature(sigInput)
 
     if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
@@ -3957,6 +3984,7 @@ export class SessionManager implements ISessionManager {
         })
       }
       managed.backendRuntimeSignature = runtimeSignature
+      managed.backendRestartSignature = restartSignature
       end()
     }
     return managed.agent
