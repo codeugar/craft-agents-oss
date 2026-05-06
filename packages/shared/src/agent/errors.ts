@@ -27,6 +27,8 @@ export type ErrorCode =
   | 'image_too_large'        // Image exceeds API dimension/size limits
   | 'provider_error'         // AI provider experiencing issues (overloaded, unavailable)
   | 'queued_message_replay_failed'  // A message queued during an active turn could not be auto-replayed (#616)
+  | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)
+  | 'sdk_cwd_missing'        // SDK subprocess cwd not present on disk (stale cross-machine import)
   | 'unknown_error';
 
 /** Provider info attached to errors for user-facing context */
@@ -234,6 +236,30 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
       { key: 'r', label: 'Retry', action: 'retry' },
     ],
     canRetry: true,
+  },
+  sdk_binary_missing: {
+    title: 'Claude Code binary missing from app bundle',
+    message:
+      'The Claude Agent SDK binary expected on disk is not present. ' +
+      'This usually means the app bundle is incomplete (interrupted download, partial update, ' +
+      'or a security tool removed it). Reinstalling Craft Agents typically fixes this.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+    retryDelayMs: 1000,
+  },
+  sdk_cwd_missing: {
+    title: 'Branch source unavailable on this machine',
+    message:
+      "The folder this branched session was forked from doesn't exist on this machine. " +
+      'This typically happens after importing a session from another workspace. ' +
+      'Retrying will start a fresh fork from a summary of the parent conversation.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+    retryDelayMs: 1000,
   },
   unknown_error: {
     title: 'Error',

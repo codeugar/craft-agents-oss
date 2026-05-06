@@ -3022,6 +3022,16 @@ export class SessionManager implements ISessionManager {
         sessionPersistenceQueue.flush(managed.id)
       }
 
+      const onBranchForkInvalidated = () => {
+        managed.sdkSessionId = undefined
+        managed.branchFromSdkSessionId = undefined
+        managed.branchFromSdkCwd = undefined
+        managed.branchFromSdkTurnId = undefined
+        sessionLog.info(`Branch fork invalidated for ${managed.id}: cleared all fork metadata`)
+        this.persistSession(managed)
+        sessionPersistenceQueue.flush(managed.id)
+      }
+
       const getRecoveryMessages = () => {
         const relevantMessages = managed.messages
           .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -3097,6 +3107,7 @@ export class SessionManager implements ISessionManager {
         session: sessionConfig,
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
+        onBranchForkInvalidated,
         getRecoveryMessages,
         getBranchFallbackMessages,
         getBranchSeedMessages,
