@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
@@ -10,10 +11,18 @@ interface FabNewChatProps {
 /**
  * Floating action button for creating a new chat on compact/mobile layouts.
  * Bottom-right, thumb-reach. Hidden on desktop — the top-bar menu + ⌘N handle it there.
+ *
+ * Rendered through a portal to `document.body` so `position: fixed` is truly
+ * viewport-relative. Without the portal, the FAB lives inside the navigator
+ * panel which is wrapped in a transformed `motion.div` (CompactPanelTransition),
+ * and any ancestor with `transform` becomes the containing block for `fixed`
+ * descendants — the FAB would otherwise pin to the top of the screen instead
+ * of the bottom.
  */
 export function FabNewChat({ onClick, className }: FabNewChatProps) {
   const { t } = useTranslation()
-  return (
+  if (typeof document === 'undefined') return null
+  return createPortal(
     <button
       type="button"
       onClick={onClick}
@@ -33,6 +42,7 @@ export function FabNewChat({ onClick, className }: FabNewChatProps) {
       )}
     >
       <Plus className="size-6 text-white" strokeWidth={2.5} />
-    </button>
+    </button>,
+    document.body,
   )
 }
