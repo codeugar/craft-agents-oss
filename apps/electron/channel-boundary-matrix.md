@@ -167,6 +167,7 @@ Runs identically on local Electron and headless remote. No Electron imports.
 | `file:readDataUrl` | `readFileDataUrl` | Pure fs + mime |
 | `file:readBinary` | `readFileBinary` | Pure fs |
 | `file:readAttachment` | `readFileAttachment` | Pure fs |
+| `file:readUserAttachment` | `readUserAttachment` | Pure fs — bypasses workspace-dir validation for draft hydration only |
 | `file:storeAttachment` | `storeAttachment` | Needs `platform.resizeImage?.()` for thumbnail |
 | `fs:search` | `searchFiles` | Pure fs traversal |
 
