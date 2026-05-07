@@ -21,6 +21,7 @@ import { WorkspaceCreationScreen } from "@/components/workspace"
 import { waitForTransportConnected } from '@/lib/transport-wait'
 import { useWorkspaceIcons } from "@/hooks/useWorkspaceIcon"
 import { useTransportConnectionState } from "@/hooks/useTransportConnectionState"
+import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
 import type { Workspace } from "../../../shared/types"
 
 interface WorkspaceSwitcherProps {
@@ -33,6 +34,9 @@ interface WorkspaceSwitcherProps {
   onWorkspaceRemoved?: () => void
   /** workspaceId -> has unread */
   workspaceUnreadMap?: Record<string, boolean>
+  /** When true (compact viewport), the topbar variant opens a bottom-sheet drawer
+   *  instead of an anchored dropdown. No effect on the sidebar variant. */
+  isCompact?: boolean
 }
 
 /**
@@ -51,8 +55,25 @@ export function WorkspaceSwitcher({
   onWorkspaceCreated,
   onWorkspaceRemoved,
   workspaceUnreadMap,
+  isCompact = false,
 }: WorkspaceSwitcherProps) {
   const { t } = useTranslation()
+
+  // Compact viewport + topbar pill → bottom-sheet drawer (touch-friendly).
+  // Sidebar variant keeps its dropdown layout because the desktop sidebar is
+  // never in compact mode.
+  if (isCompact && variant === 'topbar') {
+    return (
+      <CompactWorkspaceSwitcher
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        onSelect={onSelect}
+        onWorkspaceCreated={onWorkspaceCreated}
+        onWorkspaceRemoved={onWorkspaceRemoved}
+        workspaceUnreadMap={workspaceUnreadMap}
+      />
+    )
+  }
   const [showCreationScreen, setShowCreationScreen] = useState(false)
   const [reconnectTarget, setReconnectTarget] = useState<Workspace | null>(null)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
@@ -191,7 +212,7 @@ export function WorkspaceSwitcher({
               type="button"
               data-workspace-switcher="topbar"
               className="header-icon-btn titlebar-no-drag ml-1 flex-1 min-w-0 flex items-center justify-start gap-0.5 h-[30px] px-3 rounded-[8px] border border-foreground/6 text-[13px] text-foreground/50 hover:bg-foreground/5 hover:text-foreground transition-colors cursor-pointer data-[state=open]:bg-foreground/5 data-[state=open]:text-foreground"
-              aria-label="Select workspace"
+              aria-label={t('workspace.selectWorkspace')}
             >
               <CrossfadeAvatar
                 src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}
@@ -217,7 +238,7 @@ export function WorkspaceSwitcher({
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 isCollapsed && "h-9 w-9 shrink-0 justify-center p-0"
               )}
-              aria-label="Select workspace"
+              aria-label={t('workspace.selectWorkspace')}
             >
               <CrossfadeAvatar
                 src={selectedWorkspace ? workspaceIconMap.get(selectedWorkspace.id) : undefined}

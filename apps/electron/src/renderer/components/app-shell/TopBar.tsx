@@ -187,6 +187,7 @@ export function TopBar({
               onWorkspaceCreated={onWorkspaceCreated}
               onWorkspaceRemoved={onWorkspaceRemoved}
               workspaceUnreadMap={workspaceUnreadMap}
+              isCompact={isCompact}
             />
           </div>
         </div>

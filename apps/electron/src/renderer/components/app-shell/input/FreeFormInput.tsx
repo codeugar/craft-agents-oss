@@ -72,6 +72,7 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
+import { CompactSourceSelector } from '@/components/ui/CompactSourceSelector'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
@@ -1872,10 +1873,9 @@ export function FreeFormInput({
                 onClick={() => setSourceDropdownOpen(prev => !prev)}
                 tooltip={t("chat.sourcesTooltip")}
               />
-              <SourceSelectorPopover
+              <CompactSourceSelector
                 open={sourceDropdownOpen}
                 onOpenChange={setSourceDropdownOpen}
-                anchorRef={sourceButtonRef}
                 sources={sources}
                 selectedSlugs={optimisticSourceSlugs}
                 onToggleSlug={(slug) => {

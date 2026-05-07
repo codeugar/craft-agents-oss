@@ -90,7 +90,19 @@ export function getSessionPreviewText(session: SessionLike | SessionMeta, maxLen
     }
     // Strip leading title prefix so "https://… Analyze the article" → "Analyze the article".
     if (sanitizedLower.startsWith(titleLower)) {
-      const remainder = sanitized.slice(normalizedTitle.length).replace(/^[\s\-–—:|·•]+/, '').trim()
+      let remainder = sanitized.slice(normalizedTitle.length)
+      // If the title was truncated mid-token (e.g. mid-URL), the next character
+      // continues that same token. Eat the rest of it so we don't render
+      // "alyze the feature" — the tail of "Analyze" — as the new preview start.
+      const titleEnd = sanitized.charAt(normalizedTitle.length - 1)
+      const remainderHead = remainder.charAt(0)
+      if (titleEnd && remainderHead && /\S/.test(titleEnd) && /\S/.test(remainderHead)) {
+        const partialToken = remainder.match(/^\S+/)
+        if (partialToken) {
+          remainder = remainder.slice(partialToken[0].length)
+        }
+      }
+      remainder = remainder.replace(/^[\s\-–—:|·•]+/, '').trim()
       if (!remainder) return null
       const trimmed = remainder.slice(0, maxLength)
       return trimmed.length < remainder.length ? `${trimmed.trimEnd()}…` : trimmed
