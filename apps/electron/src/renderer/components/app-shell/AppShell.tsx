@@ -1715,8 +1715,9 @@ function AppShellContent({
     navigate(routes.view.automationsAgentic())
   }, [])
 
-  // Handler for settings view
-  const handleSettingsClick = useCallback((subpage: SettingsSubpage = 'app') => {
+  // Handler for settings view. With no arg → bare `settings` route (navigator-only
+  // in compact mode, App fallback on desktop). With an arg → `settings/<subpage>`.
+  const handleSettingsClick = useCallback((subpage?: SettingsSubpage) => {
     navigate(routes.view.settings(subpage))
   }, [])
 
@@ -1959,7 +1960,7 @@ function AppShellContent({
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
-    result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick('app') })
+    result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
@@ -2468,7 +2469,7 @@ function AppShellContent({
                       title: t("sidebar.settings"),
                       icon: Settings,
                       variant: isSettingsNavigation(navState) ? "default" : "ghost",
-                      onClick: () => handleSettingsClick('app'),
+                      onClick: () => handleSettingsClick(),
                     },
                     // --- What's New ---
                     {

@@ -30,8 +30,12 @@ export const meta: DetailsPageMeta = {
 }
 
 interface SettingsNavigatorProps {
-  /** Currently selected settings subpage */
-  selectedSubpage: SettingsSubpage
+  /**
+   * Currently selected settings subpage. `null` means the bare `settings`
+   * route (no row highlighted) — happens in compact mode where the navigator
+   * stands alone before the user drills into a subpage.
+   */
+  selectedSubpage: SettingsSubpage | null
   /** Called when a subpage is selected */
   onSelectSubpage: (subpage: SettingsSubpage) => void
 }
