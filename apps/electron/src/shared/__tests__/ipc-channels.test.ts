@@ -197,6 +197,8 @@ const EXPECTED_CHANNELS: string[] = [
   'remote:testConnection',
   'resources:export',
   'resources:import',
+  'rtk:getEnabled',
+  'rtk:setEnabled',
   'server:createWorkspace',
   'server:getActiveSessions',
   'server:getHealth',

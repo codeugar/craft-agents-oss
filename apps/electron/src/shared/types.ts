@@ -554,6 +554,10 @@ export interface ElectronAPI {
   getEnable1MContext(): Promise<boolean>
   setEnable1MContext(enabled: boolean): Promise<void>
 
+  // RTK token optimization
+  getRtkEnabled(): Promise<boolean>
+  setRtkEnabled(enabled: boolean): Promise<void>
+
   // Network proxy settings
   getNetworkProxySettings(): Promise<NetworkProxySettings | undefined>
   setNetworkProxySettings(settings: NetworkProxySettings): Promise<void>

@@ -2,9 +2,11 @@
  * Shared PreToolUse utilities and centralized PreToolUse pipeline.
  *
  * Individual utility functions (path expansion, skill qualification, etc.)
- * are used by the centralized `runPreToolUseChecks()` pipeline, which all
- * four agent backends (Claude, Codex, Copilot, Pi) call with normalized input
- * and then translate the result to their SDK-specific format.
+ * are used by the centralized `runPreToolUseChecks()` pipeline, which both
+ * agent backends (Claude and Pi) call with normalized input and then translate
+ * the result to their SDK-specific format. Pi hosts non-Anthropic providers
+ * (OpenAI/Codex, Copilot, etc.) as model providers — they are not separate
+ * backends and inherit this pipeline transparently.
  *
  * Pipeline steps:
  * 1. Permission mode check: Block tools disallowed by current mode
@@ -45,6 +47,7 @@ import {
 } from '../mode-manager.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
 import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
+import { rewriteBashWithRtk } from './rtk-rewrite.ts';
 
 // ============================================================
 // TYPES
@@ -633,6 +636,8 @@ export interface PreToolUseInput {
   prerequisiteManager?: PrerequisiteManagerLike;
   /** Backend metadata (from Codex fork params.metadata or Copilot input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
+  /** RTK Bash-rewrite context (undefined when toggle is off or rtk binary missing) */
+  rtkContext?: import('./rtk-rewrite.ts').RtkContext;
   /** Debug callback */
   onDebug?: (message: string) => void;
 }
@@ -846,6 +851,25 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (metadataResult.modified) {
     currentInput = metadataResult.input;
     wasModified = true;
+  }
+
+  // 5g. RTK Bash rewrite (last input transform — flows into both 'modify' and 'prompt' results).
+  // Permission decisions above and the ask-mode prompt below operate on the
+  // ORIGINAL `input` parameter, so the LLM still believes it ran the original
+  // command and our permission system gates the original command — only the
+  // SDK's actual execution sees the rewritten form.
+  if (ctx.rtkContext?.enabled && ctx.rtkContext.path) {
+    const rtkResult = rewriteBashWithRtk(
+      toolName,
+      currentInput,
+      ctx.rtkContext.path,
+      ctx.rtkContext.exclude,
+      onDebug,
+    );
+    if (rtkResult.modified) {
+      currentInput = rtkResult.input;
+      wasModified = true;
+    }
   }
 
   // ============================================================
