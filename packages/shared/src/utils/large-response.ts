@@ -25,14 +25,21 @@ import {
 // ============================================================
 
 /**
- * Default per-result summarization threshold (roughly ~60KB of text).
+ * Default per-result summarization threshold (roughly ~48KB of plain text,
+ * less for token-dense content like base64).
  *
  * Prefer {@link tokenLimitFor} at call sites that have the active model's
  * `contextWindow` available — model-aware sizing keeps moderate-context
- * models (e.g. 64k) from filling their window with a few sub-15k tool
- * results that each pass this fixed threshold individually.
+ * models (e.g. 64k) from filling their window with a few sub-threshold tool
+ * results that each pass individually.
+ *
+ * Lowered from 15k to 12k after observing a session poisoned by a single
+ * 56KB base64-heavy Read result that estimated to ~14k tokens via the
+ * 4-chars/token heuristic but cost far more in the real tokenizer. The
+ * lower cap, combined with {@link estimateTokensDensityAware}, gives
+ * headroom for that drift.
  */
-export const TOKEN_LIMIT = 15000;
+export const TOKEN_LIMIT = 12000;
 
 /** Max tokens to send for summarization (~400KB). Beyond this, save to file + preview only. */
 export const MAX_SUMMARIZATION_INPUT = 100000;
@@ -60,6 +67,50 @@ const PER_RESULT_CONTEXT_FRACTION = 0.10;
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+/**
+ * Threshold above which base64-density correction kicks in. Below this size
+ * the correction doesn't matter — the result fits anyway.
+ */
+const DENSITY_AWARE_MIN_LENGTH = 20_000;
+
+/** Minimum run length for a base64-dense span to count. Short A-Za-z0-9 runs
+ *  appear in normal text (URLs, IDs); long unbroken runs are encoded data. */
+const BASE64_RUN_MIN = 100;
+
+/** Fraction of total characters that must be inside long base64-style runs
+ *  before the density correction applies. */
+const BASE64_DENSITY_THRESHOLD = 0.70;
+
+/** Effective chars-per-token for base64 in real tokenizers (Anthropic, GPT,
+ *  Llama all land in the 1.3–1.7 range for base64-heavy content). */
+const BASE64_CHARS_PER_TOKEN = 1.5;
+
+/**
+ * Density-aware token estimate. Mirrors {@link estimateTokens} for normal
+ * text but corrects for base64-heavy content (email MIME bodies, JSON with
+ * embedded binary, dumped certs, etc.) where the 4-chars/token heuristic
+ * underestimates by ~2.5x.
+ *
+ * Trigger conditions (all must hold):
+ *  - text length ≥ {@link DENSITY_AWARE_MIN_LENGTH}
+ *  - ≥ {@link BASE64_DENSITY_THRESHOLD} of chars are inside unbroken
+ *    base64-charset runs of length ≥ {@link BASE64_RUN_MIN}
+ *
+ * When triggered, returns `text.length / 1.5` instead of `text.length / 4`.
+ */
+export function estimateTokensDensityAware(text: string): number {
+  if (text.length < DENSITY_AWARE_MIN_LENGTH) return estimateTokens(text);
+  const runRegex = new RegExp(`[A-Za-z0-9+/=]{${BASE64_RUN_MIN},}`, 'g');
+  let denseChars = 0;
+  for (const match of text.matchAll(runRegex)) {
+    denseChars += match[0].length;
+  }
+  if (denseChars / text.length >= BASE64_DENSITY_THRESHOLD) {
+    return Math.ceil(text.length / BASE64_CHARS_PER_TOKEN);
+  }
+  return estimateTokens(text);
 }
 
 /**
@@ -536,8 +587,10 @@ export async function guardLargeResult(
     return `[Base64-encoded binary detected but save failed: ${result.error}]`;
   }
 
-  // 3. Existing size check + summarize flow (model-aware when contextWindow provided)
-  if (estimateTokens(text) <= tokenLimitFor(opts.contextWindow)) return null;
+  // 3. Existing size check + summarize flow (model-aware when contextWindow provided).
+  // Use density-aware estimate so base64-heavy text (MIME, JSON-embedded binary)
+  // can't slip past the 4-chars/token heuristic and poison conversation context.
+  if (estimateTokensDensityAware(text) <= tokenLimitFor(opts.contextWindow)) return null;
   const result = await handleLargeResponse({
     text,
     sessionPath: opts.sessionPath,
@@ -561,7 +614,7 @@ export async function handleLargeResponse(
   opts: HandleLargeResponseOptions
 ): Promise<HandleLargeResponseResult | null> {
   const { text, sessionPath, context, summarize, contextWindow } = opts;
-  const estimatedTokens = estimateTokens(text);
+  const estimatedTokens = estimateTokensDensityAware(text);
 
   if (estimatedTokens <= tokenLimitFor(contextWindow)) {
     return null; // Not large enough — caller should return as-is

@@ -76,7 +76,9 @@ describe('mapClaudeSdkAssistantError', () => {
       expect(error.actions?.some(a => a.action === 'settings')).toBe(true);
     });
 
-    it('matches on context_window hint even without context-1m phrase', () => {
+    it('routes generic context_window phrasing to Context Window Exceeded (not 1M)', () => {
+      // Generic context-overflow without tier/1M-specific hints. The user
+      // shouldn't be told to disable 1M when they may not have it enabled.
       const error = mapClaudeSdkAssistantError('invalid_request', {
         ...baseContext,
         actualError: {
@@ -85,7 +87,8 @@ describe('mapClaudeSdkAssistantError', () => {
         },
       });
 
-      expect(error.title).toBe('1M Context Not Available');
+      expect(error.title).toBe('Context Window Exceeded');
+      expect(error.details?.some(d => /compact|new session/i.test(d))).toBe(true);
     });
 
     it('matches on tier hint', () => {
@@ -102,7 +105,19 @@ describe('mapClaudeSdkAssistantError', () => {
       expect(error.title).toBe('1M Context Not Available');
     });
 
-    it('falls back to generic invalid_request when no 1M hints present', () => {
+    it('routes "prompt is too long" to Context Window Exceeded', () => {
+      const error = mapClaudeSdkAssistantError('invalid_request', {
+        ...baseContext,
+        actualError: {
+          errorType: 'invalid_request_error',
+          message: 'prompt is too long: 250000 tokens > 200000 maximum',
+        },
+      });
+
+      expect(error.title).toBe('Context Window Exceeded');
+    });
+
+    it('shows attachment hints when API explicitly mentions image format', () => {
       const error = mapClaudeSdkAssistantError('invalid_request', {
         ...baseContext,
         capturedApiError: {
@@ -116,6 +131,33 @@ describe('mapClaudeSdkAssistantError', () => {
       expect(error.code).toBe('invalid_request');
       expect(error.title).toBe('Invalid Request');
       expect(error.details?.some(d => d.toLowerCase().includes('attachments'))).toBe(true);
+    });
+
+    it('shows attachment hints when the user-sent turn had attachments', () => {
+      const error = mapClaudeSdkAssistantError('invalid_request', {
+        ...baseContext,
+        userTurnHadAttachments: true,
+      });
+
+      expect(error.title).toBe('Invalid Request');
+      expect(error.details?.some(d => d.toLowerCase().includes('attachments'))).toBe(true);
+    });
+
+    it('does NOT show attachment hints for plain-text turns with no attachment signal', () => {
+      // This is the poisoned-session case: history grew too large, but the
+      // current turn had no attachments and the API gave no detail. Showing
+      // "remove attachments" advice misleads the user.
+      const error = mapClaudeSdkAssistantError('invalid_request', baseContext);
+
+      expect(error.title).toBe('Invalid Request');
+      expect(error.details?.some(d => d.toLowerCase().includes('attachments'))).toBe(false);
+      expect(error.details?.some(d => /compact|new session/i.test(d))).toBe(true);
+    });
+
+    it('appends a diagnostic pointer when no error detail is available', () => {
+      const error = mapClaudeSdkAssistantError('invalid_request', baseContext);
+
+      expect(error.details?.some(d => d.includes('main.log'))).toBe(true);
     });
 
     it('falls back to generic invalid_request when no captured/actual error info exists', () => {
