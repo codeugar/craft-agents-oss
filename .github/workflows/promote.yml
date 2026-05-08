@@ -156,7 +156,7 @@ jobs:
 
       - name: Sync to OSS
         run: |
-          TARGET="https://x-access-token:${{ secrets.OSS_REPO_TOKEN }}@github.com/lukilabs/craft-agents-oss.git"
+          TARGET="https://x-access-token:${{ secrets.OSS_REPO_TOKEN }}@github.com/craft-ai-agents/craft-agents-oss.git"
           bun run scripts/oss-sync.ts --target "$TARGET" --yes --force --message-file /tmp/commit-message.md
 
   # Create a GitHub release on the OSS repo with binaries and changelog
@@ -191,7 +191,7 @@ jobs:
           CHANGELOG=$(cat /tmp/changelog.md)
 
           cd /tmp
-          git clone "https://x-access-token:${{ secrets.OSS_REPO_TOKEN }}@github.com/lukilabs/craft-agents-oss.git" oss
+          git clone "https://x-access-token:${{ secrets.OSS_REPO_TOKEN }}@github.com/craft-ai-agents/craft-agents-oss.git" oss
           cd oss
 
           if gh release view "v$VERSION" &>/dev/null; then
