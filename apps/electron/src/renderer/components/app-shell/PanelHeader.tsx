@@ -47,6 +47,22 @@ const springTransition = { type: 'spring' as const, stiffness: 300, damping: 30 
 // Traffic lights positioned at x:18, ~52px wide = 70px + 14px gap
 const STOPLIGHT_PADDING = 84
 
+// Compact header controls are 44px touch targets with a 6px flex gap.
+// Reserve the real occupied width for the centered title so long titles truncate
+// before the right-side action cluster instead of rendering underneath it.
+const COMPACT_HEADER_SIDE_PADDING = 8
+const COMPACT_HEADER_BUTTON_SIZE = 44
+const COMPACT_HEADER_GAP = 6
+const COMPACT_HEADER_TITLE_GAP = 8
+
+function compactTitleInset(controlCount: number): number {
+  if (controlCount <= 0) return 16
+  return COMPACT_HEADER_SIDE_PADDING
+    + (controlCount * COMPACT_HEADER_BUTTON_SIZE)
+    + (controlCount * COMPACT_HEADER_GAP)
+    + COMPACT_HEADER_TITLE_GAP
+}
+
 export interface PanelHeaderProps {
   /** Header title (undefined hides with animation) */
   title?: string
@@ -149,11 +165,18 @@ export function PanelHeader({
     </DropdownMenu>
   ) : titleContent
 
-  // Compact (mobile) layout puts the title in an absolute-positioned overlay so
-  // it stays visually centered relative to the full panel width regardless of
-  // which side has more buttons — iOS UINavigationBar pattern. `inset-x-12`
-  // reserves 48px on each side for the leading / trailing buttons; the title
-  // truncates if longer.
+  // Compact (mobile) layout puts the title in an absolute-positioned overlay.
+  // The side insets are based on the actual number of control slots so a long
+  // title truncates before the right-side action cluster instead of overlapping it.
+  const compactLeadingControlCount = leadingAction ? 1 : 0
+  const compactTrailingControlCount = [centerButton, actions, rightSidebarButton].filter(Boolean).length
+  const compactTitleInsetStyle = isCompactMode
+    ? {
+        left: compactTitleInset(compactLeadingControlCount),
+        right: compactTitleInset(compactTrailingControlCount),
+      }
+    : undefined
+
   const content = isCompactMode ? (
     <>
       {leadingAction && (
@@ -177,7 +200,10 @@ export function PanelHeader({
           {rightSidebarButton}
         </div>
       )}
-      <div className="absolute inset-x-12 inset-y-0 flex items-center justify-center pointer-events-none">
+      <div
+        className="absolute inset-y-0 flex items-center justify-center pointer-events-none"
+        style={compactTitleInsetStyle}
+      >
         <div className="max-w-full overflow-hidden pointer-events-auto">
           {titleNode}
         </div>

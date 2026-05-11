@@ -43,6 +43,9 @@ import {
 /** Spring transition matching AppShell's sidebar/navigator animation */
 const PANEL_SPRING = { type: 'spring' as const, stiffness: 600, damping: 49 }
 
+/** Visual breathing room between the fixed compact TopBar and the first panel. */
+const COMPACT_PANEL_TOP_GAP = 8
+
 interface PanelStackContainerProps {
   sidebarSlot: React.ReactNode
   sidebarWidth: number
@@ -125,7 +128,8 @@ export function PanelStackContainer({
           marginBlock: -PANEL_STACK_VERTICAL_OVERFLOW,
           marginBottom: -6,
           paddingBottom: 6,
-        }}
+          '--compact-panel-stack-top': `${PANEL_STACK_VERTICAL_OVERFLOW + COMPACT_PANEL_TOP_GAP}px`,
+        } as React.CSSProperties}
       >
         {/* Navigator slot — full width, slides left to -30% when detail focused. */}
         {hasNavigator && (

@@ -54,8 +54,9 @@ export function CompactPanelTransition({
 
   return (
     <motion.div
-      className="absolute inset-0"
+      className="absolute left-0 right-0 bottom-0"
       style={{
+        top: 'var(--compact-panel-stack-top, 0px)',
         // Detail layers above navigator during the transition.
         zIndex: role === 'detail' ? 10 : 0,
         // Hint the compositor; cheap on GPU and prevents jank on first frame.
