@@ -148,5 +148,5 @@ export type {
 export { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
 
 // RTK detector
-export { getRtkPath, getRtkStatus, resetRtkPathCache } from './rtk-detector.ts';
-export type { RtkStatus } from './rtk-detector.ts';
+export { getRtkPath, getRtkStatus, getRtkGain, resetRtkPathCache } from './rtk-detector.ts';
+export type { RtkStatus, RtkGainStats } from './rtk-detector.ts';

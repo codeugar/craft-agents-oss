@@ -335,6 +335,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     return getRtkStatus(opts)
   })
 
+  // Token-savings summary from `rtk gain --format json` (efficiency meter)
+  server.handle(RPC_CHANNELS.rtk.GET_GAIN, async () => {
+    const { getRtkGain } = await import('@craft-agent/shared/agent')
+    return getRtkGain()
+  })
+
   // ============================================================
   // Tools Settings
   // ============================================================

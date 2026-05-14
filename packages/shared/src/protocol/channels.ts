@@ -321,6 +321,7 @@ export const RPC_CHANNELS = {
     GET_ENABLED: 'rtk:getEnabled',
     SET_ENABLED: 'rtk:setEnabled',
     GET_STATUS: 'rtk:getStatus',
+    GET_GAIN: 'rtk:getGain',
   },
   badge: {
     REFRESH: 'badge:refresh',

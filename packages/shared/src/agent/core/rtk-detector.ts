@@ -50,6 +50,48 @@ export function getRtkStatus(opts?: { forceRecheck?: boolean }): RtkStatus {
   return { installed: path !== null, path, version };
 }
 
+/**
+ * Token-savings stats from `rtk gain --format json`. Returns null if rtk
+ * is not installed, the spawn fails, or the JSON can't be parsed. The Settings
+ * UI uses this to render an efficiency meter beneath the RTK toggle.
+ */
+export interface RtkGainStats {
+  totalCommands: number;
+  totalInput: number;
+  totalOutput: number;
+  totalSaved: number;
+  avgSavingsPct: number;
+  totalTimeMs: number;
+  avgTimeMs: number;
+}
+
+export function getRtkGain(): RtkGainStats | null {
+  const rtkPath = getRtkPath();
+  if (!rtkPath) return null;
+
+  try {
+    const out = execFileSync(rtkPath, ['gain', '--format', 'json'], {
+      encoding: 'utf-8',
+      timeout: 2000,
+      env: { ...process.env, RTK_TELEMETRY_DISABLED: '1' },
+    });
+    const parsed = JSON.parse(out) as { summary?: Partial<Record<keyof RtkGainStats | 'total_commands' | 'total_input' | 'total_output' | 'total_saved' | 'avg_savings_pct' | 'total_time_ms' | 'avg_time_ms', number>> };
+    const s = parsed.summary;
+    if (!s) return null;
+    return {
+      totalCommands: Number(s.total_commands ?? 0),
+      totalInput: Number(s.total_input ?? 0),
+      totalOutput: Number(s.total_output ?? 0),
+      totalSaved: Number(s.total_saved ?? 0),
+      avgSavingsPct: Number(s.avg_savings_pct ?? 0),
+      totalTimeMs: Number(s.total_time_ms ?? 0),
+      avgTimeMs: Number(s.avg_time_ms ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Clears the cached detection result so the next call probes PATH fresh. */
 export function resetRtkPathCache(): void {
   cachedStatus = undefined;

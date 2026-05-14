@@ -57,6 +57,17 @@ import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpoint
 import { toast } from 'sonner'
 
 /**
+ * Compact token count: 1234 → "1.2K", 1234567 → "1.2M". Used by the RTK
+ * efficiency meter. Locale-agnostic — the suffix is universal across the
+ * 7 supported locales.
+ */
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/**
  * Derive model dropdown options from a connection's models array,
  * falling back to registry models for the connection's provider type.
  */
@@ -616,6 +627,7 @@ export default function AiSettingsPage() {
   const [rtkEnabled, setRtkEnabled] = useState(false)
   const [rtkStatus, setRtkStatus] = useState<{ installed: boolean; path: string | null; version: string | null } | null>(null)
   const [rtkRechecking, setRtkRechecking] = useState(false)
+  const [rtkGain, setRtkGain] = useState<{ totalCommands: number; totalInput: number; totalOutput: number; totalSaved: number; avgSavingsPct: number; totalTimeMs: number; avgTimeMs: number } | null>(null)
 
   // Validation state per connection
   const [validationStates, setValidationStates] = useState<Record<string, {
@@ -969,6 +981,20 @@ export default function AiSettingsPage() {
     window.electronAPI?.openUrl('https://github.com/rtk-ai/rtk')
   }, [])
 
+  const refreshRtkGain = useCallback(async () => {
+    const gain = await window.electronAPI?.getRtkGain()
+    setRtkGain(gain ?? null)
+  }, [])
+
+  // Refresh gain stats whenever rtk transitions to installed-and-enabled
+  useEffect(() => {
+    if (rtkStatus?.installed && rtkEnabled) {
+      refreshRtkGain()
+    } else {
+      setRtkGain(null)
+    }
+  }, [rtkStatus?.installed, rtkEnabled, refreshRtkGain])
+
   // Refresh callback for workspace cards
   const handleWorkspaceSettingsChange = useCallback(() => {
     // Refresh context so changes propagate immediately
@@ -1104,12 +1130,41 @@ export default function AiSettingsPage() {
                     onCheckedChange={handleExtendedPromptCacheChange}
                   />
                   {rtkStatus?.installed ? (
-                    <SettingsToggle
-                      label={t("settings.ai.rtk.title")}
-                      description={t("settings.ai.rtk.description")}
-                      checked={rtkEnabled}
-                      onCheckedChange={handleRtkToggle}
-                    />
+                    <>
+                      <SettingsToggle
+                        label={t("settings.ai.rtk.title")}
+                        description={t("settings.ai.rtk.description")}
+                        checked={rtkEnabled}
+                        onCheckedChange={handleRtkToggle}
+                      />
+                      {rtkEnabled && rtkGain && rtkGain.totalCommands > 0 && (
+                        <div className="px-4 pb-4 -mt-1">
+                          <div className="flex items-center justify-between text-xs text-foreground/60">
+                            <span>
+                              {t("settings.ai.rtk.gainSummary", {
+                                saved: formatTokenCount(rtkGain.totalSaved),
+                                count: rtkGain.totalCommands,
+                                pct: rtkGain.avgSavingsPct.toFixed(1),
+                              })}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={refreshRtkGain}
+                              className="text-foreground/60 hover:text-foreground transition-colors"
+                              aria-label={t("settings.ai.rtk.gainRefresh")}
+                            >
+                              <RefreshCcw className="size-3" />
+                            </button>
+                          </div>
+                          <div className="mt-2 h-1.5 rounded-full bg-foreground/10 overflow-hidden">
+                            <div
+                              className="h-full bg-foreground/60 transition-all"
+                              style={{ width: `${Math.min(100, Math.max(0, rtkGain.avgSavingsPct))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <SettingsRow
                       label={t("settings.ai.rtk.title")}

@@ -198,6 +198,7 @@ const EXPECTED_CHANNELS: string[] = [
   'resources:export',
   'resources:import',
   'rtk:getEnabled',
+  'rtk:getGain',
   'rtk:getStatus',
   'rtk:setEnabled',
   'server:createWorkspace',
