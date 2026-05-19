@@ -1,57 +1,61 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown } from 'lucide-react'
-import { cn } from '../../lib/utils'
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-} from '../ui/StyledDropdown'
+  Drawer,
+  DrawerTrigger,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerClose,
+} from '../ui/drawer'
+import { cn } from '../../lib/utils'
 
 /**
- * AcceptPlanDropdown — Accept-Plan trigger with two options.
+ * CompactAcceptPlanDrawer — drawer-based Accept-Plan picker for compact /
+ * mobile contexts.
  *
- * Uses Radix `DropdownMenu` so positioning is handled by Floating UI (correct
- * under `@container/*` ancestors, transformed parents, and inside scroll
- * containers — issues that bit a previous hand-rolled `position: fixed` portal
- * in WebUI mobile / auto-compact).
+ * Same UX shape as `CompactPermissionModeSelector` / `CompactModelSelector` in
+ * apps/electron: a slim trigger button opens a bottom-sheet (`vaul` drawer)
+ * with the two acceptance options as full-width tap targets. Used by
+ * `TurnCard`'s compact footer (WebUI mobile / auto-compact / EditPopover).
  *
- * Options:
- *  - "Accept" — execute the plan immediately
- *  - "Accept & Compact" — summarize conversation first, then execute (useful
- *    when context is running low after a long planning session)
+ * Desktop and non-compact contexts keep using `AcceptPlanDropdown`
+ * (Radix dropdown menu).
  */
 
-interface AcceptPlanDropdownProps {
+interface CompactAcceptPlanDrawerProps {
   /** Callback when user selects "Accept" (execute immediately) */
   onAccept: () => void
   /** Callback when user selects "Accept & Compact" (compact first, then execute) */
   onAcceptWithCompact: () => void
   /** Trigger label */
   acceptLabel?: string
-  /** Primary dropdown option label */
+  /** Primary drawer option label */
   acceptOptionLabel?: string
   /** Additional className for the trigger button */
   className?: string
 }
 
-export function AcceptPlanDropdown({
+export function CompactAcceptPlanDrawer({
   onAccept,
   onAcceptWithCompact,
   acceptLabel,
   acceptOptionLabel,
   className,
-}: AcceptPlanDropdownProps) {
+}: CompactAcceptPlanDrawerProps) {
   const { t } = useTranslation()
+  const [open, setOpen] = React.useState(false)
+
   const effectiveAcceptLabel = acceptLabel ?? t('plan.acceptPlan')
   const effectiveAcceptOptionLabel = acceptOptionLabel ?? t('plan.accept')
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>
         <button
           type="button"
+          aria-label={effectiveAcceptLabel}
           className={cn(
             'h-[28px] pl-2.5 pr-2 text-xs font-medium rounded-[6px] flex items-center gap-1.5 transition-all',
             'bg-success/5 text-success hover:bg-success/10 shadow-tinted',
@@ -66,27 +70,41 @@ export function AcceptPlanDropdown({
           <span>{effectiveAcceptLabel}</span>
           <ChevronDown className="h-3 w-3 transition-transform duration-150 data-[state=open]:rotate-180" />
         </button>
-      </DropdownMenuTrigger>
+      </DrawerTrigger>
 
-      <StyledDropdownMenuContent align="end" minWidth="min-w-64" sideOffset={6}>
-        <StyledDropdownMenuItem onSelect={() => onAccept()} className="items-start py-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{effectiveAcceptOptionLabel}</span>
-            <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
-              {t('plan.executeImmediately')}
-            </span>
-          </div>
-        </StyledDropdownMenuItem>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{t('plan.acceptPlan')}</DrawerTitle>
+        </DrawerHeader>
 
-        <StyledDropdownMenuItem onSelect={() => onAcceptWithCompact()} className="items-start py-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13px] leading-tight">{t('plan.acceptAndCompact')}</span>
-            <span className="max-w-[220px] whitespace-normal text-xs leading-tight text-muted-foreground">
-              {t('plan.worksForComplex')}
-            </span>
-          </div>
-        </StyledDropdownMenuItem>
-      </StyledDropdownMenuContent>
-    </DropdownMenu>
+        <div className="px-4 pb-6 flex flex-col gap-1">
+          <DrawerClose asChild>
+            <button
+              type="button"
+              className="flex flex-col items-start gap-0.5 w-full px-3 py-3 rounded-lg text-left transition-colors hover:bg-foreground/5"
+              onClick={() => onAccept()}
+            >
+              <span className="text-sm font-medium">{effectiveAcceptOptionLabel}</span>
+              <span className="text-xs text-muted-foreground">
+                {t('plan.executeImmediately')}
+              </span>
+            </button>
+          </DrawerClose>
+
+          <DrawerClose asChild>
+            <button
+              type="button"
+              className="flex flex-col items-start gap-0.5 w-full px-3 py-3 rounded-lg text-left transition-colors hover:bg-foreground/5"
+              onClick={() => onAcceptWithCompact()}
+            >
+              <span className="text-sm font-medium">{t('plan.acceptAndCompact')}</span>
+              <span className="text-xs text-muted-foreground">
+                {t('plan.worksForComplex')}
+              </span>
+            </button>
+          </DrawerClose>
+        </div>
+      </DrawerContent>
+    </Drawer>
   )
 }
