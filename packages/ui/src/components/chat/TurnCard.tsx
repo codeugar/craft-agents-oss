@@ -82,6 +82,7 @@ import { useAnnotationIslandEvents } from '../annotations/use-annotation-island-
 import { useAnnotationCancelRestore } from '../annotations/use-annotation-cancel-restore'
 import { DocumentFormattedMarkdownOverlay } from '../overlay'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
+import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -2550,8 +2551,9 @@ export function ResponseCard({
           )}
 
           {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
-              Guarded by isLastResponse so older plans don't render an empty strip
-              with a hidden-but-focusable button. */}
+              Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
+              / CompactModelSelector pattern. Guarded by isLastResponse so older
+              plans don't render an empty strip with a hidden-but-focusable button. */}
           {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
             <div
               className={cn(
@@ -2559,7 +2561,7 @@ export function ResponseCard({
                 SIZE_CONFIG.fontSize
               )}
             >
-              <AcceptPlanDropdown
+              <CompactAcceptPlanDrawer
                 onAccept={onAccept}
                 onAcceptWithCompact={onAcceptWithCompact}
                 acceptLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.acceptPlan')}
