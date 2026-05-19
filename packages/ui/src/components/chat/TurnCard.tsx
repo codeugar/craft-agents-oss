@@ -343,7 +343,9 @@ export interface TurnCardProps {
   displayMode?: 'informative' | 'detailed'
   /** Animate response appearance (for playground demos) */
   animateResponse?: boolean
-  /** Hide footers for compact embedding (EditPopover) */
+  /** Compact-footer layout. Used by EditPopover (popover embedding) and ChatPage in
+   *  auto-compact / WebUI mobile. Hides Copy / Markdown / Branch actions; keeps the
+   *  Accept Plan dropdown when a plan is the last response. */
   compactMode?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
@@ -1406,7 +1408,8 @@ export interface ResponseCardProps {
   isLastResponse?: boolean
   /** Whether to show the Accept Plan button (default: true) */
   showAcceptPlan?: boolean
-  /** Hide footer for compact embedding (EditPopover) */
+  /** Compact-footer layout. Hides Copy / Markdown / Branch in the response footer;
+   *  keeps the Accept Plan dropdown when a plan is the last response. */
   compactMode?: boolean
   /** Callback to branch the session from this response */
   onBranch?: (options?: { newPanel?: boolean }) => void
@@ -2477,7 +2480,8 @@ export function ResponseCard({
             </div>
           </div>
 
-          {/* Footer with actions - hidden in compact mode */}
+          {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
+              Compact mode falls through to the slim Accept-Plan-only footer below. */}
           {!compactMode && (
             <div className={cn(
               "pl-4 pr-2.5 py-2 border-t border-border/30 flex items-center justify-between bg-muted/20",
@@ -2544,6 +2548,25 @@ export function ResponseCard({
               </div>
             </div>
           )}
+
+          {/* Compact footer — Accept Plan only (mobile / auto-compact / popover).
+              Guarded by isLastResponse so older plans don't render an empty strip
+              with a hidden-but-focusable button. */}
+          {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
+            <div
+              className={cn(
+                "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center justify-end bg-muted/20",
+                SIZE_CONFIG.fontSize
+              )}
+            >
+              <AcceptPlanDropdown
+                onAccept={onAccept}
+                onAcceptWithCompact={onAcceptWithCompact}
+                acceptLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.acceptPlan')}
+                acceptOptionLabel={hasActiveFollowUpAnnotations ? t('plan.acceptAndSendFollowups') : t('plan.accept')}
+              />
+            </div>
+          )}
         </div>
 
         {/* Fullscreen overlay for reading/annotating response and plan content. */}
@@ -2602,7 +2625,8 @@ export function ResponseCard({
           </div>
         </div>
 
-        {/* Footer - hidden in compact mode */}
+        {/* Desktop streaming footer; compact mode renders nothing here
+            (the Accept-Plan footer only applies to completed plans). */}
         {!compactMode && (
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
@@ -3202,6 +3226,9 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if displayMode changed
   if (prev.displayMode !== next.displayMode) return false
+
+  // Re-render if compactMode changed (affects ResponseCard footer rendering)
+  if (prev.compactMode !== next.compactMode) return false
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
   if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false
