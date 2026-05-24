@@ -142,7 +142,7 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
                 "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100",
                 hasMultiple ? "opacity-100" : "opacity-0 group-hover:opacity-100"
               )}
-              title={t('common.viewFullscreen')}
+              title={isFullscreen ? t('common.close') : t('preview.expandPreview')}
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>

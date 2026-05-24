@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { SessionManager, createManagedSession } from './SessionManager.ts'
+import { SessionManager, createManagedSession, claimAutoRetryPending } from './SessionManager.ts'
 
 // Regression test for craft-agents-oss#804.
 //
@@ -20,6 +20,48 @@ type SourceActivatedEvent = {
   sourceSlug: string
   originalMessage: string
 }
+
+describe('claimAutoRetryPending', () => {
+  it('allows the first matching retry and drops later duplicates within the deadline', () => {
+    const host = {
+      autoRetryPending: {
+        content: 'do it\n\n[github activated]',
+        deadlineMs: 2000,
+        committed: false,
+      },
+    }
+
+    expect(claimAutoRetryPending(host, 'do it\n\n[github activated]', 1000)).toBe('send')
+    expect(host.autoRetryPending?.committed).toBe(true)
+    expect(claimAutoRetryPending(host, 'do it\n\n[github activated]', 1001)).toBe('drop')
+  })
+
+  it('clears stale pending slots without dropping the message', () => {
+    const host = {
+      autoRetryPending: {
+        content: 'do it\n\n[github activated]',
+        deadlineMs: 2000,
+        committed: true,
+      },
+    }
+
+    expect(claimAutoRetryPending(host, 'do it\n\n[github activated]', 2500)).toBe('send')
+    expect(host.autoRetryPending).toBeUndefined()
+  })
+
+  it('does not over-dedup unrelated messages', () => {
+    const host = {
+      autoRetryPending: {
+        content: 'do it\n\n[github activated]',
+        deadlineMs: 2000,
+        committed: false,
+      },
+    }
+
+    expect(claimAutoRetryPending(host, 'never mind', 1000)).toBe('send')
+    expect(host.autoRetryPending).toBeDefined()
+  })
+})
 
 describe('source_activated auto-retry', () => {
   let tmpRoot: string
@@ -61,18 +103,8 @@ describe('source_activated auto-retry', () => {
     const calls: string[] = []
     const managed = (sm as unknown as { sessions: Map<string, { messages: unknown[] }> }).sessions.get(sessionId)!
     ;(sm as unknown as { sendMessage: (id: string, msg: string) => Promise<void> }).sendMessage = async (id, msg) => {
-      // Mirror the real sendMessage dedup gate before recording / mutating state,
-      // so we exercise the actual race-control path we're trying to test.
       const m = (sm as unknown as { sessions: Map<string, { autoRetryPending?: { content: string; deadlineMs: number; committed: boolean }; messages: unknown[] }> }).sessions.get(id)!
-      const pending = m.autoRetryPending
-      if (pending && msg === pending.content) {
-        if (Date.now() < pending.deadlineMs) {
-          if (pending.committed) return
-          pending.committed = true
-        } else {
-          m.autoRetryPending = undefined
-        }
-      }
+      if (claimAutoRetryPending(m, msg) === 'drop') return
       calls.push(msg)
       managed.messages.push({ id: `m-${calls.length}`, role: 'user', content: msg, timestamp: Date.now() })
     }
@@ -110,6 +142,19 @@ describe('source_activated auto-retry', () => {
       'find issues\n\n[github activated]',
       'find issues\n\n[linear activated]',
     ])
+  })
+
+  it('empty originalMessage — forwards event but does not schedule a bogus retry', async () => {
+    const sessionId = 'empty-original'
+    const managed = buildSession(sessionId)
+    const calls = spyOnSendMessage(sessionId)
+
+    await fireSourceActivated(sessionId, 'github', '')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([])
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.autoRetryTimer).toBeUndefined()
   })
 
   it('legitimate user message preempts retry — skipped when follow-up arrived', async () => {

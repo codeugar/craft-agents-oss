@@ -446,8 +446,8 @@ export interface AuthCompletedEvent {
 }
 
 /**
- * Source activated event - a source was auto-activated mid-turn
- * Caller should re-send the original message to retry with the now-active source
+ * Source activated event - a source was auto-activated mid-turn.
+ * The server owns the auto-retry; renderers should treat this as UI feedback only.
  */
 export interface SourceActivatedEvent {
   type: 'source_activated'

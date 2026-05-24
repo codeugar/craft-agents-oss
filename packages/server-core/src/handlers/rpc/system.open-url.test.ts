@@ -137,4 +137,12 @@ describe('registerSystemCoreHandlers OPEN_URL', () => {
       /^Failed to open URL: URL blocked \(javascript:\)\. JavaScript URLs /,
     )
   })
+
+  it('rejects malformed URLs through the shared classifier instead of raw URL parsing', async () => {
+    const { openUrl, ctx } = createTestHarness()
+
+    await expect(openUrl(ctx, 'not a url')).rejects.toThrow(
+      /^Failed to open URL: URL blocked\. URL is malformed and cannot be parsed\./,
+    )
+  })
 })

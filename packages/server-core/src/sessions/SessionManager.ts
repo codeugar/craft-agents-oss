@@ -926,6 +926,37 @@ interface ManagedSession {
 
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
 
+export interface AutoRetryPendingHost {
+  autoRetryPending?: {
+    content: string
+    deadlineMs: number
+    committed: boolean
+  }
+}
+
+export function claimAutoRetryPending(
+  host: AutoRetryPendingHost,
+  message: string,
+  nowMs = Date.now(),
+): 'send' | 'drop' {
+  const pending = host.autoRetryPending
+  if (pending && message === pending.content) {
+    if (nowMs < pending.deadlineMs) {
+      if (pending.committed) return 'drop'
+      pending.committed = true
+      return 'send'
+    }
+    host.autoRetryPending = undefined
+    return 'send'
+  }
+
+  if (pending && nowMs >= pending.deadlineMs) {
+    host.autoRetryPending = undefined
+  }
+
+  return 'send'
+}
+
 /**
  * Create a ManagedSession from any session-like source (SessionMetadata, SessionConfig, StoredSession).
  * Spreads all matching fields from the source so new persistent fields automatically propagate.
@@ -5249,21 +5280,9 @@ export class SessionManager implements ISessionManager {
     // duplicate that arrives from a legacy renderer still running the client-side
     // auto_retry. The first matching caller wins (server timer or legacy RPC,
     // whichever arrives first), subsequent matching calls within the deadline drop.
-    const pending = managed.autoRetryPending
-    if (pending && message === pending.content) {
-      if (Date.now() < pending.deadlineMs) {
-        if (pending.committed) {
-          sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
-          return
-        }
-        pending.committed = true
-        // fall through — first caller proceeds normally
-      } else {
-        // Stale slot — clear it. Don't drop this call (same content, but window expired).
-        managed.autoRetryPending = undefined
-      }
-    } else if (pending && Date.now() >= pending.deadlineMs) {
-      managed.autoRetryPending = undefined
+    if (claimAutoRetryPending(managed, message) === 'drop') {
+      sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+      return
     }
 
     // Clear any pending plan execution state when a new user message is sent.
@@ -7164,7 +7183,13 @@ export class SessionManager implements ISessionManager {
 
         if (!managed) break
 
-        const messageWithSuffix = `${event.originalMessage}\n\n[${event.sourceSlug} activated]`
+        const originalMessage = event.originalMessage ?? ''
+        if (!originalMessage.trim()) {
+          sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
+          break
+        }
+
+        const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
         const messageCountAtSchedule = managed.messages.length
 
         // Stash the retry payload so a duplicate sendMessage from a legacy renderer

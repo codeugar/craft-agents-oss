@@ -650,6 +650,7 @@
   "plan.executeImmediately": "Wykonaj plan natychmiast",
   "plan.worksForComplex": "Najlepiej sprawdza się przy złożonych, dłuższych planach",
   "preferences.placeholderLanguage": "np. Polski",
+  "preview.expandPreview": "Rozwiń podgląd",
   "preview.failedToRenderPdf": "Nie udało się wyrenderować PDF",
   "preview.htmlPreview": "Podgląd HTML",
   "preview.loadingImage": "Ładowanie obrazu...",

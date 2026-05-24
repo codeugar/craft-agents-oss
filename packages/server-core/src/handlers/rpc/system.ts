@@ -281,9 +281,14 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
   server.handle(RPC_CHANNELS.shell.OPEN_URL, async (ctx, url: string) => {
     deps.platform.logger.info('[OPEN_URL] Received request:', url)
     try {
+      const classification = classifyExternalUrl(url)
+      if (classification.kind === 'dangerous') {
+        throw new Error(formatBlockedUrlError(classification))
+      }
+
       const parsed = new URL(url)
 
-      if (parsed.protocol === 'craftagents:') {
+      if (classification.kind === 'internal-deeplink') {
         const deepLink = parseInternalCraftAgentsDeepLink(parsed)
 
         if (deepLink?.handledNoop) {
@@ -310,11 +315,6 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
           throw new Error(`Cannot open URL on client: ${deepLinkResult.error}`)
         }
         return
-      }
-
-      const classification = classifyExternalUrl(url)
-      if (classification.kind === 'dangerous') {
-        throw new Error(formatBlockedUrlError(classification))
       }
 
       const result = await requestClientOpenExternal(server, ctx.clientId, url)

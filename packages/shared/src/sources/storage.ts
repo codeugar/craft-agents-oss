@@ -169,9 +169,7 @@ function deleteApiKeyCredentialBestEffort(
       workspaceRootPath,
       workspaceId: basename(workspaceRootPath),
     };
-    cm.delete(source).catch((err) => {
-      debug('[saveSourceConfig] orphan credential cleanup failed:', err);
-    });
+    cm.deleteSync(source);
   } catch (err) {
     debug('[saveSourceConfig] orphan credential cleanup threw:', err);
   }

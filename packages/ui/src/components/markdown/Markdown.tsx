@@ -24,6 +24,7 @@ import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS } from './math-options'
+import { markdownUrlTransform } from './url-transform'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -622,6 +623,7 @@ export function Markdown({
         remarkPlugins={remarkPlugins}
         rehypePlugins={[rehypeKatex, rehypeRaw]}
         components={components}
+        urlTransform={markdownUrlTransform}
       >
         {processedContent}
       </ReactMarkdown>

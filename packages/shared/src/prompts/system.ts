@@ -1034,7 +1034,7 @@ You can render \`markdown-preview\` code blocks as inline rendered markdown. Use
 **\`src\` field:** References a markdown file on disk. Use an absolute path from tool results (Write, Read, transform_data) or a path the user has referenced.
 
 **Workflow for showing a markdown file you just wrote:**
-1. Write the file via the \`Write\` tool to a path under the user's workspace, home, or tmpdir.
+1. Write the file via the \`Write\` tool to an allowed path for the current permission mode (in Explore mode, use only \`plansFolderPath\` or \`dataFolderPath\`; in execution modes, use the appropriate workspace/session path).
 2. Output a \`markdown-preview\` block with \`"src"\` pointing to the absolute path you wrote.
 
 **When to use:**

@@ -1,9 +1,11 @@
 import { BrowserWindow, shell, nativeTheme, Menu, app } from 'electron'
 import { windowLog } from './logger'
-import { join } from 'path'
+import { join, resolve, sep } from 'path'
 import { existsSync } from 'fs'
 import { release } from 'os'
+import { fileURLToPath } from 'url'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
 
@@ -96,6 +98,65 @@ export class WindowManager {
     if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.mainFrame) {
       window.webContents.send(channel, ...args)
     }
+  }
+
+  private isRendererAppUrl(url: string): boolean {
+    if (VITE_DEV_SERVER_URL) {
+      try {
+        const parsed = new URL(url)
+        const devServer = new URL(VITE_DEV_SERVER_URL)
+        if (parsed.origin === devServer.origin) return true
+      } catch {
+        // Fall through to file:// handling below.
+      }
+    }
+
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'file:') return false
+
+      const filePath = resolve(fileURLToPath(parsed))
+      const rendererRoot = resolve(join(__dirname, 'renderer'))
+      return filePath === join(rendererRoot, 'index.html') || filePath.startsWith(rendererRoot + sep)
+    } catch {
+      return false
+    }
+  }
+
+  private openExternalFromRenderer(url: string, context: string, sourceWindow?: BrowserWindow): void {
+    const classification = classifyExternalUrl(url)
+
+    if (classification.kind === 'dangerous') {
+      windowLog.warn(`[url-safety] Blocked ${context}: ${formatBlockedUrlError(classification)} url=${url}`)
+      return
+    }
+
+    if (classification.kind === 'internal-deeplink') {
+      if (!sourceWindow) {
+        windowLog.warn(`[url-safety] Blocked ${context}: internal deep link has no target window url=${url}`)
+        return
+      }
+
+      void import('./deep-link').then(async ({ handleDeepLink }) => {
+        const result = await handleDeepLink(
+          url,
+          this,
+          this.eventSink ?? undefined,
+          this.clientResolver ?? undefined,
+          this.clientResolver?.(sourceWindow.webContents.id),
+        )
+        if (!result.success) {
+          windowLog.warn(`[url-safety] Blocked ${context}: unsupported internal deep link url=${url} error=${result.error ?? 'unknown'}`)
+        }
+      }).catch((error) => {
+        windowLog.warn(`[url-safety] Failed to route internal deep link from ${context}: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      return
+    }
+
+    void shell.openExternal(url).catch((error) => {
+      windowLog.warn(`[url-safety] Failed to open external URL from ${context}: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
   /**
@@ -206,22 +267,23 @@ export class WindowManager {
       window.show()
     })
 
-    // Open external links in default browser
+    // Open external links in default browser, but never hand known-dangerous
+    // schemes directly to shell.openExternal. Markdown normal-clicks go through
+    // OPEN_URL; middle-clicks/window.open/top-navigation land here.
     window.webContents.setWindowOpenHandler((details) => {
-      shell.openExternal(details.url)
+      this.openExternalFromRenderer(details.url, 'window-open', window)
       return { action: 'deny' }
     })
 
     // Handle external navigation attempts from renderer WebContents
     window.webContents.on('will-navigate', (event, url) => {
-      // Allow navigation within the app (file:// in prod, localhost dev server)
-      const isInternalUrl = url.startsWith('file://') ||
-        (VITE_DEV_SERVER_URL && url.startsWith(VITE_DEV_SERVER_URL))
+      // Allow only the actual app shell (file:// in prod, Vite dev server in dev).
+      // Any other navigation is treated as an external URL and goes through the
+      // same URL-safety classifier used by OPEN_URL.
+      if (this.isRendererAppUrl(url)) return
 
-      if (!isInternalUrl) {
-        event.preventDefault()
-        shell.openExternal(url)
-      }
+      event.preventDefault()
+      this.openExternalFromRenderer(url, 'will-navigate', window)
     })
 
     // Enable right-click context menu in development
