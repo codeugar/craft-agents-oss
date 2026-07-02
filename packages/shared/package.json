@@ -57,6 +57,7 @@
     "./search": "./src/search/index.ts",
     "./tools": "./src/tools/index.ts",
     "./mentions": "./src/mentions/index.ts",
+    "./native-agent-room": "./src/native-agent-room/index.ts",
     "./skills/types": "./src/skills/types.ts",
     "./automations": "./src/automations/index.ts",
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
