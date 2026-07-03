@@ -322,3 +322,59 @@ Known gaps:
 Next milestone:
 
 - None for this request.
+
+## 2026-07-03: M1 Agent Library (Agent-Library-Centric Model)
+
+Milestone completed: M1.
+
+Design decision (user-confirmed): the product model is agent-library-centric, not
+template-centric. Agents are workspace-level entities users create and reuse;
+rooms reference agents and snapshot their config on join; TeamTemplate becomes a
+saved combination of agent snapshots + workflow + RoomBus policy.
+
+Files changed:
+
+- `packages/shared/src/native-agent-room/types.ts`
+- `packages/shared/src/native-agent-room/storage.ts`
+- `packages/shared/src/native-agent-room/agent-library.ts`
+- `packages/shared/src/native-agent-room/room-operations.ts`
+- `packages/shared/src/native-agent-room/index.ts`
+- `packages/shared/src/native-agent-room/__tests__/agent-library.test.ts`
+- `docs/native-agent-room-implementation-log.md`
+
+Behavior added:
+
+- Added `AgentDefinition` workspace-level agent library with CRUD, persisted under
+  `{workspaceRootPath}/native-agent-room/agents/`.
+- Added `agentDefinitionId` provenance on `RoleCard` and
+  `roleCardFromAgentDefinition` snapshot helper (deep copy, fresh role id).
+- Added `createRoomWithAgents` (build a room directly from library agents, no
+  template required) and `addAgentToRoom` (add a library agent to an existing room
+  with role card, member, and inbox).
+- Added `createTeamTemplateFromAgents` (template as an agent combination with
+  provenance).
+- `createRoomFromTemplate` now resolves template roles library-first: roles whose
+  `agentDefinitionId` still exists use the current library version; deleted agents
+  fall back to the template snapshot.
+- Snapshot semantics: editing a library agent does not mutate existing rooms;
+  room-level prompt overrides do not write back to the library.
+
+Verification commands run:
+
+- `bun test packages/shared/src/native-agent-room/__tests__/`
+- `bun run typecheck:shared`
+
+Result:
+
+- Native Agent Room P0-P3 + M1 tests passed: 34 tests, 144 assertions.
+- Shared package typecheck passed.
+
+Known gaps:
+
+- M2 runtime wiring (session binding, RoomBus session tools, ContextPack prompt
+  building, event-driven scheduling) is not implemented yet.
+- No UI for the agent library or rooms yet (M3).
+
+Next milestone:
+
+- M2: runtime vertical slice.

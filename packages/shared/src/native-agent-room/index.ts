@@ -1,4 +1,5 @@
 export type {
+  AgentDefinition,
   AgentId,
   AgentInbox,
   Artifact,
@@ -12,6 +13,7 @@ export type {
   ContextPolicy,
   ContextSourceType,
   ContextUsedItem,
+  CreateAgentDefinitionInput,
   CreateProjectInput,
   CreateRoomRecordInput,
   CreateTeamTemplateInput,
@@ -42,9 +44,21 @@ export type {
   TeamTemplateRef,
   TimelineItem,
   TimestampMs,
+  UpdateAgentDefinitionInput,
   WorkflowTemplate,
   WorkflowTemplateStep,
 } from './types.ts';
+
+export {
+  createAgentDefinition,
+  deleteAgentDefinition,
+  getAgentDefinitionPath,
+  listAgentDefinitions,
+  loadAgentDefinition,
+  roleCardFromAgentDefinition,
+  saveAgentDefinition,
+  updateAgentDefinition,
+} from './agent-library.ts';
 
 export {
   resolveContextPack,
@@ -66,7 +80,10 @@ export type {
 } from './room-bus.ts';
 
 export {
+  addAgentToRoom,
   createRoomFromTemplate,
+  createRoomWithAgents,
+  createTeamTemplateFromAgents,
   duplicateRoomConfig,
   forkRoom,
   saveRoomAsTeamTemplate,
@@ -74,7 +91,10 @@ export {
 } from './room-operations.ts';
 
 export type {
+  AddAgentToRoomInput,
   CreateRoomFromTemplateInput,
+  CreateRoomWithAgentsInput,
+  CreateTeamTemplateFromAgentsInput,
   DuplicateRoomConfigInput,
   ForkRoomInput,
   SaveRoomAsTeamTemplateInput,
@@ -90,6 +110,7 @@ export {
   deleteRoom,
   deleteTeamTemplate,
   ensureNativeAgentRoomDir,
+  getNativeAgentRoomAgentsPath,
   getNativeAgentRoomPath,
   getNativeAgentRoomProjectsPath,
   getNativeAgentRoomRoomsPath,

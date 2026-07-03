@@ -173,6 +173,8 @@ export interface ContextPolicy {
 
 export interface RoleCard {
   id: string;
+  /** Provenance link to the workspace agent library entry this card was snapshotted from. */
+  agentDefinitionId?: string;
   name: string;
   roleKey: string;
   mission: string;
@@ -185,6 +187,41 @@ export interface RoleCard {
   doneCriteria: string[];
   contextPolicy: ContextPolicy;
 }
+
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  roleKey: string;
+  mission: string;
+  prompt: string;
+  responsibilities: string[];
+  inputs: string[];
+  outputs: string[];
+  allowedActions: RoomBusActionType[];
+  forbiddenActions: string[];
+  doneCriteria: string[];
+  contextPolicy: ContextPolicy;
+  createdAt: TimestampMs;
+  updatedAt: TimestampMs;
+}
+
+export interface CreateAgentDefinitionInput {
+  name: string;
+  description?: string;
+  roleKey: string;
+  mission?: string;
+  prompt: string;
+  responsibilities?: string[];
+  inputs?: string[];
+  outputs?: string[];
+  allowedActions?: RoomBusActionType[];
+  forbiddenActions?: string[];
+  doneCriteria?: string[];
+  contextPolicy?: ContextPolicy;
+}
+
+export type UpdateAgentDefinitionInput = Partial<Omit<AgentDefinition, 'id' | 'createdAt' | 'updatedAt'>>;
 
 export interface RoomMember {
   id: string;
