@@ -378,3 +378,75 @@ Known gaps:
 Next milestone:
 
 - M2: runtime vertical slice.
+
+## 2026-07-04: M2 Runtime Vertical Slice
+
+Milestone completed: M2.
+
+Files changed:
+
+- `packages/shared/src/native-agent-room/room-runtime.ts`
+- `packages/shared/src/native-agent-room/llm-runner.ts`
+- `packages/shared/src/native-agent-room/room-bus.ts`
+- `packages/shared/src/native-agent-room/agent-library.ts`
+- `packages/shared/src/native-agent-room/index.ts`
+- `packages/shared/src/native-agent-room/__tests__/room-runtime.test.ts`
+- `packages/shared/src/native-agent-room/__tests__/agent-library.test.ts`
+- `docs/native-agent-room-implementation-log.md`
+
+Behavior added:
+
+- `buildAgentTurnPrompt`: renders a ContextPack into `{ systemPrompt, userPrompt }`
+  (role contract as system prompt; member directory, current task, required
+  artifacts, decisions, attention events, unread inbox, timeline, and allowed
+  actions as the user prompt).
+- `AgentRunner` seam: a turn function receiving `{ contextPack, prompt,
+  allowedActions }` and returning RoomBus actions. Scripted runners drive tests;
+  LLM-backed runners drive production.
+- `runAgentTurn`: builds context, invokes the runner, enforces role
+  `allowedActions` and the room policy per-turn request cap, publishes surviving
+  actions through the RoomBus (bus-level validation and loop detection still
+  apply), marks the agent's consumed inbox items handled, and reports
+  published/rejected actions per turn. Refuses to run in a paused room.
+- `runRoomScheduler`: event-driven loop — picks the next member with an unread
+  inbox item and a registered runner, runs its turn, repeats until quiescent
+  (no unread anywhere), `maxTurns` cap (default 20), or room pause.
+- `createLlmAgentRunner`: adapter over the existing `queryLlm` seam
+  (`BaseAgent.queryLlm`-compatible, injected as a function): role prompt as
+  systemPrompt, rendered context as prompt, action JSON schema restricted to the
+  role's allowed actions as outputSchema; malformed LLM output degrades to no
+  actions. Production binding: obtain a backend via
+  `createBackendFromConnection(...)` + `postInit()` and pass
+  `(req) => backend.queryLlm(req)`; SessionManager is intentionally not used
+  (Electron/RPC-coupled, not headless).
+- RoomBus fix: the sender's own open-request tracking inbox item is now created
+  as `read` instead of `unread` — an unread self-item would have re-triggered
+  the sender's turn forever under event-driven scheduling.
+- `listAgentDefinitions` now tie-breaks equal `createdAt` by id for a stable
+  order.
+
+Verification commands run:
+
+- `bun test packages/shared/src/native-agent-room/__tests__/`
+- `bun run typecheck:shared`
+
+Result:
+
+- Native Agent Room P0-P3 + M1 + M2 tests passed: 43 tests, 185 assertions.
+- Includes the blueprint 11.9 acceptance scenario end-to-end with scripted
+  runners: user mentions Frontend -> Frontend (missing api_contract) asks
+  Backend via ask_agent -> Backend answers with answer_agent resolving the
+  request -> Frontend consumes the answer -> room quiescent, zero unread items.
+- Shared package typecheck passed.
+
+Known gaps:
+
+- Production wiring of member -> LLM connection/backend (UI/API layer, M3).
+- No artifact create/update storage op for agents yet (P4): the Backend agent in
+  the slice answers but cannot yet publish a real artifact.
+- Room pause/resume and approval_request user surfaces are data-level only until
+  the M3 UI.
+
+Next milestone:
+
+- M3: minimal UI (agent library management + three-column room view).

@@ -71,6 +71,7 @@ export type {
 } from './attention.ts';
 
 export {
+  isRequestAction,
   publishRoomBusEvent,
   resolveRoomBusTargets,
 } from './room-bus.ts';
@@ -78,6 +79,34 @@ export {
 export type {
   PublishRoomBusEventInput,
 } from './room-bus.ts';
+
+export {
+  buildAgentTurnPrompt,
+  runAgentTurn,
+  runRoomScheduler,
+} from './room-runtime.ts';
+
+export type {
+  AgentRunner,
+  AgentTurnAction,
+  AgentTurnInput,
+  AgentTurnOutput,
+  AgentTurnPrompt,
+  RejectedAction,
+  RoomSchedulerInput,
+  RoomSchedulerResult,
+  RunAgentTurnInput,
+  RunAgentTurnResult,
+} from './room-runtime.ts';
+
+export {
+  createLlmAgentRunner,
+} from './llm-runner.ts';
+
+export type {
+  CreateLlmAgentRunnerOptions,
+  RoomLlmQuery,
+} from './llm-runner.ts';
 
 export {
   addAgentToRoom,
