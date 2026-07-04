@@ -130,7 +130,7 @@ export function listAgentDefinitions(workspaceRootPath: string): AgentDefinition
       }
     })
     .filter((item): item is AgentDefinition => item !== null)
-    .sort((a, b) => a.createdAt - b.createdAt);
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
 export function updateAgentDefinition(

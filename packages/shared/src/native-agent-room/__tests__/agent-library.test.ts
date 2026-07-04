@@ -47,10 +47,12 @@ function makeAgentInput(roleKey: string, name: string): CreateAgentDefinitionInp
 }
 
 describe('agent library CRUD', () => {
-  it('creates, loads, and lists agent definitions with defaults', () => {
+  it('creates, loads, and lists agent definitions with defaults', async () => {
     const root = makeWorkspaceRoot();
 
     const frontend = createAgentDefinition(root, makeAgentInput('frontend', 'Frontend Engineer'));
+    // creation timestamps order the list; keep the two creations in distinct ms
+    await new Promise((resolve) => setTimeout(resolve, 2));
     const backend = createAgentDefinition(root, {
       name: 'Backend API Designer',
       roleKey: 'backend',

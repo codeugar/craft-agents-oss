@@ -48,6 +48,10 @@ const REQUEST_ACTIONS = new Set<RoomBusActionType>([
   'approval_request',
 ]);
 
+export function isRequestAction(type: RoomBusActionType): boolean {
+  return REQUEST_ACTIONS.has(type);
+}
+
 function eventTargetKey(targets: TargetRef[] | undefined): string {
   return (targets ?? [])
     .map((target) => {
@@ -199,7 +203,12 @@ function ensureInbox(room: Room, agentId: string): AgentInbox {
   return inbox;
 }
 
-function addInboxItem(room: Room, agentId: string, event: RoomBusEvent): void {
+function addInboxItem(
+  room: Room,
+  agentId: string,
+  event: RoomBusEvent,
+  status: InboxItem['status'] = 'unread'
+): void {
   const inbox = ensureInbox(room, agentId);
   if (inbox.items.some((item) => item.eventId === event.id)) return;
 
@@ -207,7 +216,7 @@ function addInboxItem(room: Room, agentId: string, event: RoomBusEvent): void {
     id: createNativeAgentRoomId('inbox_item'),
     eventId: event.id,
     type: inboxTypeForEvent(event.type),
-    status: 'unread',
+    status,
     priority: priorityForEvent(event),
     createdAt: event.createdAt,
   };
@@ -304,8 +313,10 @@ export function publishRoomBusEvent(
     addInboxItem(room, agentId, event);
   }
 
+  // The sender keeps a tracking item for its own open request, but it must not
+  // demand attention — an unread self-item would re-trigger the sender's turn forever.
   if (REQUEST_ACTIONS.has(event.type) && room.members.some((member) => member.id === event.from)) {
-    addInboxItem(room, event.from, event);
+    addInboxItem(room, event.from, event, 'read');
   }
 
   saveRoom(workspaceRootPath, room);
