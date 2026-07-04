@@ -17,6 +17,7 @@ const NATIVE_AGENT_ROOM_DIR = 'native-agent-room';
 const PROJECTS_DIR = 'projects';
 const TEAM_TEMPLATES_DIR = 'team-templates';
 const ROOMS_DIR = 'rooms';
+const AGENTS_DIR = 'agents';
 
 export function createNativeAgentRoomId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -66,11 +67,16 @@ export function getNativeAgentRoomRoomsPath(workspaceRootPath: string): string {
   return join(getNativeAgentRoomPath(workspaceRootPath), ROOMS_DIR);
 }
 
+export function getNativeAgentRoomAgentsPath(workspaceRootPath: string): string {
+  return join(getNativeAgentRoomPath(workspaceRootPath), AGENTS_DIR);
+}
+
 export function ensureNativeAgentRoomDir(workspaceRootPath: string): string {
   const root = getNativeAgentRoomPath(workspaceRootPath);
   mkdirSync(getNativeAgentRoomProjectsPath(workspaceRootPath), { recursive: true });
   mkdirSync(getNativeAgentRoomTeamTemplatesPath(workspaceRootPath), { recursive: true });
   mkdirSync(getNativeAgentRoomRoomsPath(workspaceRootPath), { recursive: true });
+  mkdirSync(getNativeAgentRoomAgentsPath(workspaceRootPath), { recursive: true });
   return root;
 }
 

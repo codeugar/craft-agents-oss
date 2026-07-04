@@ -1,5 +1,7 @@
 import { loadRoom, loadTeamTemplate, saveRoom, createRoomRecord, createTeamTemplate, createNativeAgentRoomId } from './storage.ts';
+import { loadAgentDefinition, roleCardFromAgentDefinition } from './agent-library.ts';
 import type {
+  AgentDefinition,
   AgentInbox,
   CreateTeamTemplateInput,
   InboxItem,
@@ -8,6 +10,8 @@ import type {
   RoomBusActionType,
   RoomBusPolicy,
   RoomMember,
+  RoomPhase,
+  RoomStatus,
   TargetRef,
   TeamTemplate,
   TimelineItem,
@@ -19,6 +23,31 @@ export interface CreateRoomFromTemplateInput {
   templateId: string;
   name: string;
   goal: string;
+}
+
+export interface CreateRoomWithAgentsInput {
+  projectId: string;
+  name: string;
+  goal: string;
+  agentDefinitionIds: string[];
+  status?: RoomStatus;
+  phase?: RoomPhase;
+  workflow?: WorkflowTemplate;
+  roomBusPolicy?: RoomBusPolicy;
+}
+
+export interface AddAgentToRoomInput {
+  roomId: string;
+  agentDefinitionId: string;
+}
+
+export interface CreateTeamTemplateFromAgentsInput {
+  projectId?: string;
+  name: string;
+  description?: string;
+  agentDefinitionIds: string[];
+  defaultWorkflow?: WorkflowTemplate;
+  roomBusPolicy?: RoomBusPolicy;
 }
 
 export interface DuplicateRoomConfigInput {
@@ -116,6 +145,28 @@ function defaultRoomBusPolicy(roles: RoleCard[]): RoomBusPolicy {
   };
 }
 
+function resolveAgentDefinitions(workspaceRootPath: string, agentDefinitionIds: string[]): AgentDefinition[] {
+  return agentDefinitionIds.map((agentDefinitionId) => {
+    const definition = loadAgentDefinition(workspaceRootPath, agentDefinitionId);
+    if (!definition) {
+      throw new Error(`Agent definition not found: ${agentDefinitionId}`);
+    }
+    return definition;
+  });
+}
+
+// Template roles that came from the agent library resolve to the current
+// library version when it still exists; otherwise the template snapshot is used.
+function refreshRoleFromLibrary(workspaceRootPath: string, role: RoleCard): RoleCard {
+  if (role.agentDefinitionId) {
+    const definition = loadAgentDefinition(workspaceRootPath, role.agentDefinitionId);
+    if (definition) {
+      return { ...roleCardFromAgentDefinition(definition), id: role.id };
+    }
+  }
+  return clone(role);
+}
+
 export function createRoomFromTemplate(
   workspaceRootPath: string,
   input: CreateRoomFromTemplateInput
@@ -125,7 +176,7 @@ export function createRoomFromTemplate(
     throw new Error(`Team template not found: ${input.templateId}`);
   }
 
-  const roleCards = clone(template.roles);
+  const roleCards = template.roles.map((role) => refreshRoleFromLibrary(workspaceRootPath, role));
   const room = createRoomRecord(workspaceRootPath, {
     projectId: input.projectId,
     templateId: template.id,
@@ -337,6 +388,75 @@ export function saveRoomAsTeamTemplate(
   };
 
   return createTeamTemplate(workspaceRootPath, templateInput);
+}
+
+export function createRoomWithAgents(
+  workspaceRootPath: string,
+  input: CreateRoomWithAgentsInput
+): Room {
+  const definitions = resolveAgentDefinitions(workspaceRootPath, input.agentDefinitionIds);
+  const roleCards = definitions.map((definition) => roleCardFromAgentDefinition(definition));
+
+  const room = createRoomRecord(workspaceRootPath, {
+    projectId: input.projectId,
+    name: input.name,
+    goal: input.goal,
+    status: input.status,
+    phase: input.phase,
+    workflow: input.workflow ?? defaultWorkflow(),
+    roomBusPolicy: input.roomBusPolicy ?? defaultRoomBusPolicy(roleCards),
+    roleCards,
+  });
+
+  const { members, inboxes } = createMembersAndInboxes(room.id, roleCards);
+  const nextRoom: Room = {
+    ...room,
+    members,
+    inboxes,
+  };
+  saveRoom(workspaceRootPath, nextRoom);
+  return nextRoom;
+}
+
+export function addAgentToRoom(
+  workspaceRootPath: string,
+  input: AddAgentToRoomInput
+): { room: Room; member: RoomMember } {
+  const room = loadRoom(workspaceRootPath, input.roomId);
+  if (!room) {
+    throw new Error(`Room not found: ${input.roomId}`);
+  }
+
+  const definition = loadAgentDefinition(workspaceRootPath, input.agentDefinitionId);
+  if (!definition) {
+    throw new Error(`Agent definition not found: ${input.agentDefinitionId}`);
+  }
+
+  const role = roleCardFromAgentDefinition(definition);
+  const member = createMemberForRole(room.id, role);
+  room.roleCards.push(role);
+  room.members.push(member);
+  room.inboxes.push(createInboxForMember(room.id, member));
+  saveRoom(workspaceRootPath, room);
+
+  return { room: loadRoom(workspaceRootPath, room.id)!, member };
+}
+
+export function createTeamTemplateFromAgents(
+  workspaceRootPath: string,
+  input: CreateTeamTemplateFromAgentsInput
+): TeamTemplate {
+  const definitions = resolveAgentDefinitions(workspaceRootPath, input.agentDefinitionIds);
+  const roles = definitions.map((definition) => roleCardFromAgentDefinition(definition));
+
+  return createTeamTemplate(workspaceRootPath, {
+    projectId: input.projectId,
+    name: input.name,
+    description: input.description,
+    roles,
+    defaultWorkflow: input.defaultWorkflow ?? defaultWorkflow(),
+    roomBusPolicy: input.roomBusPolicy ?? defaultRoomBusPolicy(roles),
+  });
 }
 
 export function updateRoomRolePrompt(
