@@ -489,10 +489,12 @@ export interface ElectronAPI {
   deleteAgentDefinition(workspaceId: string, agentDefinitionId: string): Promise<void>
   listAgentRooms(workspaceId: string): Promise<import('@craft-agent/shared/native-agent-room').Room[]>
   getAgentRoom(workspaceId: string, roomId: string): Promise<{ room: import('@craft-agent/shared/native-agent-room').Room; project: import('@craft-agent/shared/native-agent-room').Project | null; isRunning: boolean }>
-  createAgentRoom(workspaceId: string, input: { name: string; goal: string; agentDefinitionIds: string[]; projectId?: string }): Promise<import('@craft-agent/shared/native-agent-room').Room>
+  createAgentRoom(workspaceId: string, input: { name: string; goal: string; agentDefinitionIds: string[]; projectId?: string; llmConnectionSlug?: string; model?: string }): Promise<import('@craft-agent/shared/native-agent-room').Room>
   setAgentRoomStatus(workspaceId: string, roomId: string, status: import('@craft-agent/shared/native-agent-room').RoomStatus): Promise<import('@craft-agent/shared/native-agent-room').Room>
+  setAgentRoomModel(workspaceId: string, roomId: string, config: { llmConnectionSlug?: string; model?: string }): Promise<import('@craft-agent/shared/native-agent-room').Room>
   postAgentRoomMessage(workspaceId: string, roomId: string, message: string): Promise<import('@craft-agent/shared/native-agent-room').RoomBusEvent>
   runAgentRoom(workspaceId: string, roomId: string): Promise<{ started: boolean }>
+  onAgentRoomChanged(callback: (roomId: string) => void): () => void
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@craft-agent/shared/statuses').StatusConfig[]>

@@ -358,6 +358,10 @@ export interface Room {
   phase: RoomPhase;
   workflow?: WorkflowTemplate;
   roomBusPolicy?: RoomBusPolicy;
+  /** LLM connection slug this room's agents run on; falls back to the workspace default when unset. */
+  llmConnectionSlug?: string;
+  /** Model id override for this room; falls back to the connection's default model when unset. */
+  model?: string;
   roleCards: RoleCard[];
   members: RoomMember[];
   tasks: Task[];
@@ -440,6 +444,8 @@ export interface CreateRoomRecordInput {
   phase?: RoomPhase;
   workflow?: WorkflowTemplate;
   roomBusPolicy?: RoomBusPolicy;
+  llmConnectionSlug?: string;
+  model?: string;
   roleCards?: RoleCard[];
   members?: RoomMember[];
   tasks?: Task[];

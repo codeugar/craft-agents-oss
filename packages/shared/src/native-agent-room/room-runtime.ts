@@ -64,6 +64,8 @@ export interface RoomSchedulerInput {
   runners: Record<string, AgentRunner>;
   /** Hard cap on total turns per scheduler run. Defaults to 20. */
   maxTurns?: number;
+  /** Fires after each completed turn — used by the transport layer to push live updates. */
+  onTurn?: (turn: RunAgentTurnResult) => void;
 }
 
 export interface RoomSchedulerResult {
@@ -297,6 +299,7 @@ export async function runRoomScheduler(
       triggerEventId: next.triggerEventId,
     });
     turns.push(turn);
+    input.onTurn?.(turn);
   }
 
   return { turns, stoppedReason: 'max_turns' };

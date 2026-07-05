@@ -278,8 +278,12 @@ export const RPC_CHANNELS = {
     ROOMS_GET: 'nativeAgentRoom:rooms:get',
     ROOMS_CREATE: 'nativeAgentRoom:rooms:create',
     ROOMS_SET_STATUS: 'nativeAgentRoom:rooms:setStatus',
+    ROOMS_SET_MODEL: 'nativeAgentRoom:rooms:setModel',
     ROOMS_POST_MESSAGE: 'nativeAgentRoom:rooms:postMessage',
     ROOMS_RUN: 'nativeAgentRoom:rooms:run',
+    // Push channel: fires (workspace-scoped) with the changed roomId whenever a
+    // room's events/turns/status change, so clients live-refresh instead of polling.
+    ROOMS_CHANGED: 'nativeAgentRoom:rooms:changed',
   },
   labels: {
     LIST: 'labels:list',

@@ -128,6 +128,7 @@ export {
   createRoomWithAgents,
   createTeamTemplateFromAgents,
   duplicateRoomConfig,
+  setRoomModel,
   forkRoom,
   saveRoomAsTeamTemplate,
   updateRoomRolePrompt,
@@ -140,6 +141,7 @@ export type {
   CreateTeamTemplateFromAgentsInput,
   DuplicateRoomConfigInput,
   ForkRoomInput,
+  SetRoomModelInput,
   SaveRoomAsTeamTemplateInput,
 } from './room-operations.ts';
 

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { RoomModelSelector } from '@/components/native-agent-room/RoomModelSelector'
 import type {
   Project,
   Room,
@@ -78,6 +79,20 @@ export default function AgentRoomPage({ workspaceId, roomId }: AgentRoomPageProp
     void reload()
   }, [reload])
 
+  // Live updates: the server pushes ROOMS_CHANGED (workspace-scoped) after every
+  // user message, status change, and agent turn — so we refetch on push instead
+  // of polling. `running` is derived from the pushed isRunning flag.
+  React.useEffect(() => {
+    const cleanup = window.electronAPI.onAgentRoomChanged((changedRoomId) => {
+      if (changedRoomId !== roomId) return
+      void (async () => {
+        const isRunning = await reload()
+        setRunning(isRunning)
+      })()
+    })
+    return cleanup
+  }, [roomId, reload])
+
   React.useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [room?.events.length])
@@ -105,27 +120,18 @@ export default function AgentRoomPage({ workspaceId, roomId }: AgentRoomPageProp
     [room],
   )
 
-  // Starts a detached scheduler run on the server, then polls the room until
-  // the run finishes (multi-turn LLM runs outlive a single RPC timeout).
+  // Starts a detached scheduler run on the server. Progress arrives via the
+  // ROOMS_CHANGED push subscription above (no polling); we just optimistically
+  // flag running so the UI shows the working state immediately.
   const runRoom = React.useCallback(async () => {
     setRunning(true)
     try {
       await window.electronAPI.runAgentRoom(workspaceId, roomId)
-      const deadline = Date.now() + 5 * 60 * 1000
-      // give the server a moment to flag the run as started
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      while (Date.now() < deadline) {
-        const isRunning = await reload()
-        if (!isRunning) break
-        await new Promise((resolve) => setTimeout(resolve, 2500))
-      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('agentRooms.runFailed'))
-    } finally {
       setRunning(false)
-      await reload()
+      toast.error(error instanceof Error ? error.message : t('agentRooms.runFailed'))
     }
-  }, [workspaceId, roomId, reload, t])
+  }, [workspaceId, roomId, t])
 
   const handleSend = async () => {
     const message = draft.trim()
@@ -229,6 +235,13 @@ export default function AgentRoomPage({ workspaceId, roomId }: AgentRoomPageProp
               {t('agentRooms.agentsWorking')}
             </span>
           )}
+          <RoomModelSelector
+            workspaceId={workspaceId}
+            roomId={roomId}
+            llmConnectionSlug={room.llmConnectionSlug}
+            model={room.model}
+            onChanged={() => void reload()}
+          />
           <Button variant="ghost" size="sm" onClick={() => void togglePause()}>
             {paused ? <Play className="h-3.5 w-3.5 mr-1" /> : <Pause className="h-3.5 w-3.5 mr-1" />}
             {paused ? t('agentRooms.resume') : t('agentRooms.pause')}

@@ -526,3 +526,58 @@ describe('createLlmAgentRunner action normalization', () => {
     expect(typeof event.payload.expectedOutput).toBe('string');
   });
 });
+
+describe('runRoomScheduler onTurn callback (live progress hook)', () => {
+  it('fires onTurn after each completed turn with the turn result', async () => {
+    const root = makeWorkspaceRoot();
+    const { room } = setupPricingRoom(root);
+    const frontend = room.members.find((member) => member.roleKey === 'frontend')!;
+    const backend = room.members.find((member) => member.roleKey === 'backend')!;
+
+    const frontendRunner: AgentRunner = (input) => {
+      const answered = input.contextPack.attentionEvents.some((e) => e.type === 'answer_agent');
+      if (!answered) {
+        return {
+          actions: [{
+            type: 'ask_agent',
+            to: [{ type: 'agent', id: backend.id }],
+            payload: { message: 'Need contract.', expectedOutput: 'contract' },
+          }],
+        };
+      }
+      return { actions: [] };
+    };
+    const backendRunner: AgentRunner = (input) => {
+      const openAsk = input.contextPack.attentionEvents.find((e) => e.type === 'ask_agent' && e.status === 'open');
+      if (openAsk) {
+        return {
+          actions: [{
+            type: 'answer_agent',
+            to: [{ type: 'agent', id: openAsk.from }],
+            parentEventId: openAsk.id,
+            payload: { message: 'here it is' },
+          }],
+        };
+      }
+      return { actions: [] };
+    };
+
+    publishRoomBusEvent(root, {
+      roomId: room.id,
+      from: 'user',
+      type: 'message',
+      payload: { message: '@Frontend go' },
+    });
+
+    const seen: string[] = [];
+    const result = await runRoomScheduler(root, {
+      roomId: room.id,
+      runners: { [frontend.id]: frontendRunner, [backend.id]: backendRunner },
+      onTurn: (turn) => { seen.push(turn.agentId); },
+    });
+
+    // onTurn fired once per turn, in order, matching the scheduler's turns
+    expect(seen).toEqual(result.turns.map((t) => t.agentId));
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+  });
+});
