@@ -77,6 +77,8 @@
     "electron:dist:win": "bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --win",
     "electron:dist:linux": "bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --linux",
     "electron:dist:dev:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac",
+    "electron:dmg:local": "bash apps/electron/scripts/build-dmg-local.sh",
+    "electron:dmg:local:x64": "bash apps/electron/scripts/build-dmg-local.sh x64",
     "electron:dist:dev:win": "CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --win",
     "electron:dist:dev:linux": "CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --linux",
     "playground:dev": "lsof -ti:5173 | xargs kill -9 2>/dev/null; vite dev --config apps/electron/vite.config.ts --open /playground.html",
