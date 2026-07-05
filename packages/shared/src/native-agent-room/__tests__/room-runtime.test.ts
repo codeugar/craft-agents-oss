@@ -425,3 +425,104 @@ describe('createLlmAgentRunner', () => {
     expect(result.rejectedActions).toHaveLength(0);
   });
 });
+
+describe('turn logs (Context Used persistence)', () => {
+  it('persists a turn log with contextUsed and published event ids', async () => {
+    const root = makeWorkspaceRoot();
+    const { room } = setupPricingRoom(root);
+    const frontend = room.members.find((member) => member.roleKey === 'frontend')!;
+    const backend = room.members.find((member) => member.roleKey === 'backend')!;
+
+    publishRoomBusEvent(root, {
+      roomId: room.id,
+      from: 'user',
+      type: 'message',
+      payload: { message: '@Frontend implement the pricing page.' },
+    });
+
+    const runner: AgentRunner = () => ({
+      actions: [
+        {
+          type: 'ask_agent',
+          to: [{ type: 'agent', id: backend.id }],
+          payload: { message: 'Need the API contract.', expectedOutput: 'API contract' },
+        },
+      ],
+    });
+
+    const result = await runAgentTurn(root, { roomId: room.id, agentId: frontend.id, runner });
+
+    const reloaded = loadRoom(root, room.id)!;
+    expect(reloaded.turnLogs).toBeDefined();
+    expect(reloaded.turnLogs!).toHaveLength(1);
+
+    const log = reloaded.turnLogs![0]!;
+    expect(log.agentId).toBe(frontend.id);
+    expect(log.publishedEventIds).toEqual(result.publishedEvents.map((event) => event.id));
+    // context used mirrors what the agent actually read this turn
+    expect(log.contextUsed.some((item) => item.type === 'role')).toBe(true);
+    expect(log.contextUsed.some((item) => item.label === 'design-tokens.json@v3')).toBe(true);
+  });
+});
+
+describe('createLlmAgentRunner output parsing', () => {
+  it('parses actions wrapped in markdown code fences', async () => {
+    const root = makeWorkspaceRoot();
+    const { room } = setupPricingRoom(root);
+    const frontend = room.members.find((member) => member.roleKey === 'frontend')!;
+    const backend = room.members.find((member) => member.roleKey === 'backend')!;
+
+    const fencedText = [
+      'Here is my plan:',
+      '```json',
+      JSON.stringify({
+        actions: [
+          {
+            type: 'ask_agent',
+            to: [{ type: 'agent', id: backend.id }],
+            payload: { message: 'Need the contract.', expectedOutput: 'API contract' },
+          },
+        ],
+      }),
+      '```',
+    ].join('\n');
+
+    const runner = createLlmAgentRunner({ queryLlm: async () => ({ text: fencedText }) });
+    const result = await runAgentTurn(root, { roomId: room.id, agentId: frontend.id, runner });
+
+    expect(result.publishedEvents).toHaveLength(1);
+    expect(result.publishedEvents[0]!.type).toBe('ask_agent');
+  });
+});
+
+describe('createLlmAgentRunner action normalization', () => {
+  it('normalizes loose model output: action/type alias, string target, top-level message', async () => {
+    const root = makeWorkspaceRoot();
+    const { room } = setupPricingRoom(root);
+    const frontend = room.members.find((member) => member.roleKey === 'frontend')!;
+    const backend = room.members.find((member) => member.roleKey === 'backend')!;
+
+    const looseText = JSON.stringify({
+      actions: [
+        {
+          action: 'ask_agent',
+          to: 'backend',
+          message: 'Please provide the pricing API contract.',
+        },
+      ],
+    });
+
+    const runner = createLlmAgentRunner({ queryLlm: async () => ({ text: looseText }) });
+    const result = await runAgentTurn(root, { roomId: room.id, agentId: frontend.id, runner });
+
+    expect(result.rejectedActions).toHaveLength(0);
+    expect(result.publishedEvents).toHaveLength(1);
+    const event = result.publishedEvents[0]!;
+    expect(event.type).toBe('ask_agent');
+    // string target resolved to the backend member
+    expect(event.to).toEqual([{ type: 'agent', id: backend.id }]);
+    // top-level message folded into payload; missing expectedOutput defaulted
+    expect(event.payload.message).toBe('Please provide the pricing API contract.');
+    expect(typeof event.payload.expectedOutput).toBe('string');
+  });
+});

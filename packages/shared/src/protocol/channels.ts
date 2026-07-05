@@ -269,6 +269,18 @@ export const RPC_CHANNELS = {
     REORDER: 'statuses:reorder',
     CHANGED: 'statuses:changed',
   },
+  nativeAgentRoom: {
+    AGENTS_LIST: 'nativeAgentRoom:agents:list',
+    AGENTS_CREATE: 'nativeAgentRoom:agents:create',
+    AGENTS_UPDATE: 'nativeAgentRoom:agents:update',
+    AGENTS_DELETE: 'nativeAgentRoom:agents:delete',
+    ROOMS_LIST: 'nativeAgentRoom:rooms:list',
+    ROOMS_GET: 'nativeAgentRoom:rooms:get',
+    ROOMS_CREATE: 'nativeAgentRoom:rooms:create',
+    ROOMS_SET_STATUS: 'nativeAgentRoom:rooms:setStatus',
+    ROOMS_POST_MESSAGE: 'nativeAgentRoom:rooms:postMessage',
+    ROOMS_RUN: 'nativeAgentRoom:rooms:run',
+  },
   labels: {
     LIST: 'labels:list',
     CREATE: 'labels:create',

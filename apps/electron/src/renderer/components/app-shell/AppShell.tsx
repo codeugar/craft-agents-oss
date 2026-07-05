@@ -30,6 +30,7 @@ import {
   Clock,
   Radio,
   Bot,
+  MessagesSquare,
   Info,
   MailOpen,
 } from "lucide-react"
@@ -113,11 +114,13 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
+  isAgentRoomsNavigation,
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
+import { AgentRoomsListPanel } from "../native-agent-room/AgentRoomsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
@@ -1699,6 +1702,11 @@ function AppShellContent({
     navigate(routes.view.skills())
   }, [])
 
+  // Handler for agent rooms view
+  const handleAgentRoomsClick = useCallback(() => {
+    navigate(routes.view.agentRooms())
+  }, [])
+
   // Handlers for automations view
   const handleAutomationsClick = useCallback(() => {
     navigate(routes.view.automations())
@@ -1960,12 +1968,13 @@ function AppShellContent({
     // 3. Sources, Skills, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+    result.push({ id: 'nav:agentRooms', type: 'nav', action: handleAgentRoomsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleAgentRoomsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2082,6 +2091,11 @@ function AppShellContent({
     // Skills navigator
     if (isSkillsNavigation(navState)) {
       return t("sidebar.allSkills")
+    }
+
+    // Agent Rooms navigator
+    if (isAgentRoomsNavigation(navState)) {
+      return t("sidebar.agentRooms")
     }
 
     // Automations navigator
@@ -2423,6 +2437,13 @@ function AppShellContent({
                         type: 'skills',
                         onAddSkill: openAddSkill,
                       },
+                    },
+                    {
+                      id: "nav:agentRooms",
+                      title: t("sidebar.agentRooms"),
+                      icon: MessagesSquare,
+                      variant: isAgentRoomsNavigation(navState) ? "default" : "ghost",
+                      onClick: handleAgentRoomsClick,
                     },
                     {
                       id: "nav:automations",
@@ -3174,6 +3195,17 @@ function AppShellContent({
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
+              />
+            )}
+            {isAgentRoomsNavigation(navState) && activeWorkspaceId && (
+              /* Agent Rooms + Agent Library List */
+              <AgentRoomsListPanel
+                workspaceId={activeWorkspaceId}
+                selectedRoomId={isAgentRoomsNavigation(navState) && navState.details?.type === 'room' ? navState.details.roomId : null}
+                selectedAgentDefinitionId={isAgentRoomsNavigation(navState) && navState.details?.type === 'agent' ? navState.details.agentDefinitionId : null}
+                onRoomClick={(room) => navigate(routes.view.agentRooms({ roomId: room.id }))}
+                onAgentClick={(agent) => navigate(routes.view.agentRooms({ agentDefinitionId: agent.id }))}
+                onNewAgentClick={() => navigate(routes.view.agentRooms({ agentDefinitionId: 'new' }))}
               />
             )}
             {isAutomationsNavigation(navState) && (

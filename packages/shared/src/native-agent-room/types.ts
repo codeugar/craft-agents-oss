@@ -366,8 +366,23 @@ export interface Room {
   events: RoomBusEvent[];
   inboxes: AgentInbox[];
   timeline: TimelineItem[];
+  /** Per-agent-turn execution records; absent on rooms created before M3. */
+  turnLogs?: TurnLog[];
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
+}
+
+export interface TurnLog {
+  id: string;
+  roomId: string;
+  agentId: string;
+  triggerEventId?: string;
+  publishedEventIds: string[];
+  rejectedActionCount: number;
+  contextUsed: ContextUsedItem[];
+  /** Raw runner/LLM response for observability and debugging. */
+  rawResponse?: string;
+  createdAt: TimestampMs;
 }
 
 export interface RoomMemberSummary {

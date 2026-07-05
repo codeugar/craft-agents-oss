@@ -1,4 +1,4 @@
-import { loadRoom, saveRoom } from './storage.ts';
+import { createNativeAgentRoomId, loadRoom, saveRoom } from './storage.ts';
 import { isRequestAction, publishRoomBusEvent } from './room-bus.ts';
 import { resolveContextPack } from './attention.ts';
 import type {
@@ -31,6 +31,8 @@ export interface AgentTurnInput {
 
 export interface AgentTurnOutput {
   actions: AgentTurnAction[];
+  /** Raw model output, persisted on the turn log for observability. */
+  rawText?: string;
 }
 
 export type AgentRunner = (input: AgentTurnInput) => AgentTurnOutput | Promise<AgentTurnOutput>;
@@ -212,8 +214,9 @@ export async function runAgentTurn(
     }
   }
 
+  const latest = loadRoom(workspaceRootPath, input.roomId)!;
+
   if (unreadItemIds.length > 0) {
-    const latest = loadRoom(workspaceRootPath, input.roomId)!;
     const inbox = latest.inboxes.find((item) => item.agentId === input.agentId);
     if (inbox) {
       const unread = new Set(unreadItemIds);
@@ -222,9 +225,22 @@ export async function runAgentTurn(
           item.status = 'handled';
         }
       }
-      saveRoom(workspaceRootPath, latest);
     }
   }
+
+  latest.turnLogs = latest.turnLogs ?? [];
+  latest.turnLogs.push({
+    id: createNativeAgentRoomId('turn'),
+    roomId: input.roomId,
+    agentId: input.agentId,
+    triggerEventId: input.triggerEventId,
+    publishedEventIds: publishedEvents.map((event) => event.id),
+    rejectedActionCount: rejectedActions.length,
+    contextUsed: contextPack.contextUsed,
+    rawResponse: output.rawText,
+    createdAt: Date.now(),
+  });
+  saveRoom(workspaceRootPath, latest);
 
   return {
     roomId: input.roomId,

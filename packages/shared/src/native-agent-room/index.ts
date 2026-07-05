@@ -44,6 +44,7 @@ export type {
   TeamTemplateRef,
   TimelineItem,
   TimestampMs,
+  TurnLog,
   UpdateAgentDefinitionInput,
   WorkflowTemplate,
   WorkflowTemplateStep,
@@ -107,6 +108,19 @@ export type {
   CreateLlmAgentRunnerOptions,
   RoomLlmQuery,
 } from './llm-runner.ts';
+
+export {
+  upsertRoomArtifact,
+} from './artifact-ops.ts';
+
+export {
+  refreshRoomTimeline,
+} from './timeline-ops.ts';
+
+export type {
+  UpsertRoomArtifactInput,
+  UpsertRoomArtifactResult,
+} from './artifact-ops.ts';
 
 export {
   addAgentToRoom,

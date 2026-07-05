@@ -233,6 +233,18 @@ export const CHANNEL_MAP = {
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
 
+  // Native Agent Room
+  listAgentDefinitions: invoke(RPC_CHANNELS.nativeAgentRoom.AGENTS_LIST),
+  createAgentDefinition: invoke(RPC_CHANNELS.nativeAgentRoom.AGENTS_CREATE),
+  updateAgentDefinition: invoke(RPC_CHANNELS.nativeAgentRoom.AGENTS_UPDATE),
+  deleteAgentDefinition: invoke(RPC_CHANNELS.nativeAgentRoom.AGENTS_DELETE),
+  listAgentRooms: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_LIST),
+  getAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_GET),
+  createAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_CREATE),
+  setAgentRoomStatus: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_STATUS),
+  postAgentRoomMessage: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_POST_MESSAGE),
+  runAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_RUN),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),
