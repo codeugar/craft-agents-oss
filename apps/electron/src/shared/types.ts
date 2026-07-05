@@ -482,6 +482,18 @@ export interface ElectronAPI {
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
 
+  // Native Agent Room (workspace-scoped)
+  listAgentDefinitions(workspaceId: string): Promise<import('@craft-agent/shared/native-agent-room').AgentDefinition[]>
+  createAgentDefinition(workspaceId: string, input: import('@craft-agent/shared/native-agent-room').CreateAgentDefinitionInput): Promise<import('@craft-agent/shared/native-agent-room').AgentDefinition>
+  updateAgentDefinition(workspaceId: string, agentDefinitionId: string, patch: import('@craft-agent/shared/native-agent-room').UpdateAgentDefinitionInput): Promise<import('@craft-agent/shared/native-agent-room').AgentDefinition>
+  deleteAgentDefinition(workspaceId: string, agentDefinitionId: string): Promise<void>
+  listAgentRooms(workspaceId: string): Promise<import('@craft-agent/shared/native-agent-room').Room[]>
+  getAgentRoom(workspaceId: string, roomId: string): Promise<{ room: import('@craft-agent/shared/native-agent-room').Room; project: import('@craft-agent/shared/native-agent-room').Project | null; isRunning: boolean }>
+  createAgentRoom(workspaceId: string, input: { name: string; goal: string; agentDefinitionIds: string[]; projectId?: string }): Promise<import('@craft-agent/shared/native-agent-room').Room>
+  setAgentRoomStatus(workspaceId: string, roomId: string, status: import('@craft-agent/shared/native-agent-room').RoomStatus): Promise<import('@craft-agent/shared/native-agent-room').Room>
+  postAgentRoomMessage(workspaceId: string, roomId: string, message: string): Promise<import('@craft-agent/shared/native-agent-room').RoomBusEvent>
+  runAgentRoom(workspaceId: string, roomId: string): Promise<{ started: boolean }>
+
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@craft-agent/shared/statuses').StatusConfig[]>
   reorderStatuses(workspaceId: string, orderedIds: string[]): Promise<void>
@@ -842,6 +854,18 @@ export interface SkillsNavigationState {
 }
 
 /**
+ * Agent Rooms navigation state
+ */
+export interface AgentRoomsNavigationState {
+  navigator: 'agentRooms'
+  details:
+    | { type: 'room'; roomId: string }
+    | { type: 'agent'; agentDefinitionId: string }
+    | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Automations navigation state
  */
 export interface AutomationsNavigationState {
@@ -860,6 +884,7 @@ export type NavigationState =
   | SettingsNavigationState
   | SkillsNavigationState
   | AutomationsNavigationState
+  | AgentRoomsNavigationState
 
 export const isSessionsNavigation = (
   state: NavigationState
@@ -880,6 +905,10 @@ export const isSkillsNavigation = (
 export const isAutomationsNavigation = (
   state: NavigationState
 ): state is AutomationsNavigationState => state.navigator === 'automations'
+
+export const isAgentRoomsNavigation = (
+  state: NavigationState
+): state is AgentRoomsNavigationState => state.navigator === 'agentRooms'
 
 export const DEFAULT_NAVIGATION_STATE: NavigationState = {
   navigator: 'sessions',
@@ -909,6 +938,11 @@ export const getNavigationStateKey = (state: NavigationState): string => {
   if (state.navigator === 'settings') {
     if (state.subpage === null) return 'settings'
     return `settings:${state.subpage}`
+  }
+  if (state.navigator === 'agentRooms') {
+    if (state.details?.type === 'room') return `agentRooms/room/${state.details.roomId}`
+    if (state.details?.type === 'agent') return `agentRooms/agent/${state.details.agentDefinitionId}`
+    return 'agentRooms'
   }
   // Chats
   const f = state.filter

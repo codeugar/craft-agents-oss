@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'agentRooms' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -61,7 +61,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'agentRooms', 'settings'
 ]
 
 /**
@@ -158,6 +158,20 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
       }
     }
 
+    return null
+  }
+
+  // Agent Rooms navigator
+  if (first === 'agentRooms') {
+    if (segments.length === 1) {
+      return { navigator: 'agentRooms', details: null }
+    }
+    if (segments[1] === 'room' && segments[2]) {
+      return { navigator: 'agentRooms', details: { type: 'room', id: segments[2] } }
+    }
+    if (segments[1] === 'agent' && segments[2]) {
+      return { navigator: 'agentRooms', details: { type: 'agent', id: segments[2] } }
+    }
     return null
   }
 
@@ -277,6 +291,11 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   if (parsed.navigator === 'skills') {
     if (!parsed.details) return 'skills'
     return `skills/skill/${parsed.details.id}`
+  }
+
+  if (parsed.navigator === 'agentRooms') {
+    if (!parsed.details) return 'agentRooms'
+    return `agentRooms/${parsed.details.type}/${parsed.details.id}`
   }
 
   if (parsed.navigator === 'automations') {
@@ -404,6 +423,19 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
     return { type: 'view', name: 'skill-info', id: compound.details.id, params: {} }
   }
 
+  // Agent Rooms
+  if (compound.navigator === 'agentRooms') {
+    if (!compound.details) {
+      return { type: 'view', name: 'agent-rooms', params: {} }
+    }
+    return {
+      type: 'view',
+      name: compound.details.type === 'room' ? 'agent-room' : 'agent-definition',
+      id: compound.details.id,
+      params: {},
+    }
+  }
+
   // Automations
   if (compound.navigator === 'automations') {
     if (!compound.details) {
@@ -528,6 +560,19 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     return {
       navigator: 'skills',
       details: { type: 'skill', skillSlug: compound.details.id },
+    }
+  }
+
+  // Agent Rooms
+  if (compound.navigator === 'agentRooms') {
+    if (!compound.details) {
+      return { navigator: 'agentRooms', details: null }
+    }
+    return {
+      navigator: 'agentRooms',
+      details: compound.details.type === 'room'
+        ? { type: 'room', roomId: compound.details.id }
+        : { type: 'agent', agentDefinitionId: compound.details.id },
     }
   }
 
@@ -729,6 +774,17 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
       navigator: 'automations',
       automationFilter: state.filter ?? undefined,
       details: state.details ? { type: 'automation', id: state.details.automationId } : null,
+    }
+  }
+
+  if (state.navigator === 'agentRooms') {
+    return {
+      navigator: 'agentRooms',
+      details: state.details
+        ? state.details.type === 'room'
+          ? { type: 'room', id: state.details.roomId }
+          : { type: 'agent', id: state.details.agentDefinitionId }
+        : null,
     }
   }
 

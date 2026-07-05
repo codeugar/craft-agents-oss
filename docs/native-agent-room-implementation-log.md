@@ -450,3 +450,67 @@ Known gaps:
 Next milestone:
 
 - M3: minimal UI (agent library management + three-column room view).
+
+## 2026-07-05: M3 Full UI + P4/P5 Slices + Runtime Hardening
+
+Milestone completed: M3 (plus the P4 artifact-ops and P5 timeline slices it
+depends on).
+
+Files changed (high level):
+
+- Shared domain: `artifact-ops.ts` (P4 slice), `timeline-ops.ts` (P5 slice),
+  `types.ts` (TurnLog + rawResponse), `room-runtime.ts` (turn logs persisted),
+  `llm-runner.ts` (fenced-JSON extraction, loose-output normalization, explicit
+  format instruction with member ids, rawText observability),
+  `agent-library.ts` (stable list ordering), plus tests (51 total).
+- Protocol/RPC: `protocol/channels.ts` (`nativeAgentRoom` block),
+  `server-core/handlers/rpc/native-agent-room.ts` (agents CRUD, rooms
+  list/get/create/setStatus/postMessage/run) registered in `rpc/index.ts`.
+- Client transport: `channel-map.ts` + `ElectronAPI` types.
+- Navigation: new `agentRooms` navigator (route-parser, routes, NavigationState
+  + guards, nav-helpers) following the Skills pattern exactly.
+- UI: `AgentRoomsListPanel` (rooms + agent library sections, new-room dialog),
+  `AgentDefinitionPage` (create/edit/delete with allowed-action picker),
+  `AgentRoomPage` (blueprint §9 three-column view: members with unread badges /
+  event stream with typed chips + composer + pause/run / artifacts-timeline-
+  context-used tabs), wired into AppShell + MainContentPanel.
+- i18n: 63 new keys across all 7 locales (parity + sorted pass).
+
+Runtime findings fixed during end-to-end verification (real gpt-5.5 via the
+workspace's default Pi connection, driven through the webui with Playwright):
+
+- `createBackendFromConnection` needs the host runtime context
+  (appRootPath/resourcesPath/isPackaged from HandlerDeps.platform), otherwise
+  Pi backends fail with "piServerPath not configured".
+- Pi's outputSchema is prompt-injected, not enforced: models emit fenced JSON
+  and loose shapes (`action` for `type`, bare role-string targets, top-level
+  `message`, missing `expectedOutput`). The runner now normalizes these against
+  the member directory instead of dropping the turn.
+- Multi-turn LLM runs exceed the 30s RPC timeout: `rooms:run` is now
+  fire-and-forget with an in-memory running set; `rooms:get` reports
+  `isRunning` and the room page polls until the run completes.
+
+Verification:
+
+- 51 native-agent-room tests / 220 assertions pass; typecheck passes for
+  core/shared/server-core/server/electron/ui/webui; i18n parity + sorted pass;
+  llm-connections (20) and models-pi (5) suites pass.
+- Blueprint 11.9 verified live end-to-end in the browser: user mention ->
+  Frontend published ask_agent -> Backend answered with answer_agent (contract
+  for GET /api/v1/pricing) -> parent request resolved -> room quiescent, zero
+  unread. Agent library CRUD, room creation dialog, three-column rendering,
+  unread badges, and Context tab all visually verified via webui + Playwright.
+
+Known gaps:
+
+- Live push (`nativeAgentRoom:changed`) not implemented; the room page polls
+  during runs and refetches after actions.
+- Per-room LLM connection/model selection (uses the workspace default).
+- Approval_request pause surface and richer artifact content viewing are data-
+  level only.
+
+Next milestone:
+
+- M4: P4/P5 completion (artifact content storage/viewing, decision flows,
+  timeline enrichment), live event push, per-agent model binding, prompt
+  tuning for reliable multi-turn behavior.

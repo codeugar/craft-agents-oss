@@ -157,6 +157,13 @@ export const routes = {
       return `skills/skill/${skillSlug}` as const
     },
 
+    /** Agent Rooms view (agentRooms navigator). */
+    agentRooms: (selection?: { roomId?: string; agentDefinitionId?: string }) => {
+      if (selection?.roomId) return `agentRooms/room/${selection.roomId}` as const
+      if (selection?.agentDefinitionId) return `agentRooms/agent/${selection.agentDefinitionId}` as const
+      return 'agentRooms' as const
+    },
+
     /** Automations view (automations navigator) - supports type filtering */
     automations: (params?: { automationId?: string; type?: 'scheduled' | 'event' | 'agentic' }) => {
       const { automationId, type } = params ?? {}
