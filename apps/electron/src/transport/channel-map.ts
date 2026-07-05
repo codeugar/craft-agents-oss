@@ -242,8 +242,10 @@ export const CHANNEL_MAP = {
   getAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_GET),
   createAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_CREATE),
   setAgentRoomStatus: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_STATUS),
+  setAgentRoomModel: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_MODEL),
   postAgentRoomMessage: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_POST_MESSAGE),
   runAgentRoom: invoke(RPC_CHANNELS.nativeAgentRoom.ROOMS_RUN),
+  onAgentRoomChanged: listener(RPC_CHANNELS.nativeAgentRoom.ROOMS_CHANGED),
 
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),

@@ -18,6 +18,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.nativeAgentRoom.ROOMS_GET,
   RPC_CHANNELS.nativeAgentRoom.ROOMS_CREATE,
   RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_STATUS,
+  RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_MODEL,
   RPC_CHANNELS.nativeAgentRoom.ROOMS_POST_MESSAGE,
   RPC_CHANNELS.nativeAgentRoom.ROOMS_RUN,
 ] as const
@@ -33,6 +34,8 @@ export interface CreateRoomRpcInput {
   goal: string
   agentDefinitionIds: string[]
   projectId?: string
+  llmConnectionSlug?: string
+  model?: string
 }
 
 export interface RunRoomRpcResult {
@@ -45,6 +48,17 @@ export interface RunRoomRpcResult {
 const runningRooms = new Set<string>()
 
 export function registerNativeAgentRoomHandlers(server: RpcServer, deps: HandlerDeps): void {
+  // Notify clients that a room changed, so they live-refresh instead of polling.
+  // Broadcast to all (like llmConnections:changed): roomId is globally unique and
+  // the client filters by it, which sidesteps workspace-id-vs-name target matching.
+  const notifyRoomChanged = (roomId: string): void => {
+    try {
+      server.push(RPC_CHANNELS.nativeAgentRoom.ROOMS_CHANGED, { to: 'all' }, roomId)
+    } catch (error) {
+      console.error('[native-agent-room] Failed to push room change:', error)
+    }
+  }
+
   // --- Agent library ---
 
   server.handle(RPC_CHANNELS.nativeAgentRoom.AGENTS_LIST, async (_ctx, workspaceId: string) => {
@@ -104,13 +118,17 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
         projectId = projects[0]?.id ?? nar.createProject(rootPath, { name: 'Agent Rooms' }).id
       }
 
-      return nar.createRoomWithAgents(rootPath, {
+      const room = nar.createRoomWithAgents(rootPath, {
         projectId,
         name: input.name,
         goal: input.goal,
         agentDefinitionIds: input.agentDefinitionIds,
         status: 'active',
+        llmConnectionSlug: input.llmConnectionSlug,
+        model: input.model,
       })
+      notifyRoomChanged(room.id)
+      return room
     },
   )
 
@@ -123,7 +141,24 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
       if (!room) throw new Error(`Room not found: ${roomId}`)
       room.status = status
       nar.saveRoom(rootPath, room)
+      notifyRoomChanged(roomId)
       return nar.loadRoom(rootPath, roomId)
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.nativeAgentRoom.ROOMS_SET_MODEL,
+    async (
+      _ctx,
+      workspaceId: string,
+      roomId: string,
+      config: { llmConnectionSlug?: string; model?: string },
+    ) => {
+      const nar = await import('@craft-agent/shared/native-agent-room')
+      const rootPath = requireWorkspace(workspaceId).rootPath
+      const room = nar.setRoomModel(rootPath, roomId, config)
+      notifyRoomChanged(roomId)
+      return room
     },
   )
 
@@ -145,6 +180,7 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
         payload: { message },
       })
       nar.refreshRoomTimeline(rootPath, roomId)
+      notifyRoomChanged(roomId)
       return event
     },
   )
@@ -164,11 +200,14 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
         return { started: false }
       }
 
-      const connectionSlug = getDefaultLlmConnection()
+      // Per-room connection first, workspace default as fallback.
+      const connectionSlug = room.llmConnectionSlug ?? getDefaultLlmConnection()
       if (!connectionSlug) {
         throw new Error('No LLM connection configured. Set up a connection in Settings first.')
       }
       const connection = getLlmConnection(connectionSlug)
+      // Per-room model override first, then the connection's default model.
+      const model = room.model ?? connection?.defaultModel
 
       const now = Date.now()
       const agent = createBackendFromConnection(connectionSlug, {
@@ -201,7 +240,7 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
             (agent as unknown as { queryLlm: RoomLlmQuery }).queryLlm(request)
           const runner = nar.createLlmAgentRunner({
             queryLlm,
-            model: connection?.defaultModel,
+            model,
           })
           const runners = Object.fromEntries(room.members.map((member) => [member.id, runner]))
 
@@ -209,6 +248,9 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
             roomId,
             runners,
             maxTurns: 12,
+            // Push a live update after every turn so the room view streams
+            // events in as agents act, instead of waiting for a poll.
+            onTurn: () => notifyRoomChanged(roomId),
           })
           nar.refreshRoomTimeline(workspace.rootPath, roomId)
         } catch (error) {
@@ -216,6 +258,8 @@ export function registerNativeAgentRoomHandlers(server: RpcServer, deps: Handler
         } finally {
           runningRooms.delete(roomId)
           agent.destroy()
+          // Final push so clients clear the "running" state and see the last events.
+          notifyRoomChanged(roomId)
         }
       })()
 

@@ -265,6 +265,8 @@ export function createRoomRecord(workspaceRootPath: string, input: CreateRoomRec
     phase: input.phase ?? 'clarify',
     workflow: input.workflow,
     roomBusPolicy: input.roomBusPolicy,
+    llmConnectionSlug: input.llmConnectionSlug,
+    model: input.model,
     roleCards: input.roleCards ?? [],
     members: input.members ?? [],
     tasks: input.tasks ?? [],

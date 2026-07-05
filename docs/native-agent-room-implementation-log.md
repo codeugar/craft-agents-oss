@@ -514,3 +514,40 @@ Next milestone:
 - M4: P4/P5 completion (artifact content storage/viewing, decision flows,
   timeline enrichment), live event push, per-agent model binding, prompt
   tuning for reliable multi-turn behavior.
+
+## 2026-07-05: M4a — Live Event Push + Per-Room Model Selection
+
+Two M4 features requested by the user.
+
+### 1. Live event push (replaces polling)
+- Added `RoomSchedulerInput.onTurn` callback (shared) firing after each completed turn.
+- New push channel `nativeAgentRoom:rooms:changed`. The handler broadcasts it
+  (`server.push(..., { to: 'all' }, roomId)`) after create / set-status / set-model /
+  post-message, on every scheduler turn (via `onTurn`), and on run finish.
+  Broadcast-to-all (like `llmConnections:changed`) because roomId is globally unique
+  and the client filters by it — sidesteps workspace-id-vs-name target matching (an
+  initial `{ to: 'workspace', workspaceId }` attempt delivered 0 events because the
+  webui client registers the workspace *name* while the handler had the resolved id).
+- Client: `onAgentRoomChanged` listener; `AgentRoomPage` subscribes and refetches on
+  push, and the polling loop in `runRoom` was removed (now optimistic + push-driven).
+
+### 2. Per-room model selection
+- Added `Room.llmConnectionSlug` + `Room.model` (shared types), threaded through
+  `createRoomWithAgents` / `createRoomRecord`, and new `setRoomModel` op.
+- `ROOMS_RUN` now resolves connection as `room.llmConnectionSlug ?? getDefaultLlmConnection()`
+  and model as `room.model ?? connection.defaultModel`.
+- New RPC `ROOMS_SET_MODEL` + `CreateRoomRpcInput` gains the two optional fields.
+- New `RoomModelSelector` component (two native selects: connection + model, populated
+  from `listLlmConnections()`), mounted in the room header. i18n: 4 keys × 7 locales.
+
+Verification (live, webui + Playwright, real gpt-5.5):
+- Per-room model: created a room with `chatgpt-plus / pi/gpt-5.5`, `setAgentRoomModel`
+  persisted and `getAgentRoom` returned it; the header selector rendered both dropdowns
+  (Workspace default / ChatGPT Plus; GPT-5.3…5.5) with the room's values selected.
+- Live push: `onAgentRoomChanged` fired 4× across one message + run (post + per-turn +
+  finish), with zero polling.
+- 56 native-agent-room tests / 233 assertions pass; typecheck passes for
+  shared/server-core/electron; i18n parity + sorted pass.
+
+Known gaps (still M4): approval_request pause surface, artifact content viewer,
+per-agent (vs per-room) model, prompt tuning for reliable multi-turn.

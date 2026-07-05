@@ -34,6 +34,13 @@ export interface CreateRoomWithAgentsInput {
   phase?: RoomPhase;
   workflow?: WorkflowTemplate;
   roomBusPolicy?: RoomBusPolicy;
+  llmConnectionSlug?: string;
+  model?: string;
+}
+
+export interface SetRoomModelInput {
+  llmConnectionSlug?: string;
+  model?: string;
 }
 
 export interface AddAgentToRoomInput {
@@ -405,6 +412,8 @@ export function createRoomWithAgents(
     phase: input.phase,
     workflow: input.workflow ?? defaultWorkflow(),
     roomBusPolicy: input.roomBusPolicy ?? defaultRoomBusPolicy(roleCards),
+    llmConnectionSlug: input.llmConnectionSlug,
+    model: input.model,
     roleCards,
   });
 
@@ -416,6 +425,21 @@ export function createRoomWithAgents(
   };
   saveRoom(workspaceRootPath, nextRoom);
   return nextRoom;
+}
+
+export function setRoomModel(
+  workspaceRootPath: string,
+  roomId: string,
+  input: SetRoomModelInput
+): Room {
+  const room = loadRoom(workspaceRootPath, roomId);
+  if (!room) {
+    throw new Error(`Room not found: ${roomId}`);
+  }
+  room.llmConnectionSlug = input.llmConnectionSlug;
+  room.model = input.model;
+  saveRoom(workspaceRootPath, room);
+  return loadRoom(workspaceRootPath, roomId)!;
 }
 
 export function addAgentToRoom(
